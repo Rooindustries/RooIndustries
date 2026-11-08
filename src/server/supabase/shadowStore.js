@@ -207,13 +207,18 @@ export const projectReferralAccountShadow = async ({
 export const fetchShadowDocumentSizes = async ({
   documentTypes,
   afterId,
+  ids = null,
+  filters = [],
+  limit = 500,
   client = createSupabaseAdminClient(),
 } = {}) => {
   const rows = requireRpcData(
     await client.rpc("roo_fetch_shadow_document_sizes", {
       p_document_types: documentTypes,
       p_after_id: afterId || null,
-      p_limit: 500,
+      p_limit: limit,
+      p_ids: ids,
+      p_filters: filters,
     }),
     "shadow document sizes"
   );
@@ -313,7 +318,7 @@ export const readPublicContentRevision = async ({
     requireRpcData(await client.rpc("roo_read_public_content_revision"), "public content revision")
   );
 
-export const fetchRecoveryPaymentDocuments = async ({
+export const fetchRecoveryPaymentIds = async ({
   backend,
   statuses,
   refundedStatus,
@@ -325,7 +330,7 @@ export const fetchRecoveryPaymentDocuments = async ({
   client = createSupabaseAdminClient(),
 } = {}) => {
   const data = requireRpcData(
-    await client.rpc("roo_fetch_recovery_payment_documents", {
+    await client.rpc("roo_fetch_recovery_payment_document_ids", {
       p_backend: resolveStoreBackend(backend),
       p_statuses: Array.isArray(statuses) ? statuses : [],
       p_refunded_status: String(refundedStatus || "refunded"),
@@ -476,3 +481,6 @@ export const fetchShadowSummary = async ({
   client = createSupabaseAdminClient(),
 } = {}) =>
   requireRpcData(await client.rpc("roo_shadow_summary"), "shadow summary");
+
+export const referralSyncCursor = async ({client = createSupabaseAdminClient(), afterId} = {}) =>
+  requireRpcData(await client.rpc("roo_referral_sync_cursor", {p_after_id: afterId ?? null}), "referral sync cursor");

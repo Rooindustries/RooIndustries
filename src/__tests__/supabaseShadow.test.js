@@ -18,7 +18,7 @@ const createRpcClient = (seed = []) => {
   return {
     documents,
     rpc: jest.fn(async (name, args = {}) => {
-      if (name === "roo_fetch_shadow_documents_targeted") {
+      if (["roo_fetch_shadow_documents_targeted", "roo_fetch_shadow_document_sizes"].includes(name)) {
         const requested = args.p_document_types;
         const requestedIds = args.p_ids;
         const limit = Math.max(1, Math.min(1000, Number(args.p_limit) || 500));
@@ -36,7 +36,10 @@ const createRpcClient = (seed = []) => {
                 })
             )
             .sort((a, b) => String(a._id).localeCompare(String(b._id)))
-            .slice(0, limit),
+            .slice(0, limit)
+            .filter(document => !args.p_after_id || document._id > args.p_after_id)
+            .map(document => name === "roo_fetch_shadow_document_sizes"
+              ? {_id: document._id, bytes: Buffer.byteLength(JSON.stringify(document))} : document),
           error: null,
         };
       }
@@ -377,14 +380,14 @@ describe("Supabase document compatibility client", () => {
       .resolves.toEqual({ targetPackage: { title: "Selected" } });
   });
 
-  test("keeps missing upgrade references null and enforces the combined commerce budget", async () => {
+  test("keeps missing upgrade references null and budgets each read separately", async () => {
     const link = { _id: "upgradeLink.one", _type: "upgradeLink", slug: { current: "one" }, targetPackage: { _ref: "package.one" }, intro: "x".repeat(140000) };
     const shadowClient = createRpcClient([link]);
     const client = new SupabaseDocumentClient({ shadowClient, commerceOnly: true });
     const query = `*[_type == "upgradeLink" && lower(slug.current) == $slug][0]{targetPackage->{title}}`;
     await expect(client.fetch(query, { slug: "one" })).resolves.toEqual({ targetPackage: null });
     shadowClient.documents.set("package.one", { _id: "package.one", _type: "package", title: "x".repeat(140000) });
-    await expect(client.fetch(query, { slug: "one" })).rejects.toMatchObject({ code: "COMMERCE_PAYLOAD_BUDGET_EXCEEDED" });
+    await expect(client.fetch(query, { slug: "one" })).resolves.toEqual({targetPackage: {title: "x".repeat(140000)}});
   });
 
   test("supports revision-guarded set, unset, and increments", async () => {
@@ -608,9 +611,10 @@ describe("Supabase document compatibility client", () => {
   test("does not use the broad compatibility RPC when targeted reads are unavailable", async () => {
     const shadowClient = {
       rpc: jest.fn(async (name) =>
-        name === "roo_fetch_shadow_documents_targeted"
-          ? { data: null, error: { code: "PGRST202" } }
-          : { data: [], error: null }
+        name === "roo_fetch_shadow_document_sizes"
+          ? {data: [{_id: "booking.one", bytes: 100}], error: null}
+          : name === "roo_fetch_shadow_documents_targeted"
+            ? { data: null, error: { code: "PGRST202" } } : { data: [], error: null }
       ),
     };
     const client = new SupabaseDocumentClient({
@@ -705,7 +709,7 @@ describe("Supabase document compatibility client", () => {
     });
 
     await expect(
-      client.fetch(`*[_type == "booking"]`)
+      client.getDocument("booking.oversized")
     ).rejects.toMatchObject({
       code: "COMMERCE_PAYLOAD_BUDGET_EXCEEDED",
       statusCode: 503,

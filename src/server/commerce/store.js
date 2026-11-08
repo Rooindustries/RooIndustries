@@ -25,6 +25,10 @@ export class CommerceStore {
     return this.client.documentBatches(options);
   }
 
+  referralSyncCursor(afterId) {
+    return this.client.referralSyncCursor(afterId);
+  }
+
   referralEarnings(options) {
     return typeof this.client.referralEarnings === "function"
       ? this.client.referralEarnings(options)

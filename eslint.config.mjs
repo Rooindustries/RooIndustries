@@ -11,6 +11,12 @@ const ruleSet = (names) => Object.fromEntries(names.map((name) => [`roo/${name}`
 
 export default [
   {
+    files: ["src/**/*.{js,mjs,cjs}"],
+    ignores: ["src/server/supabase/documentClient.js", "src/server/supabase/shadowStore.js", testFiles],
+    rules: {"no-restricted-imports": ["error", {patterns: [{group: ["**/shadowStore*"],
+      importNames: ["fetchShadowDocuments"], message: "Read document groups through SupabaseDocumentClient."}]}]},
+  },
+  {
     files: ["src/**/*.{js,jsx,mjs,cjs}", "app/**/*.{js,jsx,mjs,cjs}", "middleware.js"],
     ignores: [testFiles],
     linterOptions: { reportUnusedDisableDirectives: "off" },

@@ -10,6 +10,7 @@ import {execFileSync} from 'node:child_process';
 import {
   checkPayoutCronScale, checkPayoutPackageScale, checkPayoutReadScale, createLegacyPayoutClient,
 } from './lib/payout-read-scale.mjs';
+import {checkGroupReadScale, checkMissingRead, checkNearCapRead, checkCronResume} from './lib/shadow-read-scale.mjs';
 
 const host = process.env.ROO_TEST_HOST || '127.0.0.1';
 const originalFetch = globalThis.fetch;
@@ -17,6 +18,9 @@ const baseline = process.argv
   .find((value) => value.startsWith('--baseline='))
   ?.slice(11);
 const sources = [
+  'src/server/api/ref/bookingEmails.js',
+  'src/server/downloads/downloadAccess.js',
+  'src/server/cms/documents.js',
   'src/server/api/ref/payoutUtils.js',
   'src/server/api/ref/bookingRefunds.js',
   'src/server/api/ref/bookingCommit.js',
@@ -3086,6 +3090,12 @@ try {
   await run('payout-read-scale-packages', () =>
     checkPayoutPackageScale({sql, seed, origin, post})
   );
+
+  for (const reader of ['payment', 'booking-email', 'booking-settings', 'download', 'cms'])
+    await run(`payout-read-scale-group-${reader}`, () => checkGroupReadScale({sql, seed, commerce, fixture, reader}));
+  await run('payout-read-scale-missing', () => checkMissingRead({sql, seed, commerce, fixture, origin}));
+  await run('payout-read-scale-near-cap', () => checkNearCapRead({sql, seed, commerce}));
+  await run('payout-read-scale-resume', () => checkCronResume({sql, seed}));
 
   await run('legacy-earnings-large-history', () =>
     checkPayoutReadScale({sql, seed, summary})

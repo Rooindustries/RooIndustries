@@ -54,7 +54,7 @@ export function computeEarningsFromBookings(bookings = []) {
 export async function fetchPayoutPackages({client}) {
   const packages = [];
   for await (const batch of client.documentBatches({documentTypes: ['package']})) {
-    if (batch.error) throw batch.error;
+    if (batch.error && batch.error.code !== "COMMERCE_PAYLOAD_BUDGET_EXCEEDED") throw batch.error;
     for (const {title, order} of batch.documents) packages.push({title, order});
   }
   const result = await evaluate(parse('* | order(coalesce(order, 999) asc, title asc)'), {

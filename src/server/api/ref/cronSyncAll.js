@@ -12,7 +12,7 @@ const readClient = createClient({}, {domain: 'commerce'});
 
 const writeClient = createClient({}, {domain: 'commerce'});
 
-export default async function handler(req, res) {
+export const createCronSyncAll = ({now = Date.now, budgetMs = 45000} = {}) => async (req, res) => {
   if (req.method !== 'GET') {
     return res.status(405).json({ok: false, error: 'Method not allowed'});
   }
@@ -39,8 +39,11 @@ export default async function handler(req, res) {
   }
 
   try {
+    const started = now();
     const results = [];
-    for await (const batch of readClient.documentBatches({documentTypes: ['referral']})) {
+    const afterId = await readClient.referralSyncCursor();
+    let complete = true;
+    batches: for await (const batch of readClient.documentBatches({documentTypes: ['referral'], afterId})) {
       if (batch.error) {
         logSafeError('Referral cron batch failed', batch.error);
         for (const id of batch.ids) {
@@ -49,9 +52,11 @@ export default async function handler(req, res) {
             errorCode: String(batch.error.code || 'REFERRAL_SYNC_FAILED').slice(0, 128),
           });
         }
-        continue;
+        await writeClient.referralSyncCursor(batch.ids.at(-1));
       }
       for (const referral of batch.documents) {
+        if (results.length && now() - started >= budgetMs) { complete = false; break batches; }
+        await writeClient.referralSyncCursor(referral._id);
         try {
           if (!referral._rev) {
             throw Object.assign(new Error('Referral source revision is missing'), {status: 409});
@@ -96,6 +101,7 @@ export default async function handler(req, res) {
         }
       }
     }
+    if (complete) await writeClient.referralSyncCursor('');
     if (!results.length) {
       return res.status(200).json({ok: true, synced: 0, message: 'No referrals found'});
     }
@@ -103,6 +109,7 @@ export default async function handler(req, res) {
     const updatedCount = results.filter((r) => r.updated).length;
     return res.status(200).json({
       ok: true,
+      complete: complete && !results.some(row => row.pending),
       total: results.length,
       synced: updatedCount,
       results,
@@ -111,4 +118,6 @@ export default async function handler(req, res) {
     logSafeError('Referral cron sync failed', err);
     return res.status(500).json({ok: false, error: 'Server error'});
   }
-}
+};
+
+export default createCronSyncAll();

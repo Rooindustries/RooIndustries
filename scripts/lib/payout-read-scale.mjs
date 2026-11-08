@@ -85,7 +85,7 @@ export const checkPayoutCronScale = async ({sql, seed, documents, commerce, fixt
   assert.ok(size.bytes > 250 * 1024);
   const [access] = await sql`
     select has_function_privilege('anon',
-      'public.roo_fetch_shadow_document_sizes(text[],text,integer)', 'execute') as anon,
+      'public.roo_fetch_shadow_document_sizes(text[],text,integer,text[],jsonb)', 'execute') as anon,
       has_function_privilege('authenticated',
       'public.roo_fetch_shadow_document_sizes(text[],text,integer)', 'execute') as authenticated
   `;
@@ -119,7 +119,8 @@ export const checkPayoutCronScale = async ({sql, seed, documents, commerce, fixt
       const failed = rows.find(row => row.id === `${prefix}0002`);
       assert.equal(failed.pending, true);
       assert.equal(failed.errorCode, 'COMMERCE_PAYLOAD_BUDGET_EXCEEDED');
-      if (oversized) assert.ok(rows.filter(row => row.id !== failed.id).every(row => !row.pending));
+      assert.equal(body.complete, false);
+      assert.ok(rows.filter(row => row.id !== failed.id).every(row => !row.pending));
       assert.equal(rows.find(row => row.id === `${prefix}${String(count).padStart(4, '0')}`).pending, undefined);
       assert.ok(errors.some(error => error.label === 'Referral cron batch failed' &&
         error.code === 'COMMERCE_PAYLOAD_BUDGET_EXCEEDED'));
@@ -131,7 +132,7 @@ export const checkPayoutCronScale = async ({sql, seed, documents, commerce, fixt
   };
   try {
     const first = await cron();
-    if (growing) assert.ok(first.pending > 1);
+    if (growing) assert.equal(first.pending, 1);
     const body = {
       referralId: state.creator._id, packageType: 'vertex', amount: 2,
       payoutId: `transfer-${state.key}`, paidOn: '2026-11-08T10:00:00.000Z',
