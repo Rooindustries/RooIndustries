@@ -1,6 +1,4 @@
 const { test: base, expect } = require("./fixtures/booking-flow.cjs");
-const { fork } = require("node:child_process");
-const { once } = require("node:events");
 
 const creators = {
   fixturecreator: { id: "referral.fixture-creator", commission: 5.5 },
@@ -10,8 +8,9 @@ const byId = records => [...records].sort((a, b) => a._id.localeCompare(b._id));
 
 const test = base.extend({
   native: [async ({}, use) => {
-    const child = fork(require.resolve("./fixtures/referral-payment.mjs"), ["--worker"], {
-      execArgv: [], stdio: ["ignore", "inherit", "inherit", "ipc"],
+    const { spawnContained, stopChild } = await import("../scripts/lib/start-on-port.mjs");
+    const child = spawnContained(process.execPath, [require.resolve("./fixtures/referral-payment.mjs"), "--worker"], {
+      stdio: ["ignore", "inherit", "inherit", "ipc"],
     });
     const pending = new Map();
     let nextId = 0;
@@ -23,28 +22,29 @@ const test = base.extend({
         pending.delete(message.id);
         message.error ? request.reject(new Error(message.error)) : request.resolve(message.value);
       });
-      child.on("exit", code => {
-        const error = new Error(`Creator payment fixture exited (${code})`);
+      const failed = error => {
         reject(error);
         for (const request of pending.values()) request.reject(error);
         pending.clear();
-      });
+      };
+      child.once("error", failed);
+      child.once("exit", (code, signal) => failed(new Error(`Creator payment fixture exited (${signal || code})`)));
     });
     const call = (method, ...args) => new Promise((resolve, reject) => {
       const id = ++nextId;
       pending.set(id, { resolve, reject });
-      child.send({ id, method, args });
+      child.send({ id, method, args }, error => {
+        if (!error) return;
+        pending.delete(id);
+        reject(error);
+      });
     });
     try {
       await ready;
       await use(Object.fromEntries(["request", "pay", "webhook", "state", "snapshot", "nextSlotDate", "evidence"]
         .map(method => [method, (...args) => call(method, ...args)])));
     } finally {
-      if (child.exitCode === null) {
-        const exited = once(child, "exit");
-        await call("stop");
-        await exited;
-      }
+      await stopChild(child);
     }
   }, { scope: "worker", timeout: 180000 }],
 });

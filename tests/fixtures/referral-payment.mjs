@@ -166,6 +166,7 @@ export async function createReferralPaymentFixture() {
     const { default: next } = await import("next");
     app = next({ dev: true, hostname: host, port });
     await app.prepare();
+    const developmentServer = await app.server.getServer();
     const handle = app.getRequestHandler();
     server = http.createServer(async (req, res) => {
       try {
@@ -174,6 +175,9 @@ export async function createReferralPaymentFixture() {
     });
     await listenOnPort(server, host, port);
     const request = async ({ method = "GET", path, body = "", headers = {} }) => {
+      await developmentServer.ensureMiddleware(path);
+      const match = await developmentServer.matchers.match(new URL(path, baseURL).pathname, {});
+      assert.ok(match, `Fixture route missing: ${path}`);
       const response = await fetch(`${baseURL}${path}`, { method,
         headers: { origin: baseURL, ...headers }, ...(["GET", "HEAD"].includes(method) ? {} : { body }) });
       const text = await response.text();
