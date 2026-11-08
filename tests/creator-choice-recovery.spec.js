@@ -15,6 +15,41 @@ const ready = async (page, flow, code = "friend") => {
 };
 const quote = flow => flow.state.calls.filter(call => call.path === "/api/payment/quote").at(-1)?.body;
 
+for (const blockedKey of ["booking_draft", "checkout_booking_state", "payment_session_state"]) {
+  test(`failed ${blockedKey} saves without code choices do not show a code warning`,
+    async ({ page, context, flow }, info) => {
+      let saveErrors = 0;
+      page.on("console", message => {
+        if (message.type() === "error" && message.text() === "Failed to save checkout choices") saveErrors += 1;
+      });
+      await context.addInitScript(key => {
+        const setItem = Storage.prototype.setItem;
+        Storage.prototype.setItem = function (name, value) {
+          if (name === key) throw new DOMException("Storage quota", "QuotaExceededError");
+          return setItem.call(this, name, value);
+        };
+      }, blockedKey);
+      await ready(page, flow, "");
+      await expect.poll(() => quote(flow)).toMatchObject({ referralCode: "", couponCode: "" });
+      if (blockedKey === "payment_session_state") {
+        await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+        await expect(page.getByRole("alert").filter({
+          hasText: "Your browser could not save this payment session.",
+        })).toBeVisible();
+      }
+      await expect.poll(() => saveErrors).toBeGreaterThan(0);
+      if (blockedKey === "booking_draft") {
+        for (const width of [390, 1280]) {
+          await page.setViewportSize({ width, height: 844 });
+          await info.attach(`no-code-save-failure-${width}`, {
+            body: await page.screenshot(), contentType: "image/png",
+          });
+        }
+      }
+      await expect(page.getByRole("alert").filter({ hasText: "could not save your code choices" })).toHaveCount(0);
+    });
+}
+
 for (const blockedKey of ["booking_draft", "checkout_booking_state", "referral_session", "all"]) {
   test(`returning to booking keeps a creator replacement when saving ${blockedKey} fails`, async ({ page, context, flow }, info) => {
     let saveErrors = 0;
@@ -27,9 +62,11 @@ for (const blockedKey of ["booking_draft", "checkout_booking_state", "referral_s
     await ready(page, flow);
     await page.evaluate(key => {
       const setItem = Storage.prototype.setItem;
+      window.failedCheckoutSaves = 0;
       Storage.prototype.setItem = function (name, value) {
         const choices = ["booking_draft", "checkout_booking_state", "payment_session_state", "referral_session"];
         if (name === key || (key === "all" && choices.includes(name))) {
+          window.failedCheckoutSaves += 1;
           throw new DOMException("Storage quota", "QuotaExceededError");
         }
         return setItem.call(this, name, value);
@@ -59,7 +96,8 @@ for (const blockedKey of ["booking_draft", "checkout_booking_state", "referral_s
     await flow.payment();
     await expect(input(page, "referral")).toHaveValue("second");
     await expect.poll(() => quote(flow)).toMatchObject({ referralCode: "second" });
-    expect(saveErrors).toBe(1);
+    expect(saveErrors).toBeGreaterThan(0);
+    expect(saveErrors).toBe(await page.evaluate(() => window.failedCheckoutSaves));
   });
 }
 
@@ -113,6 +151,27 @@ test("a creator replacement survives a checkout storage quota failure", async ({
   await page.getByRole("button", { name: "Pay your way", exact: true }).click();
   await expect.poll(() => flow.state.calls.filter(call => call.path === "/api/payment/start").at(-1)?.body)
     .toMatchObject({ bookingPayload: { referralCode: "second" } });
+});
+
+test("a coupon-only save warning clears when storage recovers", async ({ page, flow }) => {
+  await ready(page, flow, "");
+  await page.evaluate(() => {
+    const setItem = Storage.prototype.setItem;
+    window.restoreCheckoutStorage = () => { Storage.prototype.setItem = setItem; };
+    Storage.prototype.setItem = function (key, value) {
+      if (key === "checkout_booking_state") throw new DOMException("Storage quota", "QuotaExceededError");
+      return setItem.call(this, key, value);
+    };
+  });
+  await input(page, "coupon").fill("save20");
+  await apply(page, "coupon").click();
+  await expect.poll(() => quote(flow)).toMatchObject({ couponCode: "save20", referralCode: "" });
+  const notice = page.getByRole("alert").filter({ hasText: "could not save your code choices" });
+  await expect(notice).toBeVisible();
+  await page.evaluate(() => window.restoreCheckoutStorage());
+  await page.getByRole("button", { name: "Remove coupon", exact: true }).click();
+  await expect.poll(() => quote(flow)).toMatchObject({ couponCode: "", referralCode: "" });
+  await expect(notice).toHaveCount(0);
 });
 
 test("an incidental coupon link keeps a deliberate combinable coupon", async ({ page, context, flow }) => {

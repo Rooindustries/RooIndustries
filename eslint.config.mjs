@@ -1,5 +1,6 @@
 import globals from "globals";
 import reactHooks from "eslint-plugin-react-hooks";
+import tsParser from "@typescript-eslint/parser";
 import roo, { rules } from "./eslint-rules/index.mjs";
 
 const emailTextRules = new Set(["no-hand-built-dollars"]);
@@ -27,6 +28,13 @@ export default [
     rules: ruleSet(Object.keys(rules).filter((name) =>
       !emailTextRules.has(name) && !scriptRules.has(name) && !navigationRules.has(name)
     )),
+  },
+  {
+    files: ["src/**/*.{ts,tsx}", "app/**/*.{ts,tsx}"],
+    ignores: [testFiles],
+    languageOptions: { parser: tsParser },
+    plugins: { roo },
+    rules: ruleSet(["no-unscoped-payment-storage"]),
   },
   {
     files: ["src/lib/sectionNavigator.jsx"],

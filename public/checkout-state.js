@@ -1,19 +1,23 @@
 const unsaved = new Map();
+const unsavedChoices = new Set();
 const SAVE_STATE_EVENT = "checkout-save-state";
-let reported = false;
 const announce = () => window.dispatchEvent(new Event(SAVE_STATE_EVENT));
+const hasCodes = (value) => Boolean(
+  value?.referralCode || value?.couponCode || value?.referral?.code ||
+  value?.coupon?.code || value?.dismissedReferralCode
+);
 
 export const CHECKOUT_SAVE_NOTICE =
   "Your browser could not save your code choices. They still apply to this checkout, but reloading may lose them.";
 
-export const hasCheckoutSaveFailure = () => unsaved.size > 0;
+export const hasCheckoutSaveFailure = () => unsavedChoices.size > 0;
 
 export const subscribeCheckoutSaveFailure = (listener) => {
   window.addEventListener(SAVE_STATE_EVENT, listener);
   return () => window.removeEventListener(SAVE_STATE_EVENT, listener);
 };
 
-const createStore = (key, text = false) => {
+const createStore = (key, text, hasChoices) => {
   const read = () => {
     if (typeof window === "undefined") return null;
     try {
@@ -26,6 +30,7 @@ const createStore = (key, text = false) => {
   const write = (value) => {
     if (typeof window === "undefined") return false;
     const serialized = value == null || (text && !value) ? null : text ? String(value) : JSON.stringify(value);
+    const carriedChoices = hasChoices(value) || hasChoices(read()) || unsavedChoices.has(key);
     unsaved.set(key, serialized);
     let saved = false;
     try {
@@ -35,9 +40,11 @@ const createStore = (key, text = false) => {
       saved = storage.getItem(key) === serialized;
       if (saved) unsaved.delete(key);
     } catch {}
-    if (!saved && !reported) {
-      reported = true;
+    if (!saved) {
+      if (carriedChoices) unsavedChoices.add(key);
       console.error("Failed to save checkout choices");
+    } else {
+      unsavedChoices.delete(key);
     }
     announce();
     return saved;
@@ -47,7 +54,10 @@ const createStore = (key, text = false) => {
       try {
         const stored = window.sessionStorage.getItem(key);
         if (stored !== null && !matches(text ? stored : JSON.parse(stored))) {
-          if (matches(read())) unsaved.delete(key);
+          if (matches(read())) {
+            unsaved.delete(key);
+            unsavedChoices.delete(key);
+          }
           announce();
           return true;
         }
@@ -58,10 +68,20 @@ const createStore = (key, text = false) => {
   return { read, write, remove };
 };
 
-export const bookingDraft = createStore("booking_draft");
-export const checkoutBooking = createStore("checkout_booking_state");
-export const paymentSession = createStore("payment_session_state");
-export const referralSession = createStore("referral_session", true);
+export const bookingDraft = createStore("booking_draft", false, (draft) =>
+  Object.values(draft?.packages || {}).some((pkg) => hasCodes(pkg?.checkoutCodes))
+);
+export const checkoutBooking = createStore("checkout_booking_state", false, (booking) =>
+  hasCodes(booking) || hasCodes(booking?.checkoutCodes)
+);
+export const paymentSession = createStore("payment_session_state", false, (session) => {
+  try {
+    return hasCodes(JSON.parse(session?.fingerprint || "null"));
+  } catch {
+    return false;
+  }
+});
+export const referralSession = createStore("referral_session", true, Boolean);
 
 export const migrateBookingDraft = () => {
   if (typeof window === "undefined") return;

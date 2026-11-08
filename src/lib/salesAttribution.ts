@@ -1,4 +1,5 @@
 import { INDEXABLE_ROUTES } from "./routes";
+import { referralSession } from "../../public/checkout-state.js";
 
 export type SalesAttribution = {
   version: 1;
@@ -61,7 +62,7 @@ export function captureSalesAttribution(): SalesAttribution | null {
       let referrerHost = "";
       try { const referrer = new URL(document.referrer); if (referrer.origin !== window.location.origin) referrerHost = referrer.hostname; } catch {}
       let creatorCode = campaign.creatorCode;
-      if (!creatorCode) { try { creatorCode = label(sessionStorage.getItem("referral_session")); } catch {} }
+      if (!creatorCode) creatorCode = label(referralSession.read());
       current = sanitizeSalesAttribution({ version: 1, journeyId, capturedAt: new Date().toISOString(), landingPath: salesPath(window.location.pathname), referrerHost, ...campaign, creatorCode });
     }
     fallback = current;

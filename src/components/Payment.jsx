@@ -375,6 +375,37 @@ export default function Payment({ hideFooter = false }) {
     bookingData.originalOrderId, referralCode || "", couponCode || "",
   ]);
 
+  const updateBookingDraftCodes = (nextCheckout) => {
+    try {
+      const draft = bookingDraft.read();
+      const packageDraft = draft?.packages?.[packageTitle];
+      const draftEmail = String(packageDraft?.form?.email || "").trim().toLowerCase();
+      const bookingEmail = String(bookingData.email || "").trim().toLowerCase();
+      const bookingStart = String(bookingData.startTimeUTC || "");
+      const hold = JSON.parse(sessionStorage.getItem("my_slot_hold") || "null");
+      const sameHold = hold?.holdToken && hold.holdToken === nextCheckout.slotHoldToken &&
+        hold.startTimeUTC === bookingStart;
+      const draftStart = String(packageDraft?.startTimeUTC || (sameHold ? bookingStart : ""));
+      if (!bookingEmail || draftEmail !== bookingEmail || !bookingStart || draftStart !== bookingStart || !sameHold) {
+        return;
+      }
+      packageDraft.startTimeUTC = bookingStart;
+      packageDraft.checkoutCodes = nextCheckout.checkoutCodes;
+      bookingDraft.write(draft);
+    } catch {}
+  };
+
+  const replaceCodeLocation = (nextCheckout, search) => {
+    const state = { ...navState, bookingData: nextCheckout };
+    try {
+      if (window.history.state?.__rooLegacy) {
+        const url = `${location.pathname}${search}${location.hash}`;
+        window.history.replaceState({ ...window.history.state, usr: state }, "", url);
+      }
+    } catch {}
+    navigate({ pathname: location.pathname, search, hash: location.hash }, { replace: true, state });
+  };
+
   const persistCheckoutCodes = (
     nextReferral,
     nextCoupon,
@@ -407,29 +438,8 @@ export default function Payment({ hideFooter = false }) {
     setPreApplyingCodes(true);
     writeStoredCheckout(nextCheckout);
     appliedCodeSelectionRef.current = codeSelectionKey(nextCheckout.referralCode, nextCheckout.couponCode, search);
-    try {
-      const draft = bookingDraft.read();
-      const packageDraft = draft?.packages?.[packageTitle];
-      const draftEmail = String(packageDraft?.form?.email || "").trim().toLowerCase();
-      const bookingEmail = String(bookingData.email || "").trim().toLowerCase();
-      const bookingStart = String(bookingData.startTimeUTC || "");
-      const hold = JSON.parse(sessionStorage.getItem("my_slot_hold") || "null");
-      const sameHold = hold?.holdToken && hold.holdToken === nextCheckout.slotHoldToken &&
-        hold.startTimeUTC === bookingStart;
-      const draftStart = String(packageDraft?.startTimeUTC || (sameHold ? bookingStart : ""));
-      if (bookingEmail && draftEmail === bookingEmail && bookingStart && draftStart === bookingStart && sameHold) {
-        packageDraft.startTimeUTC = bookingStart;
-        packageDraft.checkoutCodes = checkoutCodes;
-        bookingDraft.write(draft);
-      }
-    } catch {}
-    const state = { ...navState, bookingData: nextCheckout };
-    try {
-      if (window.history.state?.__rooLegacy) {
-        window.history.replaceState({ ...window.history.state, usr: state }, "", `${location.pathname}${search}${location.hash}`);
-      }
-    } catch {}
-    navigate({ pathname: location.pathname, search, hash: location.hash }, { replace: true, state });
+    updateBookingDraftCodes(nextCheckout);
+    replaceCodeLocation(nextCheckout, search);
   };
 
   useEffect(() => {
