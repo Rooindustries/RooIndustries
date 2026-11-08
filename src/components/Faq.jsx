@@ -164,14 +164,9 @@ export default function FaqSection({
   }, [location.hash]);
   
   const [[page, direction], setPage] = useState([0, 0]);
+  const pendingPageScrollRef = useRef(null);
 
   const [containerRef, { height }] = useElementSize();
-
-  const scrollWithOffset = (id) => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    scrollWindowTo(el.getBoundingClientRect().top + window.scrollY - 96);
-  };
 
   const toggleQuestion = (questionId) => {
     setOpenQuestions((prev) => ({
@@ -219,9 +214,16 @@ export default function FaqSection({
   const paginate = (newDirection) => {
     const newPage = safePage + newDirection;
     if (newPage >= 0 && newPage < totalPages) {
+      pendingPageScrollRef.current = newPage;
       setPage([newPage, newDirection]);
-      setTimeout(() => scrollWithOffset("faq"), 250);
     }
+  };
+
+  const finishPageChange = (animation) => {
+    if (animation !== "center" || pendingPageScrollRef.current !== safePage) return;
+    pendingPageScrollRef.current = null;
+    const faq = document.getElementById("faq");
+    if (faq) scrollWindowTo(faq.getBoundingClientRect().top + window.scrollY - 96);
   };
 
   const isLoading = questions === null;
@@ -308,6 +310,7 @@ export default function FaqSection({
                   initial="enter"
                   animate="center"
                   exit="exit"
+                  onAnimationComplete={finishPageChange}
                   transition={{
                     x: { type: "spring", stiffness: 300, damping: 30 },
                     opacity: { duration: 0.2 },

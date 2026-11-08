@@ -1096,17 +1096,15 @@ const sampleScrollAfterClick = async (page, button) => {
             return;
           }
           const frames = [window.scrollY];
-          find().click();
-          const clickedAt = performance.now();
-          const sample = () => {
-            frames.push(window.scrollY);
-            if (performance.now() - clickedAt > 2000) {
-              resolve(frames);
-              return;
-            }
-            requestAnimationFrame(sample);
+          const sample = () => frames.push(window.scrollY);
+          const finish = () => {
+            sample();
+            document.removeEventListener("scroll", sample);
+            resolve(frames);
           };
-          requestAnimationFrame(sample);
+          document.addEventListener("scroll", sample);
+          document.addEventListener("scrollend", finish, { once: true });
+          find().click();
         };
         requestAnimationFrame(settle);
       }),
