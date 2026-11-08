@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { after, before, beforeEach, test } from 'node:test';
 import { createBookingContactFixture } from './fixtures/booking-contact.mjs';
 
@@ -19,7 +22,11 @@ const minutesLater = minutes => {
 };
 
 let fixture;
+let scratch;
+const originalTmpdir = process.env.TMPDIR;
 before(async () => {
+  scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'booking-payment-window-'.repeat(4)));
+  process.env.TMPDIR = scratch;
   fixture = await createBookingContactFixture({ artifactName: 'booking-payment-window' });
 });
 beforeEach(() => {
@@ -30,7 +37,22 @@ beforeEach(() => {
 });
 after(async () => {
   minutesLater(0);
-  await fixture?.stop();
+  try {
+    await fixture?.stop();
+  } finally {
+    if (originalTmpdir === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = originalTmpdir;
+    if (scratch) fs.rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test('the payment fixture starts in a long temporary path with TCP connections', async () => {
+  const socketPath = path.join(fixture.database.scratch, `.s.PGSQL.${fixture.database.pgPort}`);
+  assert.ok(Buffer.byteLength(socketPath) > 107, socketPath);
+  const [connection] = await fixture.database.sql`
+    select current_setting('unix_socket_directories') as sockets, host(inet_server_addr()) as host`;
+  assert.equal(connection.sockets, '');
+  assert.equal(connection.host, process.env.ROO_TEST_HOST || '127.0.0.1');
 });
 
 const paymentInProgress = 'This slot already has a payment session in progress.';
