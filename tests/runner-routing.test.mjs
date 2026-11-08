@@ -4,133 +4,94 @@ import path from "node:path";
 import { test } from "node:test";
 import yaml from "js-yaml";
 
-const SELF_HOSTED = new Set(["self-hosted", "devbox", "roo-site", "roo-smoke"]);
-const load = (file) => yaml.load(fs.readFileSync(file, "utf8"));
-const workflows = fs.readdirSync(".github/workflows")
-  .filter((file) => file.endsWith(".yml"))
-  .map((file) => ({ file, workflow: load(path.join(".github/workflows", file)) }));
-const actions = fs.readdirSync(".github/actions")
-  .map((name) => path.join(".github/actions", name, "action.yml"))
-  .filter((file) => fs.existsSync(file))
-  .map((file) => ({ file, action: load(file) }));
+const LABEL = "[a-z0-9][a-z0-9.-]*";
+const PLAIN_LABEL = new RegExp(`^${LABEL}$`);
+const VARIABLE_OR_LABEL = new RegExp(`^\\$\\{\\{ vars\\.([A-Z][A-Z0-9_]*) \\|\\| '(${LABEL})' \\}\\}$`);
+const FORKS_ELSEWHERE = new RegExp(
+  "^\\$\\{\\{ github\\.event_name == 'pull_request' && github\\.event\\.pull_request\\.head\\.repo\\.full_name != github\\.repository" +
+  ` && '(${LABEL})' \\|\\| vars\\.([A-Z][A-Z0-9_]*) \\|\\| '(${LABEL})' \\}\\}$`,
+);
+const GITHUB_HOSTED = /^ubuntu-(?:latest|[0-9]{2}\.[0-9]{2})$/;
+const HOSTED = "runner.environment == 'github-hosted'";
+const HOSTED_ONLY_DEPS = [
+  `\${{ ${HOSTED} && '--with-deps' || '' }}`,
+  `\${{ inputs.browser-deps == 'true' && ${HOSTED} && '--with-deps' || '' }}`,
+];
+const INSTALLS = /\bsudo\b|apt-get|install-deps|--with-deps/;
 
-const tokenize = (source) => {
-  const tokens = [];
-  const pattern = /\s*('(?:[^']|'')*'|&&|\|\||==|!=|\(|\)|[A-Za-z_][\w.-]*)/y;
-  while (pattern.lastIndex < source.trim().length) {
-    const match = pattern.exec(source);
-    assert.ok(match, `Unsupported expression: ${source}`);
-    tokens.push(match[1]);
-  }
-  return tokens;
+const files = fs.readdirSync(".github/workflows");
+const workflows = files
+  .filter((file) => /\.ya?ml$/.test(file))
+  .map((file) => ({ file, workflow: yaml.load(fs.readFileSync(path.join(".github/workflows", file), "utf8")) }));
+const jobs = workflows.flatMap(({ file, workflow }) => Object.entries(workflow.jobs).map(([id, job]) => ({ file, workflow, id, job })));
+const actions = fs.readdirSync(".github/actions").map((name) => path.join(".github/actions", name, "action.yml"));
+
+const events = ({ file, on }) => {
+  if (typeof on === "string") return [on];
+  if (Array.isArray(on) && on.every((event) => typeof event === "string")) return on;
+  assert.ok(on && typeof on === "object" && !Array.isArray(on), `${file}: unreadable triggers ${JSON.stringify(on)}`);
+  return Object.keys(on);
 };
 
-const evaluate = (source, context) => {
-  const tokens = tokenize(source);
-  let index = 0;
-  const lookup = (name) => name.split(".").reduce((value, key) => (value == null ? null : value[key]), context);
-  const primary = () => {
-    const token = tokens[index++];
-    if (token === "(") {
-      const value = or();
-      assert.equal(tokens[index++], ")");
-      return value;
-    }
-    if (token.startsWith("'")) return token.slice(1, -1).replaceAll("''", "'");
-    return lookup(token) ?? null;
-  };
-  const compare = () => {
-    const left = primary();
-    const operator = tokens[index];
-    if (operator !== "==" && operator !== "!=") return left;
-    index += 1;
-    const equal = String(left ?? "") === String(primary() ?? "");
-    return operator === "==" ? equal : !equal;
-  };
-  const and = () => {
-    let value = compare();
-    while (tokens[index] === "&&") {
-      index += 1;
-      const right = compare();
-      value = value ? right : value;
-    }
-    return value;
-  };
-  const or = () => {
-    let value = and();
-    while (tokens[index] === "||") {
-      index += 1;
-      const right = and();
-      value = value || right;
-    }
-    return value;
-  };
-  const value = or();
-  assert.equal(index, tokens.length, `Unparsed expression: ${source}`);
-  return value;
+const runner = ({ file, id, job }) => {
+  const runsOn = job["runs-on"];
+  if (typeof runsOn === "string" && PLAIN_LABEL.test(runsOn)) return { label: runsOn };
+  const variable = typeof runsOn === "string" ? VARIABLE_OR_LABEL.exec(runsOn) : null;
+  if (variable) return { variable: variable[1], label: variable[2] };
+  const forks = typeof runsOn === "string" ? FORKS_ELSEWHERE.exec(runsOn) : null;
+  assert.ok(forks, `${file} ${id}: runs-on is not one of the checked forms: ${JSON.stringify(runsOn)}`);
+  return { forkLabel: forks[1], variable: forks[2], label: forks[3] };
 };
 
-const runnerFor = (runsOn, context) => {
-  const match = /^\$\{\{(.*)\}\}$/s.exec(String(runsOn).trim());
-  return match ? evaluate(match[1], context) : runsOn;
-};
+test("workflows are .yml files and every job names its runner in one of the checked forms", () => {
+  for (const file of files) assert.match(file, /^[a-z0-9-]+\.yml$/, `unexpected file in .github/workflows: ${file}`);
+  for (const file of actions) assert.ok(fs.existsSync(file), `missing ${file}`);
+  for (const job of jobs) runner(job);
+});
 
-const contexts = {
-  forkPullRequest: { event_name: "pull_request", repository: "Rooindustries/RooIndustries", event: { pull_request: { head: { repo: { full_name: "someone/RooIndustries" } } } } },
-  pullRequest: { event_name: "pull_request", repository: "Rooindustries/RooIndustries", event: { pull_request: { head: { repo: { full_name: "Rooindustries/RooIndustries" } } } } },
-  push: { event_name: "push", repository: "Rooindustries/RooIndustries", event: {} },
-};
-
-test("pull request jobs from forks never reach the self-hosted runners", () => {
-  for (const { file, workflow } of workflows) {
-    if (!("pull_request" in workflow.on) && !("pull_request_target" in workflow.on)) continue;
-    for (const [id, job] of Object.entries(workflow.jobs)) {
-      for (const vars of [{}, { TESTS_RUNNER: "roo-site" }]) {
-        const label = runnerFor(job["runs-on"], { github: contexts.forkPullRequest, vars });
-        assert.ok(!SELF_HOSTED.has(label), `${file} ${id} sends a fork's pull request to ${label}`);
-      }
-    }
+test("pull request jobs from forks run only on GitHub-hosted runners", () => {
+  for (const job of jobs.filter(({ file, workflow }) => events({ file, on: workflow.on }).some((event) => event === "pull_request" || event === "pull_request_target"))) {
+    const { forkLabel, label } = runner(job);
+    assert.match(forkLabel ?? label, GITHUB_HOSTED, `${job.file} ${job.id} runs forks' pull requests on ${forkLabel ?? label}`);
   }
 });
 
-test("the test jobs run on the website's own runners for its branches and main", () => {
-  const { workflow } = workflows.find(({ file }) => file === "tests.yml");
-  for (const [id, job] of Object.entries(workflow.jobs)) {
-    for (const event of [contexts.pullRequest, contexts.push]) {
-      assert.equal(runnerFor(job["runs-on"], { github: event, vars: {} }), "roo-site", `tests.yml ${id}`);
-      assert.equal(runnerFor(job["runs-on"], { github: event, vars: { TESTS_RUNNER: "ubuntu-24.04" } }), "ubuntu-24.04", `tests.yml ${id}`);
-    }
+test("test jobs run on the website's runners, forks' pull requests on GitHub-hosted ones", () => {
+  const tests = jobs.filter(({ file }) => file === "tests.yml");
+  assert.ok(tests.length > 0);
+  for (const job of tests) {
+    assert.deepEqual(runner(job), { forkLabel: "ubuntu-24.04", variable: "TESTS_RUNNER", label: "roo-site" }, job.id);
   }
 });
 
 test("production smoke has a lane of its own and runs only for deployments", () => {
-  const { workflow } = workflows.find(({ file }) => file === "production-smoke.yml");
-  assert.deepEqual(Object.keys(workflow.on), ["deployment_status"]);
-  for (const [id, job] of Object.entries(workflow.jobs)) {
-    assert.equal(runnerFor(job["runs-on"], { github: contexts.push, vars: {} }), "roo-smoke", id);
+  const smoke = jobs.filter(({ file }) => file === "production-smoke.yml");
+  assert.ok(smoke.length > 0);
+  for (const job of smoke) {
+    assert.deepEqual(events({ file: job.file, on: job.workflow.on }), ["deployment_status"]);
+    assert.deepEqual(runner(job), { variable: "SMOKE_RUNNER", label: "roo-smoke" }, job.id);
+    assert.ok(job.job.steps.every((step) => step.if === undefined), "smoke steps run unconditionally");
   }
-  for (const { workflow: other, file } of workflows.filter(({ file }) => file !== "production-smoke.yml")) {
-    for (const [id, job] of Object.entries(other.jobs)) {
-      for (const event of Object.values(contexts)) {
-        assert.notEqual(runnerFor(job["runs-on"], { github: event, vars: {} }), "roo-smoke", `${file} ${id}`);
-      }
-    }
+  for (const job of jobs.filter(({ file }) => file !== "production-smoke.yml")) {
+    const { forkLabel, label } = runner(job);
+    assert.ok(label !== "roo-smoke" && forkLabel !== "roo-smoke", `${job.file} ${job.id}`);
   }
 });
 
-test("system package installs run only on GitHub-hosted runners", () => {
+test("system packages are installed only on GitHub-hosted runners", () => {
   const steps = [
-    ...workflows.flatMap(({ file, workflow }) => Object.values(workflow.jobs).flatMap((job) => (job.steps || []).map((step) => ({ file, step })))),
-    ...actions.flatMap(({ file, action }) => (action.runs.steps || []).map((step) => ({ file, step }))),
+    ...jobs.flatMap(({ file, job }) => (job.steps ?? []).map((step) => ({ file, step }))),
+    ...actions.flatMap((file) => yaml.load(fs.readFileSync(file, "utf8")).runs.steps.map((step) => ({ file, step }))),
   ];
-  const hosted = "runner.environment == 'github-hosted'";
+  const hostedOnly = (condition) => typeof condition === "string" && !/\|\||\$\{\{|[()]|!(?!=)/.test(condition) && condition.split(" && ").includes(HOSTED);
+  let guarded = 0;
   for (const { file, step } of steps) {
-    const run = String(step.run || "");
-    if (/\bsudo\b|install-deps|apt-get/.test(run)) {
-      assert.ok(String(step.if || "").includes(hosted), `${file}: ${run.split("\n")[0]}`);
-    }
-    if (run.includes("--with-deps")) {
-      assert.ok(String(step.if || "").includes(hosted) || run.includes(`${hosted} && '--with-deps'`), `${file}: ${run.split("\n")[0]}`);
-    }
+    const run = String(step.run ?? "");
+    let rest = [run];
+    for (const guard of HOSTED_ONLY_DEPS) rest = rest.flatMap((part) => part.split(guard));
+    guarded += rest.length - 1;
+    for (const part of rest) assert.ok(!part.includes("${{"), `${file}: run lines take no expressions but the hosted-only --with-deps guards: ${run}`);
+    if (rest.some((part) => INSTALLS.test(part))) assert.ok(hostedOnly(step.if), `${file}: ${run.split("\n")[0]} installs packages on every runner`);
   }
+  assert.equal(guarded, 2);
 });
