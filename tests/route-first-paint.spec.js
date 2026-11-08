@@ -27,7 +27,12 @@ for (const javaScriptEnabled of [false, true]) {
           const content = page.locator(route === "/referrals/login"
             ? "#ref-login-identifier" : '[role="dialog"].ri-booking');
           try {
-            await page.goto(route, { waitUntil: javaScriptEnabled ? "commit" : "load" });
+            const response = await page.goto(route, { waitUntil: javaScriptEnabled ? "commit" : "load" });
+            const hiddenSegments = await page.evaluate(html =>
+              new DOMParser().parseFromString(html, "text/html").querySelectorAll('[hidden][id^="S:"]').length,
+              await response.text()
+            );
+            expect(hiddenSegments).toBe(0);
             await expect(content).toHaveCount(1);
             await page.waitForFunction(() => {
               const links = [...document.querySelectorAll('link[rel="stylesheet"]')];

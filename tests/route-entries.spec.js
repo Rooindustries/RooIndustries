@@ -439,23 +439,37 @@ test("a looping animation inside the account choice doesn't keep its overlay aft
   await attach(testInfo, "looping-animation-close", { looping: String(looping) });
 });
 
-test("cancelled account-choice exit animations still close the overlay", async ({ page }) => {
-  await page.goto("/referrals/login?oauth=unlinked&provider=discord");
-  await expect(page.getByRole("dialog")).toBeVisible();
-  await finishDialogOpening(page);
-  await page.evaluate(() => {
-    const observer = new MutationObserver(() => {
-      const overlay = document.querySelector("[data-closing]");
-      if (!overlay) return;
-      const panel = overlay.querySelector('[role="dialog"]');
-      for (const element of [overlay, panel]) {
-        for (const animation of element.getAnimations()) animation.cancel();
-      }
-      observer.disconnect();
-    });
-    observer.observe(document.body, { subtree: true, attributes: true, attributeFilter: ["data-closing"] });
+for (const [action, state] of [["pause", "paused"], ["cancel", "idle"]]) {
+  const label = action === "pause" ? "paused" : "cancelled";
+  test(`${label} account-choice exit animations still close the overlay`, async ({ page }, testInfo) => {
+    await page.goto("/referrals/login?oauth=unlinked&provider=discord");
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await finishDialogOpening(page);
+    await page.evaluate(action => {
+      window.__interruptedDialogExits = [];
+      const observer = new MutationObserver(() => {
+        const overlay = document.querySelector("[data-closing]");
+        if (!overlay) return;
+        const panel = overlay.querySelector('[role="dialog"]');
+        for (const element of [overlay, panel]) {
+          for (const animation of element.getAnimations()) {
+            animation[action]();
+            window.__interruptedDialogExits.push(animation.playState);
+          }
+        }
+        observer.disconnect();
+      });
+      observer.observe(document.body, { subtree: true, attributes: true, attributeFilter: ["data-closing"] });
+    }, action);
+    await page.getByRole("button", { name: "Log in and link", exact: true }).click();
+    await expect.poll(() => page.evaluate(() => window.__interruptedDialogExits.length)).toBeGreaterThan(0);
+    const exits = await page.evaluate(() => window.__interruptedDialogExits);
+    expect(exits.every(exit => exit === state)).toBe(true);
+    await expect(page.locator(".glass-overlay")).toHaveCount(0, { timeout: 2000 });
+    const identifier = page.getByLabel("Referral code or login email", { exact: true });
+    await expect(identifier).toBeFocused();
+    await identifier.fill("fixture@example.invalid");
+    await expect(identifier).toHaveValue("fixture@example.invalid");
+    await attach(testInfo, "interrupted-animation-close", { action, exits });
   });
-  await page.getByRole("button", { name: "Log in and link", exact: true }).click();
-  await expect(page.locator(".glass-overlay")).toHaveCount(0);
-  await expect(page.getByLabel("Referral code or login email", { exact: true })).toBeFocused();
-});
+}

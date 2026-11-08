@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { isTopDialog, useDialogFocus } from "../lib/useDialogFocus";
+import { setVisibleTimeout } from "../lib/visibleTimeout";
 
 export default function SiteDialogFrame({
   ariaDescribedBy,
@@ -32,17 +33,23 @@ export default function SiteDialogFrame({
 
   useEffect(() => {
     if (!closing) return undefined;
-    let cancelled = false;
+    let pending = true;
     const finish = () => {
-      if (!cancelled) setRendered(false);
+      if (!pending) return;
+      pending = false;
+      cancelBackstop();
+      setRendered(false);
     };
     const exits = [overlayRef.current, dialogRef.current]
       .flatMap((element) => (typeof element?.getAnimations === "function" ? element.getAnimations() : []))
       .map((animation) => ({ animation, timing: animation.effect?.getComputedTiming() }))
       .filter(({ timing }) => Number.isFinite(timing?.endTime));
+    const duration = Math.max(0, ...exits.map(({ timing }) => timing.endTime));
+    const cancelBackstop = setVisibleTimeout(finish, duration + 100);
     Promise.allSettled(exits.map(({ animation }) => animation.finished)).then(finish);
     return () => {
-      cancelled = true;
+      pending = false;
+      cancelBackstop();
     };
   }, [closing]);
 
