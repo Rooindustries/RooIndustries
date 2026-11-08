@@ -39,6 +39,7 @@ import { trackEvent } from "../lib/analytics";
 import { captureSalesAttribution } from "../lib/salesAttribution";
 import { isValidEmail } from "../lib/emailValidation";
 import { classifyHoldResponse } from "../lib/holdResponse";
+import { readHoldPaymentSession, clearStoredPaymentSession } from "../lib/paymentSessionStorage";
 
 const { applyPackageContentOverrides, getPackageFeatureItems } = packageContent;
 const {
@@ -61,7 +62,6 @@ const IST_OFFSET_MINUTES = 330;
 const FORM_PREFILL_KEY = "booking_form_prefill";
 const HOLD_STORAGE_KEY = "my_slot_hold";
 const BOOKING_DRAFT_KEY = BOOKING_DRAFT_STORAGE_KEY;
-const PAYMENT_SESSION_STORAGE_KEY = "payment_session_state";
 const SESSION_STATE_KEY = "booking_modal_state";
 const REFERRAL_STORAGE_KEY = "referral_session";
 const INVALID_CHECKOUT_CODE_MESSAGE = "Invalid referral or coupon code.";
@@ -2042,7 +2042,7 @@ export default function BookingForm() {
 
     const bookingConfirmation = createBookingConfirmation(data);
     try {
-      sessionStorage.removeItem(PAYMENT_SESSION_STORAGE_KEY);
+      clearStoredPaymentSession(readHoldPaymentSession(myHold));
       sessionStorage.removeItem(CHECKOUT_BOOKING_STORAGE_KEY);
     } catch {
       console.error("Failed to persist booking confirmation");
@@ -2126,9 +2126,7 @@ export default function BookingForm() {
     setErrorStep2("");
     setPaymentReleaseStatus("");
     try {
-      const stored = JSON.parse(
-        sessionStorage.getItem(PAYMENT_SESSION_STORAGE_KEY) || "null"
-      );
+      const stored = readHoldPaymentSession(myHold);
       const paymentAccessToken = String(stored?.paymentAccessToken || "").trim();
       if (!paymentAccessToken) {
         throw new Error("Return to payment once so the active session can be checked.");
@@ -2166,7 +2164,7 @@ export default function BookingForm() {
       setMyHold(nextHold);
       writeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY, JSON.stringify(nextHold));
       const checkoutUpdated = updateStoredCheckoutHold(refreshed);
-      removeBrowserStorage("sessionStorage", PAYMENT_SESSION_STORAGE_KEY);
+      clearStoredPaymentSession(stored);
       broadcastHold(nextHold);
       setPaymentReleaseStatus(
         checkoutUpdated
@@ -2358,6 +2356,11 @@ export default function BookingForm() {
 
     const finalReferralCode = String(appliedReferral?.code || "").trim();
     const finalCouponCode = String(appliedCoupon?.code || "").trim();
+    const checkoutCodes = {
+      referral: sanitizeReferralForCheckout(appliedReferral),
+      coupon: sanitizeCouponForCheckout(appliedCoupon),
+      dismissedReferralCode,
+    };
 
     const payload = {
       salesAttribution: captureSalesAttribution(),
@@ -2386,17 +2389,15 @@ export default function BookingForm() {
 
       ...(finalReferralCode ? { referralCode: finalReferralCode } : {}),
       ...(finalCouponCode ? { couponCode: finalCouponCode } : {}),
+      checkoutCodes,
     };
 
     try {
       persistDraft({
         form: { ...form },
         selectedPackage: { ...selectedPackage },
-        checkoutCodes: {
-          referral: sanitizeReferralForCheckout(appliedReferral),
-          coupon: sanitizeCouponForCheckout(appliedCoupon),
-          dismissedReferralCode,
-        },
+        startTimeUTC: selectedSlot.utcStart.toISOString(),
+        checkoutCodes,
       });
     } catch {
       console.error("Failed to persist booking draft");
