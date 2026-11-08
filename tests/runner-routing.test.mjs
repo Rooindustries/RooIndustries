@@ -12,6 +12,8 @@ const FORKS_ELSEWHERE = new RegExp(
   ` && '(${LABEL})' \\|\\| vars\\.([A-Z][A-Z0-9_]*) \\|\\| '(${LABEL})' \\}\\}$`,
 );
 const GITHUB_HOSTED = /^ubuntu-(?:latest|[0-9]{2}\.[0-9]{2})$/;
+const DEPOT_HOSTED = /^depot-ubuntu-(?:latest|[0-9]{2}\.[0-9]{2})$/;
+const vmLabel = (label) => GITHUB_HOSTED.test(label) || DEPOT_HOSTED.test(label);
 const OUTSIDE_DEVBOX = "!startsWith(runner.name, 'devbox-')";
 const OUTSIDE_DEVBOX_DEPS = [
   `\${{ ${OUTSIDE_DEVBOX} && '--with-deps' || '' }}`,
@@ -62,8 +64,8 @@ const checkForkRouting = (job) => {
     assert.ok(forkLabel !== undefined, `${where}: a repository variable would choose the runner for forks' pull requests`);
     assert.match(forkLabel, GITHUB_HOSTED, `${where} runs forks' pull requests on ${forkLabel}`);
   }
-  if (route.variable !== undefined || !GITHUB_HOSTED.test(route.label)) {
-    const allowed = job.file === "production-smoke.yml" ? ["deployment_status"] : ["push", "pull_request", "schedule", "workflow_dispatch"];
+  if (route.variable !== undefined || !vmLabel(route.label)) {
+    const allowed = job.file === "production-smoke.yml" ? ["deployment_status"] : ["push", "pull_request"];
     const untrusted = triggers.filter((trigger) => !allowed.includes(trigger));
     assert.deepEqual(untrusted, [], `${where}: a dedicated runner is reachable from ${untrusted.join(", ")}`);
   }
@@ -86,6 +88,10 @@ test("the routing check rejects routes a fork or an untrusted event could reach"
     [["issue_comment"], "roo-site"],
     [{ workflow_run: { workflows: ["Tests"] } }, "${{ vars.TESTS_RUNNER || 'ubuntu-24.04' }}"],
     [["deployment_status"], "roo-site"],
+    [["schedule"], "roo-site"],
+    [["workflow_dispatch"], "roo-site"],
+    [["schedule", "workflow_dispatch"], "roo-site"],
+    [["schedule", "workflow_dispatch"], "${{ vars.TESTS_RUNNER || 'depot-ubuntu-24.04' }}"],
   ]) {
     assert.throws(() => checkForkRouting(fixture(on, runsOn)), assert.AssertionError, `${JSON.stringify(on)} ${runsOn}`);
   }
@@ -94,7 +100,7 @@ test("the routing check rejects routes a fork or an untrusted event could reach"
     ["pull_request", "ubuntu-24.04"],
     [["pull_request_target"], "ubuntu-24.04"],
     ["push", "${{ vars.TESTS_RUNNER || 'roo-site' }}"],
-    [["schedule", "workflow_dispatch"], "roo-site"],
+    [["schedule", "workflow_dispatch"], "depot-ubuntu-24.04"],
     [["pull_request_review", "issue_comment"], "ubuntu-24.04"],
   ]) {
     checkForkRouting(fixture(on, runsOn));
@@ -109,17 +115,57 @@ test("test jobs run on the website's runners, forks' pull requests on GitHub-hos
   }
 });
 
-test("production smoke has a lane of its own and runs only for deployments", () => {
+const checkSmokeActions = (step) => {
+  if (!Object.hasOwn(step, "uses")) return;
+  const { uses } = step;
+  assert.ok(uses === "actions/checkout@v4" || uses === "actions/setup-node@v4", `${uses}: action is not allowed in production smoke`);
+  if (uses === "actions/setup-node@v4") {
+    assert.ok(
+      !Object.keys(step.with ?? {}).some((input) => ["cache", "cache-dependency-path"].includes(input.toLowerCase())),
+      `${uses}: production smoke cannot use cache inputs`,
+    );
+  }
+};
+
+test("production smoke runs on Depot by default and only for deployments", () => {
   const smoke = jobs.filter(({ file }) => file === "production-smoke.yml");
   assert.ok(smoke.length > 0);
   for (const job of smoke) {
     assert.deepEqual(events({ file: job.file, on: job.workflow.on }), ["deployment_status"]);
-    assert.deepEqual(runner(job), { variable: "SMOKE_RUNNER", label: "roo-smoke" }, job.id);
+    assert.equal(job.job["runs-on"], "${{ vars.SMOKE_RUNNER || 'depot-ubuntu-24.04' }}", job.id);
     assert.ok(job.job.steps.every((step) => step.if === undefined), "smoke steps run unconditionally");
+    for (const step of job.job.steps) checkSmokeActions(step);
   }
-  for (const job of jobs.filter(({ file }) => file !== "production-smoke.yml")) {
+  for (const job of jobs) {
     const { forkLabel, label } = runner(job);
     assert.ok(label !== "roo-smoke" && forkLabel !== "roo-smoke", `${job.file} ${job.id}`);
+  }
+});
+
+test("production smoke permits only approved actions without setup-node cache inputs", () => {
+  for (const step of [
+    { uses: "actions/setup-go@v5" },
+    { uses: "actions/setup-node@v4", with: { cache: "npm" } },
+    { uses: "actions/setup-node@v4", with: { Cache: false } },
+    { uses: "actions/setup-node@v4", with: { "cache-dependency-path": "package-lock.json" } },
+    { uses: "actions/setup-node@v4", with: { "Cache-Dependency-Path": "" } },
+    { uses: "actions/cache@v4" },
+    { uses: "actions/cache/restore@v4" },
+    { uses: "actions/cache/save@v4" },
+    { uses: "third-party/action@v1" },
+    { uses: "actions/setup-node@v3" },
+    { uses: "actions/checkout@v3" },
+    { uses: "actions/checkout@v4 " },
+    { uses: null },
+  ]) {
+    assert.throws(() => checkSmokeActions(step), assert.AssertionError, String(step.uses));
+  }
+  for (const step of [
+    { uses: "actions/setup-node@v4", with: { "node-version": 22 } },
+    { uses: "actions/checkout@v4" },
+    { run: "npm ci" },
+  ]) {
+    checkSmokeActions(step);
   }
 });
 
@@ -132,7 +178,7 @@ const outsideDevbox = (condition) => {
   ));
 };
 
-const checkSystemPackages = (file, step) => {
+const checkInstall = ({ file, step }) => {
   const run = String(step.run ?? "");
   let rest = [run];
   for (const guard of OUTSIDE_DEVBOX_DEPS) rest = rest.flatMap((part) => part.split(guard));
@@ -146,16 +192,21 @@ test("system packages are installed only outside the dev box runners", () => {
     ...jobs.flatMap(({ file, job }) => (job.steps ?? []).map((step) => ({ file, step }))),
     ...actions.flatMap((file) => yaml.safeLoad(fs.readFileSync(file, "utf8")).runs.steps.map((step) => ({ file, step }))),
   ];
-  let guarded = 0;
-  for (const { file, step } of steps) {
-    guarded += checkSystemPackages(file, step);
+  assert.equal(steps.reduce((count, step) => count + checkInstall(step), 0), 2);
+});
+
+test("package installs remain guarded in workflows and actions", () => {
+  const install = { run: "npx playwright install --with-deps chromium" };
+  for (const file of ["fixture.yml", ".github/actions/fixture/action.yml"]) {
+    assert.throws(() => checkInstall({ file, step: install }), assert.AssertionError, file);
+    checkInstall({ file, step: { ...install, if: OUTSIDE_DEVBOX } });
+    assert.throws(() => checkInstall({ file, step: { run: "echo ${{ vars.TEST }}" } }), assert.AssertionError, file);
   }
-  assert.equal(guarded, 2);
 });
 
 test("system package guards reject unsafe conditions and accept the dev box exclusion", () => {
   const install = { run: "sudo apt-get install example" };
-  assert.throws(() => checkSystemPackages("fixture.yml", install), assert.AssertionError);
+  assert.throws(() => checkInstall({ file: "fixture.yml", step: install }), assert.AssertionError);
   for (const condition of [
     "runner.environment == 'github-hosted'",
     `\${{ ${OUTSIDE_DEVBOX} || true }}`,
@@ -166,13 +217,13 @@ test("system package guards reject unsafe conditions and accept the dev box excl
     `\${{ ${OUTSIDE_DEVBOX} && \${{ inputs.browsers }} }}`,
     `\${{ ${OUTSIDE_DEVBOX} &&  }}`,
   ]) {
-    assert.throws(() => checkSystemPackages("fixture.yml", { ...install, if: condition }), assert.AssertionError, String(condition));
+    assert.throws(() => checkInstall({ file: "fixture.yml", step: { ...install, if: condition } }), assert.AssertionError, String(condition));
   }
   for (const condition of [
     `\${{ ${OUTSIDE_DEVBOX} }}`,
     `\${{ inputs.browsers != '' && ${OUTSIDE_DEVBOX} }}`,
     OUTSIDE_DEVBOX,
   ]) {
-    checkSystemPackages("fixture.yml", { ...install, if: condition });
+    checkInstall({ file: "fixture.yml", step: { ...install, if: condition } });
   }
 });
