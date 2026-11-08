@@ -295,6 +295,14 @@ try{
     const bookingPayload={packageTitle,email:'customer@example.invalid',discord:'fixture',specs:'synthetic computer',mainGame:'fixture game',localTimeZone:'Asia/Kolkata',startTimeUTC:hold.startTimeUTC,slotHoldId:hold._id,slotHoldToken:issueHoldToken({holdId:hold._id,startTimeUTC:hold.startTimeUTC,expiresAt,holdNonce:hold.holdNonce,backend:'supabase',cutoverGeneration:0})};
     const {resolvePaymentQuote}=await import('../src/server/api/ref/pricing.js');const quote=await resolvePaymentQuote({packageTitle,client:commerce});const {buildQuoteFingerprint}=await import('../src/server/api/payment/paymentRecord.js');return{provider:'paypal',bookingPayload,quoteFingerprint:buildQuoteFingerprint({bookingPayload,quote})};
   };
+  const useFixtureReferral=async input=>{
+    const referral={_id:'referral.a1',_type:'referral',slug:{_type:'slug',current:'fixture'},registrationStatus:'verified',
+      currentDiscountPercent:0,currentCommissionPercent:10,totalSales:0,totalEarnings:0,backendOwner:'supabase',cutoverGeneration:0};
+    const current=await documents.getDocument(referral._id);
+    if(current)await documents.patch(referral._id).ifRevisionId(current._rev).set(referral).commit();
+    else await documents.create(referral);
+    input.bookingPayload.referralCode='FIXTURE';
+  };
   const a1Start=async(provider='paypal',variant='normal')=>{
     fixture.setRequestHook(async(phase,request)=>{if(phase==='after'&&(request.status>=400||request.response?.ok===false||request.response?.error)){evidence.databaseErrors||=[];evidence.databaseErrors.push({scenario:scenarioNumber,response:request.response});}});
     const input=await startInput();input.provider=provider;input.bookingPayload.message='Original note';emailFailure=variant==='email-failure';
@@ -321,11 +329,7 @@ try{
       input.bookingPayload = { originalOrderId: original._id, packageTitle: target.title, email: original.email,
         upgradeIntentToken: issueUpgradeIntentToken({ bookingId: original._id, email: original.email, targetPackageTitle: target.title, backend: 'supabase', cutoverGeneration: 0 }) };
     }
-    if(variant==='referral'){
-      const referral={_id:'referral.a1',_type:'referral',slug:{_type:'slug',current:'fixture'},registrationStatus:'verified',currentDiscountPercent:0,currentCommissionPercent:10,totalSales:0,totalEarnings:0,backendOwner:'supabase',cutoverGeneration:0};
-      const current=await documents.getDocument(referral._id);if(current)await documents.patch(referral._id).ifRevisionId(current._rev).set(referral).commit();else await documents.create(referral);
-      input.bookingPayload.referralCode='FIXTURE';
-    }
+    if(variant==='referral')await useFixtureReferral(input);
     if(variant==='coupon'||provider==='free'){
       const code=`A1${scenarioNumber}`,percent=provider==='free'?100:10;
       await commerce.create({_id:`coupon.a1.${scenarioNumber}`,_type:'coupon',code,isActive:true,discountType:'percent',discountPercent:percent,canCombineWithReferral:true,timesUsed:0,activeReservations:0,maxUses:0,backendOwner:'supabase',cutoverGeneration:0});input.bookingPayload.couponCode=code;
@@ -681,6 +685,7 @@ try{
   });
   for(const [provider,variant] of [['paypal','partial'],['razorpay','partial'],['paypal','no-refund'],['razorpay','no-refund'],['paypal','sync-failure'],['razorpay','sync-failure'],['paypal','missing-details'],['paypal','reported-total'],['paypal','pending-refund'],['razorpay','pending-refund'],['paypal','payment-sync-failure'],['razorpay','payment-sync-failure'],['paypal','create-conflict'],['razorpay','create-conflict'],['paypal','revision-conflict'],['razorpay','revision-conflict'],['paypal','later-full'],['razorpay','later-full']])await run(variant==='partial'?`a2-outside-ownership-${provider}-legacy-direct-partial-proof`:`fix-c-legacy-${provider}-${variant}`,async()=>{
     const input=await startInput(),proof=provider==='paypal'?{paypalOrderId:'order-fixture',paypalPaymentId:'capture-fixture'}:{razorpayOrderId:'order-fixture',razorpayPaymentId:'payment-fixture',razorpaySignature:crypto.createHmac('sha256','fixture-secret').update('order-fixture|payment-fixture').digest('hex')};
+    if(variant==='later-full')await useFixtureReferral(input);
     const hold=(await row(input.bookingPayload.slotHoldId)).payload;await commerce.patch(hold._id).ifRevisionId(hold._rev).set({phase:'active'}).commit();await sql`update migration.source_documents set payload=jsonb_set(payload,'{backendOwner}','"sanity"'::jsonb) where legacy_sanity_id=${hold._id}`;await sql`update commerce.slot_holds set backend_owner='sanity' where legacy_sanity_id=${hold._id}`;const {issueHoldToken}=await import('../src/server/booking/holdToken.js');input.bookingPayload.slotHoldToken=issueHoldToken({holdId:hold._id,startTimeUTC:hold.startTimeUTC,expiresAt:hold.expiresAt,holdNonce:hold.holdNonce,backend:'sanity',cutoverGeneration:0});
     if(variant!=='no-refund'&&provider==='razorpay'){Object.assign(razorpayPayment,{amount_refunded:499,refund_status:'partial'});razorpayRefunds=[{id:'refund-fixture',payment_id:'payment-fixture',amount:499,currency:'USD',status:'processed'}];}
     else if(variant!=='no-refund'){paypalOrder.purchase_units[0].payments.captures[0].status='PARTIALLY_REFUNDED';paypalOrder.purchase_units[0].payments.refunds=[{id:'refund-fixture',status:'COMPLETED',amount:{value:'4.99',currency_code:'USD'}}];}
@@ -697,6 +702,7 @@ try{
     else assert.equal(result.status,200,JSON.stringify(result));
     const booking=(await row((recovered||result).body.bookingId)).payload,saved=(await sql`select payload from migration.source_documents where document_type='paymentRecord' and payload->>'bookingId'=${booking._id}`)[0]?.payload;
     assert.equal(booking.status,'captured');assert.equal(saved.bookingId,booking._id);assert.equal(booking.netAmount,9.99);const commission=booking.commissionAmount;
+    if(variant==='later-full')assert.ok(commission>0,`later-full books with creator commission: ${commission}`);
     const [ledger]=await sql`select count(*)::int count,coalesce(sum(amount_subunits),0)::int amount from commerce.refunds where payment_record_id=(select id from commerce.payment_records where legacy_sanity_id=${saved._id})`;
     if(variant==='no-refund'){assert.equal(booking.refundedAmount,undefined);assert.equal(saved.refundState,undefined);assert.equal(ledger.count,0);}
     else if(variant==='missing-details'){assert.equal(booking.refundedAmount,undefined);assert.equal(saved.refundState,'partial');assert.equal(saved.providerRefundDetailsMissing,true);assert.equal(saved.providerRecoveryTerminalReason,'provider_partial_refund_details_missing_owner_review');assert.equal(ledger.count,0);}
