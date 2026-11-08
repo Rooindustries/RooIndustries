@@ -58,6 +58,7 @@ runs:
       if: ${{ inputs.browsers != '' && inputs.browser-deps == 'true' && !startsWith(runner.name, 'devbox-') }}
       shell: bash
       run: |
+        rm -rf -- "${HOME:?}/.cache/roo-playwright-apt"
         . /etc/os-release
         echo "os=$ID-$VERSION_ID" >> "$GITHUB_OUTPUT"
         echo "image=${ImageVersion:-self-hosted}" >> "$GITHUB_OUTPUT"

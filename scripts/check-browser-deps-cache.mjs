@@ -9,12 +9,15 @@ const steps = setup.runs.steps;
 const enabled = "${{ inputs.browsers != '' && inputs.browser-deps == 'true' && !startsWith(runner.name, 'devbox-') }}";
 const packages = steps.find(step => step.id === "system-packages");
 assert.equal(packages?.if, enabled, "Read the system package key whenever browser dependencies are enabled.");
+assert.equal(packages.run.split("\n")[0], 'rm -rf -- "${HOME:?}/.cache/roo-playwright-apt"',
+  "Clear leftover system packages before restoring the cache.");
 assert.ok(packages.run.includes('echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"'),
   "Use the current UTC ISO week for the system package cache.");
 const install = steps.findIndex(step => step.run?.includes("scripts/install-browser-deps.sh"));
 const cache = steps.findIndex(step => step.uses === "actions/cache/restore@v4" &&
   step.with?.path === "~/.cache/roo-playwright-apt/*.deb");
 assert.ok(cache >= 0 && install > cache, "Restore system packages before installing browser dependencies.");
+assert.ok(steps.indexOf(packages) < cache, "Clear system packages before restoring the cache.");
 assert.equal(steps[cache].if, enabled, "Restore system packages whenever browser dependencies are enabled.");
 assert.equal(steps[install].if, enabled, "Install browser system packages whenever dependencies are enabled.");
 assert.equal(steps[cache].id, "apt-packages");
