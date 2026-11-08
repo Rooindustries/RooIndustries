@@ -49,10 +49,39 @@ test("workflows are .yml files and every job names its runner in one of the chec
   for (const job of jobs) runner(job);
 });
 
+const checkForkRouting = (job) => {
+  const triggers = events({ file: job.file, on: job.workflow.on });
+  const route = runner(job);
+  const where = `${job.file} ${job.id}`;
+  if (triggers.includes("pull_request_target")) {
+    assert.deepEqual(Object.keys(route), ["label"], `${where}: pull_request_target jobs name one GitHub-hosted label`);
+    assert.match(route.label, GITHUB_HOSTED, `${where} runs pull_request_target on ${route.label}`);
+  }
+  if (triggers.includes("pull_request")) {
+    const forkLabel = route.forkLabel ?? (route.variable === undefined ? route.label : undefined);
+    assert.ok(forkLabel !== undefined, `${where}: a repository variable would choose the runner for forks' pull requests`);
+    assert.match(forkLabel, GITHUB_HOSTED, `${where} runs forks' pull requests on ${forkLabel}`);
+  }
+};
+
 test("pull request jobs from forks run only on GitHub-hosted runners", () => {
-  for (const job of jobs.filter(({ file, workflow }) => events({ file, on: workflow.on }).some((event) => event === "pull_request" || event === "pull_request_target"))) {
-    const { forkLabel, label } = runner(job);
-    assert.match(forkLabel ?? label, GITHUB_HOSTED, `${job.file} ${job.id} runs forks' pull requests on ${forkLabel ?? label}`);
+  for (const job of jobs) checkForkRouting(job);
+});
+
+test("the fork routing check rejects routes a fork could reach", () => {
+  const template = "${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-24.04' || vars.TESTS_RUNNER || 'roo-site' }}";
+  const fixture = (on, runsOn) => ({ file: "fixture.yml", id: "job", workflow: { on }, job: { "runs-on": runsOn } });
+  for (const [on, runsOn] of [
+    ["pull_request", "${{ vars.TESTS_RUNNER || 'ubuntu-24.04' }}"],
+    ["pull_request", "roo-site"],
+    [["pull_request_target"], template],
+    [{ pull_request_target: null }, "${{ vars.TESTS_RUNNER || 'ubuntu-24.04' }}"],
+    [["push", "pull_request"], "self-hosted"],
+  ]) {
+    assert.throws(() => checkForkRouting(fixture(on, runsOn)), assert.AssertionError, `${JSON.stringify(on)} ${runsOn}`);
+  }
+  for (const [on, runsOn] of [["pull_request", template], ["pull_request", "ubuntu-24.04"], [["pull_request_target"], "ubuntu-24.04"], ["push", "${{ vars.TESTS_RUNNER || 'roo-site' }}"]]) {
+    checkForkRouting(fixture(on, runsOn));
   }
 });
 
