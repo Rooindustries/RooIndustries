@@ -50,7 +50,8 @@ const synchronousTools = new Map([
   ["git", (args) => ["ls-files", "rev-parse"].includes(args[0]) ||
     (args[0] === "-C" && args[2] === "rev-parse")],
   ["cc", (args) => args.length === 4 && args[0] === "-O2" &&
-    args[1].endsWith("/scripts/lib/macos-process-info.c") && args[2] === "-o"],
+    ["macos-process-info.c", "linux-subreaper.c"].some((file) => args[1].endsWith(`/scripts/lib/${file}`)) &&
+    args[2] === "-o"],
   ["ps", (args) => sameArgs(args, ["-axo", "pid=,ppid=,pgid=,stat=,uid=,command="])],
   ["lsof", (args) => (args.length === 4 && args[0] === "-nP" &&
     /^-iTCP:\d+$/.test(args[1]) && args[2] === "-sTCP:LISTEN" && args[3] === "-Fptn") ||

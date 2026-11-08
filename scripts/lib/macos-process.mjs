@@ -5,15 +5,16 @@ import net from "node:net";
 import os from "node:os";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { markedPids } from "./fixture-run.mjs";
 
 const { spawnSync } = createRequire(import.meta.url)("./fixture-tool-policy.cjs");
 
-let inspector;
-const macIdentities = () => {
-  if (!inspector) {
-    const source = fileURLToPath(new URL("./macos-process-info.c", import.meta.url));
+const helpers = new Map();
+const nativeHelper = (name) => {
+  if (!helpers.has(name)) {
+    const source = fileURLToPath(new URL(`./${name}.c`, import.meta.url));
     const digest = createHash("sha256").update(fs.readFileSync(source)).digest("hex");
-    inspector = fileURLToPath(new URL(`../../node_modules/.cache/process-info-${digest}`, import.meta.url));
+    const inspector = fileURLToPath(new URL(`../../node_modules/.cache/process-info-${digest}`, import.meta.url));
     fs.mkdirSync(path.dirname(inspector), { recursive: true });
     if (!fs.existsSync(inspector)) {
       const temporary = `${inspector}.${process.pid}`;
@@ -23,14 +24,27 @@ const macIdentities = () => {
       }
       fs.renameSync(temporary, inspector);
     }
+    helpers.set(name, inspector);
   }
-  const result = spawnSync(inspector, [], { encoding: "utf8" });
+  return helpers.get(name);
+};
+export const macInspector = () => nativeHelper("macos-process-info");
+export const linuxSubreaper = () => nativeHelper("linux-subreaper");
+
+const macIdentities = () => {
+  const result = spawnSync(macInspector(), [], { encoding: "utf8" });
   if (result.status !== 0) {
     throw new Error(`Cannot inspect process identities: ${result.stderr}`, { cause: result.error });
   }
   return new Map(result.stdout.trim().split("\n").map((line) => line.split(" "))
-    .map(([pid, start, uid]) => [Number(pid), { start, startedAt: Number(start) * 1000, uid: Number(uid) }]));
+    .map(([pid, start, uid, parent, group, status]) => [Number(pid), {
+      start, startedAt: Number(start) * 1000, uid: Number(uid), parent: Number(parent), group: Number(group),
+      status: Number(status),
+    }]));
 };
+
+const macAncestry = () => [...macIdentities()].flatMap(([pid, identity]) =>
+  identity.status === 5 ? [] : [{ pid, ...identity }]);
 
 export const allocationTime = () => process.platform === "darwin" ? Date.now() : os.uptime() * 1000;
 const ticks = process.platform === "linux" ? Number(spawnSync("getconf", ["CLK_TCK"], { encoding: "utf8" }).stdout) : 0;
@@ -62,36 +76,51 @@ export const processTable = () => {
 export const sameProcess = (left, right) => Boolean(left && right && left.pid === right.pid &&
   left.start === right.start);
 
-export const recordMacMembers = (state, table = processTable()) => {
+const watchRecords = (state) => {
+  const file = state.directory && path.join(state.directory, "ancestry.log");
+  if (!file || !fs.existsSync(file)) return { members: [] };
+  const lines = fs.readFileSync(file, "utf8").split("\n");
+  const watcher = lines.find((line) => line.startsWith("watcher "))?.split(" ").slice(1).join(":");
+  return { watcher, done: lines.includes("done"), members: lines.filter((line) => line.startsWith("member "))
+    .map((line) => line.split(" ").slice(1).join(":")) };
+};
+
+export const recordMacMembers = (state, table = process.platform === "darwin" ? macAncestry() : processTable()) => {
+  const watch = watchRecords(state);
+  const live = new Set(table.map(({ pid, start }) => `${pid}:${start}`));
+  const observed = new Set(watch.members);
+  for (const key of state.members.keys()) if (!live.has(key)) state.members.delete(key);
+  const allowed = (entry) => entry.uid === process.getuid() && `${entry.pid}:${entry.start}` !== watch.watcher &&
+    entry.pid !== process.pid && !sameProcess(entry, state.leader) &&
+    entry.startedAt >= (state.scope?.startedAt ?? state.leader?.startedAt ?? 0);
   if (state.directory && fs.existsSync(state.directory)) {
     for (const file of fs.readdirSync(state.directory).filter((name) => name.endsWith(".json"))) {
       for (const entry of JSON.parse(fs.readFileSync(path.join(state.directory, file), "utf8"))) {
-        state.members.set(`${entry.pid}:${entry.start}`, entry);
+        if (live.has(`${entry.pid}:${entry.start}`) && allowed(entry)) state.members.set(`${entry.pid}:${entry.start}`, entry);
       }
     }
   }
-  for (const allocation of state.allocations || []) {
-    if (!state.ports.includes(allocation.port) || !Number.isFinite(allocation.allocatedAt)) continue;
-    const expected = [allocation.command, ...allocation.args].join(" ");
-    for (const { pid } of portListeners(allocation.port)) {
-      const entry = table.find((candidate) => candidate.pid === pid);
-      if (!entry || !(entry.startedAt > allocation.allocatedAt) || entry.uid !== process.getuid() ||
-        entry.command !== expected) continue;
-      const key = `${entry.pid}:${entry.start}`;
-      if (!state.members.has(key)) state.members.set(key, { ...entry, ports: [allocation.port] });
+  for (const entry of table) {
+    if (allowed(entry) && observed.has(`${entry.pid}:${entry.start}`)) {
+      state.members.set(`${entry.pid}:${entry.start}`, { ...entry, ports: state.ports });
     }
+  }
+  const marked = markedPids(state.scope, table.map(({ pid }) => pid));
+  for (const entry of table) {
+    if (!marked.has(entry.pid) || !allowed(entry)) continue;
+    state.members.set(`${entry.pid}:${entry.start}`, { ...entry, ports: state.ports });
   }
   const parents = table.filter((entry) => sameProcess(entry, state.leader) ||
     state.members.has(`${entry.pid}:${entry.start}`));
   const leader = table.find((entry) => entry.pid === state.leader?.pid);
   for (const entry of table.filter((candidate) => (!leader || sameProcess(leader, state.leader)) &&
-    candidate.group === state.leader?.pid &&
+    allowed(candidate) && candidate.group === state.leader?.pid &&
     candidate.startedAt >= state.leader.startedAt && !sameProcess(candidate, state.leader))) {
     state.members.set(`${entry.pid}:${entry.start}`, { ...entry, ports: state.ports });
     parents.push(entry);
   }
   for (const parent of parents) {
-    for (const entry of table.filter((candidate) => candidate.parent === parent.pid)) {
+    for (const entry of table.filter((candidate) => candidate.parent === parent.pid && allowed(candidate))) {
       const key = `${entry.pid}:${entry.start}`;
       if (sameProcess(entry, state.leader) || state.members.has(key)) continue;
       state.members.set(key, { ...entry, ports: state.ports });
@@ -143,9 +172,19 @@ export const ownsMacPorts = async (child, host, ports, state) => {
 
 export const drainMacGroup = async (state, grace = 1000) => {
   const signalled = new Map();
+  const interval = process.platform === "darwin" ? 250 : 25;
   for (;;) {
     const members = recordMacMembers(state);
-    if (!members.length) return;
+    if (!members.length) {
+      const watch = watchRecords(state);
+      const table = processTable();
+      if (watch.watcher && !watch.done && !table.some((entry) => sameProcess(entry, state.leader)) &&
+        table.some((entry) => `${entry.pid}:${entry.start}` === watch.watcher)) {
+        await new Promise((resolve) => setTimeout(resolve, interval));
+        continue;
+      }
+      return;
+    }
     for (const entry of members) {
       const key = `${entry.pid}:${entry.start}`;
       const sentAt = signalled.get(key);
@@ -155,7 +194,7 @@ export const drainMacGroup = async (state, grace = 1000) => {
       try { process.kill(entry.pid, signal); } catch (error) { if (error.code !== "ESRCH") throw error; }
       if (sentAt === undefined) signalled.set(key, Date.now());
     }
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await new Promise((resolve) => setTimeout(resolve, interval));
   }
 };
 

@@ -2,14 +2,16 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   freeTcpPorts, releaseTcpPorts, reserveTcpPorts, takeTcpPortReservations,
 } from "../scripts/lib/free-tcp-port.mjs";
-import { allocationTime, drainMacGroup, ownsMacPorts, processTable } from "../scripts/lib/macos-process.mjs";
+import { allocationTime, drainMacGroup, ownsMacPorts, processTable, recordMacMembers } from "../scripts/lib/macos-process.mjs";
+import { scopeOf } from "../scripts/lib/fixture-run.mjs";
+import { spawnContained, stopChild } from "../scripts/lib/start-on-port.mjs";
 
 const host = "127.0.0.1";
 const supervisor = fileURLToPath(new URL("../scripts/lib/macos-fixture-child.mjs", import.meta.url));
@@ -79,6 +81,35 @@ test("an unmatched outside command on an allocated port is never adopted or stop
     await terminate(other);
     await started.dispose();
     for (const fd of reservations) fs.closeSync(fd);
+  }
+});
+
+test("the same command on another loopback address is never adopted", { timeout: 20000 }, async () => {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "macos-address-"));
+  const binary = path.join(scratch, "process-probe");
+  const source = fileURLToPath(new URL("./fixtures/process-probe.c", import.meta.url));
+  const built = spawnSync("cc", ["-O2", source, "-o", binary], { encoding: "utf8" });
+  assert.equal(built.status, 0, built.stderr);
+  const [port] = await freeTcpPorts(host, [0]);
+  const owner = spawnContained(binary, ["wait"], { stdio: ["ignore", "pipe", "inherit"] });
+  let other;
+  try {
+    await once(owner.stdout, "data");
+    const state = { leader: processTable().find(({ pid }) => pid === owner.pid), members: new Map(),
+      ports: [port], scope: scopeOf(owner),
+      allocations: [{ port, host, allocatedAt: allocationTime(), command: binary, args: ["wait"] }] };
+    other = spawn(binary, ["wait"], { stdio: ["ignore", "pipe", "inherit"],
+      env: { ...process.env, FIXTURE_HOST: "::1", FIXTURE_PORT: String(port) } });
+    await once(other.stdout, "data");
+    recordMacMembers(state);
+    assert.equal([...state.members.values()].some((entry) => entry.pid === other.pid), false);
+    await stopChild(owner, 100);
+    assert.ok(alive(other.pid), "cleanup stopped the unrelated listener");
+  } finally {
+    await stopChild(owner, 0);
+    if (other) await terminate(other);
+    await releaseTcpPorts(host, [port]);
+    fs.rmSync(scratch, { recursive: true, force: true });
   }
 });
 
