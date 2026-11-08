@@ -2,6 +2,10 @@ const loadFixturePorts = require("../tests/fixtures/fixture-ports-setup.cjs");
 
 module.exports = async function groupDeadline(config) {
   const { groupTimeoutMs, groupStartedAt } = config.metadata;
+  if (groupTimeoutMs === undefined) {
+    await loadFixturePorts(config);
+    return;
+  }
   if (!Number.isFinite(groupTimeoutMs) || groupTimeoutMs <= 0 || groupTimeoutMs >= config.globalTimeout ||
       !Number.isFinite(groupStartedAt)) {
     throw new Error("Playwright group deadline must leave time for shutdown and reports.");

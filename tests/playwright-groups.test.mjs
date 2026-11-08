@@ -3,10 +3,12 @@ import fs from "node:fs";
 import { test } from "node:test";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
+import yaml from "js-yaml";
 import {
   assignRestGroups,
   groupPattern,
   listSpecFiles,
+  FIXED_GROUPS,
   REST_1_EXTRA_SECONDS,
   REST_GROUPS,
 } from "../scripts/playwright-groups.mjs";
@@ -54,6 +56,42 @@ test("a new spec file with no timing yet still gets a group", () => {
 
 test("the same timings always give the same groups", () => {
   assert.deepEqual(assignRestGroups([...specFiles].reverse(), timings), assignRestGroups(specFiles, timings));
+});
+
+test("the workflow gets each browser group's files and deadline from its measured timings", () => {
+  const job = yaml.safeLoad(fs.readFileSync(".github/workflows/tests.yml", "utf8")).jobs.playwright;
+  assert.ok(job.steps.some(step => step.run?.includes('timings.json env >> "$GITHUB_ENV"')));
+  const fullDuration = Object.values(timings).reduce((total, seconds) => total + seconds, 0);
+  for (const group of [...Object.keys(FIXED_GROUPS), ...REST_GROUPS]) {
+    const plan = execFileSync(process.execPath, ["scripts/playwright-groups.mjs", group,
+      ".github/playwright-timings.json", "env"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    const env = Object.fromEntries(plan.trim().split("\n").map(line => line.split("=")));
+    const files = specFiles.filter(file => new RegExp(env.PW_FILES).test(`/tests/${file}`));
+    assert.ok(files.length, group);
+    const measured = files.reduce((total, file) => total + (timings[file] || 0), 0);
+    const deadline = Number(env.PW_GROUP_TIMEOUT_MS);
+    assert.ok(deadline > measured * 1000, `${group} needs time beyond its healthy measured run`);
+    assert.ok(deadline < fullDuration * 1000, `${group} must use its own workload`);
+    assert.ok(deadline + 120000 < job["timeout-minutes"] * 60000, `${group} needs time to save reports`);
+  }
+});
+
+test("a changed measurement updates the workflow deadline", () => {
+  fs.mkdirSync("test-results", { recursive: true });
+  const dir = fs.mkdtempSync(path.resolve("test-results", "playwright-budget-"));
+  const timingFile = path.join(dir, "timings.json");
+  const deadlines = [];
+  try {
+    for (const seconds of [10, 100]) {
+      fs.writeFileSync(timingFile, JSON.stringify({ "booking-flow.spec.js": seconds }));
+      const plan = execFileSync(process.execPath, ["scripts/playwright-groups.mjs", "booking", timingFile, "env"],
+        { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+      deadlines.push(Number(plan.match(/PW_GROUP_TIMEOUT_MS=(\d+)/)[1]));
+    }
+    assert.ok(deadlines[1] > deadlines[0], "The deadline must follow the selected group's measured time.");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("merged timings use each file's median across runs", () => {
