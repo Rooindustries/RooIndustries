@@ -466,6 +466,35 @@ test("an abandoned section request does not carry into a later homepage visit", 
   }))).toEqual({ hash: "", top: true, section: "" });
 });
 
+for (const route of ["/tourney", "/admin/content", "/BIOSGuide"]) {
+  test(`a section trip interrupted by ${route} leaves a later Home visit at the top`, async ({ page }, testInfo) => {
+    await page.setViewportSize(VIEWPORTS[0].viewport);
+    await page.goto("/reviews", { waitUntil: "domcontentloaded" });
+    const selector = navLink("faq");
+    await waitForHydrated(page, selector);
+    const request = await page.evaluate(({ selector, route }) => {
+      document.querySelector(selector).click();
+      const saved = sessionStorage.getItem("roo_pending_section");
+      window.location.assign(route);
+      return saved;
+    }, { selector, route });
+    expect(request).not.toBeNull();
+    await page.waitForURL(`${BASE_URL}${route}`);
+    if (route === "/tourney") {
+      await page.locator("a.tourney-brand").click();
+    } else {
+      await page.goto("/", { waitUntil: "domcontentloaded" });
+    }
+    await waitForHydrated(page, selector);
+    await expect.poll(() => page.evaluate(() => ({
+      hash: window.location.hash,
+      top: window.scrollY <= 140,
+      pending: sessionStorage.getItem("roo_pending_section"),
+    }))).toEqual({ hash: "", top: true, pending: null });
+    await page.screenshot({ path: testInfo.outputPath("home-after-interrupted-section-trip.png") });
+  });
+}
+
 for (const [label, request] of [
   ["legacy", "#faq"],
   ["bound", JSON.stringify({ hash: "#faq", path: "/" })],
@@ -490,13 +519,19 @@ for (const [label, request] of [
 }
 
 for (const [label, request, hash] of [
-  ["matching destination", { hash: "faq", path: "/" }, "#faq"],
+  ["matching history entry", { hash: "faq", path: "/", entry: "saved-trip" }, "#faq"],
+  ["different history entry", { hash: "#faq", path: "/", entry: "other-trip" }, ""],
+  ["missing history entry", { hash: "#faq", path: "/" }, ""],
   ["different destination", { hash: "#faq", path: "/tools" }, ""],
   ["missing destination", { hash: "#faq" }, ""],
   ["malformed request", null, ""],
 ]) {
   test(`a saved section request handles its ${label}`, async ({ page }) => {
     await page.addInitScript((request) => {
+      window.history.replaceState({
+        ...window.history.state,
+        __rooSectionTrip: { key: "saved-trip" },
+      }, "", window.location.href);
       sessionStorage.setItem("roo_pending_section", JSON.stringify(request));
     }, request);
     await page.goto("/", { waitUntil: "domcontentloaded" });

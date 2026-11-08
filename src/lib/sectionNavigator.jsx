@@ -167,11 +167,6 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
       }
 
       intentRef.current = normalizedHash;
-      writePendingSectionTarget(normalizedHash, "/");
-      writeRouteTransitionIntent(normalizedHash);
-      document.documentElement.classList.add("route-transition-out");
-      prefetchSectionData(normalizedHash);
-
       const nextHref = buildHomeSectionHref(normalizedHash);
       const trip = tripRef.current?.superseded ? null : tripRef.current;
       const {
@@ -186,10 +181,6 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
           key, via, from: window.location.href, fromKey: locationRef.current.key,
         };
       }
-      if (via === "document") {
-        window.location.assign(nextHref);
-        return true;
-      }
       if (via === "memory") {
         if (trip) {
           replaceBrowserUrl(nextHref);
@@ -198,6 +189,14 @@ export function SectionNavigationProvider({ routeShell = "browser", children }) 
           const updateHistory = ownsTripEntry(entry) && entry.superseded ? "replaceState" : "pushState";
           window.history[updateHistory]({ ...window.history.state, [SECTION_TRIP_ENTRY]: { key } }, "", nextHref);
         }
+      }
+      writePendingSectionTarget(normalizedHash, "/", key);
+      writeRouteTransitionIntent(normalizedHash);
+      document.documentElement.classList.add("route-transition-out");
+      prefetchSectionData(normalizedHash);
+      if (via === "document") {
+        window.location.assign(nextHref);
+        return true;
       }
       navigate({ pathname: "/", hash: normalizedHash }, { replace: Boolean(trip), state });
       return true;

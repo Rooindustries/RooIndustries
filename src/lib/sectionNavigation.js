@@ -57,11 +57,11 @@ export const announceSectionTarget = (hash = "") => {
   );
 };
 
-export const writePendingSectionTarget = (hash = "", path) => {
+export const writePendingSectionTarget = (hash = "", path, entry) => {
   const normalized = normalizeSectionHash(hash);
   if (!normalized) return;
   try {
-    sessionStorage.setItem(PENDING_SECTION_KEY, JSON.stringify({ hash: normalized, path }));
+    sessionStorage.setItem(PENDING_SECTION_KEY, JSON.stringify({ hash: normalized, path, entry }));
   } catch {}
   announceSectionTarget(normalized);
 };
@@ -72,7 +72,9 @@ export const readPendingSectionTarget = (path = typeof window === "undefined" ? 
     if (!raw) return "";
     const pending = JSON.parse(raw);
     const hash = typeof pending?.hash === "string" ? normalizeSectionHash(pending.hash) : "";
-    if (!hash || pending.path !== path) {
+    const trip = window.history.state?.[SECTION_TRIP_ENTRY];
+    const entry = trip?.superseded ? null : trip?.key || window.history.state?.usr?.sectionTrip;
+    if (!hash || pending.path !== path || typeof pending.entry !== "string" || pending.entry !== entry) {
       clearPendingSectionTarget();
       return "";
     }
