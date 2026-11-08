@@ -18,6 +18,7 @@ import noScriptingMediaQuery from "./no-scripting-media-query.mjs";
 import noSecureContextNavigationKeys from "./no-secure-context-navigation-keys.mjs";
 import noUncheckedGroupSignal from "./no-unchecked-group-signal.mjs";
 import noUnfilteredRequestError from "./no-unfiltered-request-error.mjs";
+import noUncontainedFixtureProcess from "./no-uncontained-fixture-process.mjs";
 import noUnguardedTimerNavigation from "./no-unguarded-timer-navigation.mjs";
 import noVirtualMockOfInstalledModule from "./no-virtual-mock-of-installed-module.mjs";
 import smoothScrollNeedsMotionCheck from "./smooth-scroll-needs-motion-check.mjs";
@@ -42,6 +43,7 @@ export const rules = {
   "no-scripting-media-query": noScriptingMediaQuery,
   "no-secure-context-navigation-keys": noSecureContextNavigationKeys,
   "no-unchecked-group-signal": noUncheckedGroupSignal,
+  "no-uncontained-fixture-process": noUncontainedFixtureProcess,
   "no-unfiltered-request-error": noUnfilteredRequestError,
   "no-unguarded-timer-navigation": noUnguardedTimerNavigation,
   "no-virtual-mock-of-installed-module": noVirtualMockOfInstalledModule,

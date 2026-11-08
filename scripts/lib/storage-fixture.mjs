@@ -4,10 +4,10 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawnSync } from "./fixture-tools.mjs";
 import { createClient } from '@supabase/supabase-js';
 import { listenOnPort, releaseTcpPorts, reserveTcpPorts } from './free-tcp-port.mjs';
-import { startChildOnPorts, stopChild } from './start-on-port.mjs';
+import { startChildOnPorts, stopChild } from './fixture-tools.mjs';
 import { createSweepPostgresFixture, root } from './sweep-postgres-fixture.mjs';
 import { installNetworkGuard } from './test-target-safety.mjs';
 

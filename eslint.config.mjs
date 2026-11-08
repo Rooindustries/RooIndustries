@@ -4,7 +4,9 @@ import roo, { rules } from "./eslint-rules/index.mjs";
 
 const emailTextRules = new Set(["no-hand-built-dollars"]);
 const pageOnly = "A file in tests/fixtures/browser is one function the page runs; the fixtures read it as text.";
-const scriptRules = new Set(["no-parent-ipc-disconnect", "no-unchecked-group-signal", "no-linux-only-test-tooling"]);
+const scriptRules = new Set([
+  "no-parent-ipc-disconnect", "no-unchecked-group-signal", "no-linux-only-test-tooling", "no-uncontained-fixture-process",
+]);
 const navigationRules = new Set(["no-secure-context-navigation-keys"]);
 const testFiles = "src/**/__tests__/**";
 const ruleSet = (names) => Object.fromEntries(names.map((name) => [`roo/${name}`, "error"]));
@@ -46,6 +48,13 @@ export default [
       "scripts/monitoring-deployment-e2e.mjs",
     ],
     rules: ruleSet(["no-linux-only-test-tooling"]),
+  },
+  {
+    files: [
+      "scripts/test-*-server.mjs", "scripts/test-*-postgres.mjs", "scripts/lib/*fixture.mjs",
+      "scripts/lib/start-postgres.mjs", "scripts/run-api-contract-audit.mjs", "scripts/monitoring-next-startup-e2e.mjs",
+    ],
+    rules: ruleSet(["no-uncontained-fixture-process"]),
   },
   {
     files: ["scripts/lib/process-group.mjs"],

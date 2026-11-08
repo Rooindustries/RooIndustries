@@ -1,8 +1,7 @@
 const testHost = process.env.ROO_TEST_HOST || '127.0.0.1';
 import fs from "node:fs";
 import path from "node:path";
-import { spawn } from "node:child_process";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnContained, stopChild } from "./lib/fixture-tools.mjs";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from "./lib/test-target-safety.mjs";
@@ -95,13 +94,13 @@ let active;
 let stopping = false;
 const execute = (args, executionEnv = env) => new Promise((resolve, reject) => {
   const stdio = ["inherit", "inherit", "inherit", lock.fd];
-  active = spawn(process.execPath, args, { env: lock.childEnv(executionEnv), stdio });
+  active = spawnContained(process.execPath, args, { env: lock.childEnv(executionEnv), stdio });
   active.once("error", reject);
   active.once("exit", (code, signal) => code === 0 ? resolve() : reject(new Error(`Test server exited ${signal || code}.`)));
 });
 for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => {
   stopping = true;
-  active?.kill(signal);
+  if (active) void stopChild(active);
 });
 if (development) {
   if (fs.existsSync(path.join(dist, "BUILD_ID"))) throw new Error("Development server cannot reuse a production build.");

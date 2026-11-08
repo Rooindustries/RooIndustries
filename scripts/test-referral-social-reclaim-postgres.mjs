@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 
+import { startPostgres } from "./lib/start-postgres.mjs";
+import { stopChild } from "./lib/fixture-tools.mjs";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnSync } from "./lib/fixture-tools.mjs";
 
 import postgres from "postgres";
 import { freeTcpPort } from "./lib/free-tcp-port.mjs";
@@ -336,17 +338,14 @@ const assertBlocked = async (sql, scenario) => {
   assert.equal(audit.outcome, "blocked_active_account");
 };
 
-let started = false;
+let pgChild;
 let sql;
 try {
   const version = run(path.join(pgBin, "postgres"), ["--version"]);
   assert.match(version, /PostgreSQL\) 17\./, "PostgreSQL 17 is required");
   run(path.join(pgBin, "initdb"), ["-D", dataDir, "--auth=trust", "--no-locale"]);
   fs.appendFileSync(path.join(dataDir, "pg_hba.conf"), "\nhost all all samehost trust\n");
-  run(path.join(pgBin, "pg_ctl"), [
-    "-D", dataDir, "-o", `-p ${port} -h ${postgresHost} -k ''`, "-w", "start",
-  ], { stdio: "ignore" });
-  started = true;
+  pgChild = await startPostgres(pgBin, dataDir, postgresHost, port);
   run(path.join(pgBin, "createdb"), [
     "-h", postgresHost, "-p", String(port), "referral_reclaim_fixture",
   ]);
@@ -408,10 +407,6 @@ try {
   }, null, 2) + "\n");
 } finally {
   await sql?.end({ timeout: 1 }).catch(() => {});
-  if (started) {
-    spawnSync(path.join(pgBin, "pg_ctl"), [
-      "-D", dataDir, "-m", "fast", "-w", "stop",
-    ], { encoding: "utf8" });
-  }
+  if (pgChild) await stopChild(pgChild);
   fs.rmSync(tempRoot, { recursive: true, force: true });
 }

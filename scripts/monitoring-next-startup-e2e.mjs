@@ -1,11 +1,11 @@
-import { execFileSync } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { openSync, closeSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from './lib/test-target-safety.mjs';
 import { portFromEnv } from './lib/free-tcp-port.mjs';
-import { startChildOnPorts, stopChild } from './lib/start-on-port.mjs';
-import { holdGroupMembers, releaseGroupMembers } from './lib/process-group.mjs';
+import {
+  execFileSync, holdGroupMembers, releaseGroupMembers, startChildOnPorts, stopChild,
+} from './lib/fixture-tools.mjs';
 
 refuseEnvFiles();
 const host = process.env.ROO_TEST_HOST || '127.0.0.1';

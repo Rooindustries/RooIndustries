@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import { freeTcpPorts } from './lib/free-tcp-port.mjs';
 import { spawnGroup } from './lib/process-group.mjs';
-import { spawnContained, stopChild } from './lib/start-on-port.mjs';
+import { spawnContained, stopChild } from './lib/fixture-tools.mjs';
 import { localImportsOf } from './lib/local-imports.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -169,8 +169,9 @@ export function GET() { throw new Error('Fixture edge error'); }
   const hasError = (rows, message) => events(rows).some(event => event.exception?.values?.some(value => value.value === message));
   try {
     execFileSync(probe, [], { env: environment({ ROO_SOURCEMAPS_NETWORK_LOG: controlLog }) });
-    await execute('node-network-control', ['--input-type=module', '-e',
-      'await fetch("https://monitoring-fixture.invalid/").catch(() => {});'], environment({ ROO_SOURCEMAPS_NETWORK_LOG: controlLog }));
+    await execute('node-network-control',
+      [join(root, 'scripts/lib/network-control.mjs'), 'https://monitoring-fixture.invalid/'],
+      environment({ ROO_SOURCEMAPS_NETWORK_LOG: controlLog }));
     const controls = await readFile(controlLog, 'utf8');
     check('native and Node outbound checks detect blocked connections',
       ['BLOCK-native-dns', 'BLOCK-native-connect', 'BLOCK-node-transport'].every(value => controls.includes(value)), true);

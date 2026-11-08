@@ -4,11 +4,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import { spawnSync } from 'node:child_process';
+import { spawnSync } from "./fixture-tools.mjs";
 import postgres from 'postgres';
 import { createClient } from '@supabase/supabase-js';
 import { listenOnPort, releaseTcpPorts, reserveTcpPorts } from './free-tcp-port.mjs';
-import { startChildOnPorts, stopChild } from './start-on-port.mjs';
+import { startChildOnPorts, stopChild } from './fixture-tools.mjs';
 
 export const root = path.resolve(new URL('../..', import.meta.url).pathname);
 const host = process.env.ROO_TEST_HOST || '127.0.0.1';

@@ -1,7 +1,6 @@
 import { installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from "./lib/test-target-safety.mjs";
 import { portFromEnv } from "./lib/free-tcp-port.mjs";
-import { spawnContained, startChildOnPorts, stopChild } from "./lib/start-on-port.mjs";
-import { signalGroup } from "./lib/process-group.mjs";
+import { signalGroup, spawnContained, startChildOnPorts, stopChild } from "./lib/fixture-tools.mjs";
 
 refuseEnvFiles();
 const host = process.env.ROO_TEST_HOST || "127.0.0.1";

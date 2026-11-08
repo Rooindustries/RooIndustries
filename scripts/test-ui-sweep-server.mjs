@@ -6,7 +6,7 @@ import { uiRepairsFixture } from '../tests/fixtures/ui-repairs-server.mjs';
 import { uiFinishFixture } from '../tests/fixtures/ui-finish-server.mjs';
 import { installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from './lib/test-target-safety.mjs';
 import { portFromEnv, reserveTcpPorts } from './lib/free-tcp-port.mjs';
-import { startChildOnPorts, stopChild } from './lib/start-on-port.mjs';
+import { startChildOnPorts, stopChild } from './lib/fixture-tools.mjs';
 import { lockBuildDirectory } from './lib/build-lock.mjs';
 import { withNodeOption } from './lib/node-options.mjs';
 

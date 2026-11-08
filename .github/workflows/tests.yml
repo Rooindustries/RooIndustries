@@ -326,6 +326,7 @@ jobs:
             .next-e2e-native-admin/cache/webpack
             .next-e2e-native-booking/cache/webpack
       - uses: ./.github/actions/postgres
+      - run: node --test tests/postgres-process.test.mjs
       - name: Build the pinned native Storage fixture
         run: |
           git clone --depth 1 --branch v1.79.33 https://github.com/supabase/storage.git "$STORAGE_SOURCE"

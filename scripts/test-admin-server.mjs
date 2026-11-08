@@ -4,7 +4,7 @@ import http from "node:http";
 import { randomUUID } from "node:crypto";
 import { registerHooks } from "node:module";
 import { pathToFileURL } from "node:url";
-import { spawn } from "node:child_process";
+import { spawnContained, stopChild } from "./lib/fixture-tools.mjs";
 import { localOrigin, refuseEnvFiles, validateDistDir } from "./lib/test-target-safety.mjs";
 import { listenOnPort, portFromEnv, releaseTcpPorts, reserveTcpPorts } from "./lib/free-tcp-port.mjs";
 import fixturePorts from "../tests/fixtures/fixture-ports.cjs";
@@ -58,14 +58,7 @@ let stopped = false;
 const stop = async () => {
   if (stopped) return;
   stopped = true;
-  if (active && active.exitCode === null && active.signalCode === null) {
-    const child = active;
-    await new Promise(resolve => {
-      const timer = setTimeout(() => child.kill("SIGKILL"), 5000);
-      child.once("exit", () => { clearTimeout(timer); resolve(); });
-      child.kill("SIGTERM");
-    });
-  }
+  if (active) await stopChild(active);
   if (control.listening) { control.closeAllConnections(); await new Promise(resolve => control.close(resolve)); }
   restoreEmailFetch?.();
   const cleanup = await fixture.stop();
@@ -318,7 +311,7 @@ try {
   }, "--import", path.join(root, "scripts/lib/test-target-safety.mjs"), path.join(root, "scripts/lib/content-test-hooks.mjs"));
   const execute = args => new Promise((resolve, reject) => {
     const stdio = ["inherit", "inherit", "inherit", lock.fd];
-    active = spawn(process.execPath, args, { env: lock.childEnv(env), stdio });
+    active = spawnContained(process.execPath, args, { env: lock.childEnv(env), stdio });
     active.once("error", reject);
     active.once("exit", (code, signal) => code === 0 || stopped ? resolve() : reject(new Error(`Admin fixture server exited ${signal || code}.`)));
   });

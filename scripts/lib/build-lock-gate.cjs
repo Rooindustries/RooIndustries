@@ -1,31 +1,8 @@
 const fs = require("node:fs");
 const path = require("node:path");
-const { spawnSync } = require("node:child_process");
+const { spawnSync, lockScript } = require("./fixture-tool-policy.cjs");
 
 const inUse = 75;
-
-const lockScript = String.raw`
-use strict;
-use warnings;
-use Fcntl ':flock';
-use Errno qw(EAGAIN EWOULDBLOCK);
-my ($shared, $nonblock, $wait, $conflict) = @ARGV;
-open(my $lock, '<&=', 3) or do {
-  print STDERR "Cannot open build lock fd 3: $!\n";
-  exit(2);
-};
-my $mode = $shared ? LOCK_SH : LOCK_EX;
-my $immediate = $nonblock || (length($wait) && $wait == 0);
-local $SIG{ALRM} = sub { exit(flock($lock, $mode | LOCK_NB) ? 0 : $conflict); };
-alarm($wait) if length($wait) && !$immediate;
-if (!flock($lock, $mode | ($immediate ? LOCK_NB : 0))) {
-  exit($conflict) if $immediate && ($! == EAGAIN || $! == EWOULDBLOCK);
-  print STDERR "Cannot take build lock: $!\n";
-  exit(2);
-}
-alarm(0);
-exit(0);
-`;
 
 const flock = (fd, { shared = false, nonblock = false, wait = null, conflictExitCode = 1 }) => {
   const args = [

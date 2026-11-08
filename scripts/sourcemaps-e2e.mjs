@@ -9,7 +9,7 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import { freeTcpPorts } from './lib/free-tcp-port.mjs';
-import { spawnContained, stopChild } from './lib/start-on-port.mjs';
+import { spawnContained, stopChild } from './lib/fixture-tools.mjs';
 import { lockBuildDirectory } from './lib/build-lock.mjs';
 import { inheritTestProcessGuard, installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from './lib/test-target-safety.mjs';
 
@@ -283,8 +283,9 @@ if (process.argv[2] === '--build') {
       '--bind', artifact, artifact, nativeProbe], { env: environment({ ROO_SOURCEMAPS_NETWORK_LOG: controlLog }) });
     const nativeControl = await readFile(controlLog, 'utf8');
     assert(nativeControl.includes('BLOCK-native-connect') && nativeControl.includes('BLOCK-native-dns'));
-    const nodeControl = await execute('caught-node-network-control', ['--input-type=module', '-e',
-      'await fetch("https://sourcemaps-guard.invalid").catch(() => {});'], environment({ ROO_SOURCEMAPS_NETWORK_LOG: controlLog }));
+    const nodeControl = await execute('caught-node-network-control',
+      [join(root, 'scripts/lib/network-control.mjs'), 'https://sourcemaps-guard.invalid'],
+      environment({ ROO_SOURCEMAPS_NETWORK_LOG: controlLog }));
     assert.equal(nodeControl.status, 0);
     assert((await readFile(controlLog, 'utf8')).includes('BLOCK-node-transport'));
     const envDirectory = join(fixture, 'env-file-refusal');

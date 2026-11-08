@@ -10,6 +10,8 @@ import { freeTcpPort, reserveTcpPorts } from "../scripts/lib/free-tcp-port.mjs";
 import { spawnContained, startChildOnPorts, stopChild } from "../scripts/lib/start-on-port.mjs";
 import { spawnGroup } from "../scripts/lib/process-group.mjs";
 
+import { spawnSync as runFixture, startChildOnPorts as startFixtureOnPorts } from "../scripts/lib/fixture-tools.mjs";
+
 const host = "127.0.0.1";
 const library = (name) => JSON.stringify(new URL(`../scripts/lib/${name}`, import.meta.url).href);
 
@@ -699,5 +701,31 @@ await startChildOnPorts({ host: "127.0.0.1", requested: [0], output: () => "", s
     assert.match(run.stderr, /refused to create one: unshare: unshare failed: Operation not permitted/);
   } finally {
     fs.rmSync(bin, { recursive: true, force: true });
+  }
+});
+
+test("fixture entry points refuse unlisted programs and daemon modes before starting a child", async () => {
+  for (const [command, args] of [
+    ["git", ["daemon", "--detach"]],
+    ["perl", ["-e", "fork && exit; sleep 60"]],
+  ]) {
+    assert.throws(() => runFixture(command, args), /listed foreground mode/);
+  }
+  for (const [command, args] of [
+    ["/bin/sh", ["-c", "sleep 60 &"]],
+    ["pg_ctl", ["start"]],
+    [process.execPath, ["-e", "setInterval(() => {}, 1000)"]],
+    [process.execPath, ["node_modules/next/dist/bin/next", "unknown-mode"]],
+  ]) {
+    let port;
+    await assert.rejects(startFixtureOnPorts({
+      host, requested: [0], output: () => "",
+      spawnChild: ([picked], launch) => {
+        port = picked;
+        return launch.spawn(command, args);
+      },
+    }), /listed foreground mode/);
+    const server = await competitor(port);
+    await close(server);
   }
 });

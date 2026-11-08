@@ -1,9 +1,11 @@
 #!/usr/bin/env node
+import { startPostgres } from "./lib/start-postgres.mjs";
+import { stopChild } from "./lib/fixture-tools.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnSync } from "./lib/fixture-tools.mjs";
 import postgres from "postgres";
 import { freeTcpPort } from "./lib/free-tcp-port.mjs";
 
@@ -125,17 +127,12 @@ end;
 $$;
 `;
 
-let started = false;
+let pgChild;
 let sql = null;
 try {
   run(path.join(pgBin, "initdb"), ["-D", dataDir, "--auth=trust", "--no-locale"]);
   fs.appendFileSync(path.join(dataDir, "pg_hba.conf"), "\nhost all all samehost trust\n");
-  run(path.join(pgBin, "pg_ctl"), [
-    "-D", dataDir,
-    "-o", `-p ${port} -h ${postgresHost} -k ''`,
-    "-w", "start",
-  ], { stdio: "ignore" });
-  started = true;
+  pgChild = await startPostgres(pgBin, dataDir, postgresHost, port);
   run(path.join(pgBin, "psql"), [
     "-h", postgresHost,
     "-p", String(port),
@@ -425,10 +422,6 @@ try {
   }, null, 2) + "\n");
 } finally {
   if (sql) await sql.end({ timeout: 1 });
-  if (started) {
-    spawnSync(path.join(pgBin, "pg_ctl"), ["-D", dataDir, "-m", "fast", "-w", "stop"], {
-      encoding: "utf8",
-    });
-  }
+  if (pgChild) await stopChild(pgChild);
   fs.rmSync(tempRoot, { recursive: true, force: true });
 }
