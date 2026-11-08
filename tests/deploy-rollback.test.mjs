@@ -8,6 +8,8 @@ import { DOMAIN, TOKEN, startVercel } from "./fixtures/fake-vercel.mjs";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const script = path.join(root, "scripts/deploy-rollback.mjs");
 const LIVE_URL = "https://rooindustries-live-roo-industries.vercel.app";
+const TEAM_ID = "team_rooFixture";
+const PROJECT_ID = "prj_rooFixture";
 
 const run = (args, env) => new Promise(resolve => {
   const childEnv = { PATH: process.env.PATH, ROLLBACK_VERIFY_INTERVAL_MS: "20", ROLLBACK_VERIFY_TIMEOUT_MS: "400", ...env };
@@ -30,6 +32,128 @@ const withVercel = async (options, body) => {
 };
 
 const mutations = requests => requests.filter(request => request.method !== "GET");
+
+for (const action of ["--status", "--dry-run"]) {
+  test(`configured scope works with a project-scoped token for ${action}`, () => withVercel({ forbidTeams: true }, async (vercel, exec) => {
+    const result = await exec([action], { CI: "true", VERCEL_TEAM_ID: ` ${TEAM_ID} `, VERCEL_PROJECT_ID: ` ${PROJECT_ID} ` });
+    assert.equal(result.code, 0, result.output);
+    if (action === "--status") assert.equal(JSON.parse(result.output).live.id, "dpl_live");
+    else assert.match(result.output, /Target:\s+dpl_previous/);
+    assert.ok(vercel.requests.length > 0);
+    assert.ok(vercel.requests.every(request => request.path !== "/v2/teams" && request.query.teamId === TEAM_ID));
+    assert.ok(vercel.requests.some(request => request.path === `/v9/projects/${PROJECT_ID}`));
+    assert.deepEqual(mutations(vercel.requests), []);
+  }));
+}
+
+for (const ci of ["CI", "GITHUB_ACTIONS"]) {
+  for (const missing of ["VERCEL_TEAM_ID", "VERCEL_PROJECT_ID"]) {
+    for (const value of [undefined, "  "]) {
+      test(`${ci} refuses ${value === undefined ? "an unset" : "a blank"} ${missing} before contacting Vercel`, () => withVercel({}, async (vercel, exec) => {
+        const result = await exec(["--status"], {
+          [ci]: "true",
+          VERCEL_TEAM_ID: TEAM_ID,
+          VERCEL_PROJECT_ID: PROJECT_ID,
+          [missing]: value,
+        });
+        assert.equal(result.code, 1, result.output);
+        assert.match(result.output, new RegExp(missing));
+        assert.match(result.output, /repository variable/i);
+        assert.deepEqual(vercel.requests, []);
+      }));
+    }
+  }
+}
+
+test("CI names both missing repository variables before contacting Vercel", () => withVercel({}, async (vercel, exec) => {
+  const result = await exec(["--status"], { CI: "true" });
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /VERCEL_TEAM_ID/);
+  assert.match(result.output, /VERCEL_PROJECT_ID/);
+  assert.match(result.output, /repository variables/i);
+  assert.deepEqual(vercel.requests, []);
+}));
+
+for (const [name, value] of [
+  ["VERCEL_TEAM_ID", "team_bad-id"], ["VERCEL_TEAM_ID", "team_"],
+  ["VERCEL_PROJECT_ID", "prj_bad_id"], ["VERCEL_PROJECT_ID", "prj_"],
+]) {
+  test(`refuses malformed ${name} ${value} before contacting Vercel`, () => withVercel({}, async (vercel, exec) => {
+    const result = await exec(["--dry-run"], { [name]: value });
+    assert.equal(result.code, 1, result.output);
+    assert.match(result.output, new RegExp(name));
+    assert.deepEqual(vercel.requests, []);
+  }));
+}
+
+test("refuses a live deployment from a different configured project", () => withVercel({
+  tweak: state => {
+    state.aliases[DOMAIN].projectId = "prj_other";
+    state.deployments.find(item => item.uid === "dpl_live").projectId = "prj_other";
+  },
+}, async (vercel, exec) => {
+  const result = await exec(["--status"], { VERCEL_TEAM_ID: TEAM_ID, VERCEL_PROJECT_ID: PROJECT_ID });
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /prj_other/);
+  assert.match(result.output, /prj_rooFixture/);
+  assert.ok(vercel.requests.some(request => request.path === "/v13/deployments/dpl_live"));
+  assert.ok(vercel.requests.every(request => !request.path.startsWith("/v9/projects/")));
+  assert.deepEqual(mutations(vercel.requests), []);
+}));
+
+for (const args of [[], ["--undo"]]) {
+  test(`${args.length ? "undo" : "rollback"} refuses a project change before the mutation`, () => withVercel({
+    swapLiveOnAliasRead: 2,
+    swapLiveTo: "dpl_otherProject",
+    tweak: state => {
+      const live = state.deployments.find(item => item.uid === "dpl_live");
+      state.deployments.push({ ...structuredClone(live), uid: "dpl_otherProject", projectId: "prj_other" });
+      if (args.length) {
+        state.aliases[DOMAIN].deploymentId = "dpl_previous";
+        state.project.autoAssignCustomDomains = false;
+      }
+    },
+  }, async (vercel, exec) => {
+    const result = await exec(args, { VERCEL_TEAM_ID: TEAM_ID, VERCEL_PROJECT_ID: PROJECT_ID });
+    assert.equal(result.code, 1, result.output);
+    assert.match(result.output, /prj_other/);
+    assert.match(result.output, /prj_rooFixture/);
+    assert.deepEqual(mutations(vercel.requests), []);
+  }));
+}
+
+test("a configured team is the only scope tried outside CI", () => withVercel({}, async (vercel, exec) => {
+  const result = await exec(["--status"], { VERCEL_TEAM_ID: "team_wrong" });
+  assert.equal(result.code, 1, result.output);
+  assert.equal(vercel.requests.length, 1);
+  assert.equal(vercel.requests[0].path, `/v4/aliases/${DOMAIN}`);
+  assert.equal(vercel.requests[0].query.teamId, "team_wrong");
+}));
+
+test("a configured team works without a configured project outside CI", () => withVercel({ forbidTeams: true }, async (vercel, exec) => {
+  const result = await exec(["--status"], { VERCEL_TEAM_ID: TEAM_ID });
+  assert.equal(result.code, 0, result.output);
+  assert.ok(vercel.requests.every(request => request.path !== "/v2/teams" && request.query.teamId === TEAM_ID));
+}));
+
+test("a configured project still permits team discovery outside CI", () => withVercel({}, async (vercel, exec) => {
+  const result = await exec(["--status"], { VERCEL_PROJECT_ID: PROJECT_ID });
+  assert.equal(result.code, 0, result.output);
+  assert.equal(vercel.requests[0].path, "/v2/teams");
+  assert.ok(vercel.requests.some(request => request.path === `/v9/projects/${PROJECT_ID}`));
+}));
+
+test("configured scope is retained through automatic rollback and undo", () => withVercel({ forbidTeams: true }, async (vercel, exec) => {
+  const env = { GITHUB_ACTIONS: "true", VERCEL_TEAM_ID: TEAM_ID, VERCEL_PROJECT_ID: PROJECT_ID };
+  const rollback = await exec(["--if-live", LIVE_URL], env);
+  assert.equal(rollback.code, 0, rollback.output);
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_previous");
+  const undo = await exec(["--undo"], env);
+  assert.equal(undo.code, 0, undo.output);
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_live");
+  assert.ok(vercel.requests.every(request => request.path !== "/v2/teams" && request.query.teamId === TEAM_ID));
+  assert.equal(mutations(vercel.requests).length, 2);
+}));
 
 test("dry run shows the live and previous production deployments and changes nothing", () => withVercel({}, async (vercel, exec) => {
   const result = await exec(["--dry-run"]);

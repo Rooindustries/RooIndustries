@@ -41,6 +41,7 @@ export const startVercel = ({
   swapNewestOnDeploymentRead = 0,
   dropAcceptedRollback = false,
   promoteAssignPolls = 0,
+  forbidTeams = false,
 } = {}) => {
   const state = structuredClone(fixture);
   tweak?.(state);
@@ -102,6 +103,7 @@ export const startVercel = ({
     };
     let match;
     if (req.method === "GET" && url.pathname === "/v2/teams") {
+      if (forbidTeams) return send(403, { error: { code: "forbidden", message: "You don't have permission to list the team" } });
       return send(200, { teams: state.teams, pagination: { count: state.teams.length, next: null, prev: null } });
     }
     if (req.method === "GET" && (match = url.pathname.match(/^\/v4\/aliases\/([^/]+)$/))) {

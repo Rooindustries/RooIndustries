@@ -31,6 +31,16 @@ const withSite = async (overrides, body) => {
   }
 };
 
+const stopChildren = parentPid => {
+  const output = execFileSync("ps", ["-A", "-o", "pid=", "-o", "ppid="], { encoding: "utf8" });
+  const pids = output.trim().split("\n")
+    .map(row => row.trim().split(/\s+/).map(Number))
+    .filter(([, parent]) => parent === parentPid)
+    .map(([pid]) => pid);
+  assert.ok(pids.length, `No child processes found for ${parentPid}`);
+  for (const pid of pids) process.kill(pid, "SIGKILL");
+};
+
 test("a healthy site passes every money-path check with GET requests only", () => withSite({ packages: { postOnLoad: true } }, (site, result) => {
   assert.equal(result.code, 0, result.output);
   for (const name of ["page /", "page /packages", "page /booking", "page /payment", "booking availability", "package prices", "referral capture", "booking page renders", "payment page renders"]) {
@@ -146,7 +156,7 @@ test("a confirmed page failure still counts when the browser later disconnects",
   const site = await startSite({
     status: { "/": 500 },
     onRequest: (pathname) => {
-      if (pathname === "/packages" && smokePid) execFileSync("pkill", ["-KILL", "-P", String(smokePid)]);
+      if (pathname === "/packages" && smokePid) stopChildren(smokePid);
     },
   });
   try {
@@ -164,7 +174,7 @@ test("a browser that dies mid-run means the smoke could not run, not a money-pat
   let smokePid;
   const site = await startSite({
     onRequest: (pathname) => {
-      if (pathname === "/packages" && smokePid) execFileSync("pkill", ["-KILL", "-P", String(smokePid)]);
+      if (pathname === "/packages" && smokePid) stopChildren(smokePid);
     },
   });
   try {
@@ -239,12 +249,16 @@ test("deploy gate: a healthy live deployment passes and nothing is rolled back",
   assert.deepEqual(vercelChanges(vercel), []);
 }));
 
-test("deploy gate: a money-path failure on the live deployment rolls production back once", () => withGate({ site: { status: { "/payment": 500 } } }, async ({ vercel, exec }) => {
-  const result = await exec();
+test("deploy gate: a money-path failure on the live deployment rolls production back once", () => withGate({
+  site: { status: { "/payment": 500 } },
+  vercel: { forbidTeams: true },
+}, async ({ vercel, exec }) => {
+  const result = await exec({ CI: "true", VERCEL_TEAM_ID: "team_rooFixture", VERCEL_PROJECT_ID: "prj_rooFixture" });
   assert.equal(result.code, 1, result.output);
   const changes = vercelChanges(vercel);
   assert.equal(changes.length, 1);
   assert.equal(changes[0].path, "/v1/projects/prj_rooFixture/rollback/dpl_previous");
+  assert.ok(vercel.requests.every(request => request.path !== "/v2/teams" && request.query.teamId === "team_rooFixture"));
   assert.match(changes[0].query.description, /Money-path smoke failed/);
   assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_previous");
   assert.match(result.output, /--undo/);
