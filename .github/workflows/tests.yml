@@ -137,6 +137,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
+      native: ${{ steps.plan.outputs.native }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -155,6 +156,8 @@ jobs:
         run: |
           matrix="$(node scripts/playwright-groups.mjs matrix .playwright-timings/timings.json)"
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          native="$(node scripts/playwright-groups.mjs native)"
+          echo "native=$native" >> "$GITHUB_OUTPUT"
 
   playwright:
     name: Playwright ${{ matrix.suite.name }}
@@ -313,10 +316,10 @@ jobs:
 
   native:
     name: Native PostgreSQL 17 suites
-    needs: tested-tree
-    if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
+    needs: [tested-tree, playwright-plan]
+    if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' && needs.playwright-plan.result == 'success' }}
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-24.04' || vars.TESTS_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 60
+    timeout-minutes: ${{ fromJSON(needs.playwright-plan.outputs.native).timeoutMinutes }}
     env:
       ROO_TEST_HOST: 127.0.0.1
       PW_PORT: "3211"
@@ -352,13 +355,13 @@ jobs:
           playwright-ports: "3211"
       - name: Run native admin CMS suite
         env:
-          PW_GROUP_TIMEOUT_MS: "2100000"
+          PW_GROUP_TIMEOUT_MS: ${{ fromJSON(needs.playwright-plan.outputs.native).adminTimeoutMs }}
         run: xvfb-run -a npx playwright test -c playwright.admin.config.js
       - name: Run all six native booking-hold browser cases
         env:
           NEXT_DIST_DIR: .next-e2e-native-booking
           PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/native-booking-hold.json
-          PW_GROUP_TIMEOUT_MS: "1200000"
+          PW_GROUP_TIMEOUT_MS: ${{ fromJSON(needs.playwright-plan.outputs.native).bookingTimeoutMs }}
         run: |
           xvfb-run -a npx playwright test tests/booking-hold.spec.js --project=chromium --output=test-results/booking-hold-e2e --reporter=line,json
           node - <<'NODE'

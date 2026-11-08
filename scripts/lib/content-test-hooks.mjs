@@ -8,8 +8,8 @@ if (control) {
   const emit = http.Server.prototype.emit;
   http.Server.prototype.emit = function (event, request, ...rest) {
     if (event !== "request") return emit.call(this, event, request, ...rest);
-    const trace = request?.headers?.["x-roo-test-trace"];
-    return traces.run(typeof trace === "string" ? trace : null, () => emit.call(this, event, request, ...rest));
+    const requestId = request?.headers?.["x-roo-test-request-id"];
+    return traces.run(typeof requestId === "string" ? requestId : null, () => emit.call(this, event, request, ...rest));
   };
 
   const baseFetch = globalThis.fetch;
@@ -26,11 +26,11 @@ if (control) {
 
   const rpcPrefix = `${new URL(process.env.SUPABASE_URL).origin}/rest/v1/rpc/`;
   globalThis.fetch = async (input, init) => {
-    const trace = traces.getStore();
+    const requestId = traces.getStore();
     const url = typeof input === "string" || input instanceof URL ? String(input) : input.url;
-    if (!trace || !url.startsWith(rpcPrefix)) return baseFetch(input, init);
+    if (!requestId || !url.startsWith(rpcPrefix)) return baseFetch(input, init);
     const rpc = new URL(url).pathname.slice(new URL(rpcPrefix).pathname.length);
-    const { action } = await report("/store-calls", { trace, rpc });
+    const { action } = await report("/store-calls", { requestId, rpc });
     if (action === "fail") {
       return new Response(JSON.stringify({ code: "PGRST000", message: "Store unavailable." }), {
         status: 503,
@@ -38,7 +38,7 @@ if (control) {
       });
     }
     const response = await baseFetch(input, init);
-    if (action === "hold") await report("/store-holds", { trace, rpc }, 25000);
+    if (action === "hold") await report("/store-holds", { requestId, rpc }, 25000);
     if (action === "lose") {
       await response.arrayBuffer();
       throw new TypeError("fetch failed");
@@ -59,7 +59,7 @@ if (control) {
   };
 
   const record = (operation) => async (target, options) => {
-    await report("/purges", { operation, target, options: options ?? null, trace: traces.getStore() ?? null });
+    await report("/purges", { operation, target, options: options ?? null, requestId: traces.getStore() ?? null });
   };
   const purge = {
     invalidateByTag: record("invalidateByTag"),
@@ -68,12 +68,12 @@ if (control) {
     dangerouslyDeleteBySrcImage: record("dangerouslyDeleteBySrcImage"),
   };
   const waitUntil = (promise) => {
-    const trace = traces.getStore();
-    if (!trace) return;
-    void report("/kept-alive", { trace, state: "registered" }).catch(() => {});
+    const requestId = traces.getStore();
+    if (!requestId) return;
+    void report("/kept-alive", { requestId, state: "registered" }).catch(() => {});
     Promise.resolve(promise).then(
-      () => report("/kept-alive", { trace, state: "settled" }).catch(() => {}),
-      () => report("/kept-alive", { trace, state: "settled" }).catch(() => {}),
+      () => report("/kept-alive", { requestId, state: "settled" }).catch(() => {}),
+      () => report("/kept-alive", { requestId, state: "settled" }).catch(() => {}),
     );
   };
   globalThis[Symbol.for("@vercel/request-context")] = { get: () => ({ purge, waitUntil }) };

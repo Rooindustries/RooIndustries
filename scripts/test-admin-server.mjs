@@ -193,18 +193,18 @@ try {
       response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(purges)); return;
     }
     if (request.method === "GET" && request.url.startsWith("/kept-alive?")) {
-      const trace = new URL(request.url, controlOrigin).searchParams.get("trace");
-      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(keptAlive.filter(entry => entry.trace === trace).map(({ state }) => state))); return;
+      const requestId = new URL(request.url, controlOrigin).searchParams.get("requestId");
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(keptAlive.filter(entry => entry.requestId === requestId).map(({ state }) => state))); return;
     }
     if (request.method === "POST" && request.url === "/store-rules") {
-      const { trace, rules } = await readJson(request);
-      storeRules.set(trace, rules.map(rule => ({ ...rule, pattern: new RegExp(rule.rpc) })));
+      const { requestId, rules } = await readJson(request);
+      storeRules.set(requestId, rules.map(rule => ({ ...rule, pattern: new RegExp(rule.rpc) })));
       response.writeHead(200, { "Content-Type": "application/json" }); response.end("{}"); return;
     }
     if (request.method === "POST" && request.url === "/store-calls") {
       const call = await readJson(request);
       storeCalls.push(call);
-      const rule = (storeRules.get(call.trace) || []).find(entry => entry.pattern.test(call.rpc) && entry.times !== 0);
+      const rule = (storeRules.get(call.requestId) || []).find(entry => entry.pattern.test(call.rpc) && entry.times !== 0);
       if (rule && rule.times > 0) rule.times -= 1;
       response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify({ action: rule?.action || "pass" })); return;
     }
@@ -214,19 +214,19 @@ try {
       response.writeHead(200, { "Content-Type": "application/json" }); response.end("{}"); return;
     }
     if (request.method === "GET" && request.url.startsWith("/store-holds?")) {
-      const trace = new URL(request.url, controlOrigin).searchParams.get("trace");
-      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(storeHolds.filter(hold => hold.trace === trace).map(({ rpc }) => rpc))); return;
+      const requestId = new URL(request.url, controlOrigin).searchParams.get("requestId");
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(storeHolds.filter(hold => hold.requestId === requestId).map(({ rpc }) => rpc))); return;
     }
     if (request.method === "POST" && request.url === "/store-release") {
-      const { trace } = await readJson(request);
-      const released = storeHolds.filter(hold => hold.trace === trace);
-      storeHolds.splice(0, storeHolds.length, ...storeHolds.filter(hold => hold.trace !== trace));
+      const { requestId } = await readJson(request);
+      const released = storeHolds.filter(hold => hold.requestId === requestId);
+      storeHolds.splice(0, storeHolds.length, ...storeHolds.filter(hold => hold.requestId !== requestId));
       for (const hold of released) hold.release();
       response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify({ released: released.length })); return;
     }
     if (request.method === "GET" && request.url.startsWith("/store-calls?")) {
-      const trace = new URL(request.url, controlOrigin).searchParams.get("trace");
-      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(storeCalls.filter(call => call.trace === trace).map(({ rpc }) => rpc))); return;
+      const requestId = new URL(request.url, controlOrigin).searchParams.get("requestId");
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(storeCalls.filter(call => call.requestId === requestId).map(({ rpc }) => rpc))); return;
     }
     if (request.method === "POST" && request.url === "/publish-elsewhere") {
       try {
