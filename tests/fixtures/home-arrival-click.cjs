@@ -1,8 +1,6 @@
-const { readFileSync } = require("node:fs");
-const { join } = require("node:path");
+const { pageScript } = require("./browser-task.cjs");
 const { waitForHydrated, waitForRouteCommitted } = require("./react-hydration.cjs");
 
-const pageScript = (name) => readFileSync(join(__dirname, "browser", name), "utf8").trim();
 const watchHomeArrival = pageScript("watch-home-arrival.js");
 
 async function clickAtHomeArrival(page, first, second, painted = false) {

@@ -34,7 +34,14 @@ export default [
     linterOptions: { reportUnusedDisableDirectives: "off" },
     languageOptions: { ecmaVersion: "latest", sourceType: "module", globals: { ...globals.node } },
     plugins: { roo },
-    rules: ruleSet(["no-hand-built-node-options", "no-unchecked-group-signal"]),
+    rules: {
+      ...ruleSet(["no-hand-built-node-options", "no-unchecked-group-signal"]),
+      "no-restricted-imports": ["error", { patterns: [{ regex: "(^|/)browser/", message: pageOnly }] }],
+      "no-restricted-syntax": ["error",
+        { selector: "CallExpression[callee.name='require'][arguments.0.value=/(^|\\/)browser\\//]", message: pageOnly },
+        { selector: "ImportExpression[source.value=/(^|\\/)browser\\//]", message: pageOnly },
+      ],
+    },
   },
   {
     files: [
@@ -65,6 +72,9 @@ export default [
       "no-restricted-properties": ["error",
         ...["globalThis", "window", "self"].flatMap((object) => ["process", "require"]
           .map((property) => ({ object, property, message: pageOnly }))),
+      ],
+      "no-restricted-syntax": ["error",
+        ...["ImportExpression", "Identifier[name='arguments']"].map((selector) => ({ selector, message: pageOnly })),
       ],
       "no-with": "error",
     },

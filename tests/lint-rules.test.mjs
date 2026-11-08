@@ -1353,3 +1353,27 @@ run("no-virtual-mock-of-installed-module", {
     },
   ],
 });
+
+describe("page scripts stay out of Node", async () => {
+  const { ESLint } = await import("eslint");
+  const eslint = new ESLint({ cwd: fileURLToPath(new URL("..", import.meta.url)) });
+  const failures = async (code, file) => (await eslint.lintText(code, { filePath: file }))[0].messages
+    .filter((message) => message.severity === 2).length;
+  const page = "tests/fixtures/browser/probe.js";
+  const node = "tests/fixtures/probe.mjs";
+  for (const code of [
+    "process.pid;", "require('node:child_process');", "module.require('node:child_process');",
+    "exports.stop = stop;", "globalThis.process.pid;", "import('node:child_process');",
+    "arguments[2].exports.stop = stop;", "export { disconnect } from 'node:process';",
+  ]) it(`page script refuses ${code}`, async () => assert.ok(await failures(code, page) > 0));
+  it("page script may stop its own observer", async () => {
+    assert.equal(await failures("((x) => { const o = new MutationObserver(x); o.disconnect(); })", page), 0);
+  });
+  for (const code of [
+    "require('./browser/probe.js');", "import probe from './browser/probe.js';",
+    "await import('../fixtures/browser/probe.js');",
+  ]) it(`Node code refuses ${code}`, async () => assert.ok(await failures(code, node) > 0));
+  it("Node code may load the browser task helper", async () => {
+    assert.equal(await failures("const { pageScript } = require('./browser-task.cjs'); pageScript('x.js');", node), 0);
+  });
+});
