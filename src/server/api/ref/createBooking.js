@@ -942,11 +942,11 @@ export default async function handler(req, res) {
               : originalOrderId,
             couponCode,
             paymentProvider,
+            ...(packagePrice !== undefined ? { grossAmount: toMoney(packagePrice) } : {}),
             ...(isInternalPaymentFinalization ? {
               grossAmount: internalPaymentRecord?.pricingSnapshot?.grossAmount,
               netAmount: internalPaymentRecord?.pricingSnapshot?.netAmount,
             } : {}),
-            ...(packagePrice !== undefined ? { grossAmount: toMoney(packagePrice) } : {}),
             ...(paymentRecordId ? { paymentRecordId } : {}),
             paypalOrderId,
             razorpayOrderId,

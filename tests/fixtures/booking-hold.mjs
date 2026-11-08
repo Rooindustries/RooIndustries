@@ -19,6 +19,8 @@ export async function createBookingHoldFixture() {
     SUPABASE_CUTOVER_ENABLED: "1", COMMERCE_CUTOVER_ENABLED: "1", COMMERCE_FAILOVER_GENERATION: "0",
     DODO_PAYMENTS_ENVIRONMENT: "test_mode", DODO_PAYMENTS_API_KEY: "fixture-only",
     DODO_PAYMENTS_WEBHOOK_KEY: "whsec_Zml4dHVyZS1vbmx5", DODO_PAYMENTS_PRODUCT_ID: "pdt_fixture",
+    PAYPAL_ENV: "sandbox", PAYPAL_CLIENT_ID: "", PAYPAL_CLIENT_SECRET: "",
+    RAZORPAY_KEY_ID: "", RAZORPAY_KEY_SECRET: "", DISABLE_RAZORPAY_CHECKOUT: "0",
     PAYMENT_SESSION_SECRET: "fixture-only-payment-session", HOLD_TOKEN_SECRET: "fixture-only-hold",
     CRON_SECRET: "fixture-only-cron",
     REF_SESSION_SECRET: "fixture-only-ref-session", RESEND_API_KEY: "re_fixture",
@@ -70,8 +72,46 @@ export async function createBookingHoldFixture() {
     let checkoutCount = 0;
     let paymentStatus = null;
     const sessions = new Map();
+    const orders = new Map();
+    let loseOrderResponse = false;
+    let hideOrderLookup = false;
     database.setProviderHandler(async request => {
       evidence.providerRequests.push(request);
+      if (request.path === "/emails") return { body: { id: "email_fixture" } };
+      if (request.path === "/v1/oauth2/token") return { body: { access_token: "fixture-token" } };
+      if (["/v2/checkout/orders", "/v1/orders"].includes(request.path) && request.method === "POST") {
+        const id = `order_fixture_${++checkoutCount}`;
+        const order = { ...request.body, id, status: request.path === "/v1/orders" ? "created" : "CREATED" };
+        orders.set(id, order);
+        if (loseOrderResponse) {
+          loseOrderResponse = false;
+          hideOrderLookup = true;
+          return { status: 503, body: {} };
+        }
+        return { body: order };
+      }
+      if (request.path.startsWith("/v1/orders?receipt=")) {
+        if (hideOrderLookup) {
+          hideOrderLookup = false;
+          return { status: 503, body: {} };
+        }
+        const receipt = new URL(request.path, baseURL).searchParams.get("receipt");
+        return { body: { items: [...orders.values()].filter(order => order.receipt === receipt) } };
+      }
+      const razorpayPayment = orderId => ({ id: `payment_${orderId}`, order_id: orderId,
+        status: "captured", captured: true, amount: orders.get(orderId).amount, currency: orders.get(orderId).currency });
+      if (/^\/v1\/orders\/[^/]+\/payments$/.test(request.path)) {
+        return { body: { items: paymentStatus === "captured" ? [razorpayPayment(request.path.split("/")[3])] : [] } };
+      }
+      if (request.path.startsWith("/v1/payments/payment_")) {
+        return { body: razorpayPayment(request.path.split("/").pop().slice("payment_".length)) };
+      }
+      if (request.path.startsWith("/v1/orders/")) return { body: orders.get(request.path.split("/").pop()) };
+      if (request.path.startsWith("/v2/checkout/orders/")) {
+        const order = orders.get(request.path.split("/").pop());
+        assert.ok(order, "Unknown fixture order");
+        return { body: order };
+      }
       if (request.path === "/products/pdt_fixture") return { body: { product_id: "pdt_fixture", is_recurring: false,
         price: { type: "one_time_price", currency: "USD", pay_what_you_want: true, tax_inclusive: false,
           purchasing_power_parity: false, discount: 0, price: 0 } } };
@@ -105,7 +145,8 @@ export async function createBookingHoldFixture() {
       }
       throw new Error(`Unhandled fixture provider request ${request.path}`);
     });
-    const providers = new Set(["https://test.dodopayments.com", "https://api.resend.com"]);
+    const providers = new Set(["https://test.dodopayments.com", "https://api.resend.com",
+      "https://api-m.sandbox.paypal.com", "https://api.razorpay.com"]);
     globalThis.fetch = (input, init) => {
       const url = new URL(typeof input === "string" || input instanceof URL ? String(input) : input.url);
       if (providers.has(url.origin)) return originalFetch(`${database.origin}/provider${url.pathname}${url.search}`, init);
@@ -124,7 +165,10 @@ export async function createBookingHoldFixture() {
     for (const [route, module] of Object.entries({
       "/api/holdSlot": "../../src/server/booking/holdSlot.js",
       "/api/payment/quote": "../../src/server/api/payment/quote.js",
+      "/api/payment/providers": "../../src/server/api/payment/providers.js",
       "/api/payment/start": "../../src/server/api/payment/start.js",
+      "/api/payment/finalize": "../../src/server/api/payment/finalize.js",
+      "/api/payment/status": "../../src/server/api/payment/status.js",
       "/api/payment/cancel": "../../src/server/api/payment/cancel.js",
       "/api/releaseHold": "../../src/server/booking/releaseHold.js",
       "/api/bookingAvailability": "../../src/server/booking/availability.js",
@@ -219,7 +263,27 @@ export async function createBookingHoldFixture() {
       assert.equal(quote.status, 200, JSON.stringify(quote));
       return post("/api/payment/start", { provider: "dodo", bookingPayload, quoteFingerprint: quote.body.quoteFingerprint });
     };
+    const createUpgrade = async () => {
+      const id = `booking.original.${nextDate++}`;
+      await commerce.create({ _id: id, _type: "booking", ...details,
+        backendOwner: "supabase", cutoverGeneration: 0, status: "captured", packageTitle: "Vertex Essentials",
+        packagePrice: "$9.99", grossAmount: 9.99, netAmount: 9.99, paymentProvider: "paypal",
+        paypalOrderId: `order_${id}`, paymentRecordId: `payment_${id}`, startTimeUTC: "2099-02-01T00:30:00.000Z" });
+      await commerce.create({ _id: `payment_${id}`, _type: "paymentRecord",
+        backendOwner: "supabase", cutoverGeneration: 0, status: "booked", provider: "paypal",
+        verificationState: "server_verified", bookingId: id, providerOrderId: `order_${id}`,
+        providerPaymentId: `capture_${id}`, pricingSnapshot: { currency: "USD", netAmount: 9.99 },
+        providerPublicData: { currency: "USD", totalAmount: 999, taxAmount: 0, taxInclusive: false } });
+      const { issueUpgradeIntentToken } = await import("../../src/server/api/ref/upgradeIntentToken.js");
+      return { originalOrderId: id, packageTitle: "Performance Vertex Overhaul", ...details,
+        startTimeUTC: "2099-02-01T00:30:00.000Z", displayDate: "1 February 2099", displayTime: "6:00 AM",
+        upgradeIntentToken: issueUpgradeIntentToken({ bookingId: id, email: details.email,
+          targetPackageTitle: "Performance Vertex Overhaul", backend: "supabase", cutoverGeneration: 0 }) };
+    };
     return { baseURL, post, get, hold, start, nextSlotDate, commerce, details, evidence, save, stop,
+      createUpgrade,
+      loseOrderResponse: () => { loseOrderResponse = true; },
+      advanceClock: ms => { clockShiftMs += ms; },
       setPaymentStatus, holdRunsOut, restoreClock, reconcile, paymentSucceeded };
   } catch (error) { await stop(); throw error; }
 }
@@ -230,7 +294,8 @@ if (process.argv.includes("--worker")) {
   process.once("SIGTERM", shutdown);
   process.once("SIGINT", shutdown);
   process.once("disconnect", () => { fixture.stop(); });
-  const forwardedMethods = ["get", "setPaymentStatus", "holdRunsOut", "restoreClock", "reconcile", "paymentSucceeded"];
+  const forwardedMethods = ["get", "setPaymentStatus", "holdRunsOut", "restoreClock", "reconcile", "paymentSucceeded",
+    "loseOrderResponse", "advanceClock", "createUpgrade"];
   process.on("message", async ({ id, method, args = [] }) => {
     try {
       let value;
@@ -238,8 +303,28 @@ if (process.argv.includes("--worker")) {
       else if (forwardedMethods.includes(method)) {
         value = (await fixture[method](...args)) ?? null;
       }
+      else if (method === "createCoupon") {
+        value = await fixture.commerce.createIfNotExists({ _id: `coupon.${args[0]}`, _type: "coupon", code: args[0],
+          isActive: true, discountType: "percent", discountPercent: args[1] ?? 20, canCombineWithReferral: true,
+          timesUsed: 0, activeReservations: 0, maxUses: 0, backendOwner: "supabase", cutoverGeneration: 0 });
+      }
+      else if (method === "setPaymentProvider") {
+        Object.assign(process.env, {
+          PAYPAL_CLIENT_ID: args[0] === "paypal" ? "fixture-client" : "",
+          PAYPAL_CLIENT_SECRET: args[0] === "paypal" ? "fixture-secret" : "",
+          RAZORPAY_KEY_ID: args[0] === "razorpay" ? "rzp_test_fixture" : "",
+          RAZORPAY_KEY_SECRET: args[0] === "razorpay" ? "fixture-secret" : "",
+        });
+        value = null;
+      }
       else if (method === "nextSlotDate") value = fixture.nextSlotDate();
       else if (method === "getHold") value = await fixture.commerce.getDocument(...args);
+      else if (method === "expirePayment") {
+        const record = await fixture.commerce.fetch('*[_type == "paymentRecord" && providerOrderId == $id][0]',
+          { id: args[0] });
+        value = await fixture.commerce.patch(record._id).set({ sessionExpiresAt: new Date(Date.now() - 1000).toISOString() })
+          .commit();
+      }
       else if (method === "evidence") value = fixture.evidence;
       else if (method === "verifyHold") {
         const stored = await fixture.commerce.getDocument(args[0].holdId);

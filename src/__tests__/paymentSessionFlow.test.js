@@ -649,9 +649,11 @@ beforeEach(() => {
     currency: "USD",
     key: "rzp_test_key",
   });
-  mockInspectPayPalOrder.mockResolvedValue({ state: "unpaid" });
+  mockInspectPayPalOrder.mockResolvedValue({ state: "unpaid",
+    details: { purchase_units: [{ amount: { value: "84.99", currency_code: "USD" } }] } });
   mockInspectPayPalCapture.mockImplementation(async ({ paymentId }) => ({ state: "found", providerPaymentId: paymentId, providerOrderId: getOnlyPaymentRecord().providerOrderId }));
-  mockInspectRazorpayOrder.mockResolvedValue({ state: "unpaid" });
+  mockInspectRazorpayOrder.mockResolvedValue({ state: "unpaid",
+    details: { id: "razorpay_order_1", status: "created", amount: 8499, currency: "USD" } });
   mockInspectRazorpayPayment.mockResolvedValue({
     state: "found",
     providerOrderId: "razorpay_order_1",
@@ -2989,7 +2991,9 @@ describe("payment session flow", () => {
       }),
     ]);
 
-    expect(results.map((entry) => entry.httpStatus).sort()).toEqual([200, 409]);
+    expect(results.map((entry) => entry.httpStatus)).toEqual([200, 200]);
+    expect(results[0].body.providerPayload).toEqual(results[1].body.providerPayload);
+    expect(results.filter(entry => entry.body.checkoutConflict)).toHaveLength(1);
     expect(store.paymentUpgradeLocks).toHaveLength(1);
     expect(store.paymentRecords).toHaveLength(1);
     expect(
@@ -2998,7 +3002,7 @@ describe("payment session flow", () => {
     ).toBe(1);
   });
 
-  test("a completed upgrade cannot reuse a stale credit quote", async () => {
+  test("a completed upgrade returns its original checkout instead of spending credit again", async () => {
     const originalOrderId = "booking_upgrade_replay";
     const { issueUpgradeIntentToken } = require("../server/api/ref/upgradeIntentToken");
     const bookingPayload = baseBookingPayload({
@@ -3029,10 +3033,9 @@ describe("payment session flow", () => {
     });
 
     expect(replay).toMatchObject({
-      httpStatus: 409,
-      body: {
-        code: "upgrade_credit_changed_after_quote",
-      },
+      httpStatus: 200,
+      body: { status: "booked", bookingId: "booking_upgrade_complete",
+        quoteFingerprint: first.body.quoteFingerprint, providerPayload: {} },
     });
     expect(store.paymentRecords).toHaveLength(1);
     expect(mockCreatePayPalOrder).toHaveBeenCalledTimes(1);
@@ -3177,7 +3180,9 @@ describe("payment session flow", () => {
       }),
     ]);
 
-    expect(results.map((entry) => entry.httpStatus).sort()).toEqual([200, 409]);
+    expect(results.map((entry) => entry.httpStatus)).toEqual([200, 200]);
+    expect(results[0].body.providerPayload).toEqual(results[1].body.providerPayload);
+    expect(results.filter(entry => entry.body.checkoutConflict)).toHaveLength(1);
     expect(mockCreatePayPalOrder.mock.calls.length + mockCreateRazorpayOrder.mock.calls.length).toBe(1);
     expect(store.paymentRecords).toHaveLength(1);
     expect(store.paymentStartClaims).toHaveLength(1);

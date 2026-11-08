@@ -8,6 +8,47 @@ const providers = {
 };
 
 const test = base.extend({
+  bookingNative: [async ({}, use) => {
+    const { fork } = require("node:child_process");
+    const { once } = require("node:events");
+    const child = fork(require.resolve("./booking-hold.mjs"), ["--worker"], {
+      execArgv: [], stdio: ["ignore", "inherit", "inherit", "ipc"],
+    });
+    const pending = new Map();
+    let nextId = 0;
+    const ready = new Promise((resolve, reject) => {
+      child.on("message", message => {
+        if (message.ready) return resolve();
+        const request = pending.get(message.id);
+        if (!request) return;
+        pending.delete(message.id);
+        message.error ? request.reject(new Error(message.error)) : request.resolve(message.value);
+      });
+      child.on("exit", code => {
+        const error = new Error(`Booking fixture exited (${code})`);
+        reject(error);
+        for (const request of pending.values()) request.reject(error);
+        pending.clear();
+      });
+    });
+    const call = (method, ...args) => new Promise((resolve, reject) => {
+      const id = ++nextId;
+      pending.set(id, { resolve, reject });
+      child.send({ id, method, args });
+    });
+    try {
+      await ready;
+      await use(Object.fromEntries(["post", "get", "nextSlotDate", "evidence", "createCoupon", "setPaymentProvider",
+        "reconcile", "loseOrderResponse", "setPaymentStatus", "expirePayment", "advanceClock", "createUpgrade"]
+        .map(method => [method, (...args) => call(method, ...args)])));
+    } finally {
+      if (child.exitCode === null) {
+        const exited = once(child, "exit");
+        await call("stop");
+        await exited;
+      }
+    }
+  }, { scope: "worker" }],
   cpuThrottling: [async ({ page, browserName }, use, testInfo) => {
     const rate = Number(process.env.PW_CPU_THROTTLING_RATE || 1);
     if (!Number.isFinite(rate) || rate < 1) throw new Error("Invalid CPU throttling rate.");
@@ -161,7 +202,9 @@ const test = base.extend({
     const reserve = async () => {
       await booking();
       await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+      const held = page.waitForResponse(response => new URL(response.url()).pathname === "/api/holdSlot");
       await page.getByRole("button", { name: "Next", exact: true }).last().click();
+      await held;
       await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toBeVisible();
     };
     const details = async (email = "visitor@example.invalid") => {
