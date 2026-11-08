@@ -1,7 +1,7 @@
 const observers = new Set([
   "MutationObserver", "ResizeObserver", "IntersectionObserver", "PerformanceObserver", "ReportingObserver",
 ]);
-const globalObjects = new Set(["globalThis", "window", "self", "global"]);
+const globalObjects = new Set(["globalThis", "window", "self", "global", "top", "parent", "frames"]);
 const staticKey = (node) => {
   const key = node.property ?? node.key;
   if (!node.computed && key.type === "Identifier") return key.name;

@@ -1273,6 +1273,7 @@ run("no-parent-ipc-disconnect", {
       `globalThis[name] = fork; new PerformanceObserver(f).disconnect();`,
       `delete window?.ReportingObserver; new ReportingObserver(f).disconnect();`,
       `global.global.MutationObserver = fork; new MutationObserver(f).disconnect();`,
+      `parent.MutationObserver = fork; top.frames.ResizeObserver = fork; new MutationObserver(f).disconnect();`,
       `window.self["ResizeObserver"] = fork; new ResizeObserver(f).disconnect();`,
       `Object.assign(globalThis.window, { IntersectionObserver: fork }); new IntersectionObserver(f).disconnect();`,
     ].map((code) => ({ code, errors: [{ messageId: "parent" }] })),
