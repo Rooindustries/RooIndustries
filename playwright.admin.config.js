@@ -3,6 +3,8 @@ const config = require("./playwright.config");
 
 module.exports = defineConfig({
   ...config,
+  metadata: { ...config.metadata, groupTimeoutMs: 35 * 60 * 1000 },
+  globalTimeout: 37 * 60 * 1000,
   testMatch: /(admin-cms|content-revision|content-publish-purge)\.spec\.js$/,
   outputDir: "test-results/admin-e2e",
   retries: 0,
@@ -16,7 +18,7 @@ module.exports = defineConfig({
       },
     },
   }],
-  use: { ...config.use, javaScriptEnabled: true, actionTimeout: 10000, navigationTimeout: 20000, video: "off", trace: "off" },
+  use: { ...config.use, javaScriptEnabled: true, actionTimeout: 10000, navigationTimeout: 20000, video: "off" },
   webServer: config.webServer ? {
     ...config.webServer,
     timeout: 240000,

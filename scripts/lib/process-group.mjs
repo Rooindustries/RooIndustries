@@ -69,6 +69,31 @@ export const holdGroupMembers = (child) => {
   });
 };
 
+export const holdDescendants = (child) => {
+  if (!handles.has(child) || !leaderUnreaped(child)) return [];
+  const processes = fs.readdirSync("/proc").filter(entry => /^\d+$/.test(entry)).flatMap(pid => {
+    let fd;
+    try {
+      fd = fs.openSync(`/proc/${pid}`, directory);
+      const stat = fs.readFileSync(`/proc/self/fd/${fd}/stat`, "utf8");
+      return [{ fd, pid: Number(pid), parent: Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]) }];
+    } catch {}
+    if (fd !== undefined) fs.closeSync(fd);
+    return [];
+  });
+  const owned = new Set([child.pid]);
+  let previous;
+  do {
+    previous = owned.size;
+    for (const proc of processes) if (owned.has(proc.parent)) owned.add(proc.pid);
+  } while (owned.size !== previous);
+  return processes.flatMap(proc => {
+    if (owned.has(proc.pid)) return [proc.fd];
+    fs.closeSync(proc.fd);
+    return [];
+  });
+};
+
 export const releaseGroupMembers = (held) => {
   const running = held.filter((fd) => isRunning(`/proc/self/fd/${fd}`)).length;
   for (const fd of held) fs.closeSync(fd);

@@ -155,7 +155,8 @@
     "test:build-lock": "node --test tests/build-lock.test.mjs",
     "check:repository-files": "node scripts/check-repository-files.mjs",
     "test:repository-files": "node --test tests/repository-files.test.mjs",
-    "test:runner-routing": "node --test tests/runner-routing.test.mjs"
+    "test:runner-routing": "node --test tests/runner-routing.test.mjs",
+    "test:playwright-timeouts": "node scripts/playwright-timeouts-e2e.mjs"
   },
   "eslintConfig": {
     "extends": [
