@@ -7,6 +7,7 @@ import {
   readStoredCheckoutBooking,
 } from "../lib/checkoutStorage";
 import packagePricing from "../lib/packagePricing";
+import { bookingDraft } from "../../public/checkout-state.js";
 import { classifyHoldResponse } from "../lib/holdResponse";
 import { CHECKOUT_CONFIRMATION_EVENT, isCheckoutConfirmationPending } from "../lib/checkoutConfirmation";
 import { CLIENT_REQUEST_TIMEOUT_MS } from "../lib/clientRequest";
@@ -15,7 +16,6 @@ import { scrollWindowTo } from "../lib/scrollWindowTo";
 const { getPublicPackageTitle } = packagePricing;
 
 const HOLD_STORAGE_KEY = "my_slot_hold";
-const BOOKING_DRAFT_KEY = "booking_draft";
 const MOBILE_MAX_WIDTH = 780;
 
 const useIsMobileWidth = (maxWidth = MOBILE_MAX_WIDTH) => {
@@ -222,7 +222,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
 
   const readDraft = () => {
     try {
-      return sessionStorage.getItem(BOOKING_DRAFT_KEY);
+      return JSON.stringify(bookingDraft.read());
     } catch {
       return null;
     }
@@ -232,7 +232,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
     currentHoldRef.current = null;
     setHold(null);
     removeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY);
-    if (!keepDraft) removeBrowserStorage("sessionStorage", BOOKING_DRAFT_KEY);
+    if (!keepDraft) bookingDraft.remove();
     broadcastHold(null);
     if (redirect) {
       nav("/", { replace: false });
@@ -348,10 +348,9 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
       backgroundLocation: location.state?.backgroundLocation || location,
     };
     try {
-      const draftRaw = sessionStorage.getItem(BOOKING_DRAFT_KEY);
+      const draft = bookingDraft.read();
       let draftPkg = null;
-      if (draftRaw) {
-        const draft = JSON.parse(draftRaw);
+      if (draft) {
         draftPkg = draft?.selectedPackage || null;
       }
 

@@ -15,6 +15,77 @@ const ready = async (page, flow, code = "friend") => {
 };
 const quote = flow => flow.state.calls.filter(call => call.path === "/api/payment/quote").at(-1)?.body;
 
+for (const blockedKey of ["booking_draft", "checkout_booking_state", "referral_session", "all"]) {
+  test(`returning to booking keeps a creator replacement when saving ${blockedKey} fails`, async ({ page, context, flow }, info) => {
+    let saveErrors = 0;
+    page.on("console", message => {
+      if (message.type() === "error" && message.text() === "Failed to save checkout choices") saveErrors += 1;
+    });
+    await context.route("**/api/ref/validateReferral?code=second", route => route.fulfill({
+      json: { ok: true, referral: { code: "second", currentDiscountPercent: 5 } },
+    }));
+    await ready(page, flow);
+    await page.evaluate(key => {
+      const setItem = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (name, value) {
+        const choices = ["booking_draft", "checkout_booking_state", "payment_session_state", "referral_session"];
+        if (name === key || (key === "all" && choices.includes(name))) {
+          throw new DOMException("Storage quota", "QuotaExceededError");
+        }
+        return setItem.call(this, name, value);
+      };
+    }, blockedKey);
+    await input(page, "referral").fill("second");
+    await apply(page, "referral").click();
+    await expect(input(page, "referral")).toBeEnabled();
+    await expect.poll(() => quote(flow)).toMatchObject({ referralCode: "second" });
+    await expect(page.getByRole("alert").filter({ hasText: "could not save your code choices" })).toHaveCount(1);
+    await page.getByRole("link", { name: "Back to Booking", exact: true }).click();
+    const review = page.getByRole("button", { name: "Review before payment", exact: true });
+    await expect(review.or(page.getByRole("heading", { name: "Review your booking", exact: true })).first()).toBeVisible();
+    if (await review.isVisible()) await review.click();
+    await expect(page.getByRole("button", { name: "Remove referral code second", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Remove referral code friend", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("alert").filter({ hasText: "could not save your code choices" })).toHaveCount(1);
+    if (blockedKey === "booking_draft") {
+      for (const width of [390, 1280]) {
+        await page.setViewportSize({ width, height: 844 });
+        await expect(page.locator(".ri-booking.transition-opacity")).toHaveCSS("opacity", "1");
+        const path = info.outputPath(`draft-save-notice-${width}.png`);
+        await page.screenshot({ path });
+        await info.attach(`draft-save-notice-${width}`, { path, contentType: "image/png" });
+      }
+    }
+    await flow.payment();
+    await expect(input(page, "referral")).toHaveValue("second");
+    await expect.poll(() => quote(flow)).toMatchObject({ referralCode: "second" });
+    expect(saveErrors).toBe(1);
+  });
+}
+
+test("returning to booking keeps coupon removal when draft saves fail", async ({ page, flow }) => {
+  await ready(page, flow);
+  await input(page, "coupon").fill("save20");
+  await apply(page, "coupon").click();
+  await expect.poll(async () => (await stored(page))?.couponCode).toBe("save20");
+  await page.evaluate(() => {
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (name, value) {
+      if (name === "booking_draft") throw new DOMException("Storage quota", "QuotaExceededError");
+      return setItem.call(this, name, value);
+    };
+  });
+  await page.getByRole("button", { name: "Remove coupon", exact: true }).click();
+  await expect(input(page, "coupon")).toHaveValue("");
+  await page.getByRole("link", { name: "Back to Booking", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Remove coupon code save20", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Remove referral code friend", exact: true })).toBeVisible();
+  await flow.payment();
+  await expect(input(page, "coupon")).toHaveValue("");
+  await expect.poll(() => quote(flow)).toMatchObject({ referralCode: "friend", couponCode: "" });
+});
+
 test("a creator replacement survives a checkout storage quota failure", async ({ page, context, flow }, info) => {
   await context.route("**/api/ref/validateReferral?code=second", route => route.fulfill({
     json: { ok: true, referral: { code: "second", currentDiscountPercent: 5 } },
@@ -113,6 +184,9 @@ test("a code edit retains the hold refreshed by payment cancellation", async ({ 
 
 test("saving a newer session retires an unsaved session for the same booking", async ({ page }) => {
   const { readFile } = require("node:fs/promises");
+  await page.route("**/public/checkout-state.js", async route => route.fulfill({
+    contentType: "text/javascript", body: await readFile(require.resolve("../public/checkout-state.js"), "utf8"),
+  }));
   await page.route("**/__test/session-module/*", async route => {
     const name = new URL(route.request().url()).pathname.split("/").at(-1);
     if (!["paymentSessionStorage.js", "browserStorage"].includes(name)) return route.abort();
@@ -126,19 +200,32 @@ test("saving a newer session retires an unsaved session for the same booking", a
     const fingerprint = JSON.stringify({ packageTitle: "Performance Vertex Overhaul",
       startTimeUTC: "2099-01-05T10:00:00.000Z", email: "visitor@example.invalid" });
     const oldSession = { provider: "dodo", providerPayload: {}, fingerprint, paymentAccessToken: "retired-session" };
+    const other = { ...oldSession, paymentAccessToken: "other-session",
+      fingerprint: JSON.stringify({ packageTitle: "Other package", email: "other@example.invalid" }) };
+    sessionStorage.setItem("payment_session_state", JSON.stringify(other));
+    let latest;
+    let otherKept;
     const setItem = Storage.prototype.setItem;
     try {
       Storage.prototype.setItem = () => { throw new DOMException("Storage quota", "QuotaExceededError"); };
       if (!storage.writeStoredPaymentSession(oldSession, unsaved)) unsaved.set(oldSession.paymentAccessToken, oldSession);
+      const newer = { ...oldSession, paymentAccessToken: "newer-unsaved-session" };
+      storage.writeStoredPaymentSession(newer, unsaved);
+      latest = storage.readCheckoutPaymentSession(fingerprint, unsaved)?.paymentAccessToken;
+      storage.clearStoredPaymentSession(newer);
+      unsaved.delete(newer.paymentAccessToken);
+      otherKept = JSON.parse(sessionStorage.getItem("payment_session_state"))?.paymentAccessToken;
     } finally {
       Storage.prototype.setItem = setItem;
     }
     const nextSession = { ...oldSession, paymentAccessToken: "current-session" };
     const saved = storage.writeStoredPaymentSession(nextSession, unsaved);
     storage.clearStoredPaymentSession(nextSession);
-    return { saved, recovered: storage.readCheckoutPaymentSession(fingerprint, unsaved) };
+    return { saved, latest, otherKept, recovered: storage.readCheckoutPaymentSession(fingerprint, unsaved) };
   });
   expect(result.saved).toBe(true);
+  expect(result.latest).toBe("newer-unsaved-session");
+  expect(result.otherKept).toBe("other-session");
   expect(result.recovered).toBeNull();
 });
 

@@ -1,5 +1,6 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import useUpgradeEligibility, { fetchUpgradeInfo } from "../lib/useUpgradeEligibility";
+import { checkoutBooking } from "../../public/checkout-state.js";
 import { useNavigate, useParams } from "react-router-dom";
 import { CLIENT_REQUEST_TIMEOUT_MS, reportRequestError, requestTimeoutError } from "../lib/clientRequest";
 import { getPublicContent } from "../lib/publicContentClient";
@@ -231,10 +232,7 @@ export default function UpgradeLink() {
     };
 
     try {
-      sessionStorage.setItem(
-        "checkout_booking_state",
-        JSON.stringify(bookingData)
-      );
+      checkoutBooking.write(bookingData);
     } catch {}
     navigate("/payment", { state: { bookingData } });
   }

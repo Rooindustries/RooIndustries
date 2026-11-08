@@ -11,7 +11,10 @@ const ruleSet = (names) => Object.fromEntries(names.map((name) => [`roo/${name}`
 
 export default [
   {
-    files: ["src/**/*.{js,jsx,mjs,cjs}", "app/**/*.{js,jsx,mjs,cjs}", "middleware.js"],
+    files: [
+      "src/**/*.{js,jsx,mjs,cjs}", "app/**/*.{js,jsx,mjs,cjs}", "middleware.js",
+      "public/checkout-state.js", "public/BIOSGuide/referral.js",
+    ],
     ignores: [testFiles],
     linterOptions: { reportUnusedDisableDirectives: "off" },
     languageOptions: {

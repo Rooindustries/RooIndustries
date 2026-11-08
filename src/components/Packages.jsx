@@ -11,6 +11,7 @@ import homeCopy from "../lib/homeCopy";
 import packageContent from "../lib/packageContent";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 import { persistBookingPackageSelection } from "../lib/checkoutStorage";
+import { referralSession } from "../../public/checkout-state.js";
 import { trackEvent } from "../lib/analytics";
 import { getSessionAvailability } from "../lib/sessionAvailability";
 import { reportRequestError, requestDeadline } from "../lib/clientRequest";
@@ -18,7 +19,6 @@ import { reportRequestError, requestDeadline } from "../lib/clientRequest";
 const loadPackageDetails = () => import("./PackageDetailsModal");
 const PackageDetailsModal = lazy(loadPackageDetails);
 
-const REFERRAL_STORAGE_KEY = "referral_session";
 const AVAILABILITY_REFRESH_INTERVAL_MS = 60_000;
 const { buildPackageOffers } = packageContent;
 const { HOME_COPY } = homeCopy;
@@ -111,7 +111,7 @@ export default function Packages({
 
     if (ref) {
       try {
-        sessionStorage.setItem(REFERRAL_STORAGE_KEY, ref);
+        referralSession.write(ref);
       } catch (e) {
         console.error("Failed to store referral from link:", e);
       }

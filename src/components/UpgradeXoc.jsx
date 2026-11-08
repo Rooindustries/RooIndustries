@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { reportRequestError } from "../lib/clientRequest";
 import useUpgradeEligibility, { fetchUpgradeInfo } from "../lib/useUpgradeEligibility";
+import { checkoutBooking } from "../../public/checkout-state.js";
 import { useNavigate } from "react-router-dom";
 
 const formatLocalDate = (utcDate, timeZone) => {
@@ -136,10 +137,7 @@ export default function UpgradeXoc() {
     };
 
     try {
-      sessionStorage.setItem(
-        "checkout_booking_state",
-        JSON.stringify(bookingData)
-      );
+      checkoutBooking.write(bookingData);
     } catch {}
     navigate("/payment", { state: { bookingData } });
   }

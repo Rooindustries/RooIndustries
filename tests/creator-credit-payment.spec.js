@@ -81,6 +81,7 @@ for (const [index, scenario] of [
   { name: "second guide after payment started", expected: "fixturecreator", returnFirst: false },
   { name: "manual replacement at review", expected: "fixturesecond", returnFirst: false },
   { name: "manual replacement at payment", expected: "fixturesecond", returnFirst: true },
+  { name: "draft quota replacement through booking", expected: "fixturesecond", returnFirst: true },
   { name: "manual removal at review", expected: "", returnFirst: false },
   { name: "manual removal at payment", expected: "", returnFirst: true },
   { name: "new creator after manual removal", expected: "fixturesecond", returnFirst: false },
@@ -142,6 +143,21 @@ for (const [index, scenario] of [
       await expect.poll(() => page.evaluate(() => sessionStorage.getItem("referral_session"))).toBe("fixturesecond");
       await page.reload();
       await page.goto("/payment?ref=fixturecreator");
+    }
+    if (scenario.name === "draft quota replacement through booking") {
+      await page.evaluate(() => {
+        const setItem = Storage.prototype.setItem;
+        Storage.prototype.setItem = function (key, value) {
+          if (key === "booking_draft") throw new DOMException("Storage quota", "QuotaExceededError");
+          return setItem.call(this, key, value);
+        };
+      });
+      await page.locator("#payment-referral-code").fill("fixturesecond");
+      await page.locator("#payment-referral-code").locator("..").getByRole("button", { name: "Apply", exact: true }).click();
+      await expect(page.getByRole("alert").filter({ hasText: "could not save your code choices" })).toBeVisible();
+      await page.getByRole("link", { name: "Back to Booking", exact: true }).click();
+      await expect(page.getByRole("button", { name: "Remove referral code fixturesecond", exact: true })).toBeVisible();
+      await flow.payment();
     }
     if (scenario.name === "manual removal at review") await page.goto("/payment?ref=fixturecreator");
     if (["manual removal at payment", "new creator after manual removal"].includes(scenario.name)) {

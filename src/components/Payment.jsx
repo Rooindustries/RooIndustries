@@ -13,7 +13,8 @@ import { useBookingDialogPending } from "../lib/bookingDialogHold";
 import { beginCheckoutConfirmation } from "../lib/checkoutConfirmation";
 import { parseCheckoutFingerprint, paymentSessionMatchesCheckout, readCheckoutPaymentSession,
   writeStoredPaymentSession, clearStoredPaymentSession } from "../lib/paymentSessionStorage";
-import { BOOKING_DRAFT_STORAGE_KEY } from "../lib/checkoutStorage";
+import { bookingDraft, checkoutBooking, referralSession } from "../../public/checkout-state.js";
+import CheckoutSaveNotice from "./CheckoutSaveNotice";
 import {
   calculateCheckoutDiscounts,
   fetchCheckoutQuote,
@@ -101,8 +102,6 @@ export default function Payment({ hideFooter = false }) {
   const navigate = useNavigate();
   const [hydrated, setHydrated] = useState(false);
   const [browserTimeZone, setBrowserTimeZone] = useState("UTC");
-  const [checkoutSaveFailed, setCheckoutSaveFailed] = useState(false);
-  const unsavedCheckoutRef = useRef(undefined);
 
   useEffect(() => {
     setHydrated(true);
@@ -115,9 +114,7 @@ export default function Payment({ hideFooter = false }) {
     }
   }, []);
 
-  const REFERRAL_STORAGE_KEY = "referral_session";
   const FLOW_BACKGROUND_KEY = "flow_background_location";
-  const CHECKOUT_BOOKING_STORAGE_KEY = "checkout_booking_state";
   const INTERNAL_PAYMENTS_KEY = "roo_internal_payments";
 
   const readStoredBackground = () => {
@@ -146,42 +143,9 @@ export default function Payment({ hideFooter = false }) {
     } catch {}
   };
 
-  const readStoredReferral = () => {
-    try {
-      return sessionStorage.getItem(REFERRAL_STORAGE_KEY) || "";
-    } catch {
-      return "";
-    }
-  };
-
-  const writeStoredReferral = (code) => {
-    try {
-      if (code) {
-        sessionStorage.setItem(REFERRAL_STORAGE_KEY, code);
-      } else {
-        sessionStorage.removeItem(REFERRAL_STORAGE_KEY);
-      }
-    } catch {}
-  };
-
-  const readStoredCheckout = () => {
-    if (unsavedCheckoutRef.current !== undefined) return unsavedCheckoutRef.current;
-    try {
-      const raw = sessionStorage.getItem(CHECKOUT_BOOKING_STORAGE_KEY);
-      return raw ? JSON.parse(raw) : null;
-    } catch {
-      return null;
-    }
-  };
-
-  const writeStoredCheckout = (value) => {
-    const checkout = value && typeof value === "object" ? value : null;
-    const saved = checkout
-      ? writeBrowserStorage("sessionStorage", CHECKOUT_BOOKING_STORAGE_KEY, JSON.stringify(checkout))
-      : removeBrowserStorage("sessionStorage", CHECKOUT_BOOKING_STORAGE_KEY);
-    unsavedCheckoutRef.current = saved ? undefined : checkout;
-    return saved;
-  };
+  const readStoredReferral = () => referralSession.read() || "";
+  const writeStoredReferral = referralSession.write;
+  const { read: readStoredCheckout, write: writeStoredCheckout } = checkoutBooking;
 
   const buildConfirmationNavigationState = (responseBody = {}) => {
     trackConfirmedPurchase(responseBody.analyticsReceipt);
@@ -441,10 +405,10 @@ export default function Payment({ hideFooter = false }) {
     const search = serializedQuery ? `?${serializedQuery}` : "";
     pendingCodeLocationRef.current = { key: location.key, state: location.state };
     setPreApplyingCodes(true);
-    setCheckoutSaveFailed(!writeStoredCheckout(nextCheckout));
+    writeStoredCheckout(nextCheckout);
     appliedCodeSelectionRef.current = codeSelectionKey(nextCheckout.referralCode, nextCheckout.couponCode, search);
     try {
-      const draft = JSON.parse(sessionStorage.getItem(BOOKING_DRAFT_STORAGE_KEY) || "null");
+      const draft = bookingDraft.read();
       const packageDraft = draft?.packages?.[packageTitle];
       const draftEmail = String(packageDraft?.form?.email || "").trim().toLowerCase();
       const bookingEmail = String(bookingData.email || "").trim().toLowerCase();
@@ -456,7 +420,7 @@ export default function Payment({ hideFooter = false }) {
       if (bookingEmail && draftEmail === bookingEmail && bookingStart && draftStart === bookingStart && sameHold) {
         packageDraft.startTimeUTC = bookingStart;
         packageDraft.checkoutCodes = checkoutCodes;
-        sessionStorage.setItem(BOOKING_DRAFT_STORAGE_KEY, JSON.stringify(draft));
+        bookingDraft.write(draft);
       }
     } catch {}
     const state = { ...navState, bookingData: nextCheckout };
@@ -1545,7 +1509,7 @@ export default function Payment({ hideFooter = false }) {
           slotHoldExpiresAt: refreshedHold.slotHoldExpiresAt || refreshedHold.expiresAt || "",
         } : {}),
       };
-      if (!writeBrowserStorage("sessionStorage", CHECKOUT_BOOKING_STORAGE_KEY, JSON.stringify(returnCheckout)) ||
+      if (!writeStoredCheckout(returnCheckout) ||
           !writeStoredPaymentSession(session, unsavedPaymentSessionsRef.current)) {
         showBanner("error", "Your browser could not save this payment session. Checkout has stayed here so you can check its status or change payment method. Allow browser storage and try again to open checkout.", { persistent: true });
         return;
@@ -1932,14 +1896,7 @@ export default function Payment({ hideFooter = false }) {
       </motion.div>
 
       <motion.div variants={itemVariants}>
-        {checkoutSaveFailed && (
-          <p
-            role="alert"
-            className="mt-6 rounded-xl border border-danger-border bg-danger-soft px-4 py-3 text-sm text-danger-text"
-          >
-            Your browser could not save your code choices. They still apply to this checkout, but reloading may lose them.
-          </p>
-        )}
+        <CheckoutSaveNotice />
         {banner && banner.text && (
           <div
             ref={bannerRef}

@@ -1,6 +1,4 @@
-import { writeBrowserStorage } from "./browserStorage";
-
-const PAYMENT_SESSION_STORAGE_KEY = "payment_session_state";
+import { paymentSession } from "../../public/checkout-state.js";
 
 export const parseCheckoutFingerprint = (value) => {
   try {
@@ -25,9 +23,7 @@ export const paymentSessionMatchesCheckout = (storedFingerprint, currentFingerpr
 
 const readStoredPaymentSession = () => {
   try {
-    const raw = sessionStorage.getItem(PAYMENT_SESSION_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
+    const parsed = paymentSession.read();
     if (
       parsed?.paymentAccessToken &&
       parsed?.provider &&
@@ -43,12 +39,11 @@ const readStoredPaymentSession = () => {
 export const writeStoredPaymentSession = (session, unsaved) => {
   if (!session?.paymentAccessToken || !session?.provider ||
       !session?.fingerprint || !session?.providerPayload) return false;
-  const saved = writeBrowserStorage("sessionStorage", PAYMENT_SESSION_STORAGE_KEY, JSON.stringify(session));
-  if (saved) {
-    for (const [token, candidate] of unsaved) {
-      if (paymentSessionMatchesCheckout(candidate.fingerprint, session.fingerprint)) unsaved.delete(token);
-    }
-  } else unsaved.set(session.paymentAccessToken, session);
+  const saved = paymentSession.write(session);
+  for (const [token, candidate] of unsaved) {
+    if (paymentSessionMatchesCheckout(candidate.fingerprint, session.fingerprint)) unsaved.delete(token);
+  }
+  if (!saved) unsaved.set(session.paymentAccessToken, session);
   return saved;
 };
 
@@ -56,16 +51,17 @@ export const clearStoredPaymentSession = (session) => {
   const stored = readStoredPaymentSession();
   if (!session || stored?.paymentAccessToken !== session.paymentAccessToken) return;
   try {
-    sessionStorage.removeItem(PAYMENT_SESSION_STORAGE_KEY);
+    paymentSession.remove(candidate => paymentSessionMatchesCheckout(candidate?.fingerprint, session.fingerprint));
   } catch {}
 };
 
 export const readCheckoutPaymentSession = (fingerprint, unsaved) => {
-  const stored = readStoredPaymentSession();
-  if (stored && paymentSessionMatchesCheckout(stored.fingerprint, fingerprint)) return stored;
-  return [...unsaved.values()].find(
+  const pending = [...unsaved.values()].find(
     session => paymentSessionMatchesCheckout(session.fingerprint, fingerprint)
-  ) || null;
+  );
+  if (pending) return pending;
+  const stored = readStoredPaymentSession();
+  return stored && paymentSessionMatchesCheckout(stored.fingerprint, fingerprint) ? stored : null;
 };
 
 export const readHoldPaymentSession = (hold) => {
