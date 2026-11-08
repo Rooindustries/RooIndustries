@@ -849,43 +849,86 @@ try{
     const calls=[];for(let i=0;i<3;i++)calls.push(recovery?await dispatchRescheduleNotifications({bookingId,client:commerce}):await sendBookingEmailsForBooking({bookingId,client:commerce}));const saved=(await row(bookingId)).payload;
     assert.equal(saved[`${prefix}Status`],'delivery_unknown');assert.equal(saved[`${prefix}AttemptCount`],1);assert.equal(saved[`${prefix}NextAttemptAt`],'');assert.equal(saved[`${prefix}LeaseId`],'');assert.equal(saved[`${prefix}LeaseExpiresAt`],'');assert.ok(calls.every(r=>(r.body||r).deliveryUnknown===true&&(r.body||r).retryable===false));assert.equal(providerRequests.filter(r=>r.path==='/emails').length,0);return{booking,calls,saved,actualNativeRevisionGuard:true};
   });
-  for(const recovery of [false,true])await run(`a1-terminal-${recovery?'reschedule-':''}ledger-unknown-delivery-disabled`,async()=>{
-    const {sendBookingEmailsForBooking,dispatchRescheduleNotifications}=await import('../src/server/api/ref/bookingEmails.js'),prior=new Date(originalNow()-25*3600000).toISOString(),prefix=recovery?'recoveryNotification':'emailDispatch';
-    const changes=recovery?{requiresReschedule:true,recoveryNotificationStatus:'delivery_unknown',recoveryNotificationLastError:'email_delivery_unknown',recoveryNotificationLastAttemptAt:prior,recoveryNotificationAttemptCount:1,recoveryClientFirstAttemptAt:prior,recoveryOwnerNotifiedAt:new Date().toISOString()}:{emailDispatchStatus:'delivery_unknown',emailDispatchLastError:'email_delivery_unknown',emailDispatchLastAttemptAt:prior,emailDispatchAttemptCount:1,emailDispatchClientFirstAttemptAt:prior,emailDispatchOwnerSentAt:new Date().toISOString()};
-    await seed('dodo','email_partial',{booking:changes});let booking=(await row(bookingId)).payload;await commerce.patch(bookingId).ifRevisionId(booking._rev).set({[`${prefix}Status`]:'partial'}).commit();const previous=process.env.FROM_EMAIL,calls=[],snapshots=[];process.env.FROM_EMAIL='';
-    const kind=recovery?'reschedule':'booking_confirmation';
-    const readLedger=()=>sql`select recipient_type,status,attempt_count,sent_at,provider_message_id,next_attempt_at,lease_id,lease_expires_at from commerce.email_dispatches where dispatch_kind=${kind} order by recipient_type`;
-    const beforeLedger=[...(await readLedger())];
-    assert.equal(beforeLedger.length,2);
-    assert.equal(beforeLedger.find(entry=>entry.recipient_type==='customer').status,'historical_unknown');
-    assert.equal(beforeLedger.find(entry=>entry.recipient_type==='owner').status,'sent');
-    assert.ok(beforeLedger.every(entry=>entry.attempt_count===1));
-    const expectedAttempts=recovery?2:1;
-    const expectedLedger=recovery?beforeLedger.map(entry=>({...entry,attempt_count:entry.attempt_count+1})):beforeLedger;
-    try{
-      for(let i=0;i<3;i++){
-        const result=recovery?await dispatchRescheduleNotifications({bookingId,client:commerce}):await sendBookingEmailsForBooking({bookingId,client:commerce});
-        calls.push(result);
-        const snapshot=(await row(bookingId)).payload;
-        assert.equal(snapshot[`${prefix}Status`],'delivery_unknown');
-        assert.equal(snapshot[`${prefix}NextAttemptAt`],'');
-        assert.equal(snapshot[`${prefix}LeaseId`],'');
-        assert.equal(snapshot[`${prefix}LeaseExpiresAt`],'');
-        assert.equal(snapshot[`${prefix}AttemptCount`],expectedAttempts);
-        assert.equal(snapshot[recovery?'recoveryClientFirstAttemptAt':'emailDispatchClientFirstAttemptAt'],prior);
-        if(!recovery)assert.equal(snapshot.emailDispatchLastAttemptAt,prior);
-        assert.deepEqual([...(await readLedger())],expectedLedger);
-        assert.equal(providerRequests.filter(request=>request.path==='/emails').length,0);
-        snapshots.push(snapshot);
+  for (const [recovery, storedStatus] of [[false, 'partial'], [true, 'partial'], [true, 'delivery_unknown']]) {
+    const storedUnknown = storedStatus === 'delivery_unknown';
+    const name = `a1-terminal-${recovery ? 'reschedule-' : ''}ledger-` +
+      `${storedUnknown ? 'stored-' : ''}unknown-delivery-disabled`;
+    await run(name, async () => {
+      const { sendBookingEmailsForBooking, dispatchRescheduleNotifications } =
+        await import('../src/server/api/ref/bookingEmails.js');
+      const prior = new Date(originalNow() - 25 * 3600000).toISOString();
+      const prefix = recovery ? 'recoveryNotification' : 'emailDispatch';
+      const changes = {
+        [`${prefix}Status`]: 'delivery_unknown',
+        [`${prefix}LastError`]: 'email_delivery_unknown',
+        [`${prefix}LastAttemptAt`]: prior,
+        [`${prefix}AttemptCount`]: 1,
+        [`${prefix}NextAttemptAt`]: '',
+        [`${prefix}LeaseId`]: '',
+        [`${prefix}LeaseExpiresAt`]: '',
+        ...(recovery ? {
+          requiresReschedule: true,
+          recoveryClientFirstAttemptAt: prior,
+          recoveryOwnerNotifiedAt: new Date().toISOString(),
+        } : {
+          emailDispatchClientFirstAttemptAt: prior,
+          emailDispatchOwnerSentAt: new Date().toISOString(),
+        }),
+      };
+      await seed('dodo', 'email_partial', { booking: changes });
+      let booking = (await row(bookingId)).payload;
+      if (!storedUnknown) {
+        booking = await commerce.patch(bookingId).ifRevisionId(booking._rev)
+          .set({ [`${prefix}Status`]: storedStatus }).commit();
       }
-    }finally{process.env.FROM_EMAIL=previous;}
-    booking=(await row(bookingId)).payload;assert.ok(calls.every(r=>(r.body||r).retryable===false&&(r.body||r).deliveryUnknown===true));
-    for(const rpc of ['roo_project_operational_shadow','roo_refresh_operational_shadow']){
-      assert.equal((await fixture.client.rpc(rpc)).error,null);
-      assert.deepEqual([...(await readLedger())],expectedLedger);
-    }
-    return{calls,booking,snapshots,beforeLedger,ledger:await readLedger(),noProviderAttempt:true};
-  });
+      const beforeBooking = booking, previous = process.env.FROM_EMAIL, calls = [], snapshots = [];
+      const kind = recovery ? 'reschedule' : 'booking_confirmation';
+      const readLedger = () => sql`select recipient_type,status,attempt_count,sent_at,provider_message_id,
+        next_attempt_at,lease_id,lease_expires_at from commerce.email_dispatches
+        where dispatch_kind=${kind} order by recipient_type`;
+      const beforeLedger = [...(await readLedger())];
+      assert.equal(beforeLedger.length, 2);
+      assert.equal(beforeLedger.find(entry => entry.recipient_type === 'customer').status, 'historical_unknown');
+      assert.equal(beforeLedger.find(entry => entry.recipient_type === 'owner').status, 'sent');
+      assert.ok(beforeLedger.every(entry => entry.attempt_count === 1));
+      const claimsDispatch = recovery && !storedUnknown;
+      const expectedAttempts = claimsDispatch ? 2 : 1;
+      const expectedLedger = claimsDispatch
+        ? beforeLedger.map(entry => ({ ...entry, attempt_count: entry.attempt_count + 1 }))
+        : beforeLedger;
+      process.env.FROM_EMAIL = '';
+      try {
+        for (let i = 0; i < 3; i++) {
+          const result = recovery
+            ? await dispatchRescheduleNotifications({ bookingId, client: commerce })
+            : await sendBookingEmailsForBooking({ bookingId, client: commerce });
+          calls.push(result);
+          const snapshot = (await row(bookingId)).payload;
+          assert.equal(snapshot[`${prefix}Status`], 'delivery_unknown');
+          assert.equal(snapshot[`${prefix}NextAttemptAt`], '');
+          assert.equal(snapshot[`${prefix}LeaseId`], '');
+          assert.equal(snapshot[`${prefix}LeaseExpiresAt`], '');
+          assert.equal(snapshot[`${prefix}AttemptCount`], expectedAttempts);
+          assert.equal(snapshot[recovery ? 'recoveryClientFirstAttemptAt' : 'emailDispatchClientFirstAttemptAt'], prior);
+          if (!claimsDispatch) assert.equal(snapshot[`${prefix}LastAttemptAt`], prior);
+          if (storedUnknown) assert.deepEqual(snapshot, beforeBooking);
+          assert.deepEqual([...(await readLedger())], expectedLedger);
+          assert.equal(providerRequests.filter(request => request.path === '/emails').length, 0);
+          snapshots.push(snapshot);
+        }
+      } finally {
+        process.env.FROM_EMAIL = previous;
+      }
+      booking = (await row(bookingId)).payload;
+      assert.ok(calls.every(r => (r.body || r).retryable === false && (r.body || r).deliveryUnknown === true));
+      for (const rpc of ['roo_project_operational_shadow', 'roo_refresh_operational_shadow']) {
+        assert.equal((await fixture.client.rpc(rpc)).error, null);
+        assert.deepEqual([...(await readLedger())], expectedLedger);
+        if (storedUnknown) assert.deepEqual((await row(bookingId)).payload, beforeBooking);
+      }
+      return { calls, booking, snapshots, beforeLedger, ledger: await readLedger(), noProviderAttempt: true };
+    });
+  }
   await run('a1-completion-backend-ownership-transfer-preserved',async()=>{
     const checkout=await a1Start();let raced=false,transferred;
     fixture.setRequestHook(async(phase,request)=>{
