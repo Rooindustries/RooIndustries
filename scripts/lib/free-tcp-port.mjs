@@ -1,3 +1,4 @@
+import { endOwnChannel } from "./own-channel.mjs";
 import assert from "node:assert/strict";
 import net from "node:net";
 import { once } from "node:events";
@@ -140,5 +141,5 @@ export const adoptHeldTcpPorts = async () => {
     process.on("message", onReleased);
     process.send({ [holderEnv]: "adopted" });
   });
-  if (process.connected) process.disconnect();
+  endOwnChannel();
 };

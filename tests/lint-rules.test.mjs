@@ -1216,47 +1216,31 @@ run("no-unchecked-group-signal", {
 
 run("no-parent-ipc-disconnect", {
   valid: [
-    `if (process.connected) process.disconnect();`,
-    `const { disconnect } = process; disconnect();`,
+    `endOwnChannel();`,
+    `process.once("disconnect", stop);`,
     `child.channel?.unref();`,
-    `class Tracked extends Base { disconnect() { return super.disconnect(); } }`,
-    `socket.disconnect(reason);`,
+    `class Watch { disconnect() { return true; } }`,
+    `const reason = "disconnect";`,
   ],
   invalid: [
-    {
-      name: "Node code can't prove a disconnect is a browser observer's",
-      code: `new MutationObserver(f).disconnect();
-        const observer = new MutationObserver(f); observer.disconnect();
-        let watcher = null; watcher = new ResizeObserver(f); watcher?.disconnect();
-        globalThis.MutationObserver = fork; new MutationObserver(f).disconnect();
-        globalThis instanceof { [Symbol.hasInstance](g) { g.MutationObserver = fork; return true; } };
-        new MutationObserver("worker.js").disconnect();`,
-      errors: Array.from({ length: 5 }, () => ({ messageId: "parent" })),
-    },
-    {
-      name: "page callbacks belong in tests/fixtures/browser",
-      code: `await page.evaluate(() => { const observer = new MutationObserver(f); observer.disconnect(); });
-        const helper = { evaluate: (run) => run(child) }; helper.evaluate((c) => c.disconnect());
-        await page.evaluate(() => (0, child).disconnect());
-        const stop = () => new MutationObserver(f).disconnect(); await page.evaluate(stop);`,
-      errors: Array.from({ length: 4 }, () => ({ messageId: "parent" })),
-    },
-    {
-      name: "only the global process ends its own channel",
-      code: `const process = fork("worker.js"); process.disconnect();`,
-      errors: [{ messageId: "parent" }],
-    },
-    {
-      name: "static keys and destructuring are the same call",
-      code: 'child[\`disconnect\`](); child["disconnect"](); process[\`disconnect\`](); child[\`dis${suffix}\`]();',
-      errors: [{ messageId: "parent" }, { messageId: "parent" }],
-    },
     ...[
-      `const { disconnect } = child; disconnect();`,
+      `if (process.connected) process.disconnect();`,
+      `globalThis.process = child; process.disconnect();`,
+      `child.disconnect(0);`,
+      `child.disconnect(...[]);`,
+      `child.disconnect.call(child);`,
+      `child.disconnect.bind(child)();`,
+      `const stop = child.disconnect; stop.call(child);`,
+      `class Tracked extends Base { stop() { return super.disconnect(); } }`,
+      `new MutationObserver(f).disconnect();`,
+      `await page.evaluate(() => { const observer = new MutationObserver(f); observer.disconnect(); });`,
+      `const helper = { evaluate: (run) => run(child) }; helper.evaluate((c) => c.disconnect());`,
+      'child[\`disconnect\`]();',
+      `child?.["disconnect"]?.();`,
+      `const { disconnect } = process; disconnect();`,
       `const { "disconnect": stop } = child; stop();`,
       'const { [\`disconnect\`]: stop } = child; stop();',
       `let stop; ({ disconnect: stop } = child); stop();`,
-      `const { disconnect: stop = noop } = child; stop();`,
       `function release({ disconnect }) { disconnect(); }`,
       `const { child: { disconnect } } = supervisor; disconnect();`,
     ].map((code) => ({ code, errors: [{ messageId: "parent" }] })),

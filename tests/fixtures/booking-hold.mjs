@@ -1,3 +1,4 @@
+import { endOwnChannel } from "../../scripts/lib/own-channel.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import http from "node:http";
@@ -226,7 +227,7 @@ export async function createBookingHoldFixture() {
 
 if (process.argv.includes("--worker")) {
   const fixture = await createBookingHoldFixture();
-  const shutdown = async () => { await fixture.stop(); process.disconnect(); };
+  const shutdown = async () => { await fixture.stop(); endOwnChannel(); };
   process.once("SIGTERM", shutdown);
   process.once("SIGINT", shutdown);
   process.once("disconnect", () => { fixture.stop(); });
@@ -250,7 +251,7 @@ if (process.argv.includes("--worker")) {
       } else if (method === "stop") {
         await fixture.stop();
         process.send({ id, value: true });
-        process.disconnect();
+        endOwnChannel();
         return;
       } else throw new Error(`Unknown booking fixture operation: ${method}`);
       process.send({ id, value });
