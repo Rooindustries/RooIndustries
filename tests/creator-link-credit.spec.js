@@ -309,6 +309,25 @@ test("an unrelated tab does not inherit a guide visitor's code", async ({ page, 
   await other.close();
 });
 
+test("a restored guide clears a removed creator before opening a new tab", async ({ page, context }) => {
+  await page.goto("/?ref=friend");
+  await expect.poll(() => storedCode(page)).toBe("friend");
+  await page.goto("/BIOSGuide");
+  await expect(packagesLink(page)).toHaveAttribute("href", "/packages?ref=friend");
+  await page.evaluate(() => {
+    sessionStorage.removeItem("referral_session");
+    window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+  });
+  await expect(packagesLink(page)).toHaveAttribute("href", "/packages");
+  const other = await context.newPage();
+  try {
+    await other.goto(await packagesLink(page).getAttribute("href"));
+    expect(await storedCode(other)).toBeNull();
+  } finally {
+    await other.close();
+  }
+});
+
 test("the guide home link keeps the creator through booking", async ({ page, flow }) => {
   await page.goto("/BIOSGuide?ref=friend");
   const home = page.getByRole("link", { name: "Visit RooIndustries.com", exact: true });

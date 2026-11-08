@@ -15,6 +15,133 @@ const ready = async (page, flow, code = "friend") => {
 };
 const quote = flow => flow.state.calls.filter(call => call.path === "/api/payment/quote").at(-1)?.body;
 
+test("a creator replacement survives a checkout storage quota failure", async ({ page, context, flow }, info) => {
+  await context.route("**/api/ref/validateReferral?code=second", route => route.fulfill({
+    json: { ok: true, referral: { code: "second", currentDiscountPercent: 5 } },
+  }));
+  await ready(page, flow);
+  await page.evaluate(() => {
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (key === "checkout_booking_state") throw new DOMException("Storage quota", "QuotaExceededError");
+      return setItem.call(this, key, value);
+    };
+  });
+  await input(page, "referral").fill("second");
+  await apply(page, "referral").click();
+  await expect(input(page, "referral")).toBeEnabled();
+  await expect(input(page, "referral")).toHaveValue("second");
+  await expect.poll(() => quote(flow)).toMatchObject({ referralCode: "second" });
+  await expect(page.getByRole("alert").filter({ hasText: "could not save your code choices" })).toBeVisible();
+  await expect(input(page, "referral")).toHaveValue("second");
+  expect((await stored(page)).referralCode).toBe("friend");
+  for (const width of [390, 1280]) {
+    await page.setViewportSize({ width, height: 844 });
+    await info.attach(`code-save-failure-${width}`, { body: await page.screenshot(), contentType: "image/png" });
+  }
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  await expect.poll(() => flow.state.calls.filter(call => call.path === "/api/payment/start").at(-1)?.body)
+    .toMatchObject({ bookingPayload: { referralCode: "second" } });
+});
+
+test("an incidental coupon link keeps a deliberate combinable coupon", async ({ page, context, flow }) => {
+  await context.route("**/api/ref/validateCoupon?code=later*", route => route.fulfill({
+    json: { ok: true, coupon: { code: "later", discountType: "percent",
+      discountPercent: 5, canCombineWithReferral: true } },
+  }));
+  await ready(page, flow, "");
+  await input(page, "coupon").fill("save20");
+  await apply(page, "coupon").click();
+  await expect.poll(async () => (await stored(page))?.couponCode).toBe("save20");
+  await page.goto("/payment?ref=later");
+  await expect(input(page, "coupon")).toBeEnabled();
+  await expect(input(page, "coupon")).toHaveValue("save20");
+  await expect.poll(() => quote(flow)).toMatchObject({ couponCode: "save20", referralCode: "" });
+  await page.reload();
+  await expect(input(page, "coupon")).toHaveValue("save20");
+});
+
+test("code edits settle when navigation keeps the same location key", async ({ page, context, flow }) => {
+  await ready(page, flow);
+  await page.goto("/payment?dodo_return=1");
+  await expect(input(page, "coupon")).toBeEnabled();
+  await page.evaluate(() => { Math.random = () => 0.12345678; });
+  await input(page, "coupon").fill("save20");
+  await apply(page, "coupon").click();
+  await expect.poll(async () => (await stored(page))?.couponCode).toBe("save20");
+  await expect.poll(() => quote(flow)).toMatchObject({ couponCode: "save20" });
+  await expect(input(page, "coupon")).toBeEnabled();
+  await page.getByRole("button", { name: "Remove coupon", exact: true }).click();
+  await expect.poll(async () => (await stored(page))?.couponCode).toBe("");
+  await expect.poll(() => quote(flow)).toMatchObject({ couponCode: "", referralCode: "friend" });
+  await expect(input(page, "coupon")).toBeEnabled();
+  await expect(input(page, "coupon")).toHaveValue("");
+  await context.route("**/api/payment/finalize", route => route.fulfill({
+    json: { ok: true, status: "booked", bookingId: "same-key-booking" },
+  }));
+  await page.evaluate(() => {
+    const booking = JSON.parse(sessionStorage.getItem("checkout_booking_state"));
+    sessionStorage.setItem("payment_session_state", JSON.stringify({ provider: "dodo", providerPayload: {},
+      fingerprint: JSON.stringify(booking), paymentAccessToken: "same-key-session" }));
+  });
+  await input(page, "referral").press("x");
+  await expect(page).toHaveURL(/\/payment-success$/);
+});
+
+test("a code edit retains the hold refreshed by payment cancellation", async ({ page, context, flow }) => {
+  await ready(page, flow);
+  await page.evaluate(() => {
+    const booking = JSON.parse(sessionStorage.getItem("checkout_booking_state"));
+    sessionStorage.setItem("payment_session_state", JSON.stringify({ provider: "paypal", providerPayload: {},
+      paymentAccessToken: "before-hold-refresh", fingerprint: JSON.stringify(booking) }));
+  });
+  await context.route("**/api/payment/cancel", route => route.fulfill({ json: {
+    ok: true, cancelled: true, refreshedHold: { slotHoldId: "refreshed-id", slotHoldToken: "refreshed-token",
+      slotHoldExpiresAt: new Date(Date.now() + 20 * 60000).toISOString() },
+  } }));
+  await page.reload();
+  await page.getByRole("button", { name: "Change payment method", exact: true }).click();
+  await expect(input(page, "coupon")).toBeEnabled();
+  await input(page, "coupon").fill("save20");
+  await apply(page, "coupon").click();
+  await expect.poll(async () => (await stored(page))).toMatchObject({ couponCode: "save20",
+    slotHoldId: "refreshed-id", slotHoldToken: "refreshed-token" });
+  await page.reload();
+  await expect(input(page, "coupon")).toBeEnabled();
+  expect((await stored(page)).slotHoldToken).toBe("refreshed-token");
+});
+
+test("saving a newer session retires an unsaved session for the same booking", async ({ page }) => {
+  const { readFile } = require("node:fs/promises");
+  await page.route("**/__test/session-module/*", async route => {
+    const name = new URL(route.request().url()).pathname.split("/").at(-1);
+    if (!["paymentSessionStorage.js", "browserStorage"].includes(name)) return route.abort();
+    const source = await readFile(require.resolve(`../src/lib/${name.replace(/\.js$/, "")}.js`), "utf8");
+    return route.fulfill({ contentType: "text/javascript", body: source });
+  });
+  await page.goto("/packages");
+  const result = await page.evaluate(async () => {
+    const storage = await import("/__test/session-module/paymentSessionStorage.js");
+    const unsaved = new Map();
+    const fingerprint = JSON.stringify({ packageTitle: "Performance Vertex Overhaul",
+      startTimeUTC: "2099-01-05T10:00:00.000Z", email: "visitor@example.invalid" });
+    const oldSession = { provider: "dodo", providerPayload: {}, fingerprint, paymentAccessToken: "retired-session" };
+    const setItem = Storage.prototype.setItem;
+    try {
+      Storage.prototype.setItem = () => { throw new DOMException("Storage quota", "QuotaExceededError"); };
+      if (!storage.writeStoredPaymentSession(oldSession, unsaved)) unsaved.set(oldSession.paymentAccessToken, oldSession);
+    } finally {
+      Storage.prototype.setItem = setItem;
+    }
+    const nextSession = { ...oldSession, paymentAccessToken: "current-session" };
+    const saved = storage.writeStoredPaymentSession(nextSession, unsaved);
+    storage.clearStoredPaymentSession(nextSession);
+    return { saved, recovered: storage.readCheckoutPaymentSession(fingerprint, unsaved) };
+  });
+  expect(result.saved).toBe(true);
+  expect(result.recovered).toBeNull();
+});
+
 test("booking review leaves another booking's payment untouched", async ({ page, context, flow }) => {
   await ready(page, flow);
   const session = await page.evaluate(() => {
@@ -127,13 +254,24 @@ test("code persistence preserves unrelated query markers without query size", as
 
 test("unsaved sessions stay recoverable for their own restored booking", async ({ page, context, flow }, info) => {
   await ready(page, flow);
-  await page.evaluate(() => {
+  await page.evaluate(async () => {
     const first = JSON.parse(sessionStorage.getItem("checkout_booking_state"));
     const other = { ...first, email: "other@example.invalid", referralCode: "", couponCode: "",
       checkoutCodes: { referral: null, coupon: null, dismissedReferralCode: "" } };
     const state = history.state;
-    history.pushState({ ...state, usr: { ...state.usr, bookingData: other } }, "", location.href);
-    history.back();
+    await new Promise(resolve => {
+      const replaceState = history.replaceState;
+      history.replaceState = function (...args) {
+        const result = replaceState.apply(this, args);
+        if (args[0]?.usr?.bookingData?.email === first.email) {
+          history.replaceState = replaceState;
+          resolve();
+        }
+        return result;
+      };
+      history.pushState({ ...state, usr: { ...state.usr, bookingData: other } }, "", location.href);
+      history.back();
+    });
   });
   await expect.poll(() => page.evaluate(() => history.state?.usr?.bookingData?.email)).toBe("visitor@example.invalid");
   await expect.poll(async () => (await stored(page))?.email).toBe("visitor@example.invalid");

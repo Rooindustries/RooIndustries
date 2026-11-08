@@ -101,6 +101,8 @@ export default function Payment({ hideFooter = false }) {
   const navigate = useNavigate();
   const [hydrated, setHydrated] = useState(false);
   const [browserTimeZone, setBrowserTimeZone] = useState("UTC");
+  const [checkoutSaveFailed, setCheckoutSaveFailed] = useState(false);
+  const unsavedCheckoutRef = useRef(undefined);
 
   useEffect(() => {
     setHydrated(true);
@@ -163,6 +165,7 @@ export default function Payment({ hideFooter = false }) {
   };
 
   const readStoredCheckout = () => {
+    if (unsavedCheckoutRef.current !== undefined) return unsavedCheckoutRef.current;
     try {
       const raw = sessionStorage.getItem(CHECKOUT_BOOKING_STORAGE_KEY);
       return raw ? JSON.parse(raw) : null;
@@ -172,13 +175,12 @@ export default function Payment({ hideFooter = false }) {
   };
 
   const writeStoredCheckout = (value) => {
-    try {
-      if (!value || typeof value !== "object") {
-        sessionStorage.removeItem(CHECKOUT_BOOKING_STORAGE_KEY);
-        return;
-      }
-      sessionStorage.setItem(CHECKOUT_BOOKING_STORAGE_KEY, JSON.stringify(value));
-    } catch {}
+    const checkout = value && typeof value === "object" ? value : null;
+    const saved = checkout
+      ? writeBrowserStorage("sessionStorage", CHECKOUT_BOOKING_STORAGE_KEY, JSON.stringify(checkout))
+      : removeBrowserStorage("sessionStorage", CHECKOUT_BOOKING_STORAGE_KEY);
+    unsavedCheckoutRef.current = saved ? undefined : checkout;
+    return saved;
   };
 
   const buildConfirmationNavigationState = (responseBody = {}) => {
@@ -419,8 +421,16 @@ export default function Payment({ hideFooter = false }) {
       coupon: sanitizeCouponForCheckout(nextCoupon),
       dismissedReferralCode: nextReferral?.code ? "" : dismissedCode,
     };
+    const storedCheckout = readStoredCheckout();
+    const latestCheckout = storedCheckout && paymentSessionMatchesCheckout(
+      JSON.stringify(storedCheckout), bookingFingerprint
+    ) ? storedCheckout : bookingData;
     const nextCheckout = {
-      ...bookingData,
+      ...latestCheckout,
+      slotHoldId: sessionHold?.slotHoldId || latestCheckout.slotHoldId || "",
+      slotHoldToken: sessionHold?.slotHoldToken || latestCheckout.slotHoldToken || "",
+      slotHoldExpiresAt:
+        sessionHold?.slotHoldExpiresAt || sessionHold?.expiresAt || latestCheckout.slotHoldExpiresAt || "",
       referralCode: checkoutCodes.referral?.code || "",
       couponCode: checkoutCodes.coupon?.code || "",
       checkoutCodes,
@@ -429,8 +439,9 @@ export default function Payment({ hideFooter = false }) {
     if (!nextReferral && dismissedCode) query.delete("ref");
     const serializedQuery = query.toString();
     const search = serializedQuery ? `?${serializedQuery}` : "";
-    pendingCodeLocationRef.current = { key: location.key };
-    writeStoredCheckout(nextCheckout);
+    pendingCodeLocationRef.current = { key: location.key, state: location.state };
+    setPreApplyingCodes(true);
+    setCheckoutSaveFailed(!writeStoredCheckout(nextCheckout));
     appliedCodeSelectionRef.current = codeSelectionKey(nextCheckout.referralCode, nextCheckout.couponCode, search);
     try {
       const draft = JSON.parse(sessionStorage.getItem(BOOKING_DRAFT_STORAGE_KEY) || "null");
@@ -439,7 +450,7 @@ export default function Payment({ hideFooter = false }) {
       const bookingEmail = String(bookingData.email || "").trim().toLowerCase();
       const bookingStart = String(bookingData.startTimeUTC || "");
       const hold = JSON.parse(sessionStorage.getItem("my_slot_hold") || "null");
-      const sameHold = hold?.holdToken && hold.holdToken === (sessionHold?.slotHoldToken || bookingData.slotHoldToken) &&
+      const sameHold = hold?.holdToken && hold.holdToken === nextCheckout.slotHoldToken &&
         hold.startTimeUTC === bookingStart;
       const draftStart = String(packageDraft?.startTimeUTC || (sameHold ? bookingStart : ""));
       if (bookingEmail && draftEmail === bookingEmail && bookingStart && draftStart === bookingStart && sameHold) {
@@ -729,11 +740,9 @@ export default function Payment({ hideFooter = false }) {
   useEffect(() => {
     if (!hydrated || !packageTitle) return;
 
-    if (pendingCodeLocationRef.current) {
-      if (pendingCodeLocationRef.current.key === location.key) {
-        setPreApplyingCodes(true);
-        return;
-      }
+    const pending = pendingCodeLocationRef.current;
+    if (pending) {
+      if (pending.key === location.key && pending.state === location.state) return;
       pendingCodeLocationRef.current = null;
     }
 
@@ -810,6 +819,10 @@ export default function Payment({ hideFooter = false }) {
 
         const safeCoupon = sanitizeCouponForCheckout(result.value);
         if (!safeCoupon) return;
+        if (source === "referral" && couponCode && safeCoupon.code.toLowerCase() !== couponCode.toLowerCase()) {
+          nextReferralInput = nextReferral?.code || "";
+          return;
+        }
         if (safeCoupon.canCombineWithReferral === false && nextReferral) {
           nextCouponInput = "";
           setCouponError(
@@ -868,7 +881,7 @@ export default function Payment({ hideFooter = false }) {
     };
 
     preApplyCodes().finally(() => {
-      if (active) setPreApplyingCodes(false);
+      if (active && !pendingCodeLocationRef.current) setPreApplyingCodes(false);
     });
 
     return () => {
@@ -881,6 +894,7 @@ export default function Payment({ hideFooter = false }) {
     hydrated,
     location.key,
     location.search,
+    location.state,
     packageTitle,
   ]);
 
@@ -1008,8 +1022,7 @@ export default function Payment({ hideFooter = false }) {
   }, [checkoutFingerprint, couponInput, hydrated, packageTitle, referralInput]);
 
   const persistPaymentSession = (nextSession) => {
-    if (writeStoredPaymentSession(nextSession)) unsavedPaymentSessionsRef.current.delete(nextSession.paymentAccessToken);
-    else unsavedPaymentSessionsRef.current.set(nextSession.paymentAccessToken, nextSession);
+    writeStoredPaymentSession(nextSession, unsavedPaymentSessionsRef.current);
     paymentView.session = nextSession;
     setPaymentSession(nextSession);
   };
@@ -1533,7 +1546,7 @@ export default function Payment({ hideFooter = false }) {
         } : {}),
       };
       if (!writeBrowserStorage("sessionStorage", CHECKOUT_BOOKING_STORAGE_KEY, JSON.stringify(returnCheckout)) ||
-          !writeStoredPaymentSession(session)) {
+          !writeStoredPaymentSession(session, unsavedPaymentSessionsRef.current)) {
         showBanner("error", "Your browser could not save this payment session. Checkout has stayed here so you can check its status or change payment method. Allow browser storage and try again to open checkout.", { persistent: true });
         return;
       }
@@ -1554,11 +1567,14 @@ export default function Payment({ hideFooter = false }) {
   useEffect(() => {
     const query = new URLSearchParams(location.search);
     const session = readCurrentPaymentSession();
-    if (!hydrated || preApplyingCodes || pendingCodeLocationRef.current || session?.provider !== "dodo" || !session.paymentAccessToken ||
+    if (!hydrated || preApplyingCodes || pendingCodeLocationRef.current ||
+        session?.provider !== "dodo" || !session.paymentAccessToken ||
         paymentSession?.paymentAccessToken !== session.paymentAccessToken ||
         !paymentSessionMatchesCheckout(session.fingerprint, checkoutFingerprint) ||
         (!query.has("dodo_return") && !query.has("dodo_cancel"))) return;
-    const returnKey = JSON.stringify([session.paymentAccessToken, paymentView.key, paymentView.fingerprint, query.has("dodo_cancel")]);
+    const returnKey = JSON.stringify([
+      session.paymentAccessToken, paymentView.key, paymentView.fingerprint, query.has("dodo_cancel"),
+    ]);
     if (dodoReturnHandled.current === returnKey) return;
     dodoReturnHandled.current = returnKey;
     const action = query.has("dodo_cancel") ? handleChangePaymentMethod()
@@ -1916,6 +1932,14 @@ export default function Payment({ hideFooter = false }) {
       </motion.div>
 
       <motion.div variants={itemVariants}>
+        {checkoutSaveFailed && (
+          <p
+            role="alert"
+            className="mt-6 rounded-xl border border-danger-border bg-danger-soft px-4 py-3 text-sm text-danger-text"
+          >
+            Your browser could not save your code choices. They still apply to this checkout, but reloading may lose them.
+          </p>
+        )}
         {banner && banner.text && (
           <div
             ref={bannerRef}

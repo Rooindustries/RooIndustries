@@ -40,9 +40,16 @@ const readStoredPaymentSession = () => {
   return null;
 };
 
-export const writeStoredPaymentSession = (session) => {
-  if (!session?.paymentAccessToken || !session?.provider || !session?.fingerprint || !session?.providerPayload) return false;
-  return writeBrowserStorage("sessionStorage", PAYMENT_SESSION_STORAGE_KEY, JSON.stringify(session));
+export const writeStoredPaymentSession = (session, unsaved) => {
+  if (!session?.paymentAccessToken || !session?.provider ||
+      !session?.fingerprint || !session?.providerPayload) return false;
+  const saved = writeBrowserStorage("sessionStorage", PAYMENT_SESSION_STORAGE_KEY, JSON.stringify(session));
+  if (saved) {
+    for (const [token, candidate] of unsaved) {
+      if (paymentSessionMatchesCheckout(candidate.fingerprint, session.fingerprint)) unsaved.delete(token);
+    }
+  } else unsaved.set(session.paymentAccessToken, session);
+  return saved;
 };
 
 export const clearStoredPaymentSession = (session) => {
@@ -56,7 +63,9 @@ export const clearStoredPaymentSession = (session) => {
 export const readCheckoutPaymentSession = (fingerprint, unsaved) => {
   const stored = readStoredPaymentSession();
   if (stored && paymentSessionMatchesCheckout(stored.fingerprint, fingerprint)) return stored;
-  return [...unsaved.values()].find(session => paymentSessionMatchesCheckout(session.fingerprint, fingerprint)) || null;
+  return [...unsaved.values()].find(
+    session => paymentSessionMatchesCheckout(session.fingerprint, fingerprint)
+  ) || null;
 };
 
 export const readHoldPaymentSession = (hold) => {

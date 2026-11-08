@@ -179,6 +179,18 @@ const seedBookingSession = ({
   );
 };
 
+const seedPaymentSession = (paymentAccessToken) => {
+  const hold = JSON.parse(window.sessionStorage.getItem("my_slot_hold"));
+  window.sessionStorage.setItem("payment_session_state", JSON.stringify({
+    provider: "dodo",
+    paymentAccessToken,
+    providerPayload: { checkoutUrl: "/__test/checkout-handoff" },
+    fingerprint: JSON.stringify({ packageTitle: hold.packageTitle, startTimeUTC: hold.startTimeUTC,
+      originalOrderId: "", email: VALID_FORM.email, referralCode: "", couponCode: "" }),
+    result: { hold: { slotHoldId: hold.holdId, slotHoldToken: hold.holdToken } },
+  }));
+};
+
 const installDefaultFetch = ({
   settings = { dateSlots: [] },
   bookedSlots = [],
@@ -982,10 +994,7 @@ describe("booking calendar UI", () => {
       .spyOn(AbortSignal, "timeout")
       .mockReturnValue(controller.signal);
     seedBookingSession({ holdPhase: "payment_pending", step: 3 });
-    window.sessionStorage.setItem(
-      "payment_session_state",
-      JSON.stringify({ paymentAccessToken: "payment_access_timeout_1" })
-    );
+    seedPaymentSession("payment_access_timeout_1");
     global.fetch = jest.fn(async (url, options = {}) => {
       if (url === "/api/bookingAvailability") {
         return {
@@ -1046,10 +1055,7 @@ describe("booking calendar UI", () => {
         phase: "payment_pending",
       })
     );
-    window.sessionStorage.setItem(
-      "payment_session_state",
-      JSON.stringify({ paymentAccessToken: "payment_access_pending_1" })
-    );
+    seedPaymentSession("payment_access_pending_1");
     window.sessionStorage.setItem(
       "checkout_booking_state",
       JSON.stringify({
@@ -1192,10 +1198,7 @@ describe("booking calendar UI", () => {
 
   test("shows a payment-cancellation error on step 3", async () => {
     seedBookingSession({ holdPhase: "payment_pending", step: 3 });
-    window.sessionStorage.setItem(
-      "payment_session_state",
-      JSON.stringify({ paymentAccessToken: "payment_access_rejected_1" })
-    );
+    seedPaymentSession("payment_access_rejected_1");
     global.fetch = jest.fn(async (url) => {
       if (String(url).startsWith("/api/content/package")) {
         return {
