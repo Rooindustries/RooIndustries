@@ -172,8 +172,57 @@ test("protected deployments accept only the configured origin's bypass", async (
   const protection = "fixture-protection-1234";
   const result = await smoke({ protection }, { VERCEL_AUTOMATION_BYPASS_SECRET: protection });
   assert.equal(result.code, 0, result.output);
-  assert.ok(result.requests.every(row => row.bypass === protection));
+  assert.equal(result.requests[0].bypass, protection);
+  assert.equal(result.requests[0].setBypassCookie, "true");
+  assert.ok(result.requests.slice(1).every(row => !row.bypass && !row.setBypassCookie));
+  assert.ok(result.requests.slice(1).every(row => row.cookie?.includes("fixture_bypass=allowed")));
+  assert.doesNotMatch(result.output + JSON.stringify(result.requests.slice(1)), new RegExp(protection));
   assert.doesNotMatch(JSON.stringify(result.report), new RegExp(protection));
+});
+
+test("a browser cookie setup error is a smoke failure with its cause", async () => {
+  const protection = "fixture-protection-1234";
+  const result = await smoke({ protection }, {
+    VERCEL_AUTOMATION_BYPASS_SECRET: protection, FIXTURE_SMOKE_FAULT: "cookie",
+  });
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /fixture cookie setup failed.*fixture cookie cause/);
+  assert.doesNotMatch(result.output + JSON.stringify(result.report), new RegExp(protection));
+});
+
+test("the bypass cookie stays on its deployment host through browser redirects", async () => {
+  const protection = "fixture-protection-1234";
+  const other = await startSite({ listenHost: "::", onRequest: (pathname, request, response) => {
+    if (pathname !== "/final.js") return;
+    response.writeHead(200, { "content-type": "text/javascript" });
+    response.end("window.fixtureRedirectLoaded = true;");
+    return true;
+  } });
+  const destination = new URL("/final.js", other.base);
+  destination.hostname = "localhost";
+  try {
+    const result = await smoke({
+      protection,
+      onRequest: (pathname, request, response) => {
+        if (pathname !== "/redirect.js") return;
+        response.writeHead(302, { Location: destination.href });
+        response.end();
+        return true;
+      },
+      bodies: { "/booking": '<h1>Select a Date and Time for Your Session</h1>' +
+        '<script async src="/redirect.js"></script>' },
+    }, { VERCEL_AUTOMATION_BYPASS_SECRET: protection });
+    assert.equal(result.code, 0, result.output);
+    assert.ok(result.requests.some(row => row.path === "/redirect.js" && row.cookie?.includes("fixture_bypass=allowed")));
+    assert.ok(other.requests.some(row => row.path === "/final.js"));
+    assert.ok(other.requests.every(row => !row.cookie && !row.bypass));
+    assert.ok(result.requests.slice(1).every(row => !row.bypass && !row.setBypassCookie));
+    assert.doesNotMatch(result.output + JSON.stringify(result.report) +
+      JSON.stringify(result.requests.slice(1)) + JSON.stringify(other.requests),
+      new RegExp(protection));
+  } finally {
+    await other.close();
+  }
 });
 
 test("required resources refusing access are a money-path regression", async () => {
@@ -226,8 +275,8 @@ test("browser launch time belongs to the smoke before site requests start", asyn
 test("a deadline without an outstanding site request names the smoke phase", async () => {
   const result = await smoke({}, { FIXTURE_SMOKE_FAULT: "navigation", SMOKE_DEADLINE_MS: "500" });
   assert.equal(result.code, 1, result.output);
-  assert.match(result.output, /deadline.*package prices/i);
-  assert.equal(result.report.results.find(row => row.name === "package prices").couldNotRun, true);
+  assert.match(result.output, /deadline.*page \//i);
+  assert.equal(result.report.results.find(row => row.name === "page /").couldNotRun, true);
 });
 
 test("unexpected response handler errors report their cause and cannot pass", async () => {
@@ -264,9 +313,18 @@ test("unexpected body reader errors remain smoke failures with their cause", asy
   assert.match(result.output, /fixture reader cause/);
 });
 
+test("unexpected quote body reader errors remain smoke failures with their cause", async () => {
+  const result = await smoke({}, { FIXTURE_SMOKE_FAULT: "quote-body" });
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /fixture quote reader failed.*fixture quote reader cause/);
+});
+
 for (const resource of ["/api/payment/quote", "/api/payment/providers", "/api/bookingAvailability"]) {
   test(`a failed redirected API still fails initialized booking for ${resource}`, async () => {
-    const target = await startSite({ status: { "/final-api": 503 } });
+    const target = await startSite({
+      status: { "/final-api": 503 },
+      onRequest: (pathname, request, response) => { response.setHeader("Access-Control-Allow-Origin", "*"); },
+    });
     try {
       const result = await smoke({
         onRequest: (pathname, request, response) => {

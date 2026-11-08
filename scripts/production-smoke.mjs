@@ -1,11 +1,12 @@
 import fs from "node:fs";
 import {
-  smokeRequest, smokeResponseBody, isSmokeRedirect, isCiTarget, smokeErrorDetail,
-  SmokeRequestRefusal, SmokeResponseError,
+  smokeRequest, isCiTarget, smokeErrorDetail,
+  SmokeResponseError,
 } from "./lib/production-smoke-request.mjs";
+import { installCheckoutProbe } from "./lib/production-smoke-browser.mjs";
 import { isIP } from "node:net";
 import { isProductionMonitor } from "./lib/production-monitor.mjs";
-import { log, logError, redact, redactObject, deploymentOrigin } from "./lib/production-diagnostics.mjs";
+import { log, logError, redact, redactObject, redactSecret, deploymentOrigin } from "./lib/production-diagnostics.mjs";
 
 const PRODUCTION = "https://www.rooindustries.com";
 const MONEY_PAGES = ["/", "/packages", "/booking", "/payment"];
@@ -17,9 +18,15 @@ const PRICE_PATTERN = /^\$\d{1,3}(?:,\d{3})*(?:\.\d{2})?$/;
 class Refusal extends Error {}
 class CouldNotRun extends Error {}
 
-const activity = { phase: "browser launch", deadline: null, requests: new Set() };
+const activity = { phase: "browser launch", deadline: null, timer: null, requests: new Set() };
+let rejectDeadline;
+const deadline = new Promise((_, reject) => { rejectDeadline = reject; });
+const startDeadline = () => {
+  if (activity.deadline) return;
+  activity.deadline = Date.now() + SMOKE_DEADLINE_MS;
+  activity.timer = setTimeout(() => rejectDeadline(deadlineError()), SMOKE_DEADLINE_MS);
+};
 const requestStarted = request => {
-  activity.deadline ??= Date.now() + SMOKE_DEADLINE_MS;
   activity.requests.add(request);
 };
 const deadlineError = () => {
@@ -68,40 +75,55 @@ const resolveBase = (value) => {
   throw new Refusal(`the smoke only runs against ${PRODUCTION} or a local test server, not ${url.origin}.`);
 };
 
-const smokeHeaders = (url, base, original = {}) => {
-  const headers = { ...original };
-  delete headers["x-vercel-protection-bypass"];
+const bypassCookies = async base => {
   const bypass = String(process.env.VERCEL_AUTOMATION_BYPASS_SECRET || "").trim();
-  if (bypass && new URL(url).origin === base) headers["x-vercel-protection-bypass"] = bypass;
-  return headers;
-};
-
-const requestResource = async (url, options, required = true) => {
-  const request = Symbol();
-  if (required) requestStarted(request);
+  if (!bypass) return [];
   try {
-    const response = await smokeRequest(url, options);
-    const body = await smokeResponseBody(response);
-    return { response, body };
-  } finally {
-    activity.requests.delete(request);
-  }
-};
-
-const checkGet = async (url, check, base) => {
-  try {
-    const { response, body } = await requestResource(url, {
-      headers: smokeHeaders(url, base), signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    const response = await smokeRequest(base, {
+      headers: { "x-vercel-protection-bypass": bypass, "x-vercel-set-bypass-cookie": "true" },
+      redirect: "manual", signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
-    return await check(response, body);
+    const cookies = response.headers.getSetCookie().map(header => {
+      if (header.includes(bypass)) throw new Error("the bypass cookie contains the automation secret");
+      const [pair, ...attributes] = header.split(";").map(part => part.trim());
+      const separator = pair.indexOf("=");
+      if (separator <= 0) throw new Error("invalid bypass cookie");
+      const flags = attributes.map(attribute => attribute.toLowerCase());
+      const path = attributes.find(attribute => /^path=/i.test(attribute))?.slice(5) || "/";
+      const sameSite = attributes.find(attribute => /^samesite=/i.test(attribute))?.slice(9).toLowerCase();
+      const cookieUrl = new URL(base);
+      cookieUrl.pathname = path;
+      return {
+        name: pair.slice(0, separator), value: pair.slice(separator + 1), url: cookieUrl.href,
+        secure: flags.includes("secure"), httpOnly: flags.includes("httponly"),
+        ...(["strict", "lax", "none"].includes(sameSite)
+          ? { sameSite: sameSite[0].toUpperCase() + sameSite.slice(1) } : {}),
+      };
+    });
+    for (const cookie of cookies) redactSecret(cookie.value);
+    await response.body?.cancel();
+    if (!cookies.length) throw new Error("the deployment did not set a bypass cookie");
+    return cookies;
   } catch (error) {
-    if (error instanceof SmokeResponseError) throw error;
-    throw new CouldNotRun(smokeErrorDetail(error));
+    throw new CouldNotRun(`deployment protection: ${smokeErrorDetail(error)}`);
   }
 };
+
+let cookies = [];
+
+const checkGet = (browser, url, check, base) =>
+  withSmokePage(browser, base, { javaScriptEnabled: false }, async page => {
+    const response = await navigate(page, url);
+    if (!response?.ok()) throw new Error(`${new URL(url).pathname} answered ${response?.status()}`);
+    let body;
+    try { body = await response.body(); } catch (error) {
+      throw new CouldNotRun(`reading ${new URL(url).pathname}: ${smokeErrorDetail(error)}`);
+    }
+    return check(response, body);
+  });
 
 const expectHtml = async (response) => {
-  const type = response.headers.get("content-type");
+  const type = response.headers()["content-type"];
   if (!String(type).includes("text/html")) throw new SmokeResponseError(`answered ${type}`);
 };
 
@@ -122,80 +144,28 @@ const firstRequest = request => {
   return request;
 };
 
-const allowSmokeRequests = async (context, base, checkout, required, failed) => {
-  const active = new Map();
-  context.on("close", () => { for (const controller of active.values()) controller.abort(); });
-  context.on("requestfailed", request => active.get(request)?.abort());
+const allowSmokeRequests = async (context, required, failed) => {
   await context.route("**/*", async (route) => {
-    const request = route.request();
-    const url = new URL(request.url());
-    const original = firstRequest(request);
-    const originalUrl = new URL(original.url());
-    let quote = false;
-    if (checkout && original.method() === "POST" && originalUrl.origin === base &&
-        originalUrl.pathname === "/api/payment/quote" && !originalUrl.search) {
-      try {
-        const body = original.postDataJSON();
-        const fields = [
-          "packageTitle", "originalOrderId", "startTimeUTC", "email", "referralCode", "couponCode",
-          "upgradeIntentToken",
-        ];
-        quote = body?.packageTitle === checkout.packageTitle && Object.entries(body).every(([key, value]) =>
-          fields.includes(key) && (key === "packageTitle" || value === ""));
-      } catch { quote = false; }
-    }
-    const allowed = (request.method() === "GET" || quote) &&
-      (process.env.GITHUB_ACTIONS !== "true" || isCiTarget(url) || isProductionMonitor());
-    if (!allowed) {
-      if (required(request)) failed(new CouldNotRun(`${url.pathname} is blocked by the smoke request policy`));
-      return route.abort("blockedbyclient");
-    }
-    if (quote && request.method() === "POST") {
-      url.searchParams.set("packageTitle", checkout.packageTitle);
-    }
-    const headers = smokeHeaders(url.href, base, request.headers());
-    const controller = new AbortController();
-    active.set(request, controller);
     try {
-      const { response, body } = await requestResource(url.href, {
-        headers, redirect: "manual",
-        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]),
-      }, required(request));
-      if (quote && !isSmokeRedirect(response)) {
-        let payload;
-        try {
-          payload = JSON.parse(body.toString());
-        } catch (error) {
-          throw new SmokeResponseError("/payment quote is invalid JSON", { cause: error });
-        }
-        if (payload?.ok !== true || !payload.quoteFingerprint || !payload.quote ||
-            !Number.isFinite(payload.quote.netAmount) || typeof payload.quote.isFree !== "boolean") {
-          throw new SmokeResponseError("/payment quote is invalid");
-        }
+      const request = route.request();
+      const url = new URL(request.url());
+      const allowed = request.method() === "GET" &&
+        (process.env.GITHUB_ACTIONS !== "true" || isCiTarget(url) || isProductionMonitor());
+      if (!allowed) {
+        if (required(request)) failed(new CouldNotRun(`${url.pathname} is blocked by the smoke request policy`));
+        return await route.abort("blockedbyclient");
       }
-      const responseHeaders = Object.fromEntries(response.headers);
-      delete responseHeaders["content-encoding"];
-      delete responseHeaders["content-length"];
-      await route.fulfill({ status: response.status, headers: responseHeaders, body });
+      await route.continue();
     } catch (error) {
-      const detail = smokeErrorDetail(error);
-      if (!(error instanceof SmokeResponseError) && !(error instanceof SmokeRequestRefusal)) {
-        failed(new CouldNotRun(`response handling ${url.pathname}: ${detail}`));
-      } else if (!controller.signal.aborted && required(request)) {
-        failed(error instanceof SmokeRequestRefusal ? new CouldNotRun(detail) : new Error(detail));
-      }
-      try {
-        await route.abort("failed");
-      } catch (error) {
-        if (!controller.signal.aborted) {
-          failed(new CouldNotRun(`aborting ${url.pathname}: ${smokeErrorDetail(error)}`));
-        }
-      }
-    } finally {
-      active.delete(request);
+      failed(new CouldNotRun(`request handling: ${smokeErrorDetail(error)}`));
     }
   });
   await context.routeWebSocket(/.*/, (socket) => socket.close());
+};
+
+const navigate = (page, url) => {
+  startDeadline();
+  return page.goto(url, { waitUntil: "domcontentloaded", timeout: 0 });
 };
 
 const withSmokePage = async (browser, base, contextOptions, check) => {
@@ -211,6 +181,7 @@ const withSmokePage = async (browser, base, contextOptions, check) => {
   const context = await browser.newContext({ ...browserOptions, serviceWorkers: "block" })
     .catch(error => { throw new CouldNotRun(error.message); });
   const pending = new Set();
+  const timers = new Map();
   let drained;
   let fail;
   const applicationError = new Promise((_, reject) => {
@@ -218,44 +189,94 @@ const withSmokePage = async (browser, base, contextOptions, check) => {
   });
   const hasApplicationError = pattern => new RegExp(pattern, "i").test(document.body?.innerText || "");
   try {
-    await allowSmokeRequests(context, base, checkout, required, fail);
-    if (checkout) await context.addInitScript((booking) => {
-      sessionStorage.setItem("checkout_booking_state", JSON.stringify(booking));
-    }, checkout);
-    const page = await context.newPage();
-    page.on("pageerror", error => {
+    let page;
+    try {
+      await allowSmokeRequests(context, required, fail);
+      if (cookies.length) await context.addCookies(cookies);
+      if (checkout) await installCheckoutProbe(context, checkout);
+      page = await context.newPage();
+    } catch (error) {
+      throw new CouldNotRun(`preparing the browser: ${smokeErrorDetail(error)}`);
+    }
+    const responseError = error => fail(error instanceof SmokeResponseError ? new Error(smokeErrorDetail(error))
+      : new CouldNotRun(`response handling: ${smokeErrorDetail(error)}`));
+    const observe = handler => (...args) => {
+      try { Promise.resolve(handler(...args)).catch(responseError); } catch (error) { responseError(error); }
+    };
+    page.on("pageerror", observe(error => {
       const sources = (error.stack || "").split("\n").filter(frame => /^\s+at /.test(frame))
         .flatMap(frame => frame.match(/https?:\/\/[^\s)]+/g) || []);
       const origins = sources.map(source => { try { return new URL(source).origin; } catch { return null; } });
       if (origins.length && origins.every(origin => origin && origin !== base)) return;
       fail(new Error(`${new URL(page.url()).pathname} has a rendering error: ${error.message}`));
-    });
-    page.on("request", request => {
+    }));
+    page.on("request", observe(request => {
       if (required(request)) {
         const original = firstRequest(request);
+        const url = new URL(request.url());
+        if (process.env.GITHUB_ACTIONS === "true" && !isCiTarget(url) && !isProductionMonitor()) {
+          fail(new CouldNotRun(`${url.pathname} is blocked by the smoke request policy`));
+        }
         pending.add(original);
+        requestStarted(original);
+        timers.set(request, setTimeout(() => fail(new Error(`${url.pathname} timed out`)), REQUEST_TIMEOUT_MS));
       }
-    });
-    const finished = request => {
-      if (request.redirectedTo()) return;
+    }));
+    const redirects = response => [301, 302, 303, 307, 308].includes(response.status()) &&
+      response.headers().location;
+    page.on("response", observe(response => {
+      const request = response.request();
+      if (required(request) && !redirects(response) && !response.ok()) {
+        throw new SmokeResponseError(`${new URL(request.url()).pathname} answered ${response.status()}`);
+      }
+    }));
+    const clearRequest = request => {
+      clearTimeout(timers.get(request));
+      timers.delete(request);
       const original = firstRequest(request);
+      activity.requests.delete(original);
+      return original;
+    };
+    const finish = original => {
       pending.delete(original);
       if (!pending.size) drained?.();
     };
-    page.on("requestfinished", finished);
-    page.on("requestfailed", request => {
-      finished(request);
-      if (required(request) && /ERR_TOO_MANY_REDIRECTS/.test(request.failure()?.errorText || "")) {
-        fail(new Error(`${new URL(request.url()).pathname} exceeded the redirect limit`));
+    page.on("requestfinished", observe(async request => {
+      if (!required(request)) return;
+      const original = clearRequest(request);
+      const response = await request.response();
+      if (!response) throw new Error(`${new URL(request.url()).pathname} has no response`);
+      if (request.redirectedTo() || redirects(response)) return;
+      if (new URL(original.url()).pathname === "/api/payment/quote") {
+        let payload;
+        const body = await response.body();
+        try { payload = JSON.parse(body.toString()); } catch (error) {
+          throw new SmokeResponseError("/payment quote is invalid JSON", { cause: error });
+        }
+        if (payload?.ok !== true || !payload.quoteFingerprint || !payload.quote ||
+            !Number.isFinite(payload.quote.netAmount) || typeof payload.quote.isFree !== "boolean") {
+          throw new SmokeResponseError("/payment quote is invalid");
+        }
       }
-    });
+      finish(original);
+    }));
+    page.on("requestfailed", observe(request => {
+      if (!required(request)) return;
+      const original = clearRequest(request);
+      const reason = request.failure()?.errorText || "request failed";
+      if (!/ERR_ABORTED/.test(reason)) {
+        const detail = /ERR_TOO_MANY_REDIRECTS/.test(reason) ? "exceeded the redirect limit" : reason;
+        fail(new Error(`${new URL(request.url()).pathname} ${detail}`));
+      }
+      finish(original);
+    }));
     const renderedError = page.waitForFunction(hasApplicationError, APP_ERROR_PATTERN.source, {
       polling: 50, timeout: 0,
     }).then(() => {
       throw new Error(`${new URL(page.url()).pathname} shows an application error`);
     });
     const loaded = async () => {
-      const result = await check(page);
+      const result = await check(page, fail);
       if (pending.size) await new Promise(resolve => { drained = resolve; });
       if (await page.evaluate(hasApplicationError, APP_ERROR_PATTERN.source)) {
         throw new Error(`${new URL(page.url()).pathname} shows an application error`);
@@ -267,6 +288,10 @@ const withSmokePage = async (browser, base, contextOptions, check) => {
     if (!browser.isConnected()) throw new CouldNotRun(`the browser closed: ${error.message}`);
     throw error;
   } finally {
+    for (const [request, timer] of timers) {
+      clearTimeout(timer);
+      activity.requests.delete(firstRequest(request));
+    }
     await context.close();
   }
 };
@@ -279,7 +304,7 @@ const nodes = (value) => {
 
 const checkPrices = (browser, base, selectCheckout) =>
   withSmokePage(browser, base, { javaScriptEnabled: false }, async (page) => {
-    const response = await page.goto(`${base}/packages`, { waitUntil: "domcontentloaded", timeout: 30000 });
+    const response = await navigate(page, `${base}/packages`);
     if (!response?.ok()) throw new Error(`/packages answered ${response?.status()}`);
     const cards = await page.locator(".ri-package-card").evaluateAll((elements) => elements.map((card) => ({
       name: card.querySelector("h3")?.textContent?.trim() || "",
@@ -308,15 +333,20 @@ const FLOW_MARKERS = {
 };
 
 const checkPageRenders = (browser, base, pathname, checkout) =>
-  withSmokePage(browser, base, { checkout }, async (page) => {
+  withSmokePage(browser, base, { checkout }, async (page, fail) => {
     const flow = pathname === "/" ? "home" : pathname.slice(1);
     let quoted = false;
     if (pathname === "/payment") page.on("response", (response) => {
-      const request = firstRequest(response.request());
-      if (request.url() === `${base}/api/payment/quote` &&
-          request.method() === "POST" && response.ok()) quoted = true;
+      try {
+        const request = firstRequest(response.request());
+        const url = new URL(request.url());
+        if (url.origin === base && url.pathname === "/api/payment/quote" &&
+            request.method() === "GET" && response.ok()) quoted = true;
+      } catch (error) {
+        fail(new CouldNotRun(`response handling: ${smokeErrorDetail(error)}`));
+      }
     });
-    const response = await page.goto(`${base}${pathname}`, { waitUntil: "domcontentloaded", timeout: 30000 });
+    const response = await navigate(page, `${base}${pathname}`);
     if (!response?.ok()) throw new Error(`${pathname} answered ${response?.status()}`);
     const markerTimeout = Number(process.env.SMOKE_MARKER_TIMEOUT_MS || 15000);
     await page.waitForFunction(() => document.body.innerText.trim().length >= 20, null, { timeout: markerTimeout })
@@ -373,9 +403,7 @@ const checkPageRenders = (browser, base, pathname, checkout) =>
 });
 
 const checkReferral = (browser, base) => withSmokePage(browser, base, {}, async (page) => {
-    const response = await page.goto(`${base}/packages?ref=${REFERRAL_CODE}`, {
-      waitUntil: "domcontentloaded", timeout: 30000,
-    });
+    const response = await navigate(page, `${base}/packages?ref=${REFERRAL_CODE}`);
     if (!response?.ok()) throw new Error(`/packages?ref answered ${response?.status()}`);
     await page.waitForFunction((code) => sessionStorage.getItem("referral_session") === code, REFERRAL_CODE, {
       timeout: Number(process.env.SMOKE_MARKER_TIMEOUT_MS || 15000),
@@ -397,23 +425,11 @@ const main = async () => {
   const startedAt = Date.now();
   const withinDeadline = async (run) => {
     if (activity.deadline && Date.now() >= activity.deadline) throw deadlineError();
-    const operation = run();
-    const remaining = activity.deadline - Date.now();
-    let timer;
-    try {
-      return await Promise.race([
-        operation,
-        new Promise((_, reject) => {
-          timer = setTimeout(() => reject(deadlineError()), Math.max(0, remaining));
-        }),
-      ]);
-    } finally {
-      clearTimeout(timer);
-    }
+    return Promise.race([run(), deadline]);
   };
   const checks = [
-    ...MONEY_PAGES.map((path) => [`page ${path}`, () => checkGet(`${base}${path}`, expectHtml, base)]),
-    ["booking availability", () => checkGet(`${base}/api/bookingAvailability`, expectAvailability, base)],
+    ...MONEY_PAGES.map((path) => [`page ${path}`, () => checkGet(browser, `${base}${path}`, expectHtml, base)]),
+    ["booking availability", () => checkGet(browser, `${base}/api/bookingAvailability`, expectAvailability, base)],
   ];
   let chromium;
   try {
@@ -431,6 +447,15 @@ const main = async () => {
     const detail = `browser launch: ${smokeErrorDetail(error)}`;
     results.push({ name: "browser launch", ok: false, couldNotRun: true, detail });
     log(`SKIP  browser launch: ${detail}`);
+  }
+  if (browser) {
+    try { cookies = await bypassCookies(base); } catch (error) {
+      const detail = smokeErrorDetail(error);
+      results.push({ name: "deployment protection", ok: false, couldNotRun: true, detail });
+      log(`SKIP  deployment protection: ${detail}`);
+      await browser.close();
+      browser = null;
+    }
   }
   let checkout;
   try {
@@ -464,6 +489,7 @@ const main = async () => {
       }
     }
   } finally {
+    clearTimeout(activity.timer);
     await browser?.close();
   }
   const failed = results.filter((result) => !result.ok && !result.couldNotRun);

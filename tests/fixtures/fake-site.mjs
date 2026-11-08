@@ -29,14 +29,22 @@ export const startSite = (overrides = {}) => {
   const failures = new Map(Object.entries(overrides.failFirst || {}));
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, "http://site");
-    const entry = { method: req.method, path: url.pathname, at: Date.now() };
+    const entry = { method: req.method, path: url.pathname, url: req.url, headers: req.headers, at: Date.now() };
     if (req.headers["x-vercel-protection-bypass"]) entry.bypass = req.headers["x-vercel-protection-bypass"];
+    if (req.headers["x-vercel-set-bypass-cookie"]) entry.setBypassCookie = req.headers["x-vercel-set-bypass-cookie"];
+    if (req.headers.cookie) entry.cookie = req.headers.cookie;
     requests.push(entry);
-    if (overrides.protection && entry.bypass !== overrides.protection) {
-      res.writeHead(401, { "content-type": "text/html" });
-      return res.end(page("Deployment authentication required"));
+    if (overrides.protection) {
+      if (entry.bypass === overrides.protection && entry.setBypassCookie === "true") {
+        res.writeHead(302, { Location: "/", "Set-Cookie": "fixture_bypass=allowed; Path=/; HttpOnly; SameSite=Lax" });
+        return res.end();
+      }
+      if (!entry.cookie?.split(/;\s*/).includes("fixture_bypass=allowed")) {
+        res.writeHead(401, { "content-type": "text/html" });
+        return res.end(page("Deployment authentication required"));
+      }
     }
-    if (overrides.dropNonBrowser && !/Mozilla/.test(req.headers["user-agent"] || "")) return req.socket.destroy();
+    if (overrides.dropConnections) return req.socket.destroy();
     if (overrides.onRequest?.(url.pathname, req, res)) return;
     const pending = failures.get(url.pathname);
     if (pending > 0) {
@@ -54,7 +62,7 @@ export const startSite = (overrides = {}) => {
       res.writeHead(302, { Location: url.pathname });
       return res.end();
     }
-    if (overrides.resetFetchMidBody?.includes(url.pathname) && !/Mozilla/.test(req.headers["user-agent"] || "")) {
+    if (overrides.resetFetchMidBody?.includes(url.pathname)) {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       res.write("<!doctype html><html><body><h1>partial");
       return setTimeout(() => res.socket.destroy(), 20);
@@ -142,7 +150,12 @@ export const startSite = (overrides = {}) => {
               }).catch(() => {});`
           : `document.body.dataset.rooFlowReady = ${JSON.stringify(flow)}`;
         const readyCheck = startup.requiresExternalReady ? "if (!window.fixtureExternalReady) return;" : "";
-        res.end(`const initialize = () => { ${readyCheck} ${action}; }; const start = () => setTimeout(initialize, ${Number(startup.initializeDelay || 0)}); if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true }); else start();`);
+        res.end(`
+          const initialize = () => { ${readyCheck} ${action}; };
+          const start = () => setTimeout(initialize, ${Number(startup.initializeDelay || 0)});
+          if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });
+          else start();
+        `);
       }, startup.delay || 0);
     }
     if (url.pathname === "/packages") {
@@ -157,8 +170,12 @@ export const startSite = (overrides = {}) => {
         "/booking": "<h1>Select a Date and Time for Your Session</h1>",
         "/payment": "<h3>Booking Summary</h3>",
       };
-      const controls = url.pathname === "/booking" ? '<button aria-label="Next month">Next</button>' : url.pathname === "/payment" ? '<label for="payment-coupon-code">Coupon</label><input id="payment-coupon-code">' : "";
-      const body = (overrides.bodies?.[url.pathname] ?? `${markers[url.pathname] || `<h1>${url.pathname}</h1>`}<p>Fixture page ${url.pathname} with its usual content.</p>`) + controls;
+      const controls = url.pathname === "/booking" ? '<button aria-label="Next month">Next</button>'
+        : url.pathname === "/payment" ? '<label for="payment-coupon-code">Coupon</label><input id="payment-coupon-code">'
+          : "";
+      const defaultBody = `${markers[url.pathname] || `<h1>${url.pathname}</h1>`}` +
+        `<p>Fixture page ${url.pathname} with its usual content.</p>`;
+      const body = (overrides.bodies?.[url.pathname] ?? defaultBody) + controls;
       const external = overrides.scriptSources?.[url.pathname];
       const scripts = `<script async src="/__fixture/client-start.js?path=${encodeURIComponent(url.pathname)}"></script>` +
         (external ? `<script crossorigin="anonymous" src="${external}"></script>` : "");
@@ -168,7 +185,7 @@ export const startSite = (overrides = {}) => {
     return res.end();
   });
   return new Promise(resolve => {
-    server.listen(0, "127.0.0.1", () => resolve({
+    server.listen(0, overrides.listenHost || "127.0.0.1", () => resolve({
       base: `http://127.0.0.1:${server.address().port}`,
       requests,
       close: () => new Promise(done => {

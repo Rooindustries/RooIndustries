@@ -1,3 +1,9 @@
+const hiddenValues = new Set();
+
+export const redactSecret = value => {
+  if (value.length >= 4) hiddenValues.add(value);
+};
+
 export const redact = (value) => {
   let text = String(value).replace(/\b[a-z][a-z\d+.-]*:\/\/[^\s<>"']+/gi, raw => {
     try {
@@ -18,10 +24,13 @@ export const redact = (value) => {
       return raw.replace(/\/\/[^/\s]*@/, "//redacted@");
     }
   });
-  for (const [key, secret] of Object.entries(process.env)) {
-    if (!/TOKEN|SECRET|PASSWORD|DSN/.test(key)) continue;
+  const environmentSecrets = Object.entries(process.env)
+    .filter(([key]) => /TOKEN|SECRET|PASSWORD|DSN/.test(key)).map(([, secret]) => secret);
+  for (const secret of [...environmentSecrets, ...hiddenValues]) {
     for (const value of new Set([secret, secret.trim()])) {
-      if (value.length >= 4) text = text.split(value).join("[redacted]").split(encodeURIComponent(value)).join("[redacted]");
+      if (value.length >= 4) {
+        text = text.split(value).join("[redacted]").split(encodeURIComponent(value)).join("[redacted]");
+      }
     }
   }
   return text;

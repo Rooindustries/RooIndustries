@@ -54,7 +54,7 @@ test("a hung money page that times out is a money-path failure inside the smoke 
 });
 
 test("a deadline while required page requests are unfinished is a money-path failure", async () => {
-  const site = await startSite({ dropNonBrowser: true });
+  const site = await startSite({ hang: ["/"] });
   try {
     const result = await run(["--base", site.base], null, { SMOKE_DEADLINE_MS: "400" });
     assert.equal(result.code, 2, result.output);
@@ -317,7 +317,7 @@ test("deploy gate: without VERCEL_TOKEN a failure is reported but nothing is rol
   assert.deepEqual(vercel.requests, []);
 }));
 
-test("unreachable required pages are a money-path failure", () => withSite({ dropNonBrowser: true }, (site, result) => {
+test("unreachable required pages are a money-path failure", () => withSite({ dropConnections: true }, (site, result) => {
   assert.equal(result.code, 2, result.output);
   assert.match(result.output, /money-path check\(s\) failed/);
   assert.doesNotMatch(result.output, /Smoke could not run/);
@@ -351,7 +351,7 @@ test("a required page script that cannot load triggers recovery", async () => {
   });
 });
 
-test("deploy gate: unreachable required pages trigger recovery", () => withGate({ site: { dropNonBrowser: true } }, async ({ vercel, exec }) => {
+test("deploy gate: unreachable required pages trigger recovery", () => withGate({ site: { dropConnections: true } }, async ({ vercel, exec }) => {
   const result = await exec();
   assert.equal(result.code, 1, result.output);
   assert.equal(vercelChanges(vercel).length, 1);

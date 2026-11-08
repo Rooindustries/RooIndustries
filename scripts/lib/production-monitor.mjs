@@ -1,8 +1,9 @@
 import fs from "node:fs";
 
 export const isProductionMonitor = () => {
+  const workflow = "rooindustries/rooindustries/.github/workflows/production-smoke.yml@refs/heads/main";
   if (process.env.GITHUB_ACTIONS !== "true" || process.env.GITHUB_EVENT_NAME !== "deployment_status" ||
-      process.env.GITHUB_WORKFLOW_REF?.toLowerCase() !== "rooindustries/rooindustries/.github/workflows/production-smoke.yml@refs/heads/main") return false;
+      process.env.GITHUB_WORKFLOW_REF?.toLowerCase() !== workflow) return false;
   try {
     const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
     const deployment = new URL(event.deployment_status?.environment_url);
