@@ -663,13 +663,10 @@ export function AppContent({
       routePath={location.pathname}
       reservationRef={setPaymentHoldContainer}
     >
-      {eagerFlowContent ? (
-        <React.Fragment key={flowContentKey}>{flowContent}</React.Fragment>
-      ) : (
-        <Suspense key={flowContentKey} fallback={<RouteFallback />}>
-          {flowContent}
-        </Suspense>
-      )}
+      <React.Fragment key={flowContentKey}>
+        {eagerFlowContent ? flowContent : null}
+        <Suspense fallback={<RouteFallback />}>{eagerFlowContent ? null : flowContent}</Suspense>
+      </React.Fragment>
     </FlowModal>
   );
 

@@ -172,6 +172,28 @@ async function dialogShownAfterMount(page) {
   return { shownAt, mountedAt, afterMountMs: shownAt - mountedAt };
 }
 
+const recordStepGaps = (page) => page.evaluate(() => {
+  const steps = /^(Review your booking|Complete Payment)$/;
+  window.__stepGaps = 0;
+  const sample = () => {
+    const dialog = document.querySelector('[role="dialog"].ri-booking');
+    const headings = dialog ? [...dialog.querySelectorAll("h2, h3")] : [];
+    if (!headings.some(node => steps.test(node.textContent.trim()) && node.checkVisibility())) window.__stepGaps += 1;
+    if (!window.__stopStepGaps) requestAnimationFrame(sample);
+  };
+  requestAnimationFrame(sample);
+});
+
+const stopStepGaps = (page) => page.evaluate(() => {
+  window.__stopStepGaps = true;
+  return window.__stepGaps;
+});
+
+const delayLaterChunks = (page) => page.route("**/_next/static/chunks/**", async route => {
+  await new Promise(resolve => setTimeout(resolve, 1500));
+  await route.fallback();
+});
+
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
   test.describe(`${viewport.width}px`, () => {
     test.use({ viewport });
@@ -401,6 +423,17 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
       const layout = await settledDialogLayout(page, testInfo, "reopen");
       expect(grewOpenFromNothing(layout)).toBe(true);
+      expect(errors).toEqual([]);
+    });
+
+    test("a directly loaded booking keeps its review step until payment is ready", async ({ page, flow }) => {
+      const errors = watchErrors(page);
+      await flow.review();
+      await delayLaterChunks(page);
+      await recordStepGaps(page);
+      await page.getByRole("button", { name: "Continue to payment", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Complete Payment", exact: true })).toBeVisible();
+      expect(await stopStepGaps(page)).toBe(0);
       expect(errors).toEqual([]);
     });
 
