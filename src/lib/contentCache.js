@@ -6,7 +6,6 @@ import { reportRequestError, requestDeadline } from "./clientRequest";
 const CONTENT_MAX_AGE_MS = 60 * 1000;
 
 const inBrowser = typeof window !== "undefined";
-const snapshotReceivedAt = inBrowser ? Date.now() : 0;
 const entries = new Map();
 const inflight = new Map();
 const listeners = new Map();
@@ -35,10 +34,10 @@ const store = (resource, data, revision, requestSequence) => {
   notify(resource);
 };
 
-const seedContent = (resource, data, revision) => {
+const seedContent = (resource, data, revision, renderedAt) => {
   const current = entries.get(resource);
   if (!inBrowser || current?.data === data) return;
-  const entry = { data, revision, receivedAt: snapshotReceivedAt, sequence: 0 };
+  const entry = { data, revision, receivedAt: revision === null ? 0 : renderedAt, sequence: 0 };
   if (!outranks(entry, current)) return;
   entries.set(resource, entry);
   notify(resource);
@@ -53,7 +52,7 @@ export const loadContent = (resource) => {
   const requestSequence = ++sequence;
   const request = getPublicContentEntry(resource, {}, { cache: "no-cache", signal: requestDeadline() })
     .then(({ data, revision }) => {
-      if (!data || typeof data !== "object" || Array.isArray(data)) {
+      if (data !== null && (typeof data !== "object" || Array.isArray(data))) {
         throw new Error("Public content could not be read.");
       }
       store(resource, data, revision, requestSequence);
@@ -91,16 +90,18 @@ const shownEntry = (cached, initialData, revision) => {
 };
 
 export function useContent(resource, initialData = null) {
-  const revisions = useContext(ContentRevisionContext);
+  const snapshot = useContext(ContentRevisionContext);
   const visible = useContext(ContentVisibleContext);
-  const snapshotRevision = Number.isSafeInteger(revisions?.[resource]) ? revisions[resource] : null;
+  const revision = snapshot?.revisions?.[resource];
+  const snapshotRevision = Number.isSafeInteger(revision) ? revision : null;
+  const renderedAt = snapshot?.renderedAt ?? 0;
   const subscribeToResource = useCallback((listener) => subscribe(resource, listener), [resource]);
   const readEntry = useCallback(() => entries.get(resource), [resource]);
   const cached = useSyncExternalStore(subscribeToResource, readEntry, noEntry);
 
   useEffect(() => {
-    if (initialData !== null) seedContent(resource, initialData, snapshotRevision);
-  }, [resource, initialData, snapshotRevision]);
+    if (initialData !== null) seedContent(resource, initialData, snapshotRevision, renderedAt);
+  }, [resource, initialData, snapshotRevision, renderedAt]);
 
   useEffect(() => {
     if (visible) loadContent(resource).catch(() => {});

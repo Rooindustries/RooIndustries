@@ -13,6 +13,7 @@ export default function LegacyRoutePage({
   initialHomeData = null,
   initialRouteData = null,
   contentRevisions = null,
+  contentRenderedAt = 0,
   routeJsonLd = null,
   initialRouteComponent = null,
   initialHomeComponent = null,
@@ -29,7 +30,7 @@ export default function LegacyRoutePage({
 
   return (
     <MemoryRouter initialEntries={[initialEntry]}>
-      <ContentRevisionContext.Provider value={contentRevisions}>
+      <ContentRevisionContext.Provider value={{ revisions: contentRevisions, renderedAt: contentRenderedAt }}>
         <AppContent
           initialHomeData={initialHomeData}
           initialRouteData={initialRouteData}

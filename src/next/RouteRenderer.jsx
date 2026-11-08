@@ -23,6 +23,7 @@ export default async function RouteRenderer({
         initialRouteData={initialRouteData}
         routeJsonLd={routeJsonLd}
         contentRevisions={contentServer.readContentRevisions()}
+        contentRenderedAt={Date.now()}
         notFound={notFound}
       />
     </>

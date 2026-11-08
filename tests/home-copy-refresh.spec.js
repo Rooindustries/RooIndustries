@@ -49,8 +49,49 @@ test("returning home through site links refreshes copy edited in the CMS", async
   expect(await page.evaluate(() => window.__copyDocument)).toBe(true);
 });
 
+for (const state of ["updated", "missing", "failed"]) {
+  test(`a stale homepage seed refreshes on mount with ${state} content`, async ({ page }) => {
+    const errors = [];
+    page.on("console", message => {
+      if (message.type() === "error" && message.text().includes("Synthetic homepage refresh failure")) {
+        errors.push(message.text());
+      }
+    });
+    await page.clock.install({ time: new Date(Date.now() + 61_000) });
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    let refreshes = 0;
+    await page.route("**/api/content/hero", async route => {
+      refreshes += 1;
+      await gate;
+      const data = state === "missing" ? null : { headingLine1: "Updated stale heading" };
+      await route.fulfill(state === "failed"
+        ? { status: 503, json: { ok: false, error: "Synthetic homepage refresh failure" } }
+        : { json: { ok: true, data, revision: 999 } });
+    });
+    try {
+      await page.goto("/");
+      await hydrated(page);
+      await expect(page.locator("#top h1")).toContainText("Fixture Hero Heading One");
+      await expect.poll(() => refreshes).toBe(1);
+      release();
+      if (state === "failed") {
+        await expect.poll(() => errors.length).toBe(1);
+        await expect(page.locator("#top h1")).toContainText("Fixture Hero Heading One");
+      } else {
+        await expect(page.locator("#top h1")).not.toContainText("Fixture Hero Heading One");
+        if (state === "updated") await expect(page.locator("#top h1")).toContainText("Updated stale heading");
+        expect(errors).toEqual([]);
+      }
+    } finally {
+      release();
+    }
+  });
+}
+
 for (const [label, data] of [["missing", null], ["wrong-shaped", []]]) {
-  test(`a ${label} refresh keeps the published copy`, async ({ page }) => {
+  const outcome = data === null ? "removes deleted copy" : "keeps the published copy";
+  test(`a ${label} refresh ${outcome}`, async ({ page }) => {
     await page.clock.install();
     await page.goto("/", { waitUntil: "networkidle" });
     await hydrated(page);
@@ -58,7 +99,8 @@ for (const [label, data] of [["missing", null], ["wrong-shaped", []]]) {
     await page.route("**/api/content/hero", route => route.fulfill({ json: { ok: true, data, revision: 999 } }));
     await returnHome(page);
     await finished;
-    await expect(page.locator("#top h1")).toContainText("Fixture Hero Heading One");
+    if (data === null) await expect(page.locator("#top h1")).not.toContainText("Fixture Hero Heading One");
+    else await expect(page.locator("#top h1")).toContainText("Fixture Hero Heading One");
   });
 }
 
