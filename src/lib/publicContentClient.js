@@ -31,6 +31,7 @@ export const getPublicContentEntry = async (resource, params, options) => {
         signal,
         ...(options?.cache ? { cache: options.cache } : {}),
       });
+      if (response.status === 304) return { notModified: true };
       body = await response.json();
     } catch (error) {
       if (markCancelled(error, response).requestCancelled || !response) throw error;

@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { MemoryRouter } from "react-router-dom";
-import { ContentRevisionContext } from "../lib/contentCache";
+import { ContentRevisionContext } from "../lib/ContentRevisionContext";
 import { AppContent } from "../App";
 import { buildQueryString } from "./routeQuery";
 import { sanitizeBrowserSearch } from "../lib/browserSearch";

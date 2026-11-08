@@ -1,6 +1,7 @@
-import { createContext, useCallback, useContext, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useContext, useEffect, useState, useSyncExternalStore } from "react";
 import { getPublicContentEntry } from "./publicContentClient";
-import { requestDeadline } from "./clientRequest";
+import { ContentRevisionContext, ContentVisibleContext } from "./ContentRevisionContext";
+import { reportRequestError, requestDeadline } from "./clientRequest";
 import homeCopy from "./homeCopy";
 import packageContent from "./packageContent";
 
@@ -33,8 +34,6 @@ const normalizeContent = (resource, value) => {
   return copyValue;
 };
 
-export const ContentRevisionContext = createContext(null);
-
 const outranks = (next, current) => {
   if (!current) return true;
   if (next.revision !== null && current.revision !== null && next.revision !== current.revision) {
@@ -49,8 +48,8 @@ const notify = (resource) => {
   listeners.get(resource)?.forEach((listener) => listener());
 };
 
-const store = (resource, data, revision, requestSequence, startedAt) => {
-  const next = { data, revision, receivedAt: startedAt, sequence: requestSequence };
+const store = (resource, data, revision, requestSequence) => {
+  const next = { data, revision, receivedAt: Date.now(), sequence: requestSequence };
   if (!outranks(next, entries.get(resource))) return;
   entries.set(resource, next);
   notify(resource);
@@ -58,10 +57,10 @@ const store = (resource, data, revision, requestSequence, startedAt) => {
 
 export const readContent = (resource) => entries.get(resource);
 
-const seedContent = (resource, data, refreshSnapshot, revision) => {
+const seedContent = (resource, data, revision) => {
   const current = entries.get(resource);
   if (!inBrowser || current?.data === data) return;
-  const ageUnknown = refreshSnapshot || (Array.isArray(data) && data.length === 0);
+  const ageUnknown = Array.isArray(data) && data.length === 0;
   const entry = { data, revision, receivedAt: ageUnknown ? -Infinity : snapshotReceivedAt, sequence: 0 };
   if (!outranks(entry, current)) return;
   entries.set(resource, entry);
@@ -77,12 +76,17 @@ export const loadContent = (resource) => {
   const requestSequence = ++sequence;
   const startedAt = Date.now();
   const request = getPublicContentEntry(resource, {}, { cache: "no-cache", signal: requestDeadline() })
-    .then(({ data, revision }) => {
-      if (!matchesContentType(resource, data)) throw new Error("Public content could not be read.");
-      store(resource, normalizeContent(resource, data), revision, requestSequence, startedAt);
+    .then(({ data, revision, notModified }) => {
+      if (notModified && current) {
+        store(resource, current.data, current.revision, requestSequence);
+      } else {
+        if (!matchesContentType(resource, data)) throw new Error("Public content could not be read.");
+        store(resource, normalizeContent(resource, data), revision, requestSequence);
+      }
       return entries.get(resource).data;
     })
     .catch((error) => {
+      reportRequestError(error);
       const kept = entries.get(resource);
       if (kept) return kept.data;
       throw error;
@@ -112,12 +116,9 @@ const shownEntry = (cached, initialData, revision) => {
   return outranks({ revision, sequence: 0 }, cached) ? undefined : cached;
 };
 
-export function useContent(
-  resource,
-  initialData = null,
-  { enabled = true, refreshSnapshot = false } = {}
-) {
+export function useContent(resource, initialData = null, { enabled = true } = {}) {
   const revisions = useContext(ContentRevisionContext);
+  const visible = useContext(ContentVisibleContext);
   const snapshotRevision = Number.isSafeInteger(revisions?.[resource]) ? revisions[resource] : null;
   const subscribeToResource = useCallback((listener) => subscribe(resource, listener), [resource]);
   const readEntry = useCallback(() => entries.get(resource), [resource]);
@@ -126,11 +127,11 @@ export function useContent(
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    if (initialData !== null) seedContent(resource, initialData, refreshSnapshot, snapshotRevision);
-  }, [resource, initialData, refreshSnapshot, snapshotRevision]);
+    if (initialData !== null) seedContent(resource, initialData, snapshotRevision);
+  }, [resource, initialData, snapshotRevision]);
 
   useEffect(() => {
-    if (!enabled) return undefined;
+    if (!enabled || !visible) return undefined;
     let active = true;
     loadContent(resource)
       .then(() => {
@@ -142,7 +143,7 @@ export function useContent(
     return () => {
       active = false;
     };
-  }, [resource, enabled, attempt]);
+  }, [resource, enabled, attempt, visible]);
 
   const entry = shownEntry(cached, initialData, snapshotRevision);
   return {

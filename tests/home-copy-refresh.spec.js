@@ -91,3 +91,22 @@ test("an unlabelled API copy cannot replace a newer cached revision", async ({ p
   await finished;
   await expect(page.locator("#top h1")).toContainText("Newer cached heading");
 });
+
+for (const exit of ["close", "back"]) {
+  test(`the retained home copy refreshes after booking ${exit}`, async ({ page, request, baseURL }) => {
+    await page.clock.install();
+    await page.goto("/", { waitUntil: "networkidle" });
+    await hydrated(page);
+    await page.locator('#packages a[href^="/booking"]').first().click();
+    await expect(page).toHaveURL(/\/booking/);
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await controlContent(request, baseURL, {
+      patch: { _id: "tooling-hero", headingLine1: "Published during booking" },
+    });
+    await page.clock.fastForward("01:01");
+    if (exit === "back") await page.goBack();
+    else await page.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.locator("#top h1")).toContainText("Published during booking");
+  });
+}

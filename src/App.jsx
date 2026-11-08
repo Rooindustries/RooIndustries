@@ -8,6 +8,7 @@ import {
   useNavigationType,
   Navigate,
 } from "react-router-dom";
+import { ContentVisibleContext } from "./lib/ContentRevisionContext";
 import Navbar from "./components/Navbar";
 import JsonLd from "./next/JsonLd";
 import { isProductionBrowser } from "./lib/productionBrowser";
@@ -669,18 +670,20 @@ export function AppContent({
           className={`relative z-10 flex flex-col flex-1 focus:outline-none${backgroundHeld ? " invisible" : ""}`}
           style={{ paddingTop: "var(--header-offset)" }}
         >
-          <AnimatedRoutes
-            setIsModalOpen={setIsModalOpen}
-            routesLocation={routesLocation}
-            routeKey={routesKey}
-            initialHomeData={initialHomeData}
-            initialRouteData={initialRouteData}
-            heroHeadingTag={isPaymentSuccessRoute || isThankYouRoute ? "h2" : "h1"}
-            initialRouteComponent={initialRouteComponent}
-            initialRoutePath={initialRoutePath}
-            initialHomeComponent={initialHomeComponent}
-            notFound={notFound}
-          />
+          <ContentVisibleContext.Provider value={!isFlowRoute}>
+            <AnimatedRoutes
+              setIsModalOpen={setIsModalOpen}
+              routesLocation={routesLocation}
+              routeKey={routesKey}
+              initialHomeData={initialHomeData}
+              initialRouteData={initialRouteData}
+              heroHeadingTag={isPaymentSuccessRoute || isThankYouRoute ? "h2" : "h1"}
+              initialRouteComponent={initialRouteComponent}
+              initialRoutePath={initialRoutePath}
+              initialHomeComponent={initialHomeComponent}
+              notFound={notFound}
+            />
+          </ContentVisibleContext.Provider>
         </main>
       </div>
       {isFlowRoute && (
