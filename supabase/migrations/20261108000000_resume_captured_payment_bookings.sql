@@ -75,22 +75,3 @@ begin
   end loop;
 end;
 $resume$;
-
-do $queue$
-declare
-  definition text;
-  previous constant text := 'payment.updated_at, source.payload';
-  replacement constant text := $projection$payment.updated_at, (select jsonb_object_agg(key, value) from jsonb_each(source.payload)
-      where key in ('_id', '_type', 'status', 'provider', 'updatedAt', 'nextRecoveryAt',
-        'reconciliationRecoveryTerminal', 'providerRecoveryTerminal', 'providerRecoveryTerminalReason',
-        'refundRequiresBookingSync', 'resourceReleasePending', 'requiresReschedule',
-        'emailDispatchRequired', 'lateCaptureWatchUntil', 'emailDispatch')) as payload$projection$;
-begin
-  definition := pg_get_functiondef('public.roo_fetch_recovery_payment_documents(text,text[],text,text,text,timestamptz,integer,boolean)'::regprocedure);
-  if strpos(definition, replacement) > 0 then return; end if;
-  if array_length(string_to_array(definition, previous), 1) is distinct from 2 then
-    raise exception 'unexpected contract: public.roo_fetch_recovery_payment_documents';
-  end if;
-  execute replace(definition, previous, replacement);
-end;
-$queue$;

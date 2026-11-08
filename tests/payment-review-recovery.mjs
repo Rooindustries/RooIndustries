@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { after, before, beforeEach, test } from 'node:test';
 import { createBookingContactFixture } from './fixtures/booking-contact.mjs';
 
@@ -10,7 +12,13 @@ class TestDate extends RealDate {
 }
 globalThis.Date = TestDate;
 let fixture;
-before(async () => { fixture = await createBookingContactFixture({ artifactName: 'payment-review-recovery' }); });
+before(async () => {
+  fixture = await createBookingContactFixture({
+    artifactName: 'payment-review-recovery',
+    ...(process.env.ROO_TEST_PAYMENT_SOURCE_ROOT
+      ? { sourceRoot: pathToFileURL(`${process.env.ROO_TEST_PAYMENT_SOURCE_ROOT}/`) } : {}),
+  });
+});
 beforeEach(async () => {
   await fixture.resetPayments();
   now = RealDate.now();
@@ -164,5 +172,39 @@ for (const outcome of ['booked', 'refunded', 'failed', 'cancelled', 'abandoned']
       assert.equal((await fixture.post('/api/payment/finalize', {}, token)).status, 401);
     }
     assert.deepEqual(await fixture.snapshot(), before);
+  });
+}
+
+for (const databaseState of ['migrated', 'rolled-back']) {
+  test(`deployment compatibility with the ${databaseState} database`, async () => {
+    const checkout = await start();
+    await fixture.commerce.patch(checkout.id).set({
+      providerPaymentState: 'succeeded', verificationState: 'server_verified',
+      recoveryFailureCount: 3, nextRecoveryAt: '',
+    }).commit();
+    if (databaseState === 'rolled-back') {
+      const rollback = new URL('../supabase/rollbacks/20261108000000_resume_captured_payment_bookings.sql', import.meta.url);
+      await fixture.database.apply('captured-payment-rollback', fs.readFileSync(rollback, 'utf8'));
+    }
+    now += 40 * 60_000;
+    const before = await saved(checkout);
+    const queued = await fixture.database.client.rpc('roo_fetch_recovery_payment_documents', {
+      p_backend: 'supabase', p_statuses: ['started', 'needs_recovery', 'finalizing'],
+      p_refunded_status: 'refunded', p_booked_status: 'booked', p_abandoned_status: 'abandoned',
+      p_now: new Date(now).toISOString(), p_limit: 50, p_dodo_enabled: true,
+    });
+    assert.equal(queued.error, null);
+    const response = await cron();
+    assert.equal(response.status, 200, JSON.stringify(response));
+    assert.equal(response.body.summary.abandoned, 0, JSON.stringify(response));
+    const completed = await saved(checkout);
+    assert.equal(completed.status, 'booked', JSON.stringify(completed));
+    assert.ok(completed.bookingId);
+    assert.equal(completed.providerOrderId, before.providerOrderId);
+    assert.notEqual(completed.recoveryReason, 'provider_order_was_never_exposed');
+    const hold = await fixture.commerce.getDocument(checkout.hold.slotHoldId);
+    assert.equal(hold.phase, 'consumed');
+    assert.deepEqual(queued.data.find(record => record._id === checkout.id), before);
+    assert.equal((await cron()).body.summary.abandoned, 0);
   });
 }

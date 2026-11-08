@@ -8,7 +8,9 @@ import { createHmac } from 'node:crypto';
 import { installNetworkGuard, refuseEnvFiles } from '../../scripts/lib/test-target-safety.mjs';
 import { portFromEnv } from '../../scripts/lib/free-tcp-port.mjs';
 
-export async function createBookingContactFixture({ artifactName = 'booking-contact' } = {}) {
+export async function createBookingContactFixture({
+  artifactName = 'booking-contact', sourceRoot = new URL('../../src/', import.meta.url),
+} = {}) {
   refuseEnvFiles();
   const host = process.env.ROO_TEST_HOST || '127.0.0.1';
   const requested = portFromEnv('BOOKING_CONTACT_PORT');
@@ -152,20 +154,20 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
     const { runLegacyApiHandler } = await import('../../src/lib/nextApiAdapter.js');
     const handlers = new Map();
     for (const [route, module] of Object.entries({
-      '/api/holdSlot': '../../src/server/booking/holdSlot.js',
-      '/api/bookingAvailability': '../../src/server/booking/availability.js',
-      '/api/payment/start': '../../src/server/api/payment/start.js',
-      '/api/payment/quote': '../../src/server/api/payment/quote.js',
-      '/api/payment/finalize': '../../src/server/api/payment/finalize.js',
-      '/api/payment/status': '../../src/server/api/payment/status.js',
-      '/api/payment/cancel': '../../src/server/api/payment/cancel.js',
-      '/api/payment/reconcile': '../../src/server/api/payment/reconcile.js',
-      '/api/payment/webhook/dodo': '../../src/server/api/payment/webhookDodo.js',
-      '/api/ref/getUpgradeInfo': '../../src/server/api/ref/getUpgradeInfo.js',
-      '/api/ref/updateBookingStatus': '../../src/server/api/ref/updateBookingStatus.js',
-      '/api/ref/createBooking': '../../src/server/api/ref/createBooking.js',
-      '/api/ref/sendBookingEmails': '../../src/server/api/ref/sendBookingEmails.js',
-    })) handlers.set(route, (await import(module)).default);
+      '/api/holdSlot': 'server/booking/holdSlot.js',
+      '/api/bookingAvailability': 'server/booking/availability.js',
+      '/api/payment/start': 'server/api/payment/start.js',
+      '/api/payment/quote': 'server/api/payment/quote.js',
+      '/api/payment/finalize': 'server/api/payment/finalize.js',
+      '/api/payment/status': 'server/api/payment/status.js',
+      '/api/payment/cancel': 'server/api/payment/cancel.js',
+      '/api/payment/reconcile': 'server/api/payment/reconcile.js',
+      '/api/payment/webhook/dodo': 'server/api/payment/webhookDodo.js',
+      '/api/ref/getUpgradeInfo': 'server/api/ref/getUpgradeInfo.js',
+      '/api/ref/updateBookingStatus': 'server/api/ref/updateBookingStatus.js',
+      '/api/ref/createBooking': 'server/api/ref/createBooking.js',
+      '/api/ref/sendBookingEmails': 'server/api/ref/sendBookingEmails.js',
+    })) handlers.set(route, (await import(new URL(module, sourceRoot))).default);
     server.on('request', async (req, res) => {
       try {
         const chunks = [];
