@@ -11,18 +11,18 @@ permissions:
 
 jobs:
   watch:
-    name: Production smoke started in time
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Fail while a Production smoke has waited over 20 minutes for its runner
+      - name: Check queued Production smoke runs
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
-          stuck="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/production-smoke.yml/runs?status=queued&per_page=100" \
-            --jq '.workflow_runs[] | select(now - (.created_at | fromdateiso8601) > 1200) | .html_url')"
-          if [ -n "$stuck" ]; then
-            echo "::error::A Production smoke has waited over 20 minutes for its runner. Set SMOKE_RUNNER to ubuntu-24.04 and re-run it: $stuck"
+          queued="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/workflows/production-smoke.yml/runs?status=queued&per_page=100" |
+            jq -r '.workflow_runs[] | select(.status == "queued" and (now - ((.run_started_at // .created_at) | fromdateiso8601) > 1200)) | .html_url')"
+          if [ -n "$queued" ]; then
+            printf '::error::A Production smoke run has been queued for over 20 minutes: %s\n' "${queued//$'\n'/ }"
             exit 1
           fi
-          echo "No Production smoke is waiting for a runner."
+          echo "No Production smoke run has been queued for over 20 minutes."

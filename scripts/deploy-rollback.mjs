@@ -53,6 +53,18 @@ const parseArgs = (argv) => {
   return options;
 };
 
+const readScope = () => {
+  const teamId = String(process.env.VERCEL_TEAM_ID || "").trim();
+  const projectId = String(process.env.VERCEL_PROJECT_ID || "").trim();
+  if (teamId && !/^team_[a-zA-Z0-9]+$/.test(teamId)) throw new Refusal("VERCEL_TEAM_ID must start with team_ and contain only letters and digits after it.");
+  if (projectId && !/^prj_[a-zA-Z0-9]+$/.test(projectId)) throw new Refusal("VERCEL_PROJECT_ID must start with prj_ and contain only letters and digits after it.");
+  if (process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true") {
+    const missing = [...(!teamId ? ["VERCEL_TEAM_ID"] : []), ...(!projectId ? ["VERCEL_PROJECT_ID"] : [])];
+    if (missing.length) throw new Refusal(`${missing.join(" and ")} ${missing.length === 1 ? "is" : "are"} not set. Set ${missing.join(" and ")} as repository variable${missing.length === 1 ? "" : "s"}.`);
+  }
+  return { teamId, projectId };
+};
+
 const resolveApiBase = () => {
   const raw = process.env.VERCEL_API_URL || VERCEL_API;
   let url;
@@ -104,7 +116,11 @@ const summarize = (deployment) => {
   return `${deploymentId(deployment)} ${deployment?.url || ""} ${when} ${sha}${message ? ` "${message}"` : ""}`;
 };
 
-const findScope = async (api, domain) => {
+const findScope = async (api, domain, configuredTeamId) => {
+  if (configuredTeamId) {
+    const { body: alias } = await api("GET", `/v4/aliases/${encodeURIComponent(domain)}`, { teamId: configuredTeamId });
+    return { teamId: configuredTeamId, alias };
+  }
   const { body } = await api("GET", "/v2/teams", { limit: 100 });
   const teams = Array.isArray(body?.teams) ? body.teams : [];
   for (const teamId of [...teams.map((team) => team.id), null]) {
@@ -119,16 +135,17 @@ const findScope = async (api, domain) => {
   throw new Refusal(`No Vercel team this token can use serves ${domain}.`);
 };
 
-const loadState = async (api, domain) => {
-  const { teamId, alias } = await findScope(api, domain);
+const loadState = async (api, domain, scope) => {
+  const { teamId, alias } = await findScope(api, domain, scope.teamId);
   if (!alias?.deploymentId || alias.redirect) throw new Refusal(`${domain} is not pointed at a deployment.`);
   const { body: live } = await api("GET", `/v13/deployments/${encodeURIComponent(alias.deploymentId)}`, { teamId });
   if (deploymentId(live) !== alias.deploymentId) throw new Refusal(`Vercel returned ${deploymentId(live)} for ${alias.deploymentId}.`);
+  if (scope.projectId && live.projectId !== scope.projectId) throw new Refusal(`VERCEL_PROJECT_ID is ${scope.projectId}, but the live deployment belongs to ${live.projectId}.`);
   if (alias.projectId && live.projectId !== alias.projectId) throw new Refusal(`${domain} belongs to ${alias.projectId}, but its deployment belongs to ${live.projectId}.`);
   if (readyState(live) !== "READY" || live.target !== "production") {
     throw new Refusal(`The live deployment ${deploymentId(live)} is ${readyState(live)} with target ${live.target}; fix production by hand.`);
   }
-  const { body: project } = await api("GET", `/v9/projects/${encodeURIComponent(live.projectId)}`, { teamId });
+  const { body: project } = await api("GET", `/v9/projects/${encodeURIComponent(scope.projectId || live.projectId)}`, { teamId });
   if (project?.id !== live.projectId) throw new Refusal(`Vercel returned project ${project?.id} for ${live.projectId}.`);
   const { body: listing } = await api("GET", "/v7/deployments", {
     projectId: project.id,
@@ -288,10 +305,11 @@ const main = async () => {
     console.log(USAGE);
     return;
   }
+  const scope = readScope();
   const token = String(process.env.VERCEL_TOKEN || "").trim();
   if (!token) throw new Refusal("VERCEL_TOKEN is not set. Create a Vercel token for the team and export it first.");
   const api = createClient(token, resolveApiBase());
-  const state = await loadState(api, options.domain);
+  const state = await loadState(api, options.domain, scope);
 
   if (options.status) {
     console.log(JSON.stringify({
@@ -323,7 +341,7 @@ const main = async () => {
       console.log("Dry run: nothing changed.");
       return;
     }
-    const fresh = await loadState(api, options.domain);
+    const fresh = await loadState(api, options.domain, scope);
     const freshTarget = fresh.newest;
     if (!freshTarget) throw new Refusal("No ready production deployment to promote.");
     refuseBusyProject(fresh);
@@ -353,7 +371,7 @@ const main = async () => {
     console.log("Dry run: nothing changed.");
     return;
   }
-  const fresh = await loadState(api, options.domain);
+  const fresh = await loadState(api, options.domain, scope);
   refuseBusyProject(fresh);
   if (deploymentId(fresh.live) !== deploymentId(state.live)) {
     throw new Refusal(`${deploymentId(state.live)} is no longer live (${deploymentId(fresh.live)} is); leaving production alone.`);
