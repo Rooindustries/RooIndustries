@@ -44,6 +44,14 @@ export const redactObject = value => {
   if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactObject(item)]));
   return value;
 };
+export const logJson = value => console.log(JSON.stringify(redactObject(value), null, 2));
+export const annotate = (level, message) => {
+  const safe = redact(message);
+  console.log(process.env.GITHUB_ACTIONS === "true"
+    ? `::${level}::${safe.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A")}`
+    : `${level}: ${safe}`);
+};
+
 export const deploymentOrigin = value => {
   let url;
   try { url = new URL(value); } catch { throw new Error("Deployment URL must be a credential-free HTTPS origin."); }
@@ -52,4 +60,11 @@ export const deploymentOrigin = value => {
     throw new Error("Deployment URL must be a credential-free HTTPS origin.");
   }
   return url.origin;
+};
+
+export const isLoopback = value => {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) && !url.username && !url.password;
+  } catch { return false; }
 };

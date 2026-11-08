@@ -89,6 +89,7 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           node-version: 22
+          browsers: chromium
       - run: |
           node_options="$(node scripts/lib/node-options.mjs --import "$PWD/scripts/lib/test-target-safety.mjs")"
           NODE_OPTIONS="$node_options" npm test -- --maxWorkers=2
@@ -108,7 +109,7 @@ jobs:
       - run: npm run test:tooling:dependencies
       - run: npm run check:seo
       - run: npm run check:supabase:migrations
-      - run: npm run test:deploy:rollback
+      - run: PLAYWRIGHT_BROWSERS_PATH="$HOME/.cache/ms-playwright" npm run test:deploy:rollback
 
   booking-model:
     name: Booking hold model
