@@ -4,6 +4,7 @@ const { navLink } = require("./fixtures/nav-link.cjs");
 const { clickAtHomeArrival } = require("./fixtures/home-arrival-click.cjs");
 const { clickAtRouteCommit: clickAtCommit } = require("./fixtures/route-commit-click.cjs");
 const { waitForHydrated, waitForRouteCommitted } = require("./fixtures/react-hydration.cjs");
+const { holdRoutes } = require("./fixtures/held-routes.cjs");
 
 const CPU_THROTTLE_RATE = Number(process.env.NAV_CPU_THROTTLE_RATE || 4);
 const FINAL_OFFSET_MAX = 160;
@@ -489,35 +490,8 @@ const clickOnceSectionLands = async (page, sectionSelector, linkSelector, hash) 
 const readHomeTop = (page) =>
   page.evaluate(() => ({ path: window.location.pathname, hash: window.location.hash, y: window.scrollY }));
 
-const holdRouteChunks = async (page, shouldHold = () => true) => {
-  const pending = [];
-  const inFlight = new Set();
-  let holding = true;
-  const pattern = "**/_next/static/chunks/*.js";
-  const handler = async (route) => {
-    const handled = (async () => {
-      const pause = await shouldHold();
-      if (holding && pause) pending.push(route);
-      else await route.continue();
-    })();
-    inFlight.add(handled);
-    try {
-      await handled;
-    } finally {
-      inFlight.delete(handled);
-    }
-  };
-  await page.route(pattern, handler);
-  return {
-    wait: () => expect.poll(() => pending.length, { timeout: 8000 }).toBeGreaterThan(0),
-    release: async () => {
-      holding = false;
-      await Promise.all(pending.splice(0).map((route) => route.continue()));
-      while (inFlight.size) await Promise.all(inFlight);
-      await page.unroute(pattern, handler);
-    },
-  };
-};
+const holdRouteChunks = (page, shouldHold) =>
+  holdRoutes(page, "**/_next/static/chunks/*.js", shouldHold);
 
 for (const [label, selector, path, hash] of [
   ["navbar FAQ", NAVBAR("faq").selector, "/", "#faq"],
