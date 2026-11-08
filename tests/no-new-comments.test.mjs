@@ -14,6 +14,7 @@ const baseFiles = {
   "partial.js": "/* Existing block\n * retains its shape.\n */\nexport const value = 1;\n",
   "credit.js": "/* codex legacy reference\n * retains its shape.\n */\nexport const legacy = 1;\n",
   "wrap.js": "export const first = 1;\nexport const second = 2;\n",
+  "cli.js": "#!/usr/bin/env node\nexport const cli = true;\n",
 };
 const mitHeader = `/*
  * Copyright (c) 2026 Example
@@ -85,6 +86,13 @@ test("comment policy checks committed Git changes without executing them", async
       ["line license header", "new.js",
         "// Copyright (c) 2026 Example\n// SPDX-License-Identifier: MIT\nexport const value = 1;\n", 0],
       ["license after shebang", "new.js", "#!/usr/bin/env node\n/* Copyright (c) 2026 Example */\nrun();\n", 0],
+      ["retained shebang", "cli.js", "#!/usr/bin/env node\nexport const cli = false;\n", 0],
+      ["retained shebang copied as comment", "cli.js",
+        "#!/usr/bin/env node\n// /usr/bin/env node\nexport const cli = true;\n", 1],
+      ["retained shebang copied across files", "new.js", "// /usr/bin/env node\nexport const value = 1;\n", 1,
+        {}, undefined, { "cli.js": "#!/usr/bin/env node\nexport const cli = false;\n" }],
+      ["removed shebang copied as comment", "new.js", "// /usr/bin/env node\nexport const value = 1;\n", 1,
+        {}, undefined, { "cli.js": "export const cli = true;\n" }],
       ["license after code", "new.js", "export const value = 1;\n/* SPDX-License-Identifier: MIT */\n", 1],
       ["license plus prose", "new.js",
         "/* SPDX-License-Identifier: MIT\n * Explains a choice.\n */\nexport const value = 1;\n", 1],
@@ -154,7 +162,7 @@ test("comment policy checks committed Git changes without executing them", async
         "fix: value\n\nCo-authored-by: helper[bot] <bot@example.invalid>"],
       ["human coauthor", "new.js", "export const value = 1;\n", 0, {},
         "fix: value\n\nCo-authored-by: Alex <alex@example.invalid>"],
-      ["human coauthor with ambiguous name", "new.js", "export const value = 1;\n", 0, {},
+      ["reserved coauthor name within human name", "new.js", "export const value = 1;\n", 1, {},
         "fix: value\n\nCo-authored-by: Devin Patel <devin@example.invalid>"],
       ["human coauthor with ambiguous email", "new.js", "export const value = 1;\n", 0, {},
         "fix: value\n\nCo-authored-by: Alex <alex@ai.example.invalid>"],
@@ -219,14 +227,51 @@ test("comment policy checks committed Git changes without executing them", async
       "Helper <helper@cursor.sh>",
       "Helper <helper@aider.chat>",
       "Helper <helper[bot]@users.noreply.github.com>",
+      "@Copilot",
+      "helper[bot] (automation)",
+      "Helper <helper@example.invalid> (automation)",
+      "Helper Bot <helper@example.invalid>",
+      "Helpful Assistant <helper@example.invalid>",
+      "GitHub Copilot (automation) <helper@example.invalid>",
+      "Helper <helper-bot@users.noreply.github.com>",
+      "Helper <helper_bot@example.invalid>",
+      "Helper <noreply-bot@example.invalid>",
+      "Helper <123+helper[bot]@users.noreply.github.com>",
+      "Helper <person@cursor.com>",
+      "Helper <person@sub.cursor.sh>",
+      "Helper <person@aider.chat>",
+      "Helper <person@openai.com>",
+      "Helper <person@anthropic.com>",
+      "Gemini Rivera <person@example.invalid>",
+      "Cursor Smith <person@example.invalid>",
+      "Aider Hassan <person@example.invalid>",
+      "Sonnet Jones <person@example.invalid>",
+      "Alex",
+      "Alex <alex@example.invalid> extra",
+      "Alex <alex@example.invalid> <second@example.invalid>",
+      "Alex <alex@>",
+      "Alex <alex@example.invalid",
+      "<alex@example.invalid>",
+      "Alex\n<alex@example.invalid>",
     ]) {
       cases.push([`assistant coauthor ${identity}`, "new.js", "export const value = 1;\n", 1, {},
         `fix: value\n\nCo-authored-by: ${identity}`]);
     }
-    for (const name of ["Gemini Rivera", "Cursor Smith", "Aider Hassan", "Sonnet Jones"]) {
+    for (const name of ["Alex Rivera", "Sam O'Neil", "María Fernández", "Anne-Marie Jones"]) {
       cases.push([`human coauthor ${name}`, "new.js", "export const value = 1;\n", 0, {},
         `fix: value\n\nCo-authored-by: ${name} <person@example.invalid>`]);
     }
+    for (const field of ["PR_TITLE", "PR_BODY"]) {
+      for (const identity of ["@Copilot", "Helper <helper@example.invalid> (automation)",
+        "Helper <helper-bot@example.invalid>"]) {
+        cases.push([`invalid coauthor in ${field}: ${identity}`, "new.js", "export const value = 1;\n", 1,
+          { [field]: `Co-authored-by: ${identity}` }]);
+      }
+      cases.push([`human coauthor in ${field}`, "new.js", "export const value = 1;\n", 0,
+        { [field]: "Co-authored-by: Alex Rivera <123+alex@users.noreply.github.com>" }]);
+    }
+    cases.push(["mixed human and bot coauthors", "new.js", "export const value = 1;\n", 1, {},
+      "fix: value\n\nCo-authored-by: Alex <alex@example.invalid>\nCo-authored-by: @Copilot"]);
     for (const [name, path, text, status, metadata = {}, message = "test: change fixture", extra = {}] of cases) {
       await t.test(name, () => {
         git("reset", "--hard", base);

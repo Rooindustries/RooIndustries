@@ -13,15 +13,21 @@ const assistants = "codex|claude|chatgpt|openai|anthropic|gpt-?\\d[\\w.-]*|" +
   "cursor|gemini|opus|sonnet|copilot|devin|aider|haiku|AI|bot";
 const attribution = new RegExp(`\\b(?:generated|written|created|authored|assisted)\\s+(?:by|with)\\s+` +
   `(?:(?:the|an?|github)\\s+)*(?:(?:${assistants})\\b|[\\w.-]+\\[bot\\])`, "i");
-const coauthorName = new RegExp(`^(?:(?:github|google)\\s+)?(?:${assistants})` +
-  `(?:[\\s_-]+(?:code|coding|assist|assistant|agent|bot|ai))*$`, "i");
-const coauthorEmail = new RegExp("^(?:gemini-code-assist@google\\.com|cursoragent@cursor\\.com|copilot@github\\.com|" +
-  "[^@\\s]+@(?:[\\w-]+\\.)*(?:cursor\\.sh|aider\\.chat))$", "i");
+const coauthorName = new RegExp(`\\b(?:${assistants}|assistant)\\b`, "i");
+const coauthorVendor = /(?:^|\.)(?:cursor\.(?:com|sh)|aider\.chat|openai\.com|anthropic\.com|claude\.ai|chatgpt\.com)$/i;
 function authored(text) {
   if (names.test(text) || attribution.test(text) || /🤖/.test(text)) return true;
-  return [...text.matchAll(/^\s*Co-authored-by:\s*([^<\r\n]+)(?:<([^>\r\n]+)>)?\s*$/gim)]
-    .some(([, name, email = ""]) => /\[bot\]/i.test(name + email) ||
-      coauthorName.test(name.trim()) || coauthorEmail.test(email.trim()));
+  return text.split(/\r?\n/).some((line) => {
+    if (!/^[ \t]*Co-authored-by:/i.test(line)) return false;
+    const match = line.match(/^[ \t]*Co-authored-by:[ \t]+([^<>]+?)[ \t]+<([^<>\s@]+)@([^<>\s@]+)>[ \t]*$/i);
+    if (!match) return true;
+    const [, name, mailbox, domain] = match;
+    return !/^[\p{L}\p{M}][\p{L}\p{M} .'-]*$/u.test(name) || coauthorName.test(name) ||
+      !/^[a-z\d.!#$%&'*+/=?^_`{|}~-]+$/i.test(mailbox) || coauthorName.test(mailbox.replace(/[._+-]/g, " ")) ||
+      /(?:^|[._+-])(?:bot|no-?reply)(?:$|[._+-])/i.test(mailbox) ||
+      !/^[a-z\d](?:[a-z\d-]*[a-z\d])?(?:\.[a-z\d](?:[a-z\d-]*[a-z\d])?)+$/i.test(domain) ||
+      coauthorVendor.test(domain);
+  });
 }
 const linter = new Linter();
 function inspect(text, path, {
@@ -70,6 +76,7 @@ try {
       const previous = inspect(git("show", `${base}:${path}`), path, { captureRanges: deletedRanges });
       for (const message of previous.messages) problems.push(`${JSON.stringify(path)} (base): ${message.message}`);
       for (const comment of previous.comments) {
+        if (comment.type === "Shebang") continue;
         const pool = whollyChanged(comment, deletedRanges) ? removedComments : retainedComments;
         pool.push(normalizeComment(comment.value));
       }
