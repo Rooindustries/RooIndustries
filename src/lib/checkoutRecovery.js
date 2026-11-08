@@ -2,7 +2,7 @@ import { writeBrowserStorage } from "./browserStorage.js";
 
 const activeStates = {
   started: "resumable",
-  needs_recovery_with_order: "resumable",
+  needs_recovery_with_order: "confirming",
   needs_recovery_without_order: "confirming",
   paid: "confirming",
   expired: "start_again",
@@ -12,7 +12,7 @@ const providers = {
   dodo: activeStates,
   paypal: activeStates,
   razorpay: activeStates,
-  free: { ...activeStates, needs_recovery_without_order: "resumable" },
+  free: activeStates,
 };
 const recoveryTable = { booking: providers, upgrade: providers };
 
@@ -73,7 +73,9 @@ export const readStoredPaymentSession = () => {
 
 export const writeStoredPaymentSession = session => {
   if (!session?.paymentAccessToken || !session.provider || !session.fingerprint) return false;
-  return writeBrowserStorage("sessionStorage", PAYMENT_SESSION_STORAGE_KEY, JSON.stringify(normalizePaymentSession(session)));
+  const normalized = normalizePaymentSession(session);
+  return writeBrowserStorage("sessionStorage", PAYMENT_SESSION_STORAGE_KEY,
+    JSON.stringify({ ...normalized, providerPayload: normalized.providerPayload || {} }));
 };
 
 export const clearStoredPaymentSession = () => {

@@ -446,6 +446,7 @@ describe("payment session UI", () => {
           quote: { grossAmount: 10, netAmount: 10, isFree: false },
         });
       }
+      if (url === "/api/payment/status") return response({ ok: true, status: "started" });
       if (url === "/api/payment/start") {
         starts += 1;
         return response({
@@ -480,7 +481,7 @@ describe("payment session UI", () => {
         "paypal_order_resume"
       );
     });
-    expect(starts).toBe(2);
+    expect(starts).toBe(1);
     expect(JSON.parse(sessionStorage.getItem("payment_session_state"))).toMatchObject({
       paymentAccessToken: original.paymentAccessToken,
       providerPayload: { orderId: original.providerPayload.orderId },

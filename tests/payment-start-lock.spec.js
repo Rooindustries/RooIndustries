@@ -70,6 +70,63 @@ test("a coupon edit shares the pending start and keeps the original checkout", a
   await expect(page).toHaveURL(/\/payment$/);
 });
 
+for (const status of ["started", "captured_client", "needs_recovery"]) {
+  test(`a saved ${status} checkout uses its status without restarting`, async ({ page, flow, baseURL }) => {
+    let starts = 0;
+    let finalizes = 0;
+    await page.route("**/api/payment/start", route => {
+      starts++;
+      return route.fulfill({ json: { ok: true, status: "started", provider: "dodo",
+        paymentAccessToken: "saved-payment", quoteFingerprint: "locked-quote",
+        quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
+        sessionExpiresAt: new Date(Date.now() + 20 * 60_000).toISOString(),
+        providerPayload: { orderId: "saved-order", checkoutUrl: `${baseURL}/__test/checkout-handoff` },
+      } });
+    });
+    await page.route("**/api/payment/status", route => route.fulfill({ json: { ok: true, status } }));
+    await page.route("**/api/payment/finalize", route => {
+      finalizes++;
+      return route.fulfill({ json: { ok: true, status: "booked", bookingId: "fixture-booking",
+        bookingSummary: { bookingId: "fixture-booking", packageTitle: "Performance Vertex Overhaul",
+          startTimeUTC: new Date(Date.now() + 86400000).toISOString(), email: "visitor@example.invalid" },
+      } });
+    });
+    await flow.review();
+    await flow.payment();
+    await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+    await expect(page).toHaveURL(/checkout-handoff$/);
+    await page.goBack();
+    await page.route("**/api/payment/quote", route => route.fulfill({ status: 409,
+      json: { ok: false, error: "The coupon has expired and the price changed." } }));
+    await page.reload();
+    await page.getByRole("button", { name: "Resume checkout", exact: true }).click();
+    await expect(page).toHaveURL(status === "started" ? /checkout-handoff$/ : /payment-success$/);
+    expect(starts).toBe(1);
+    expect(finalizes).toBe(status === "started" ? 0 : 1);
+  });
+}
+
+test("a nonpayable saved checkout remains readable after rollback", async ({ page, flow, baseURL }) => {
+  await page.route("**/api/payment/start", route => route.fulfill({ json: {
+    ok: true, status: "started", provider: "dodo", paymentAccessToken: "saved-payment",
+    quoteFingerprint: "locked-quote", quote: { grossAmount: 84.99, netAmount: 84.99 },
+    sessionExpiresAt: new Date(Date.now() - 1000).toISOString(),
+    providerPayload: { orderId: "saved-order", checkoutUrl: `${baseURL}/__test/checkout-handoff` },
+  } }));
+  await flow.review();
+  await flow.payment();
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => {
+    const parsed = JSON.parse(sessionStorage.getItem("payment_session_state"));
+    return Boolean(parsed?.paymentAccessToken && parsed.provider && parsed.fingerprint && parsed.providerPayload);
+  })).toBe(true);
+  const session = await page.evaluate(() => JSON.parse(sessionStorage.getItem("payment_session_state")));
+  expect(session.providerPayload).toEqual({});
+  expect(session.result.checkoutState).toBe("start_again");
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Start again", exact: true })).toBeVisible();
+});
+
 const paypalSdkStub = `
 window.paypal = {
   version: "5.0.0",

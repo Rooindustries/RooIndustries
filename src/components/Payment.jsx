@@ -1222,6 +1222,22 @@ export default function Payment({ hideFooter = false }) {
       }
       const closed = ["refunded", "failed", "abandoned"].includes(resumedStatus);
       if (!response.ok) throw new Error(data?.error || "Unable to load payment status.");
+      const resumed = normalizePaymentSession({ ...paymentSession, receivedAt: Date.now(),
+        sessionExpiresAt: data.sessionExpiresAt || paymentSession.sessionExpiresAt,
+        result: { ...paymentSession.result, ...data,
+          checkoutRecovery: { providerState: resumedStatus === "started" ? "unpaid" : "pending", ...data.checkoutRecovery },
+        } });
+      if (resumed.result.checkoutState === "resumable") {
+        operation.token = resumed.paymentAccessToken;
+        persistPaymentSession(resumed);
+        return resumed;
+      }
+      if (resumed.result.checkoutState === "confirming") {
+        operation.token = resumed.paymentAccessToken;
+        persistPaymentSession(resumed);
+        await finalizeSessionCheckout({ paymentAccessToken: resumed.paymentAccessToken, providerData: {}, operation });
+        return { ...resumed, terminal: true };
+      }
       if (closed && paymentSessionOwnsCurrentHold(paymentSession)) {
         const handled = clearPaymentSession(resumedStatus, paymentSession.paymentAccessToken);
         operation.token = "";
@@ -1349,6 +1365,12 @@ export default function Payment({ hideFooter = false }) {
       const confirming = nextSession.result.checkoutState === "confirming";
       if (!late && ["booked", "email_partial"].includes(returnedStatus)) {
         await navigateToConfirmation(nextSession.provider === "free" ? "free" : "paid", data, operation);
+        return { ...nextSession, terminal: true };
+      }
+      if (!late && confirming) {
+        operation.token = nextSession.paymentAccessToken;
+        persistPaymentSession(nextSession);
+        await finalizeSessionCheckout({ paymentAccessToken: nextSession.paymentAccessToken, providerData: {}, operation });
         return { ...nextSession, terminal: true };
       }
       if (late || conflict || nextSession.result.checkoutState !== "resumable" ||

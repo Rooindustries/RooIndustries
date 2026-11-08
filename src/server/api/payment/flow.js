@@ -1,4 +1,5 @@
 import resolveQuoteProviders from "./quoteProviders.js";
+import { checkoutRecoveryDecision } from "../../../lib/checkoutRecovery.js";
 import { buildBrowserCompletionBody } from "./bookingSummary.js";
 import envValue from "../../supabase/envValue.cjs";
 import { calculateCreatorCommission, originalBookingCommission } from "../../referrals/commissionMoney.js";
@@ -3402,13 +3403,17 @@ export const startPaymentSession = async ({
       httpStatus: 200,
       body: {
         ok: true,
-        status: PAYMENT_STATUS_STARTED,
+        status: refreshedStatus,
         bookingSummary: null,
         provider,
         providers: resolveQuoteProviders({ isFree: provider === "free" }),
         quote: buildQuotePayload(quote),
         quoteFingerprint: currentQuoteFingerprint,
-        providerPayload: buildProviderPayloadFromRecord(refreshed),
+        ...checkoutRecoveryDecision({ ...refreshed,
+          kind: refreshed.bookingPayload?.originalOrderId ? "upgrade" : "booking",
+          settled: Boolean(refreshed.bookingId || refreshed.providerPaymentId ||
+            refreshed.verificationState === "server_verified"),
+          providerPayload: buildProviderPayloadFromRecord(refreshed) }),
         paymentAccessToken,
         sessionExpiresAt: String(refreshed.sessionExpiresAt || "").trim(),
         refreshedHold: buildRefreshedHoldBody(refreshed),

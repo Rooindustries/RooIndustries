@@ -357,6 +357,16 @@ try{
     return{input,quote,started,id:payment._id,proof};
   };
   const a1Hook=async provider=>requestFlow(provider,{req:provider==='paypal'?paypalReq('PAYMENT.CAPTURE.COMPLETED',{id:'capture-fixture',supplementary_data:{related_ids:{order_id:'order-fixture'}}}):provider==='razorpay'?razorReq('payment.captured',{payment:{entity:razorpayPayment}}):dodoReq()});
+  for (const status of ['captured_client', 'needs_recovery']) await run(`saved-checkout-state-${status}`, async () => {
+    const checkout = await a1Start();
+    await commerce.patch(checkout.id).set({ status }).commit();
+    const result = await requestFlow('start', { body: checkout.input });
+    assert.equal(result.status, 200, JSON.stringify(result));
+    assert.equal(result.body.status, status);
+    assert.equal(result.body.checkoutState, 'confirming');
+    assert.equal(result.body.providerPayload, null);
+    return { status, paymentHandoffWithheld: true };
+  });
   for (const mode of ['complete', 'partial', 'missing-details']) await run(`recovery-reschedule-created-${mode}`, async () => {
     const checkout = await a1Start();
     const missing = mode === 'missing-details';
