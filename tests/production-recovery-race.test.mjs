@@ -8,6 +8,13 @@ import { changes, withRecovery, withLockTools, execute, LIVE_URL, root } from ".
 
 const broken = { status: { "/payment": 500 } };
 
+const addKnownBadRelease = state => {
+  const live = state.deployments.find(item => item.uid === "dpl_live");
+  state.deployments.unshift({ ...structuredClone(live), uid: "dpl_newer",
+    url: "rooindustries-newer-roo-industries.vercel.app", created: live.created + 1000,
+    createdAt: live.created + 1000, ready: live.ready + 1000 });
+};
+
 for (const omitted of [false, true]) {
   test(`a newer release in the final rollback race is restored even when source metadata is ${omitted ? "missing" : "present"}`, () => withRecovery({
     site: broken, vercel: { swapLiveBeforeMutation: true, omitFromDeployment: omitted },
@@ -35,7 +42,7 @@ test("a lost rollback response still restores a newer release", () => withRecove
 }));
 
 test("a newer ready release appearing only in the deployment list is promoted and gated", () => withRecovery({
-  site: broken, vercel: { swapNewestOnDeploymentRead: 4, omitFromDeployment: true },
+  site: broken, vercel: { swapNewestOnDeploymentRead: 5, omitFromDeployment: true },
 }, async ({ exec, vercel, restored }) => {
   const result = await exec();
   assert.equal(result.code, 1, result.output);
@@ -136,4 +143,44 @@ test("manual rollback and undo retain native locking when flock is absent", () =
     assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_live");
     assert.equal(vercel.state.project.autoAssignCustomDomains, true);
   });
+}));
+
+test("manual C to B to A rollback keeps the newer known-bad release pinned out until undo", () => withRecovery({
+  vercel: { tweak: state => {
+    addKnownBadRelease(state);
+    state.aliases[DOMAIN].deploymentId = "dpl_newer";
+    state.project.lastAliasRequest = { type: "promote", jobStatus: "succeeded",
+      fromDeploymentId: "dpl_live", toDeploymentId: "dpl_newer" };
+  } },
+}, async ({ env, vercel }) => {
+  for (const target of ["dpl_live", "dpl_previous"]) {
+    const result = await execute("deploy-rollback.mjs", [], env);
+    assert.equal(result.code, 0, result.output);
+    assert.equal(vercel.state.aliases[DOMAIN].deploymentId, target, result.output);
+    assert.equal(vercel.state.project.autoAssignCustomDomains, false);
+  }
+  assert.deepEqual(changes(vercel).map(row => row.path.split("/").slice(-2).join("/")),
+    ["rollback/dpl_live", "rollback/dpl_previous"]);
+  const undo = await execute("deploy-rollback.mjs", ["--undo"], env);
+  assert.equal(undo.code, 0, undo.output);
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_newer");
+  assert.equal(vercel.state.project.autoAssignCustomDomains, true);
+}));
+
+test("manual rollback restores a known release only when this rollback displaced it", () => withRecovery({
+  vercel: { swapLiveBeforeMutation: true, tweak: state => {
+    addKnownBadRelease(state);
+    state.project.autoAssignCustomDomains = false;
+    state.project.lastAliasRequest = { type: "rollback", jobStatus: "succeeded",
+      fromDeploymentId: "dpl_newer", toDeploymentId: "dpl_live" };
+  } },
+}, async ({ env, vercel, restored }) => {
+  const result = await execute("deploy-rollback.mjs", [], env);
+  assert.equal(result.code, 2, result.output);
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_newer", result.output);
+  assert.equal(vercel.state.project.autoAssignCustomDomains, true);
+  assert.deepEqual(changes(vercel).map(row => row.path.split("/").slice(-2).join("/")),
+    ["rollback/dpl_previous", "promote/dpl_newer"]);
+  assert.ok(restored.requests.some(row => row.path === "/api/payment/quote"));
+  assert.match(result.output, /restored dpl_newer.*own gate \(passed\)/);
 }));

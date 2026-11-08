@@ -343,12 +343,15 @@ const postMutation = async (api, state, domain, pathname, query, payload = {}) =
   }
 };
 
-const newerReadyRelease = async (api, state) => {
+const newerReadyRelease = async (api, state, displacedId) => {
+  const knownCreatedAt = Math.max(createdAt(state.live), createdAt(state.newest));
   const { body } = await api("GET", "/v7/deployments", {
     projectId: state.project.id, target: "production", state: "READY", limit: 20, teamId: state.teamId,
   });
   return (body?.deployments || []).filter(deployment => isLiveable(deployment, state.project.id) &&
-    createdAt(deployment) > createdAt(state.live)).sort((a, b) => createdAt(b) - createdAt(a))[0];
+    createdAt(deployment) > createdAt(state.live) &&
+    (createdAt(deployment) > knownCreatedAt || deploymentId(deployment) === displacedId))
+    .sort((a, b) => createdAt(b) - createdAt(a))[0];
 };
 
 const runRestoredGate = async (deployment) => {
@@ -369,9 +372,12 @@ const runRestoredGate = async (deployment) => {
 };
 
 const restoreNewerRelease = async (api, source, domain, rolledBackTo) => {
-  let newer = await newerReadyRelease(api, source);
-  if (!newer) return;
   let current = await loadState(api, domain);
+  const job = current.project.lastAliasRequest;
+  const displacedId = job?.type === "rollback" && job.toDeploymentId === rolledBackTo &&
+    job.fromDeploymentId !== deploymentId(source.live) ? job.fromDeploymentId : null;
+  let newer = await newerReadyRelease(api, source, displacedId);
+  if (!newer) return;
   for (;;) {
     const candidate = await resolveDeployment(api, current, deploymentId(newer));
     if (!isLiveable(candidate, source.project.id) || candidate.readySubstate === "ROLLING" ||
