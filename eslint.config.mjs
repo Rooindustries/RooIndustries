@@ -50,6 +50,7 @@ export default [
   },
   {
     files: ["scripts/**/*.{js,mjs,cjs}", "tests/fixtures/**/*.{js,mjs,cjs}"],
+    ignores: ["tests/fixtures/browser/**"],
     plugins: { roo },
     rules: ruleSet(["no-parent-ipc-disconnect"]),
   },

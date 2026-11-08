@@ -1220,19 +1220,11 @@ run("no-parent-ipc-disconnect", {
     `const { disconnect } = process; disconnect();`,
     `child.channel?.unref();`,
     `class Tracked extends Base { disconnect() { return super.disconnect(); } }`,
-    `await page.evaluate(() => { const observer = new MutationObserver(f); observer.disconnect(); });`,
-    `await page.evaluate(() => new ResizeObserver(f).disconnect());`,
-    `await page.evaluate(() => { const { disconnect: stop } = window.__watcher; stop(); });`,
-    `await locator.evaluate((node) => { const seen = new ResizeObserver(f); seen.observe(node); seen.disconnect(); });`,
-    `await page.addInitScript(() => { const watcher = new MutationObserver(f); addEventListener("load", () => watcher.disconnect()); });`,
-    `evaluateBrowserTask(page, ({ path }) => new Promise((resolve) => {
-      const observer = new MutationObserver(resolve);
-      observer.disconnect();
-    }), { path });`,
+    `socket.disconnect(reason);`,
   ],
   invalid: [
     {
-      name: "scripts run in Node, where an observer constructor can be anything",
+      name: "Node code can't prove a disconnect is a browser observer's",
       code: `new MutationObserver(f).disconnect();
         const observer = new MutationObserver(f); observer.disconnect();
         let watcher = null; watcher = new ResizeObserver(f); watcher?.disconnect();
@@ -1242,11 +1234,11 @@ run("no-parent-ipc-disconnect", {
       errors: Array.from({ length: 5 }, () => ({ messageId: "parent" })),
     },
     {
-      name: "page code only owns what it declares",
-      code: `await page.evaluate(() => child.disconnect());
-        await page.evaluate(() => { const { disconnect } = child; disconnect(); });
-        evaluateBrowserTask(page, () => supervisor.child.disconnect());
-        const Watch = fork; await page.evaluate(() => new Watch("worker.js").disconnect());`,
+      name: "page callbacks belong in tests/fixtures/browser",
+      code: `await page.evaluate(() => { const observer = new MutationObserver(f); observer.disconnect(); });
+        const helper = { evaluate: (run) => run(child) }; helper.evaluate((c) => c.disconnect());
+        await page.evaluate(() => (0, child).disconnect());
+        const stop = () => new MutationObserver(f).disconnect(); await page.evaluate(stop);`,
       errors: Array.from({ length: 4 }, () => ({ messageId: "parent" })),
     },
     {
