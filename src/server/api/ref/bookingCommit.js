@@ -140,6 +140,8 @@ export const prepareDeterministicBooking = ({ booking = {}, idempotencyKey = "" 
 export const commitBookingTransaction = async ({
   client,
   booking,
+  pricing = booking,
+  paymentRecord = {},
   idempotencyKey = "",
   slot = null,
   hold = null,
@@ -193,9 +195,11 @@ export const commitBookingTransaction = async ({
   const referral = normalize(referralId)
     ? await client.fetch('*[_type == "referral" && _id == $id][0]{_id}', {id: normalize(referralId)})
     : null;
+  const frozen = await freezeBookingCommission({client, pricing, booking: doc, paymentRecord});
   const now = new Date().toISOString();
   const bookingDocument = {
     ...doc,
+    ...frozen.bookingFields,
     ...(slotLockId ? { slotLockId } : {}),
     ...(couponReservation?.redemption?._id
       ? { couponRedemptionId: couponReservation.redemption._id }
@@ -275,6 +279,8 @@ export const commitBookingTransaction = async ({
       { _id: paymentRecordMutation.id, _rev: paymentRecordMutation.revision },
       (patch) => patch.set({
         ...paymentRecordMutation.set,
+        pricingSnapshot: frozen.pricingSnapshot,
+        payerEmail: frozen.bookingFields.payerEmail,
         ...(upgradeLockToCreate ? { startClaimId: upgradeLockToCreate._id } : {}),
         bookingId: doc._id,
         updatedAt: now,
@@ -323,11 +329,12 @@ export const createRequiresRescheduleBooking = async ({
     throw new Error("A payment record is required to create a reschedule booking.");
   }
   const payload = paymentRecord.bookingPayload || {};
-  const pricing = await freezeBookingCommission({
+  const frozen = await freezeBookingCommission({
     client,
     pricing: paymentRecord.pricingSnapshot || {},
-    buyerEmail: payload.email, payerEmail: paymentRecord.payerEmail,
+    booking: {email: payload.email}, paymentRecord,
   });
+  const pricing = frozen.pricing;
   const commission = calculateCreatorCommission(pricing);
   const originalCommissionAmount = commission.originalAmount;
   const dodoTotalAmount = Number(paymentRecord.providerPublicData?.totalAmount || Number(pricing.netAmount) * 100) / 100;
@@ -352,7 +359,6 @@ export const createRequiresRescheduleBooking = async ({
       commissionBaseAmount: commission.baseAmount,
       commissionCalculationVersion: 2,
       referralAttributionVersion: 2,
-      selfReferral: pricing.selfReferral === true,
       commissionAmount: originalCommissionAmount,
       ...(paymentRecord.provider === "dodo" ? {
         dodoCheckoutSessionId: paymentRecord.providerOrderId,
@@ -375,7 +381,6 @@ export const createRequiresRescheduleBooking = async ({
         paymentRecord.provider === "razorpay" ? paymentRecord.providerOrderId : "",
       razorpayPaymentId: paymentRecord.provider === "dodo" ? "" : paymentRecord.providerPaymentId || "",
       email: payload.email || paymentRecord.payerEmail || "",
-      payerEmail: paymentRecord.payerEmail || "",
       discord: payload.discord || "",
       specs: payload.specs || "",
       mainGame: payload.mainGame || "",
@@ -415,6 +420,7 @@ export const createRequiresRescheduleBooking = async ({
       localTimeZone: payload.localTimeZone || "",
       displayDate: payload.displayDate || "",
       displayTime: payload.displayTime || "",
+      ...frozen.bookingFields,
     },
   });
   const recoveryCase = {
@@ -495,7 +501,8 @@ export const createRequiresRescheduleBooking = async ({
         { _id: paymentRecordMutation.id, _rev: paymentRecordMutation.revision },
         (patch) => patch.set({
           ...paymentRecordMutation.set,
-          ...(pricing.selfReferral ? {pricingSnapshot: pricing} : {}),
+          pricingSnapshot: frozen.pricingSnapshot,
+          payerEmail: frozen.bookingFields.payerEmail,
           ...(upgradeLockToCreate ? { startClaimId: upgradeLockToCreate._id } : {}),
           bookingId: booking._id,
           updatedAt: now,

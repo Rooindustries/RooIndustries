@@ -19,7 +19,6 @@ import { normalizeBookingStatus } from "../../booking/bookingStatus.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 import { logSafeError } from "../../safeErrorLog.js";
 import { calculateCreatorCommission } from "../../referrals/commissionMoney.js";
-import { freezeBookingCommission } from "../../referrals/bookingCommission.js";
 import {
   buildDeferredEmailDispatch,
   getBookingForEmailDispatch,
@@ -702,9 +701,7 @@ export default async function handler(req, res) {
         holdSnapshot: existingRecord?.holdSnapshot || {},
         providerOrderId,
         providerPaymentId,
-        payerEmail: String(
-          bookingDoc.payerEmail || payerEmail || resolvedEmail || ""
-        ).trim(),
+        payerEmail: String(bookingDoc.payerEmail || "").trim(),
         verificationState: String(
           bookingDoc.paymentVerificationState || existingRecord?.verificationState || ""
         ).trim(),
@@ -1295,6 +1292,7 @@ export default async function handler(req, res) {
     }
     const pricing = isInternalPaymentFinalization
       ? {
+          ...frozenPricing,
           couponDiscountAmount: Number(frozenPricing.couponDiscountAmount || 0),
           couponDiscountPercent: Number(frozenPricing.couponDiscountPercent || 0),
           couponDiscountType: String(frozenPricing.couponDiscountType || "").trim(),
@@ -1311,8 +1309,6 @@ export default async function handler(req, res) {
           effectiveReferralId: String(
             frozenPricing.effectiveReferralId || ""
           ).trim(),
-          referralCreatorEmail: frozenPricing.referralCreatorEmail,
-          selfReferral: frozenPricing.selfReferral,
           commissionAmount: calculateCreatorCommission(frozenPricing).amount,
         }
       : livePricing;
@@ -1335,8 +1331,6 @@ export default async function handler(req, res) {
       });
     }
     const resolvedPackagePrice = `$${effectiveGrossAmount.toFixed(2)}`;
-
-    let verifiedPayerEmail = internalPaymentRecord?.payerEmail || payerEmail;
 
     if (paymentProvider === "razorpay") {
       const canUseServerVerifiedCapture =
@@ -1394,7 +1388,6 @@ export default async function handler(req, res) {
             error: "Payment verification failed.",
           });
         }
-        verifiedPayerEmail = paymentVerification.payerEmail || verifiedPayerEmail;
         if (isLegacyPublicCompletion && paymentVerification.refundStatus === "partial") {
           verifiedPartialRefund = { provider: "razorpay", refundStatus: "partial",
             providerPaymentId: razorpayPaymentId,
@@ -1443,17 +1436,10 @@ export default async function handler(req, res) {
             refundDetailsMissing: paypalVerification.refundDetailsMissing === true,
             refunds: paypalVerification.refunds };
         }
-        if (paypalVerification.payerEmail) {
-          verifiedPayerEmail = paypalVerification.payerEmail;
-        }
       }
     }
 
-    const resolvedPricing = await freezeBookingCommission({
-      client: writeClient, pricing, buyerEmail: resolvedEmail,
-      payerEmail: verifiedPayerEmail,
-    });
-    const {effectiveCommissionPercent, commissionAmount} = resolvedPricing;
+    const {effectiveCommissionPercent, commissionAmount} = pricing;
 
     if (!isUpgrade) {
       const signedHoldToken = verifyHoldToken({
@@ -1622,7 +1608,6 @@ export default async function handler(req, res) {
       dodoCheckoutSessionId,
       dodoPaymentId,
       paypalOrderId,
-      payerEmail: verifiedPayerEmail,
       razorpayOrderId,
       razorpayPaymentId,
       referralCode: effectiveReferralCode,
@@ -1631,16 +1616,15 @@ export default async function handler(req, res) {
       grossAmount: effectiveGrossAmount,
       netAmount: effectiveNetAmount,
       commissionPercent: effectiveCommissionPercent,
-      commissionBaseAmount: calculateCreatorCommission(resolvedPricing).baseAmount,
+      commissionBaseAmount: calculateCreatorCommission(pricing).baseAmount,
       commissionCalculationVersion: 2,
       referralAttributionVersion: 2,
-      selfReferral: resolvedPricing.selfReferral === true,
       commissionAmount,
       ...(paymentProvider === "dodo" && internalPaymentRecord.refundState === "partial" ? {
         dodoOriginalCommissionAmount: commissionAmount,
         refundedAmount: Number(internalPaymentRecord.refundProcessedAmountInSubunits || 0) / 100,
         refundStatus: "partial",
-        commissionAmount: calculateCreatorCommission(resolvedPricing, {
+        commissionAmount: calculateCreatorCommission(pricing, {
           paidAmount: dodoTotalAmount,
           refundedAmount: Number(internalPaymentRecord.refundProcessedAmountInSubunits || 0) / 100,
         }).amount,
@@ -1681,6 +1665,8 @@ export default async function handler(req, res) {
     const committed = await commitBookingTransaction({
       client: writeClient,
       booking: bookingDocument,
+      pricing,
+      paymentRecord: internalPaymentRecord || {},
       idempotencyKey: bookingRequestId,
       slot: isUpgrade ? null : { startTimeUTC: normalizedStartTimeUTC },
       hold: holdDoc,
@@ -1697,10 +1683,6 @@ export default async function handler(req, res) {
             revision: paymentRecordForLease._rev,
             set: {
               status: PAYMENT_STATUS_BOOKED,
-              ...(resolvedPricing.selfReferral ? {pricingSnapshot: {
-                ...internalPaymentRecord.pricingSnapshot,
-                commissionPercent: 0, commissionAmount: 0, selfReferral: true,
-              }} : {}),
               bookingId: bookingDocument._id,
               finalizationLeaseId: "",
               finalizationLeaseExpiresAt: "",

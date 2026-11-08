@@ -861,7 +861,7 @@ const mirrorLegacyBookingToPaymentRecord = async ({
     providerPaymentId: String(
       providerPaymentId || booking.razorpayPaymentId || ""
     ).trim(),
-    payerEmail: String(payerEmail || booking.payerEmail || booking.email || "").trim(),
+    payerEmail: String(booking.payerEmail ?? payerEmail ?? "").trim(),
     verificationState: String(booking.paymentVerificationState || "").trim(),
     verificationWarning: String(booking.paymentVerificationWarning || "").trim(),
     bookingId: String(booking._id || "").trim(),

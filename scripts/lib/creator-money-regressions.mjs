@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import {runPayerIdentityRegressions} from './payer-identity-regressions.mjs';
 
 export async function runCreatorMoneyRegressions({
   run, seed, documents, commerce, read, post, webhook, refundCurrent, fixture, sql, startCheckout, rulesSql,
@@ -50,6 +51,8 @@ export async function runCreatorMoneyRegressions({
     assert.equal((await post('/api/ref/createBooking', body)).status, 200);
     return booking;
   };
+
+  await runPayerIdentityRegressions({run, seed, documents, commerce, read, post, emailRequests, prepareCheckout});
 
   for (const provider of ['razorpay', 'paypal', 'dodo'])
     for (const mode of ['client', 'recovery'])
@@ -165,6 +168,8 @@ export async function runCreatorMoneyRegressions({
         const state = await seed('dodo', {booking: false});
         if (mode === 'full') await startCheckout(state);
         await documents.patch(state.creator._id).set({creatorEmail: 'new-creator@gmail.com'}).commit();
+        state.payment.customer.email = identity === 'payer'
+          ? 'new-creator+paid@gmail.com' : 'other@example.invalid';
         state.record = await commerce.patch(state.record._id).set({
           payerEmail: identity === 'payer' ? 'new-creator+paid@gmail.com' : 'other@example.invalid',
           bookingPayload: {...state.record.bookingPayload,

@@ -40,7 +40,9 @@ export async function dispatchCouponAlerts({client, redemptionId = ''}) {
       const result = await new Resend(apiKey).emails.send({
         from, to, subject: referralReview ? 'Paid booking needs a creator review' : 'Paid checkout exceeded a coupon limit',
         text: referralReview
-          ? ['A paid booking references a missing creator.', `Booking: ${current._id}`,
+          ? [current.referralReviewReason === 'payer_identity_unavailable'
+            ? 'The provider could not confirm the payer email for this paid booking.'
+            : 'A paid booking references a missing creator.', `Booking: ${current._id}`,
             `Creator record: ${current.referral?._ref}`, 'Commission is held at zero until this is reviewed.'].join('\n')
           : `A paid checkout kept its coupon discount after the coupon reached its use limit.\nBooking: ${redemption.bookingId}\nCoupon record: ${redemption.coupon?._ref}\nThe buyer keeps the agreed discount.`,
       }, {idempotencyKey: generation ? `${key}/${generation}` : key, signal});
