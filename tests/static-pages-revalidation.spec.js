@@ -134,12 +134,14 @@ test("/contact, /privacy, /terms and /meet-the-team keep their last content when
       await guardBrowserContext(context, [baseURL]);
       const page = await context.newPage();
       for (const [route, resource, heading] of [["/privacy", "privacy-policy", "Privacy Policy"], ["/terms", "terms", "Terms of Service"]]) {
-        const refetch = page.waitForResponse(response => new URL(response.url()).pathname === `/api/content/${resource}`);
-        await page.goto(route);
-        const body = await (await refetch).json();
-        timeline.push({ route, step: "browser refetch without a document", refetch: body });
+        const response = await request.get(`/api/content/${resource}`);
+        const body = await response.json();
+        timeline.push({ route, step: "content API without a document", response: body });
+        expect(response.status(), route).toBe(200);
+        expect(body.ok, route).toBe(true);
         expect(body.data, route).toBeNull();
-        await page.waitForTimeout(500);
+        await page.goto(route);
+        await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
         await expect(page.locator("main").getByRole("heading", { name: heading, exact: true }), route).toBeVisible();
         await expect(page.locator("main"), route).toContainText(expected[route]);
       }
