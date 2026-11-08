@@ -3,6 +3,7 @@ import reactHooks from "eslint-plugin-react-hooks";
 import roo, { rules } from "./eslint-rules/index.mjs";
 
 const emailTextRules = new Set(["no-hand-built-dollars"]);
+const pageOnly = "Files in tests/fixtures/browser are page scripts that Node reads as text and never runs.";
 const scriptRules = new Set(["no-parent-ipc-disconnect", "no-unchecked-group-signal", "no-linux-only-test-tooling"]);
 const navigationRules = new Set(["no-secure-context-navigation-keys"]);
 const testFiles = "src/**/__tests__/**";
@@ -56,9 +57,15 @@ export default [
   },
   {
     files: ["tests/fixtures/browser/**/*.{js,mjs,cjs}"],
+    languageOptions: { sourceType: "script" },
     rules: {
-      "no-restricted-globals": ["error", "process", "require", "global"],
-      "no-restricted-syntax": ["error", "ImportDeclaration", "ImportExpression"],
+      "no-restricted-globals": ["error",
+        ...["process", "require", "module", "exports", "global"].map((name) => ({ name, message: pageOnly })),
+      ],
+      "no-restricted-properties": ["error",
+        ...["globalThis", "window", "self"].flatMap((object) => ["process", "require"]
+          .map((property) => ({ object, property, message: pageOnly }))),
+      ],
       "no-with": "error",
     },
   },

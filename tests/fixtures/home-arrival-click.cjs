@@ -1,5 +1,9 @@
-const { watchHomeArrival } = require("./browser/arrival-observers.cjs");
+const { readFileSync } = require("node:fs");
+const { join } = require("node:path");
 const { waitForHydrated, waitForRouteCommitted } = require("./react-hydration.cjs");
+
+const pageScript = (name) => readFileSync(join(__dirname, "browser", name), "utf8").trim();
+const watchHomeArrival = pageScript("watch-home-arrival.js");
 
 async function clickAtHomeArrival(page, first, second, painted = false) {
   await waitForRouteCommitted(page);
@@ -7,7 +11,7 @@ async function clickAtHomeArrival(page, first, second, painted = false) {
   const start = page.url();
   const destination = await page.locator(second).first().evaluate((link) => link.href);
   try {
-    await page.evaluate(watchHomeArrival, { first, second, painted });
+    await page.evaluate(`(${watchHomeArrival})(${JSON.stringify({ first, second, painted })})`);
     await page.waitForFunction(({ destination, start }) => {
       if (location.href !== destination) return false;
       if (destination === start && !window.__homeArrivalClick?.state.dispatched) return false;
