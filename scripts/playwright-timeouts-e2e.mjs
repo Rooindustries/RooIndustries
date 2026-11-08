@@ -16,7 +16,6 @@ refuseEnvFiles();
 const require = createRequire(import.meta.url);
 const root = path.resolve(import.meta.dirname, "..");
 const configFile = path.resolve(process.argv[2] || "playwright.config.js");
-const base = require(configFile);
 const { writeFixturePorts, fixtureInstance } = require(path.join(path.dirname(configFile), "tests/fixtures/fixture-ports.cjs"));
 const workflow = yaml.safeLoad(await fs.readFile(".github/workflows/tests.yml", "utf8"));
 const output = path.join(root, "test-results");
@@ -71,12 +70,16 @@ async function inspectTrace(file) {
   return containsAction;
 }
 
-async function check(mode) {
+async function check(mode, recordingPolicy) {
   const healthy = mode === "unbounded" || mode === "local";
-  const directory = path.join(artifact, mode);
+  const directory = path.join(artifact, recordingPolicy ? `${mode}-${recordingPolicy}` : mode);
   await fs.mkdir(directory);
   const reportFile = path.join(directory, "results.json");
   const config = path.join(directory, "config.cjs");
+  await fs.writeFile(path.join(directory, "recordings.fixture.cjs"), `
+require(${JSON.stringify(path.join(root, "tests/structured-data.spec.js"))});
+require(${JSON.stringify(path.join(root, "tests/fixtures/playwright-timeouts/hang.fixture.cjs"))});
+`);
   await fs.writeFile(config, `
 const base = require(${JSON.stringify(configFile)});
 const bounded = Number.isFinite(base.metadata.groupTimeoutMs);
@@ -86,17 +89,19 @@ module.exports = {
   globalTimeout: bounded ? 16000 : 0,
   timeout: ${mode === "group" ? 60000 : healthy ? 10000 : 4000},
   retries: ${mode === "retry" ? 1 : 0},
-  testDir: ${JSON.stringify(path.join(root, "tests/fixtures/playwright-timeouts"))},
-  testMatch: "hang.fixture.cjs",
+  testDir: ${JSON.stringify(directory)},
+  testMatch: "recordings.fixture.cjs",
+  grep: /${mode}: (?:healthy )?browser action/,
   webServer: undefined,
   outputDir: ${JSON.stringify(path.join(directory, "browser"))},
   reporter: [["line"], ["json", { outputFile: ${JSON.stringify(reportFile)} }]],
   projects: [{ ...base.projects[0], testMatch: undefined, testIgnore: undefined }],
-  use: { ...base.use, video: "off" },
+  use: { ...base.use, ${recordingPolicy ? `trace: "${recordingPolicy}", video: "off"` : ""} },
 };
 `);
   const env = {
-    PATH: process.env.PATH, HOME: process.env.HOME, DISPLAY: process.env.DISPLAY,
+    PATH: process.env.PATH, HOME: process.env.HOME,
+    DISPLAY: process.env.DISPLAY, XAUTHORITY: process.env.XAUTHORITY,
     ...(process.env.LD_LIBRARY_PATH ? { LD_LIBRARY_PATH: process.env.LD_LIBRARY_PATH } : {}),
     PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH,
     ...(mode === "local" ? {} : { CI: "1" }), BASE_URL: origin, PW_PORT: String(port),
@@ -140,8 +145,11 @@ module.exports = {
   const results = casesIn(report.suites).flatMap(test => test.results);
   const traces = results.flatMap(result => result.attachments).filter(item => item.name === "trace");
   const traceActions = await Promise.all(traces.map(trace => inspectTrace(trace.path)));
+  const files = await fs.readdir(path.join(directory, "browser"), { recursive: true });
+  const sizes = await Promise.all(files.map(file => fs.stat(path.join(directory, "browser", file))));
   return {
     mode, code, elapsedMs: Date.now() - started, watchdogExpired,
+    artifactBytes: sizes.reduce((total, stat) => total + (stat.isFile() ? stat.size : 0), 0),
     statuses: results.map(result => result.status), traces: traces.length, traceActions,
     testDurationMs: results.reduce((total, result) => total + result.duration, 0),
     named: log.includes(`${mode}: browser action`), deadline: log.includes("Playwright group exceeded"),
@@ -161,6 +169,7 @@ try {
     assert.ok(!result.deadline && !result.watchdogExpired);
     assert.equal(result.traces, 0);
   }
+  const baseline = await check("pass", "off");
   for (const mode of ["pass", "test", "retry", "group"]) results.push(await check(mode));
   const budgetsFit = ["routes", "revalidation"].every(name => {
     const job = workflow.jobs[name];
@@ -175,7 +184,14 @@ try {
     "Upload timeout reports before the next Playwright run clears test-results.");
   assert.equal(steps[uploadIndex].with.path, "test-results/playwright-timeouts-*/");
   assert.ok(steps[uploadIndex].if.includes("always()"));
-  const report = { artifact, budgetsFit, results };
+  assert.equal(baseline.code, 0, "The recording-free comparison must pass.");
+  assert.equal(baseline.traces, 0);
+  const passingComparison = {
+    before: baseline, after: results[2],
+    elapsedChangeMs: results[2].elapsedMs - baseline.elapsedMs,
+    artifactChangeBytes: results[2].artifactBytes - baseline.artifactBytes,
+  };
+  const report = { artifact, budgetsFit, passingComparison, results };
   await fs.writeFile(path.join(artifact, "check.json"), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report));
   assert.ok(budgetsFit, "Each browser group needs a separate job deadline.");

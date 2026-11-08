@@ -2,7 +2,7 @@ const { waitForRouteCommitted } = require("./fixtures/react-hydration.cjs");
 const { test, expect } = require("@playwright/test");
 const fs = require("node:fs");
 
-test.use({ javaScriptEnabled: false, trace: "off", video: "off" });
+test.use({ javaScriptEnabled: false });
 
 const routes = fs.readdirSync("app", { recursive: true })
   .filter(file => file.endsWith("page.jsx") && !file.startsWith("admin/"))

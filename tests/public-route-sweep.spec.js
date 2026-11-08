@@ -268,7 +268,7 @@ function metadataDuplicates(records) {
   });
 }
 
-test.use({ trace: "off", video: "off", screenshot: "off" });
+test.use({ screenshot: "off" });
 test.describe.configure({ retries: 0 });
 test.afterAll(async () => {
   fs.mkdirSync(output, { recursive: true });

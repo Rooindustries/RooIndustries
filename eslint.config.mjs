@@ -21,7 +21,8 @@ export default [
     },
     plugins: { roo, "react-hooks": reactHooks },
     rules: ruleSet(Object.keys(rules).filter((name) =>
-      !emailTextRules.has(name) && !scriptRules.has(name) && !navigationRules.has(name)
+      !emailTextRules.has(name) && !scriptRules.has(name) && !navigationRules.has(name) &&
+      name !== "no-playwright-recording-overrides"
     )),
   },
   {
@@ -43,6 +44,10 @@ export default [
       "scripts/monitoring-deployment-e2e.mjs",
     ],
     rules: ruleSet(["no-linux-only-test-tooling"]),
+  },
+  {
+    files: ["tests/**/*.spec.{js,mjs,cjs}", "tests/**/*.fixture.{js,mjs,cjs}"],
+    rules: ruleSet(["no-playwright-recording-overrides"]),
   },
   {
     files: ["scripts/lib/process-group.mjs"],
