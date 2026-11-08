@@ -90,7 +90,7 @@ export default function PolicyDocument({ data }) {
 }
 
 export function PolicyPage({ contentKey, initialData = null }) {
-  const { data } = useContent(contentKey, initialData, { refreshSnapshot: true });
+  const { data } = useContent(contentKey, initialData);
 
   if (!data) return null;
 

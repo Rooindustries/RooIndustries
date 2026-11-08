@@ -8,6 +8,10 @@ const scriptRules = new Set(["no-parent-ipc-disconnect", "no-unchecked-group-sig
 const navigationRules = new Set(["no-secure-context-navigation-keys"]);
 const testFiles = "src/**/__tests__/**";
 const ruleSet = (names) => Object.fromEntries(names.map((name) => [`roo/${name}`, "error"]));
+const publicContentPattern = {
+  group: ["**/publicContentClient", "**/publicContentClient.js"],
+  message: "Read public copy through useContent so sections share revisions and refreshes.",
+};
 
 export default [
   {
@@ -16,12 +20,17 @@ export default [
     ],
     ignores: ["src/components/BookingForm.jsx", "src/components/UpgradeLink.jsx"],
     rules: {
+      "no-restricted-imports": ["error", { patterns: [publicContentPattern] }],
+    },
+  },
+  {
+    files: [
+      "src/components/{Hero,ReferralBox,About,Services,Faq,Packages,HowItWorks,SupportedGames,StreamerYoutuberReviews,Tools}.jsx",
+    ],
+    rules: {
       "no-restricted-imports": ["error", {
-        patterns: [{
-          group: ["**/publicContentClient", "**/publicContentClient.js"],
-          message: "Read public copy through useContent so sections share revisions and refreshes.",
-        }, {
-          group: ["**/packageContent", "**/packageContent.js"],
+        patterns: [publicContentPattern, {
+          group: ["**/packageContent", "**/packageContent.js", "**/toolContent", "**/toolContent.js"],
           message: "Normalize public content when it enters the shared cache, before rendering.",
         }],
       }],

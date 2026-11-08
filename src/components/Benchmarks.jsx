@@ -8,7 +8,7 @@ const BENCHMARK_IMAGE_WIDTHS = [480, 768, 960, 1280];
 const REVIEW_IMAGE_WIDTHS = [480, 768, 960];
 
 export default function Benchmarks({ initialData = null, setIsModalOpen = () => {} }) {
-  const { data } = useContent("benchmarks", initialData, { refreshSnapshot: true });
+  const { data } = useContent("benchmarks", initialData);
   const benchmarks = Array.isArray(data) ? data : [];
   const [selectedImage, setSelectedImage] = useState(null);
   const [selectedAlt, setSelectedAlt] = useState("");

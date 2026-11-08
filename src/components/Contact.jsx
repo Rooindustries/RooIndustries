@@ -6,9 +6,7 @@ import companyContent from "../lib/companyContent";
 const { CONTACT_GUIDANCE } = companyContent;
 
 export default function Contact({ initialData = null }) {
-  const { data: contactData, failed: contentFailed } = useContent("contact", initialData, {
-    refreshSnapshot: true,
-  });
+  const { data: contactData, failed: contentFailed } = useContent("contact", initialData);
   const [copyStatus, setCopyStatus] = useState("idle");
   const copyResetTimeoutRef = useRef(null);
 

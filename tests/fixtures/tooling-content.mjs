@@ -140,6 +140,12 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
     }, 'tooling-benchmark-a-beta'),
   );
   const images = [...layoutImages, ...benchmarkImages];
+  if (process.env.TOOLING_CLS_CONTENT === undefined) {
+    documents.push(document('review', {
+      alt: 'Fixture community review',
+      image: { _type: 'image', asset: { _type: 'reference', _ref: benchmarkImages[0].id } },
+    }, 'tooling-review'));
+  }
   const initialDocuments = structuredClone(documents);
   const dispatches = new Map();
   const rateLimits = new Map();

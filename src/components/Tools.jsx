@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useContent } from "../lib/contentCache";
 import { Link } from "react-router-dom";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
@@ -14,21 +14,10 @@ const FOCUSABLE_SELECTOR = [
 
 const categoryLabel = (cat) => cat || "Tool";
 
-const optimizeIconUrl = (url) => {
-  if (!url) return "";
-  const separator = url.includes("?") ? "&" : "?";
-  return `${url}${separator}auto=format&fit=max&w=64&h=64`;
-};
-
-const normalizeTools = (tools) => tools.map((tool) => ({
-  ...tool,
-  iconUrl: optimizeIconUrl(tool?.iconUrl),
-}));
-
 export default function Tools({ initialData = null }) {
   const handleHomeSectionLink = useHomeSectionLinkHandler();
   const { data, loaded, failed: loadError, retry } = useContent("tools", initialData);
-  const tools = useMemo(() => normalizeTools(Array.isArray(data) ? data : []), [data]);
+  const tools = Array.isArray(data) ? data : [];
   const loading = !Array.isArray(data) && !loaded && !loadError;
   const [showDownloadModal, setShowDownloadModal] = useState(false);
   const [pendingDownload, setPendingDownload] = useState(null);

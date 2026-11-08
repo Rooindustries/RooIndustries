@@ -1,5 +1,6 @@
 const { applyHomePageCopyOverrides, resolveHeroCopy } = require("./homeCopy");
 const { buildPackageOffers, normalizeFaqQuestions } = require("./packageContent");
+const { normalizeTools } = require("./toolContent");
 
 const { cache } = require("react");
 
@@ -187,7 +188,7 @@ async function fetchStaticPageContent(resource, { requireContent = false } = {})
     if (requireContent && content == null) {
       throw Object.assign(new Error(`No published ${resource} document.`), { code: "PAGE_CONTENT_MISSING" });
     }
-    return content;
+    return resource === "tools" && Array.isArray(content) ? normalizeTools(content) : content;
   } catch (error) {
     if (requireContent) await refuseContentFallback("Page content unavailable; keeping the previous page", error);
     return null;

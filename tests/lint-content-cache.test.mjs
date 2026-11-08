@@ -29,3 +29,10 @@ test("sections cannot normalize cached package or FAQ content again", async () =
     }
   }
 });
+
+test("tools cannot normalize cached content again", async () => {
+  const [result] = await eslint.lintText('import content from "../lib/toolContent";', {
+    filePath: "src/components/Tools.jsx",
+  });
+  assert.equal(result.messages.filter(({ ruleId }) => ruleId === "no-restricted-imports").length, 1);
+});

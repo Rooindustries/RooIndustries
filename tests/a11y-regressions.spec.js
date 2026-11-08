@@ -132,7 +132,11 @@ for (const [name, viewport] of [
         const { revision } = await (await route.fetch()).json();
         await route.fulfill({ json: { ok: true, data: [{ title: "Contrast Probe", beforeImage: image, afterImage: image }], revision } });
       });
-      await page.goto("/benchmarks", { waitUntil: "networkidle" });
+      await page.goto("/contact", { waitUntil: "networkidle" });
+      const menu = page.getByRole("button", { name: "Open menu", exact: true });
+      if (await menu.isVisible()) await menu.click();
+      await page.getByRole("button", { name: "Proof", exact: true }).click();
+      await page.getByRole("link", { name: "Benchmarks", exact: true }).click();
       const ratios = [];
       for (const label of ["BEFORE", "AFTER"]) {
         const badge = page.getByText(label, { exact: true }).first();

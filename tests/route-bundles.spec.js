@@ -266,7 +266,8 @@ test("Privacy preserves rich-text links and lists, and Terms still loads", async
     ] });
     await route.fulfill({ response, json: body });
   });
-  await page.goto("/privacy");
+  await page.goto("/about");
+  await page.locator('footer a[href="/privacy"]').click();
   const link = page.getByRole("link", { name: "Policy details", exact: true });
   await expect(link).toHaveAttribute("href", "https://example.invalid/policy");
   await expect(link).toHaveAttribute("target", "_blank");
