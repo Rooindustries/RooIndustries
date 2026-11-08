@@ -3,6 +3,7 @@ import reactHooks from "eslint-plugin-react-hooks";
 import roo, { rules } from "./eslint-rules/index.mjs";
 
 const emailTextRules = new Set(["no-hand-built-dollars"]);
+const pageOnly = "A file in tests/fixtures/browser is one function the page runs; the fixtures read it as text.";
 const scriptRules = new Set(["no-parent-ipc-disconnect", "no-unchecked-group-signal", "no-linux-only-test-tooling"]);
 const navigationRules = new Set(["no-secure-context-navigation-keys"]);
 const testFiles = "src/**/__tests__/**";
@@ -33,7 +34,9 @@ export default [
     linterOptions: { reportUnusedDisableDirectives: "off" },
     languageOptions: { ecmaVersion: "latest", sourceType: "module", globals: { ...globals.node } },
     plugins: { roo },
-    rules: ruleSet(["no-hand-built-node-options", "no-unchecked-group-signal"]),
+    rules: {
+      ...ruleSet(["no-hand-built-node-options", "no-unchecked-group-signal"]),
+    },
   },
   {
     files: [
@@ -50,8 +53,32 @@ export default [
   },
   {
     files: ["scripts/**/*.{js,mjs,cjs}", "tests/fixtures/**/*.{js,mjs,cjs}"],
+    ignores: ["tests/fixtures/browser/**", "scripts/lib/own-channel.mjs"],
     plugins: { roo },
-    rules: ruleSet(["no-parent-ipc-disconnect"]),
+    rules: { ...ruleSet(["no-parent-ipc-disconnect"]), "no-with": "error" },
+  },
+  {
+    files: ["tests/fixtures/browser/**/*.{js,mjs,cjs}"],
+    languageOptions: { sourceType: "script" },
+    rules: {
+      "no-restricted-globals": ["error",
+        ...["process", "require", "module", "exports", "global"].map((name) => ({ name, message: pageOnly })),
+      ],
+      "no-restricted-properties": ["error",
+        ...["globalThis", "window", "self"].flatMap((object) => ["process", "require"]
+          .map((property) => ({ object, property, message: pageOnly }))),
+      ],
+      "no-restricted-syntax": ["error",
+        ...[
+          "Program > :not(ExpressionStatement)",
+          "Program > :nth-child(2)",
+          "Program > ExpressionStatement > :not(ArrowFunctionExpression, FunctionExpression)",
+          "ImportExpression",
+          "Identifier[name='arguments']",
+        ].map((selector) => ({ selector, message: pageOnly })),
+      ],
+      "no-with": "error",
+    },
   },
   {
     files: [`${testFiles}/*.{js,jsx,mjs,cjs}`],

@@ -1,4 +1,9 @@
+const { readFileSync } = require("node:fs");
+const { join } = require("node:path");
+
 let nextTask = 0;
+
+const pageScript = (name) => readFileSync(join(__dirname, "browser", name), "utf8").trim();
 
 async function evaluateBrowserTask(target, action, arg) {
   const page = typeof target.page === "function" ? target.page() : target;
@@ -45,4 +50,4 @@ async function evaluateBrowserTask(target, action, arg) {
   }
 }
 
-module.exports = { evaluateBrowserTask };
+module.exports = { evaluateBrowserTask, pageScript };

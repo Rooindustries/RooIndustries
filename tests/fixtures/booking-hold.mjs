@@ -4,6 +4,7 @@ import http from "node:http";
 import { createHmac } from "node:crypto";
 import { registerHooks } from "node:module";
 import { fileURLToPath } from "node:url";
+import { endOwnChannel } from "../../scripts/lib/own-channel.mjs";
 import { installNetworkGuard, refuseEnvFiles } from "../../scripts/lib/test-target-safety.mjs";
 import { portFromEnv } from "../../scripts/lib/free-tcp-port.mjs";
 
@@ -226,7 +227,7 @@ export async function createBookingHoldFixture() {
 
 if (process.argv.includes("--worker")) {
   const fixture = await createBookingHoldFixture();
-  const shutdown = async () => { await fixture.stop(); process.disconnect(); };
+  const shutdown = async () => { await fixture.stop(); endOwnChannel(); };
   process.once("SIGTERM", shutdown);
   process.once("SIGINT", shutdown);
   process.once("disconnect", () => { fixture.stop(); });
@@ -250,7 +251,7 @@ if (process.argv.includes("--worker")) {
       } else if (method === "stop") {
         await fixture.stop();
         process.send({ id, value: true });
-        process.disconnect();
+        endOwnChannel();
         return;
       } else throw new Error(`Unknown booking fixture operation: ${method}`);
       process.send({ id, value });

@@ -1,4 +1,7 @@
+const { pageScript } = require("./browser-task.cjs");
 const { waitForHydrated, waitForRouteCommitted } = require("./react-hydration.cjs");
+
+const watchHomeArrival = pageScript("watch-home-arrival.js");
 
 async function clickAtHomeArrival(page, first, second, painted = false) {
   await waitForRouteCommitted(page);
@@ -6,31 +9,7 @@ async function clickAtHomeArrival(page, first, second, painted = false) {
   const start = page.url();
   const destination = await page.locator(second).first().evaluate((link) => link.href);
   try {
-    await page.evaluate(({ first, second, painted }) => {
-      const state = { dispatched: false };
-      const observer = new MutationObserver(() => {
-        if (!document.querySelector("#services")) return;
-        observer.disconnect();
-        const click = () => {
-          state.dispatched = true;
-          document.querySelector(second).click();
-        };
-        if (painted) {
-          state.frame = requestAnimationFrame(() => { state.frame = requestAnimationFrame(click); });
-        } else {
-          click();
-        }
-      });
-      window.__homeArrivalClick = {
-        state,
-        stop: () => {
-          observer.disconnect();
-          cancelAnimationFrame(state.frame);
-        },
-      };
-      observer.observe(document.getElementById("main-content"), { childList: true, subtree: true });
-      document.querySelector(first).click();
-    }, { first, second, painted });
+    await page.evaluate(`(${watchHomeArrival})(${JSON.stringify({ first, second, painted })})`);
     await page.waitForFunction(({ destination, start }) => {
       if (location.href !== destination) return false;
       if (destination === start && !window.__homeArrivalClick?.state.dispatched) return false;

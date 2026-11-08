@@ -1216,15 +1216,42 @@ run("no-unchecked-group-signal", {
 
 run("no-parent-ipc-disconnect", {
   valid: [
-    `if (process.connected) process.disconnect();`,
+    `endOwnChannel();`,
+    `process.once("disconnect", stop);`,
     `child.channel?.unref();`,
-    `class Tracked extends Base { disconnect() { return super.disconnect(); } }`,
-    `new MutationObserver(f).disconnect();`,
-    `const observer = new MutationObserver(f); observer.disconnect();`,
-    `let observer = null; observer = new ResizeObserver(f); observer?.disconnect();`,
-    `await page.evaluate(() => { const observer = new MutationObserver(f); observer.disconnect(); });`,
+    `class Watch { disconnect() { return true; } }`,
+    `const reason = "disconnect";`,
+    `const fake = { disconnect() {}, connected: false }; const other = { disconnect: stop };`,
+    `child[key]();`,
+    `class Watch { #disconnect() {} stop() { this.#disconnect(); } }`,
   ],
   invalid: [
+    ...[
+      `if (process.connected) process.disconnect();`,
+      `globalThis.process = child; process.disconnect();`,
+      `child.disconnect(0);`,
+      `child.disconnect(...[]);`,
+      `child.disconnect.call(child);`,
+      `child.disconnect.bind(child)();`,
+      `child.disconnect = noop;`,
+      `import { disconnect } from "node:process"; disconnect();`,
+      `import { disconnect as stop } from "node:process"; stop();`,
+      `export { disconnect } from "node:process";`,
+      `import { "disconnect" as stop } from "node:process"; stop();`,
+      `const stop = child.disconnect; stop.call(child);`,
+      `class Tracked extends Base { stop() { return super.disconnect(); } }`,
+      `new MutationObserver(f).disconnect();`,
+      `await page.evaluate(() => { const observer = new MutationObserver(f); observer.disconnect(); });`,
+      `const helper = { evaluate: (run) => run(child) }; helper.evaluate((c) => c.disconnect());`,
+      'child[\`disconnect\`]();',
+      `child?.["disconnect"]?.();`,
+      `const { disconnect } = process; disconnect();`,
+      `const { "disconnect": stop } = child; stop();`,
+      'const { [\`disconnect\`]: stop } = child; stop();',
+      `let stop; ({ disconnect: stop } = child); stop();`,
+      `function release({ disconnect }) { disconnect(); }`,
+      `const { child: { disconnect } } = supervisor; disconnect();`,
+    ].map((code) => ({ code, errors: [{ messageId: "parent" }] })),
     {
       name: "held port hand-over before #320's close fix",
       code: `const finish = () => { if (child.connected) child.disconnect(); };`,
@@ -1325,4 +1352,22 @@ run("no-virtual-mock-of-installed-module", {
       errors: [{ messageId: "installed" }],
     },
   ],
+});
+
+describe("page scripts are one function and nothing else", async () => {
+  const { ESLint } = await import("eslint");
+  const eslint = new ESLint({ cwd: fileURLToPath(new URL("..", import.meta.url)) });
+  const failures = async (code) => (await eslint.lintText(code, { filePath: "tests/fixtures/browser/probe.js" }))[0]
+    .messages.filter((message) => message.severity === 2).length;
+  for (const code of [
+    "this.stop = (child) => child.disconnect();", "globalThis.stop = (child) => child.disconnect();",
+    "module.exports = (child) => child.disconnect();", "(() => {});\n(() => {});", "const stop = () => {};",
+    "require('node:child_process');", "import('node:child_process');", "export default () => {};",
+    "(() => process.pid)", "(() => module.require('node:child_process'))", "(() => globalThis.process.pid)",
+    "(function () { return arguments[2]; })",
+  ]) it(`refuses ${code}`, async () => assert.ok(await failures(code) > 0));
+  for (const code of [
+    "(({ first }) => { const watcher = new MutationObserver(() => watcher.disconnect()); })",
+    "({ path }) => new Promise((resolve) => resolve(path))",
+  ]) it(`allows ${code}`, async () => assert.equal(await failures(code), 0));
 });
