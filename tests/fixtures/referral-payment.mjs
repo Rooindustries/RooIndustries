@@ -5,6 +5,7 @@ import { once } from "node:events";
 import { registerHooks } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHash, createHmac } from "node:crypto";
+import { endOwnChannel } from "../../scripts/lib/own-channel.mjs";
 import { installNetworkGuard, refuseEnvFiles, validateDistDir } from "../../scripts/lib/test-target-safety.mjs";
 
 export const REFERRAL = Object.freeze({
@@ -267,7 +268,7 @@ export async function createReferralPaymentFixture() {
 
 if (process.argv.includes("--worker")) {
   const fixture = await createReferralPaymentFixture();
-  const shutdown = async () => { await fixture.stop(); process.disconnect(); };
+  const shutdown = async () => { await fixture.stop(); endOwnChannel(); };
   process.once("SIGTERM", shutdown);
   process.once("SIGINT", shutdown);
   process.once("disconnect", () => { fixture.stop(); });
@@ -276,7 +277,7 @@ if (process.argv.includes("--worker")) {
       if (method === "stop") {
         await fixture.stop();
         process.send({ id, value: true }, () => {
-          process.disconnect();
+          endOwnChannel();
           process.exit(0);
         });
         return;
