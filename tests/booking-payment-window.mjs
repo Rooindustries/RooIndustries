@@ -632,12 +632,33 @@ for (const entry of ['webhook', 'cron', 'retry', 'reload']) {
       assert.equal((await fixture.post('/api/payment/finalize', {}, token)).status, 202);
       assert.equal((await fixture.post('/api/payment/cancel', {}, token)).status, 401);
       fixture.setPaymentAmountOverrides({});
+      let committedResult;
+      fixture.setRequestHook(async (phase, request) => {
+        if (phase !== 'after' || !request.body?.p_mutations?.some(mutation =>
+          mutation.document?._id === reviewed._id && mutation.document.status === 'booked')) return;
+        fixture.setRequestHook(null);
+        committedResult = await fixture.post('/api/payment/status', {}, token);
+      });
       const approved = await fixture.dodoWebhook(paymentId, 'payment.succeeded', `approved_${entry}`);
+      assert.equal(committedResult?.status, 200, JSON.stringify(committedResult));
       assert.equal(approved.status, 200, JSON.stringify(approved));
       await assertBookedOnHeldSlot(checkout);
       assert.equal((await fixture.commerce.getDocument(reviewed._id)).recoveryOwnerReviewRequired, false);
+      const final = await fixture.post('/api/payment/status', {}, token);
+      assert.equal(final.status, 200, JSON.stringify(final));
+      assert.equal(final.body.bookingId, (await fixture.commerce.getDocument(reviewed._id)).bookingId);
+      const completion = await fixture.commerce.getDocument(reviewed._id);
+      const deadline = Date.parse(completion.reviewResultAccessUntil);
+      assert.ok(deadline > Date.now() && deadline <= Date.now() + 60 * 60_000);
+      assert.equal((await fixture.post('/api/payment/finalize', {}, token)).status, 401);
+      clockShiftMs = deadline - RealDate.now() - 1000;
+      assert.equal((await fixture.post('/api/payment/status', {}, token)).status, 200);
+      assert.equal((await fixture.commerce.getDocument(reviewed._id)).reviewResultAccessUntil,
+        completion.reviewResultAccessUntil);
+      clockShiftMs += 1000;
       assert.equal((await fixture.post('/api/payment/status', {}, token)).status, 401);
     } finally {
+      fixture.setRequestHook(null);
       if (previousReporter === undefined) delete globalThis[reportKey];
       else globalThis[reportKey] = previousReporter;
     }
@@ -706,6 +727,55 @@ for (const recoveryEntry of ['cron', 'webhook', 'retry']) {
   });
 }
 
+for (const entry of ['retry', 'webhook', 'cron', 'cron-missing-payload']) {
+  test(`verified capture survives twelve proof lookups failing through ${entry}`, async () => {
+    const checkout = await startCheckoutBeforeExpiry();
+    if (entry === 'cron-missing-payload') await fixture.commerce.patch(checkout.record._id).set({
+      bookingPayload: { ...checkout.record.bookingPayload, startTimeUTC: '' },
+    }).commit();
+    let failures = 0;
+    fixture.setRequestHook((phase, request) => {
+      if (phase !== 'before' || !request.body?.p_document_types?.includes('paymentProofClaim')) return;
+      failures += 1;
+      throw new Error('Synthetic proof lookup failure');
+    });
+    let exhausted;
+    try {
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        if (entry.startsWith('cron')) assert.equal((await cron()).status, entry === 'cron-missing-payload' ? 503 : 200);
+        else if (entry === 'webhook') await fixture.dodoWebhook(
+          `payment_${checkout.record.providerOrderId}`, 'payment.succeeded',
+          `proof_${checkout.record._id}_${attempt}`);
+        else assert.equal((await fixture.post('/api/payment/finalize', {},
+          checkout.started.body.paymentAccessToken)).status, 202);
+        exhausted = await fixture.commerce.getDocument(checkout.record._id);
+        if (attempt < 11) clockShiftMs = Date.parse(exhausted.nextRecoveryAt) - RealDate.now() + 1000;
+      }
+      assert.equal(failures, 12);
+      assert.equal(exhausted.verificationState, 'server_verified');
+      assert.ok(exhausted.providerPaymentId);
+      assert.equal(exhausted.reconciliationRecoveryTerminal, false);
+      assert.equal(exhausted.recoveryOwnerReviewRequired, true);
+      assert.equal(exhausted.recoveryFailureCount, 12);
+      const delay = Date.parse(exhausted.nextRecoveryAt) - Date.now();
+      assert.ok(delay > 0 && delay <= 60 * 60_000, String(delay));
+      assert.equal((await cron()).body.summary.scanned, 0);
+    } finally {
+      fixture.setRequestHook(null);
+    }
+    clockShiftMs = Date.parse(exhausted.nextRecoveryAt) - RealDate.now() + 1000;
+    assert.equal((await cron()).status, 200);
+    if (entry === 'cron-missing-payload') {
+      const completed = await fixture.commerce.getDocument(checkout.record._id);
+      assert.ok(completed.bookingId);
+      assert.equal((await fixture.commerce.getDocument(completed.bookingId)).requiresReschedule, true);
+    } else await assertBookedOnHeldSlot(checkout);
+    assert.equal((await cron()).status, 200);
+    assert.equal((await fixture.commerce.fetch('*[_type == "booking" && paymentRecordId == $id]',
+      { id: checkout.record._id })).length, 1);
+  });
+}
+
 for (const outcome of ['cancelled', 'refunded']) {
   test(`merchant review releases its reservation when ${outcome}`, async () => {
     fixture.setPaymentAmountOverrides({ status: 'requires_merchant_action' });
@@ -714,6 +784,9 @@ for (const outcome of ['cancelled', 'refunded']) {
     await holdRunsOut(checkout, 25 * 60 * 60_000);
     assert.equal((await cron()).status, 200);
     assert.equal((await holdFor(checkout.payload)).phase, 'payment_pending');
+    clockShiftMs += 25 * 60 * 60_000;
+    const token = checkout.started.body.paymentAccessToken;
+    assert.equal((await fixture.post('/api/payment/status', {}, token)).status, 200);
     fixture.setPaymentAmountOverrides(outcome === 'cancelled' ? { status: 'cancelled' } : {});
     const paymentId = `payment_${checkout.record.providerOrderId}`;
     const result = outcome === 'cancelled'
@@ -727,8 +800,56 @@ for (const outcome of ['cancelled', 'refunded']) {
     assert.equal((await fixture.commerce.getDocument(checkout.record._id)).recoveryOwnerReviewRequired, false);
     assert.equal(await isOffered(checkout.payload), true);
     assert.equal((await secondVisitor(checkout.payload)).status, 200);
+    if (outcome === 'refunded') {
+      const final = await fixture.post('/api/payment/status', {}, token);
+      assert.equal(final.status, 200, JSON.stringify(final));
+      assert.equal(final.body.status, 'refunded');
+      const completed = await fixture.commerce.getDocument(checkout.record._id);
+      const deadline = Date.parse(completed.reviewResultAccessUntil);
+      assert.ok(deadline > Date.now() && deadline <= Date.now() + 60 * 60_000);
+      assert.equal((await fixture.post('/api/payment/cancel', {}, token)).status, 401);
+      clockShiftMs = deadline - RealDate.now();
+      assert.equal((await fixture.post('/api/payment/status', {}, token)).status, 401);
+    }
   });
 }
+
+test('review access lasts until a delayed refund finishes and then expires', async () => {
+  fixture.setPaymentAmountOverrides({ status: 'requires_merchant_action' });
+  const checkout = await startCheckoutBeforeExpiry();
+  assert.equal((await cron()).status, 200);
+  clockShiftMs += 25 * 60 * 60_000;
+  const token = checkout.started.body.paymentAccessToken;
+  fixture.setPaymentAmountOverrides({});
+  fixture.setRequestHook((phase, request) => {
+    if (phase === 'before' && request.body?.p_mutations?.some(mutation =>
+      mutation.document?._id === checkout.record._id && mutation.document.status === 'refunded' &&
+      mutation.document.refundRequiresBookingSync === false)) throw new Error('Synthetic refund completion failure');
+  });
+  try {
+    const paymentId = `payment_${checkout.record.providerOrderId}`;
+    const pending = await fixture.refundPayment(paymentId, [{ refund_id: 'delayed_review_refund', payment_id: paymentId,
+      amount: Math.round(checkout.record.pricingSnapshot.netAmount * 100), currency: 'USD', status: 'succeeded' }],
+    `delayed_refund_${checkout.record._id}`);
+    assert.equal(pending.status, 503, JSON.stringify(pending));
+    const saved = await fixture.commerce.getDocument(checkout.record._id);
+    assert.equal(saved.refundRequiresBookingSync, true);
+    assert.equal(saved.reviewResultAccessUntil, undefined);
+    clockShiftMs += 2 * 60 * 60_000;
+    assert.equal((await fixture.post('/api/payment/status', {}, token)).status, 200);
+    assert.equal((await fixture.post('/api/payment/finalize', {}, token)).status, 401);
+  } finally {
+    fixture.setRequestHook(null);
+  }
+  assert.equal((await cron()).status, 200);
+  const completed = await fixture.commerce.getDocument(checkout.record._id);
+  assert.equal(completed.refundRequiresBookingSync, false);
+  const deadline = Date.parse(completed.reviewResultAccessUntil);
+  assert.ok(deadline > Date.now() && deadline <= Date.now() + 60 * 60_000);
+  assert.equal((await fixture.post('/api/payment/status', {}, token)).status, 200);
+  clockShiftMs = deadline - RealDate.now();
+  assert.equal((await fixture.post('/api/payment/status', {}, token)).status, 401);
+});
 
 test('verified capture migration restores retries and saves a reversible recovery state', async () => {
   const checkout = await startCheckoutBeforeExpiry();
@@ -738,13 +859,14 @@ test('verified capture migration restores retries and saves a reversible recover
     ['paypal', 'paypal', { nextRecoveryAt: '9999-12-31T23:59:59.999Z' }],
     ['razorpay', 'razorpay', { nextRecoveryAt: null, recoveryOwnerReviewRequired: false }],
     ['missing-date', 'razorpay', { recoveryOwnerReviewRequired: true }],
+    ['capture-evidence', 'dodo', { verificationState: '', providerPaymentState: 'succeeded' }],
     ['dodo', 'dodo', { nextRecoveryAt: '9999-12-31T23:59:59.999Z' }],
   ]) {
-    const id = provider === 'dodo' ? checkout.record._id : `paymentRecord.restart-${name}`;
+    const id = name === 'dodo' ? checkout.record._id : `paymentRecord.restart-${name}`;
     const set = { provider, status: 'needs_recovery', verificationState: 'server_verified',
       reconciliationRecoveryTerminal: true, recoveryFailureCount: 12, recoveryAttemptCount: 12,
       ...previous };
-    if (provider === 'dodo') await fixture.commerce.patch(id).set(set).commit();
+    if (name === 'dodo') await fixture.commerce.patch(id).set(set).commit();
     else await fixture.commerce.create({ _id: id, _type: 'paymentRecord', backendOwner: 'supabase',
       cutoverGeneration: 0, ...set });
     states.push(await fixture.commerce.getDocument(id));

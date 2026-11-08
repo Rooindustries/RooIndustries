@@ -2,11 +2,22 @@ import { getNextPaymentRecoveryAt } from "./paymentRecord.js";
 import { logSafeError } from "../../safeErrorLog.js";
 
 const isCapturedBookingRecovery = (record) =>
-  record.verificationState === "server_verified" &&
+  (record.verificationState === "server_verified" || record.providerPaymentState === "succeeded") &&
   ["paypal", "razorpay", "dodo"].includes(record.provider) &&
   !String(record.bookingId || "").trim() && record.providerRecoveryTerminal !== true &&
   record.providerRefundDetailsMissing !== true && record.dodoDisputeActive !== true &&
   !["refunded", "disputed"].includes(record.providerPaymentState);
+
+export const buildCaptureVerificationState = (record) => ({
+  verificationState: record.provider === "free" ? String(record.verificationState || "").trim() : "server_verified",
+  verificationWarning: "",
+  ...(record.provider !== "free" && record.verificationState !== "server_verified" ? {
+    recoveryAttemptCount: 0,
+    recoveryFailureCount: 0,
+    reconciliationRecoveryTerminal: false,
+    nextRecoveryAt: "",
+  } : {}),
+});
 
 export const buildOwnerReviewState = (record, required) =>
   required || record.recoveryOwnerReviewRequired === true

@@ -19,7 +19,7 @@ $edit$;
 
 create or replace function commerce.exhausted_capture_can_resume(payload jsonb)
 returns boolean language sql immutable set search_path = '' as $$
-  select payload->>'verificationState' = 'server_verified'
+  select (payload->>'verificationState' = 'server_verified' or payload->>'providerPaymentState' = 'succeeded')
     and payload->>'provider' in ('paypal', 'razorpay', 'dodo')
     and nullif(btrim(payload->>'bookingId'), '') is null
     and payload->>'reconciliationRecoveryTerminal' = 'true'

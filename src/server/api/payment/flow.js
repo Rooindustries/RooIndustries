@@ -1,10 +1,16 @@
 import { buildBrowserCompletionBody } from "./bookingSummary.js";
 import {
+  buildCaptureVerificationState,
   buildRecoveryFailureState,
   buildRecoveryCompletionState,
   buildOwnerReviewState,
   logPaymentRecoveryReview,
 } from "./recoveryState.js";
+import {
+  buildPaymentReviewResultAccess,
+  canReadPaymentReviewResult,
+  isPaymentAwaitingReview,
+} from "./reviewAccess.js";
 import envValue from "../../supabase/envValue.cjs";
 import { calculateCreatorCommission, originalBookingCommission } from "../../referrals/commissionMoney.js";
 import { isTerminalDisputeStatus, resolveDisputeReferralAccounting } from "../../referrals/disputeAccounting.js";
@@ -925,11 +931,9 @@ const resolveRecordFromAccessToken = async ({
 
   if (tokenResult.expired) {
     const status = String(record.status || "").trim().toLowerCase();
-    const awaitingReview = !record.bookingId &&
-      [PAYMENT_STATUS_STARTED, PAYMENT_STATUS_NEEDS_RECOVERY, PAYMENT_STATUS_FINALIZING,
-        PAYMENT_STATUS_CAPTURED_CLIENT, PAYMENT_STATUS_CAPTURED_WEBHOOK].includes(status) &&
-      (record.providerPaymentState === "requires_merchant_action" || record.recoveryOwnerReviewRequired === true);
-    const withinRecoveryWindow = isWithinPaymentAccessRecoveryWindow({ payload }) || awaitingReview;
+    const awaitingReview = isPaymentAwaitingReview(record);
+    const withinRecoveryWindow = isWithinPaymentAccessRecoveryWindow({ payload }) || awaitingReview ||
+      (allowStatusReadExtension && canReadPaymentReviewResult(record));
     const recoveryMutationAllowed =
       allowRecoveryExtension && (status === PAYMENT_STATUS_NEEDS_RECOVERY || awaitingReview);
     if (!withinRecoveryWindow || (!allowStatusReadExtension && !recoveryMutationAllowed)) {
@@ -1194,6 +1198,7 @@ const patchPaymentRecord = async ({
     ...set,
     ...(set.providerPaymentState === "requires_merchant_action" ? { recoveryOwnerReviewRequired: true } : {}),
     ...unconfirmedProviderState(record, set),
+    ...buildPaymentReviewResultAccess(record, set),
     ...(event ? { events: mergedEvents } : {}),
     updatedAt: nowIso(),
   };
@@ -2239,6 +2244,51 @@ const finalizePaymentRecordInternal = async ({
     });
   }
 
+  const captureStatus = resolveClientSourceStatus(normalizedSource);
+  const captureAmountUpdates = workingRecord.provider === "dodo"
+    ? getDodoCaptureAmountUpdates(workingRecord, verification) : {};
+  try {
+    workingRecord = await patchPaymentRecord({
+      client,
+      record: workingRecord,
+      set: {
+        status: PAYMENT_STATUS_FINALIZING,
+        providerPaymentId: String(
+          workingRecord.providerPaymentId || verification.providerPaymentId || ""
+        ).trim(),
+        providerSignature: String(
+          workingRecord.providerSignature || providerData.razorpaySignature || ""
+        ).trim(),
+        payerEmail: String(
+          verification.payerEmail || providerData.payerEmail || workingRecord.payerEmail || ""
+        ).trim(),
+        ...buildCaptureVerificationState(workingRecord),
+        ...(Object.keys(captureAmountUpdates).length ? {
+          providerPublicData: { ...workingRecord.providerPublicData, ...captureAmountUpdates },
+        } : {}),
+      },
+      event: buildPaymentRecordEvent({
+        status: captureStatus,
+        source: normalizedSource,
+        reason: "provider_capture_verified",
+        data: {
+          providerOrderId: workingRecord.providerOrderId || "",
+          providerPaymentId:
+            workingRecord.providerPaymentId || verification.providerPaymentId || "",
+        },
+      }),
+    });
+  } catch (error) {
+    if (!isConflictError(error)) throw error;
+    const current = await getPaymentRecordById(client, workingRecord._id);
+    return {
+      ok: false,
+      httpStatus: isPaymentTerminalStatus(current?.status) ? 200 : 202,
+      paymentRecord: current || workingRecord,
+      response: buildPublicStatusBody(current || workingRecord),
+    };
+  }
+
   if (["paypal", "razorpay"].includes(workingRecord.provider) && verification.refundStatus === "partial") {
     workingRecord = await recordVerifiedPartialRefunds({ client, record: workingRecord, verification, source: normalizedSource });
     const current = await currentPaymentOperation({ client, record: workingRecord });
@@ -2254,6 +2304,11 @@ const finalizePaymentRecordInternal = async ({
         verification.providerOrderId || workingRecord.providerOrderId || "",
       providerPaymentId:
         verification.providerPaymentId || workingRecord.providerPaymentId || "",
+    });
+    workingRecord = await patchPaymentRecord({
+      client,
+      record: workingRecord,
+      set: { paymentProofClaimId: String(proofClaim?._id || "").trim() },
     });
   } catch (error) {
     const duplicate = await normalizeMarkedDuplicatePaymentRecord({
@@ -2281,62 +2336,6 @@ const finalizePaymentRecordInternal = async ({
       reason: error?.code || "payment_proof_claim_failed",
       details: providerData,
     });
-  }
-
-  const captureStatus = resolveClientSourceStatus(normalizedSource);
-  const captureAmountUpdates = workingRecord.provider === "dodo"
-    ? getDodoCaptureAmountUpdates(workingRecord, verification) : {};
-  try {
-    workingRecord = await patchPaymentRecord({
-      client,
-      record: workingRecord,
-      set: {
-        status: PAYMENT_STATUS_FINALIZING,
-        providerPaymentId: String(
-          workingRecord.providerPaymentId || verification.providerPaymentId || ""
-        ).trim(),
-        providerSignature: String(
-          workingRecord.providerSignature || providerData.razorpaySignature || ""
-        ).trim(),
-        payerEmail: String(
-          verification.payerEmail || providerData.payerEmail || workingRecord.payerEmail || ""
-        ).trim(),
-        verificationState:
-          String(workingRecord.provider || "").trim().toLowerCase() === "free"
-            ? String(workingRecord.verificationState || "").trim()
-            : "server_verified",
-        verificationWarning: "",
-        ...(workingRecord.provider !== "free" && workingRecord.verificationState !== "server_verified" ? {
-          recoveryAttemptCount: 0,
-          recoveryFailureCount: 0,
-          reconciliationRecoveryTerminal: false,
-          nextRecoveryAt: "",
-        } : {}),
-        paymentProofClaimId: String(proofClaim?._id || "").trim(),
-        ...(Object.keys(captureAmountUpdates).length ? {
-          providerPublicData: { ...workingRecord.providerPublicData, ...captureAmountUpdates },
-        } : {}),
-      },
-      event: buildPaymentRecordEvent({
-        status: captureStatus,
-        source: normalizedSource,
-        reason: "provider_capture_verified",
-        data: {
-          providerOrderId: workingRecord.providerOrderId || "",
-          providerPaymentId:
-            workingRecord.providerPaymentId || verification.providerPaymentId || "",
-        },
-      }),
-    });
-  } catch (error) {
-    if (!isConflictError(error)) throw error;
-    const current = await getPaymentRecordById(client, workingRecord._id);
-    return {
-      ok: false,
-      httpStatus: isPaymentTerminalStatus(current?.status) ? 200 : 202,
-      paymentRecord: current || workingRecord,
-      response: buildPublicStatusBody(current || workingRecord),
-    };
   }
 
   if (lateCaptureFromAbandoned) {
@@ -3943,6 +3942,7 @@ const recoverCapturedPaymentAsReschedule = async ({
 
   const recoveredProviderOrderId = String(
     providerData.providerOrderId ||
+      providerData.dodoCheckoutSessionId ||
       providerData.paypalOrderId ||
       providerData.razorpayOrderId ||
       record.providerOrderId ||
@@ -3950,11 +3950,23 @@ const recoverCapturedPaymentAsReschedule = async ({
   ).trim();
   const recoveredProviderPaymentId = String(
     providerData.providerPaymentId ||
+      providerData.dodoPaymentId ||
       providerData.paypalPaymentId ||
       providerData.razorpayPaymentId ||
       record.providerPaymentId ||
       ""
   ).trim();
+  if (record.verificationState !== "server_verified") {
+    record = await patchPaymentRecord({
+      client,
+      record,
+      set: {
+        ...buildCaptureVerificationState(record),
+        providerOrderId: recoveredProviderOrderId,
+        providerPaymentId: recoveredProviderPaymentId,
+      },
+    });
+  }
   const recoveryRecord = {
     ...record,
     ...(upgradeFunding ? { bookingPayload: { ...record.bookingPayload, originalOrderId: upgradeFunding.rootOrderId } } : {}),
@@ -4023,6 +4035,7 @@ const recoverCapturedPaymentAsReschedule = async ({
   const recoveryAttemptCount = Number(record.recoveryAttemptCount || 0) + 1;
   const pendingSet = {
     status: PAYMENT_STATUS_EMAIL_PARTIAL,
+    ...buildPaymentReviewResultAccess(record, { status: PAYMENT_STATUS_EMAIL_PARTIAL }),
     providerPaymentId: recoveredProviderPaymentId,
     payerEmail: recoveryRecord.payerEmail,
     verificationState: "server_verified",
