@@ -1,9 +1,11 @@
+import { ConfigCommentParser } from "@eslint/plugin-kit";
+
 export const normalizeComment = (value) => value.replace(/^\s*\* ?/gm, "").replace(/\s+/g, " ").trim();
 
-export function consumeRemovedComment(value, removedComments) {
-  const index = removedComments.indexOf(normalizeComment(value));
+export function consumeComment(value, comments) {
+  const index = comments.indexOf(normalizeComment(value));
   if (index < 0) return false;
-  removedComments.splice(index, 1);
+  comments.splice(index, 1);
   return true;
 }
 
@@ -13,7 +15,7 @@ export function commentGroups(source, ranges) {
     const previous = groups.at(-1);
     if (previous?.type === "Line" && comment.type === "Line" &&
         whollyChanged(previous, ranges) && whollyChanged(comment, ranges) &&
-        !directives.some((pattern) => pattern.test(previous.value.trim()) || pattern.test(comment.value.trim())) &&
+        !isDirective(previous.value) && !isDirective(comment.value) &&
         comment.loc.start.line === previous.loc.end.line + 1 &&
         !source.text.slice(previous.range[1], comment.range[0]).trim()) {
       previous.value += `\n${comment.value}`;
@@ -32,14 +34,22 @@ export const whollyChanged = (comment, ranges) =>
     .every((line) => inRanges(line, ranges));
 
 const ruleNames = "[\\w@./-]+";
-const globalNames = "[\\w$]+(?:\\s*:\\s*(?:readonly|writable|readable|writeable|off|true|false))?";
 const directives = [
   new RegExp(`^eslint-(?:disable|enable)(?:-next-line|-line)?(?:\\s+${ruleNames}(?:\\s*,\\s*${ruleNames})*)?$`),
-  new RegExp(`^(?:global|globals)\\s+${globalNames}(?:\\s*,\\s*${globalNames})*$`),
   /^exported\s+[\w$]+(?:\s*,\s*[\w$]+)*$/,
   /^(?:prettier-ignore|@vite-ignore|@ts-expect-error|@ts-ignore|@ts-check|@ts-nocheck|[#@]__PURE__|@__NO_SIDE_EFFECTS__)$/,
   /^(?:istanbul|[cv]8) ignore (?:next|else|if|file|start|stop)$/,
 ];
+const commentParser = new ConfigCommentParser();
+function isDirective(value) {
+  const text = value.trim();
+  if (directives.some((pattern) => pattern.test(text))) return true;
+  const directive = text.match(/^globals?\s+([\s\S]+)$/);
+  if (!directive) return false;
+  const entries = Object.entries(commentParser.parseStringConfig(directive[1]));
+  return entries.length > 0 && entries.every(([name, setting]) => /^[\w$]+$/.test(name) &&
+    [null, "readonly", "writable", "readable", "writeable", "off", "true", "false"].includes(setting));
+}
 const mit = [
   'Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated',
   'documentation files (the "Software"), to deal in the Software without restriction, including without limitation',
@@ -75,20 +85,25 @@ export default {
     type: "problem",
     schema: [{
       type: "object",
-      properties: { addedRanges: { type: "array" }, removedComments: { type: "array", items: { type: "string" } } },
+      properties: {
+        addedRanges: { type: "array" },
+        retainedComments: { type: "array", items: { type: "string" } },
+        removedComments: { type: "array", items: { type: "string" } },
+      },
       additionalProperties: false,
     }],
     messages: { added: "Adds a new code comment." },
   },
   create(context) {
-    const { addedRanges = [], removedComments = [] } = context.options[0] || {};
+    if (!context.options.length) return {};
+    const { addedRanges = [], retainedComments = [], removedComments = [] } = context.options[0];
+    const retained = [...retainedComments];
     const removed = [...removedComments];
     return {
       Program() {
         for (const comment of commentGroups(context.sourceCode, addedRanges)) {
-          if (!whollyChanged(comment, addedRanges) || comment.type === "Shebang" ||
-              consumeRemovedComment(comment.value, removed) ||
-              directives.some((pattern) => pattern.test(comment.value.trim())) ||
+          if (comment.type === "Shebang" || consumeComment(comment.value, retained) ||
+              consumeComment(comment.value, removed) || isDirective(comment.value) ||
               (!context.sourceCode.getTokenBefore(comment) && license(comment.value))) continue;
           context.report({ loc: comment.loc, messageId: "added" });
         }

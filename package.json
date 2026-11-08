@@ -176,6 +176,7 @@
     ]
   },
   "devDependencies": {
+    "@eslint/plugin-kit": "0.4.1",
     "@lhci/cli": "0.15.1",
     "@playwright/test": "^1.55.0",
     "@typescript-eslint/parser": "8.72.1",

@@ -13,6 +13,7 @@ const baseFiles = {
   "adjacent.js": "// Existing line.\nexport const retained = true;\n",
   "partial.js": "/* Existing block\n * retains its shape.\n */\nexport const value = 1;\n",
   "credit.js": "/* codex legacy reference\n * retains its shape.\n */\nexport const legacy = 1;\n",
+  "wrap.js": "export const first = 1;\nexport const second = 2;\n",
 };
 const mitHeader = `/*
  * Copyright (c) 2026 Example
@@ -90,9 +91,18 @@ test("comment policy checks committed Git changes without executing them", async
       ["new adjacent comment", "adjacent.js", "// Existing line.\n// Explains value.\nexport const retained = true;\n", 1],
       ["unchanged comment", "adjacent.js", "// Existing line.\nexport const retained = false;\n", 0],
       ["partially retained block", "partial.js",
-        "/* Existing block\n * keeps its shape.\n */\nexport const value = 1;\n", 0],
+        "/* Existing block\n * keeps its shape.\n */\nexport const value = 1;\n", 1],
       ["existing reserved name", "credit.js",
-        "/* codex legacy reference\n * keeps its shape.\n */\nexport const legacy = 1;\n", 0],
+        "/* codex legacy reference\n * keeps its shape.\n */\nexport const legacy = 1;\n", 1],
+      ["unchanged block", "partial.js",
+        "/* Existing block\n * retains its shape.\n */\nexport const value = 2;\n", 0],
+      ["unchanged reserved name", "credit.js",
+        "/* codex legacy reference\n * retains its shape.\n */\nexport const legacy = 2;\n", 0],
+      ["wrapped unchanged code", "wrap.js", "/*\nexport const first = 1;\n*/\nexport const second = 2;\n", 1],
+      ["wrapped unchanged file", "wrap.js", "/*\nexport const first = 1;\nexport const second = 2;\n*/\n", 1],
+      ["duplicated retained comment", "adjacent.js",
+        "// Existing line.\nexport const retained = true;\n// Existing line.\nexport const duplicate = true;\n", 1],
+      ["moved within file", "adjacent.js", "export const retained = true;\n// Existing line.\n", 0],
       ["ambiguous names in prose", "new.js", "export const label = 'cursor gemini opus sonnet copilot devin';\n", 0,
         { PR_TITLE: "fix: cursor position", PR_BODY: "The sonnet now wraps normally." }],
       ["unsupported formats", "new.sql", "-- Explains query.\nselect 1;\n", 0],
@@ -108,6 +118,14 @@ test("comment policy checks committed Git changes without executing them", async
           `/* ${directive} first:writable, second:readonly */\nexport const value = 1;\n`, 0],
         [`${directive} spaced modifiers`, "new.js",
           `/* ${directive} first : writable, second : readonly */\nexport const value = 1;\n`, 0],
+        [`${directive} whitespace separator`, "new.js",
+          `/* ${directive} first:writable second:readonly */\nexport const value = 1;\n`, 0],
+        [`${directive} mixed separators`, "new.js",
+          `/* ${directive} first : writable, second:readonly\tthird:off */\nexport const value = 1;\n`, 0],
+        [`${directive} bare names`, "new.js",
+          `/* ${directive} first second, third */\nexport const value = 1;\n`, 0],
+        [`${directive} invalid modifier`, "new.js",
+          `/* ${directive} first:invalid second:readonly */\nexport const value = 1;\n`, 1],
         [`${directive} legacy modifiers`, "new.js",
           `/* ${directive} first:true, second:false, third:readable, fourth:writeable, fifth:off */\n` +
           "export const value = 1;\n", 0],
@@ -187,6 +205,28 @@ test("comment policy checks committed Git changes without executing them", async
           "eslint.config.mjs": "throw new Error('Must never load');\n",
         }],
     );
+    for (const identity of [
+      "Gemini Code Assist <gemini-code-assist@google.com>",
+      "Cursor <cursoragent@cursor.com>",
+      "Cursor Agent <cursoragent@cursor.com>",
+      "Aider <aider@aider.chat>",
+      "Aider AI <aider@aider.chat>",
+      "Gemini Code Assist <helper@example.invalid>",
+      "Cursor <helper@example.invalid>",
+      "Aider <helper@example.invalid>",
+      "Helper <gemini-code-assist@google.com>",
+      "Helper <cursoragent@cursor.com>",
+      "Helper <helper@cursor.sh>",
+      "Helper <helper@aider.chat>",
+      "Helper <helper[bot]@users.noreply.github.com>",
+    ]) {
+      cases.push([`assistant coauthor ${identity}`, "new.js", "export const value = 1;\n", 1, {},
+        `fix: value\n\nCo-authored-by: ${identity}`]);
+    }
+    for (const name of ["Gemini Rivera", "Cursor Smith", "Aider Hassan", "Sonnet Jones"]) {
+      cases.push([`human coauthor ${name}`, "new.js", "export const value = 1;\n", 0, {},
+        `fix: value\n\nCo-authored-by: ${name} <person@example.invalid>`]);
+    }
     for (const [name, path, text, status, metadata = {}, message = "test: change fixture", extra = {}] of cases) {
       await t.test(name, () => {
         git("reset", "--hard", base);
