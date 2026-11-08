@@ -1226,6 +1226,63 @@ run("no-parent-ipc-disconnect", {
   ],
   invalid: [
     {
+      name: "static template keys keep the receiver exemptions",
+      code: 'child[`disconnect`](); new MutationObserver(f)[`disconnect`](); process[`disconnect`]();' +
+        ' child[`dis${suffix}`](); child[method]();',
+      errors: [{ messageId: "parent" }],
+    },
+    ...[
+      `const { disconnect } = child; disconnect();
+        const { disconnect: stopObserver } = new MutationObserver(f); stopObserver();
+        const { disconnect: stopProcess } = process; stopProcess();`,
+      `const { disconnect: stop } = child; stop();`,
+      `const { "disconnect": stop } = child; stop();`,
+      'const { [`disconnect`]: stop } = child; stop();',
+      `let stop; ({ disconnect: stop } = child); stop();`,
+      `const { disconnect: stop = noop } = child; stop();`,
+      `function release({ disconnect }) { disconnect(); }`,
+      `const { child: { disconnect } } = supervisor; disconnect();`,
+    ].map((code) => ({ code, errors: [{ messageId: "parent" }] })),
+    ...[
+      `MutationObserver = fork; const watcher = new MutationObserver(f); watcher.disconnect();`,
+      `const watcher = new ResizeObserver(f); watcher.disconnect(); ResizeObserver = fork;`,
+      `function replace() { IntersectionObserver = fork; } new IntersectionObserver(f).disconnect();`,
+      `({ observer: PerformanceObserver } = replacements); new PerformanceObserver(f).disconnect();`,
+      `for (ReportingObserver of constructors) {} new ReportingObserver(f).disconnect();`,
+      `globalThis.MutationObserver = fork; new MutationObserver(f).disconnect();`,
+      `new ResizeObserver(f).disconnect(); window.ResizeObserver = fork;`,
+      `function replace() { self.IntersectionObserver = fork; } new IntersectionObserver(f).disconnect();`,
+      `globalThis["PerformanceObserver"] = fork; new PerformanceObserver(f).disconnect();`,
+      'self[`ReportingObserver`] = fork; new ReportingObserver(f).disconnect();',
+      `window.ResizeObserver ||= fork; new ResizeObserver(f).disconnect();`,
+      `globalThis.MutationObserver++; new MutationObserver(f).disconnect();`,
+      `({ observer: window.ResizeObserver } = replacements); new ResizeObserver(f).disconnect();`,
+      `for (self.IntersectionObserver of constructors) {} new IntersectionObserver(f).disconnect();`,
+      `delete globalThis.ReportingObserver; new ReportingObserver(f).disconnect();`,
+    ].map((code) => ({ code, errors: [{ messageId: "parent" }] })),
+    {
+      name: "configured globals are checked in script scope",
+      languageOptions: {
+        sourceType: "script",
+        globals: { MutationObserver: "writable", globalThis: "readonly" },
+      },
+      code: `MutationObserver = fork; new MutationObserver(f).disconnect();
+        globalThis.ResizeObserver = fork; new ResizeObserver(f).disconnect();`,
+      errors: [{ messageId: "parent" }, { messageId: "parent" }],
+    },
+    {
+      name: "global writes only affect their own observer constructor",
+      code: `globalThis.MutationObserver = fork; new MutationObserver(f).disconnect();
+        new ResizeObserver(f).disconnect();
+        function replace(window, self, globalThis, ResizeObserver) {
+          window.ResizeObserver = fork; self.ResizeObserver = fork; globalThis.ResizeObserver = fork;
+          ResizeObserver = fork;
+        }
+        globalThis[observerName] = fork;
+        ({ observer = globalThis.ResizeObserver } = replacements);`,
+      errors: [{ messageId: "parent" }],
+    },
+    {
       name: "held port hand-over before #320's close fix",
       code: `const finish = () => { if (child.connected) child.disconnect(); };`,
       errors: [{ messageId: "parent" }],
