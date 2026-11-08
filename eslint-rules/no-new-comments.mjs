@@ -1,4 +1,5 @@
 import { ConfigCommentParser } from "@eslint/plugin-kit";
+import ts from "typescript";
 
 export const normalizeComment = (value) => value.replace(/^\s*\* ?/gm, "").replace(/\s+/g, " ").trim();
 
@@ -15,7 +16,7 @@ export function commentGroups(source, ranges) {
     const previous = groups.at(-1);
     if (previous?.type === "Line" && comment.type === "Line" &&
         whollyChanged(previous, ranges) && whollyChanged(comment, ranges) &&
-        !isDirective(previous.value) && !isDirective(comment.value) &&
+        !isDirective(previous, source) && !isDirective(comment, source) &&
         comment.loc.start.line === previous.loc.end.line + 1 &&
         !source.text.slice(previous.range[1], comment.range[0]).trim()) {
       previous.value += `\n${comment.value}`;
@@ -33,22 +34,39 @@ export const whollyChanged = (comment, ranges) =>
   Array.from({ length: comment.loc.end.line - comment.loc.start.line + 1 }, (_, n) => comment.loc.start.line + n)
     .every((line) => inRanges(line, ranges));
 
-const ruleNames = "[\\w@./-]+";
 const directives = [
-  new RegExp(`^eslint-(?:disable|enable)(?:-next-line|-line)?(?:\\s+${ruleNames}(?:\\s*,\\s*${ruleNames})*)?$`),
-  /^exported\s+[\w$]+(?:\s*,\s*[\w$]+)*$/,
-  /^(?:prettier-ignore|@vite-ignore|@ts-expect-error|@ts-ignore|@ts-check|@ts-nocheck|[#@]__PURE__|@__NO_SIDE_EFFECTS__)$/,
+  /^(?:prettier-ignore|@vite-ignore|[#@]__PURE__|@__NO_SIDE_EFFECTS__)$/,
   /^(?:istanbul|[cv]8) ignore (?:next|else|if|file|start|stop)$/,
 ];
 const commentParser = new ConfigCommentParser();
-function isDirective(value) {
-  const text = value.trim();
-  if (directives.some((pattern) => pattern.test(text))) return true;
-  const directive = text.match(/^globals?\s+([\s\S]+)$/);
-  if (!directive) return false;
-  const entries = Object.entries(commentParser.parseStringConfig(directive[1]));
-  return entries.length > 0 && entries.every(([name, setting]) => /^[\w$]+$/.test(name) &&
-    [null, "readonly", "writable", "readable", "writeable", "off", "true", "false"].includes(setting));
+const typeDirectives = new WeakMap();
+function isDirective(comment, source) {
+  if (directives.some((pattern) => pattern.test(comment.value.trim()))) return true;
+  if (/@ts-(?:expect-error|ignore|check|nocheck)/.test(comment.value)) {
+    if (!typeDirectives.has(source)) {
+      const file = ts.createSourceFile("file.tsx", source.text, ts.ScriptTarget.Latest, false);
+      typeDirectives.set(source, [file.checkJsDirective, ...(file.commentDirectives || []).map(({ range }) => range)]
+        .filter(Boolean));
+    }
+    if (typeDirectives.get(source).some(({ pos, end }) =>
+      pos >= comment.range[0] && end <= comment.range[1])) return true;
+  }
+  if (!source.getInlineConfigNodes().some(({ range }) =>
+    range[0] === comment.range[0] && range[1] === comment.range[1])) return false;
+  const { label, value } = commentParser.parseDirective(comment.value);
+  if (/^eslint-(?:disable(?:-(?:next-)?line)?|enable)$/.test(label)) {
+    if (label === "eslint-disable-line" && comment.loc.start.line !== comment.loc.end.line) return false;
+    return Object.keys(commentParser.parseListConfig(value)).every((name) => /^[\w@./-]+$/.test(name));
+  }
+  if (label === "eslint") return commentParser.parseJSONLikeConfig(value).ok;
+  if (label === "exported") {
+    return Object.keys(commentParser.parseListConfig(value)).every((name) => /^[\w$]+$/.test(name));
+  }
+  if (label === "global" || label === "globals") {
+    return Object.entries(commentParser.parseStringConfig(value)).every(([name, setting]) => /^[\w$]+$/.test(name) &&
+      [null, "readonly", "writable", "readable", "writeable", "off", "true", "false"].includes(setting));
+  }
+  return false;
 }
 const mit = [
   'Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated',
@@ -76,8 +94,7 @@ function license(value) {
   const prose = lines.filter((line) =>
     !/^SPDX-License-Identifier: \(*[\w.+-]+\)*(?: (?:AND|OR|WITH) \(*[\w.+-]+\)*)*$/.test(line) &&
     !/^(?:Copyright (?:\(c\) |© )?|© )\d{4}\b[^\n]*$/i.test(line)).join(" ");
-  return lines.length > 0 && (!prose || prose === mit || prose === apache ||
-    /^Licensed under the (?:MIT|Apache(?: License)?(?:,? Version)? 2\.0|BSD(?:-[23]-Clause)?) license\.$/i.test(prose));
+  return lines.length > 0 && (!prose || prose === mit || prose === apache);
 }
 
 export default {
@@ -103,7 +120,7 @@ export default {
       Program() {
         for (const comment of commentGroups(context.sourceCode, addedRanges)) {
           if (comment.type === "Shebang" || consumeComment(comment.value, retained) ||
-              consumeComment(comment.value, removed) || isDirective(comment.value) ||
+              consumeComment(comment.value, removed) || isDirective(comment, context.sourceCode) ||
               (!context.sourceCode.getTokenBefore(comment) && license(comment.value))) continue;
           context.report({ loc: comment.loc, messageId: "added" });
         }
