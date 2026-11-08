@@ -6,6 +6,7 @@ import { PayPalScriptProvider, PayPalButtons, usePayPalScriptReducer } from "@pa
 import { motion } from "framer-motion";
 import { WalletCards } from "lucide-react";
 import packagePricing from "../lib/packagePricing";
+import PackageSupportWarning from "./PackageSupportWarning";
 import { captureSalesAttribution, sanitizeSalesAttribution } from "../lib/salesAttribution";
 import { trackConfirmedPurchase } from "../lib/analytics";
 import { preloadConfirmationPage, preloadConfirmationPages } from "../lib/confirmationPages";
@@ -22,7 +23,7 @@ import {
 } from "../lib/checkoutCodes";
 import { requestDeadline } from "../lib/clientRequest";
 
-const { applyPackagePricing } = packagePricing;
+const { applyPackagePricing, isTopPackageTitle } = packagePricing;
 const PAYMENT_FETCH_TIMEOUT_MS = 15_000;
 const PAYMENT_STATUS_POLL_TIMEOUT_MS = 90_000;
 const PAYMENT_STATUS_POLL_INTERVAL_MS = 2_500;
@@ -2130,6 +2131,7 @@ export default function Payment({ hideFooter = false }) {
         className="low-perf-surface glass-premium glass-card-surface glass-scroll-lite mt-8 rounded-2xl border border-line-input"
       >
         <div className="p-6 sm:p-7">
+          {isTopPackageTitle(packageTitle) && <PackageSupportWarning textClass="text-lg" />}
           <h3 className="text-[20px] font-bold text-ink">
             {isFree ? "Confirm Free Booking" : "Payment Method"}
           </h3>
