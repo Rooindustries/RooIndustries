@@ -9,6 +9,8 @@ const steps = setup.runs.steps;
 const enabled = "${{ inputs.browsers != '' && inputs.browser-deps == 'true' && !startsWith(runner.name, 'devbox-') }}";
 const packages = steps.find(step => step.id === "system-packages");
 assert.equal(packages?.if, enabled, "Read the system package key whenever browser dependencies are enabled.");
+assert.ok(packages.run.includes('echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"'),
+  "Use the current UTC ISO week for the system package cache.");
 const install = steps.findIndex(step => step.run?.includes("scripts/install-browser-deps.sh"));
 const cache = steps.findIndex(step => step.uses === "actions/cache/restore@v4" &&
   step.with?.path === "~/.cache/roo-playwright-apt/*.deb");
@@ -21,15 +23,17 @@ for (const part of ["runner.arch", "steps.system-packages.outputs.os", "steps.pl
   "steps.playwright.outputs.browsers", "steps.system-packages.outputs.image"]) {
   assert.ok(steps[cache].with.key.includes("${{ " + part + " }}"), `System package cache key must include ${part}.`);
 }
+assert.ok(steps[cache].with.key.endsWith("-${{ steps.system-packages.outputs.week }}"),
+  "Use the current week as the final part of the system package cache key.");
 assert.equal(steps[cache].with["restore-keys"],
-  steps[cache].with.key.replace("${{ steps.system-packages.outputs.image }}", ""),
+  steps[cache].with.key.replace("${{ steps.system-packages.outputs.image }}-${{ steps.system-packages.outputs.week }}", ""),
   "Reuse package archives from older runner images with the same browsers and operating system.");
 const save = steps.findIndex(step => step.uses === "actions/cache/save@v4" &&
   step.with?.path === steps[cache].with.path);
 assert.equal(save, install + 1, "Save downloaded system packages immediately after a successful install.");
 assert.equal(steps[save].if,
-  "${{ always() && steps.install-system-packages.outcome == 'success' && steps.apt-packages.outputs.cache-hit != 'true' && !startsWith(runner.name, 'devbox-') }}",
-  "Save successful installs even if another step fails, but never cache a failed install.");
+  "${{ always() && steps.install-system-packages.outcome == 'success' && steps.apt-packages.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main' && !startsWith(runner.name, 'devbox-') }}",
+  "Save successful installs on main even if another step fails, but never cache a failed install.");
 assert.equal(steps[save].with.key, "${{ steps.apt-packages.outputs.cache-primary-key }}");
 
 const seedFile = ".github/workflows/browser-deps-cache.yml";

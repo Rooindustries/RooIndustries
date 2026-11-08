@@ -61,13 +61,14 @@ runs:
         . /etc/os-release
         echo "os=$ID-$VERSION_ID" >> "$GITHUB_OUTPUT"
         echo "image=${ImageVersion:-self-hosted}" >> "$GITHUB_OUTPUT"
+        echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
     - name: Restore browser system packages
       id: apt-packages
       if: ${{ inputs.browsers != '' && inputs.browser-deps == 'true' && !startsWith(runner.name, 'devbox-') }}
       uses: actions/cache/restore@v4
       with:
         path: ~/.cache/roo-playwright-apt/*.deb
-        key: playwright-apt-${{ runner.arch }}-${{ steps.system-packages.outputs.os }}-${{ steps.playwright.outputs.version }}-${{ steps.playwright.outputs.browsers }}-${{ steps.system-packages.outputs.image }}
+        key: playwright-apt-${{ runner.arch }}-${{ steps.system-packages.outputs.os }}-${{ steps.playwright.outputs.version }}-${{ steps.playwright.outputs.browsers }}-${{ steps.system-packages.outputs.image }}-${{ steps.system-packages.outputs.week }}
         restore-keys: playwright-apt-${{ runner.arch }}-${{ steps.system-packages.outputs.os }}-${{ steps.playwright.outputs.version }}-${{ steps.playwright.outputs.browsers }}-
     - name: Install cached browser system packages
       id: install-system-packages
@@ -77,7 +78,7 @@ runs:
       env:
         BROWSERS: ${{ inputs.browsers }}
     - name: Save browser system packages
-      if: ${{ always() && steps.install-system-packages.outcome == 'success' && steps.apt-packages.outputs.cache-hit != 'true' && !startsWith(runner.name, 'devbox-') }}
+      if: ${{ always() && steps.install-system-packages.outcome == 'success' && steps.apt-packages.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main' && !startsWith(runner.name, 'devbox-') }}
       uses: actions/cache/save@v4
       with:
         path: ~/.cache/roo-playwright-apt/*.deb
