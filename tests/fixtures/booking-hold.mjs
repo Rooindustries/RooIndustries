@@ -1,10 +1,10 @@
-import { endOwnChannel } from "../../scripts/lib/own-channel.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import http from "node:http";
 import { createHmac } from "node:crypto";
 import { registerHooks } from "node:module";
 import { fileURLToPath } from "node:url";
+import { endOwnChannel } from "../../scripts/lib/own-channel.mjs";
 import { installNetworkGuard, refuseEnvFiles } from "../../scripts/lib/test-target-safety.mjs";
 import { portFromEnv } from "../../scripts/lib/free-tcp-port.mjs";
 

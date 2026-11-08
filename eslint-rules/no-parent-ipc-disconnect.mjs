@@ -4,6 +4,7 @@ const staticKey = (node) => {
   if (key.type === "Literal" && typeof key.value === "string") return key.value;
   if (key.type === "TemplateLiteral" && !key.expressions.length) return key.quasis[0].value.cooked;
 };
+const moduleName = (node) => (node?.type === "Identifier" ? node.name : node?.value);
 
 export default {
   meta: {
@@ -21,6 +22,14 @@ export default {
     return {
       MemberExpression(node) {
         if (staticKey(node) === "disconnect") context.report({ node, messageId: "parent" });
+      },
+      ImportSpecifier(node) {
+        if (moduleName(node.imported) === "disconnect") context.report({ node, messageId: "parent" });
+      },
+      ExportSpecifier(node) {
+        if ([node.local, node.exported].some((name) => moduleName(name) === "disconnect")) {
+          context.report({ node, messageId: "parent" });
+        }
       },
       Property(node) {
         if (node.parent.type === "ObjectPattern" && staticKey(node) === "disconnect") {

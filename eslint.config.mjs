@@ -52,7 +52,15 @@ export default [
     files: ["scripts/**/*.{js,mjs,cjs}", "tests/fixtures/**/*.{js,mjs,cjs}"],
     ignores: ["tests/fixtures/browser/**", "scripts/lib/own-channel.mjs"],
     plugins: { roo },
-    rules: ruleSet(["no-parent-ipc-disconnect"]),
+    rules: { ...ruleSet(["no-parent-ipc-disconnect"]), "no-with": "error" },
+  },
+  {
+    files: ["tests/fixtures/browser/**/*.{js,mjs,cjs}"],
+    rules: {
+      "no-restricted-globals": ["error", "process", "require", "global"],
+      "no-restricted-syntax": ["error", "ImportDeclaration", "ImportExpression"],
+      "no-with": "error",
+    },
   },
   {
     files: [`${testFiles}/*.{js,jsx,mjs,cjs}`],

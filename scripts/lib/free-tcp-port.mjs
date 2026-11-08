@@ -1,7 +1,7 @@
-import { endOwnChannel } from "./own-channel.mjs";
 import assert from "node:assert/strict";
 import net from "node:net";
 import { once } from "node:events";
+import { endOwnChannel } from "./own-channel.mjs";
 
 const validPort = (requested) =>
   Number.isInteger(requested) && (requested === 0 || (requested >= 1024 && requested <= 65535));

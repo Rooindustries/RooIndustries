@@ -1221,6 +1221,9 @@ run("no-parent-ipc-disconnect", {
     `child.channel?.unref();`,
     `class Watch { disconnect() { return true; } }`,
     `const reason = "disconnect";`,
+    `const fake = { disconnect() {}, connected: false }; const other = { disconnect: stop };`,
+    `child[key]();`,
+    `class Watch { #disconnect() {} stop() { this.#disconnect(); } }`,
   ],
   invalid: [
     ...[
@@ -1230,6 +1233,11 @@ run("no-parent-ipc-disconnect", {
       `child.disconnect(...[]);`,
       `child.disconnect.call(child);`,
       `child.disconnect.bind(child)();`,
+      `child.disconnect = noop;`,
+      `import { disconnect } from "node:process"; disconnect();`,
+      `import { disconnect as stop } from "node:process"; stop();`,
+      `export { disconnect } from "node:process";`,
+      `import { "disconnect" as stop } from "node:process"; stop();`,
       `const stop = child.disconnect; stop.call(child);`,
       `class Tracked extends Base { stop() { return super.disconnect(); } }`,
       `new MutationObserver(f).disconnect();`,
