@@ -1,33 +1,50 @@
-export const requestProvider = async (url, options = {}) => {
-  const signal = AbortSignal.timeout(8000);
-  const response = await fetch(url, { ...options, signal });
-  const reader = response.body?.getReader();
-  const cancel = () => { reader?.cancel(signal.reason).catch(() => {}); };
-  signal.addEventListener("abort", cancel, { once: true });
-  if (signal.aborted) cancel();
+import DodoPayments from "dodopayments";
+import { logSafeError } from "../../safeErrorLog.js";
 
-  return {
-    ok: response.ok,
-    status: response.status,
-    async json() {
-      const decoder = new TextDecoder();
-      const chunks = [];
-      try {
+export const providerDeadline = () => AbortSignal.timeout(8000);
+
+export const requestProvider = async (url, options = {}) => {
+  const signal = options.signal || providerDeadline();
+  let reader;
+  const cancel = () => { reader?.cancel(signal.reason).catch(() => {}); };
+  try {
+    signal.throwIfAborted();
+    const response = await fetch(url, { ...options, signal });
+    reader = response.body?.getReader();
+    signal.addEventListener("abort", cancel, { once: true });
+    if (signal.aborted) cancel();
+    const chunks = [];
+    signal.throwIfAborted();
+    if (reader) {
+      for (;;) {
+        const { done, value } = await reader.read();
         signal.throwIfAborted();
-        if (reader) {
-          for (;;) {
-            const { done, value } = await reader.read();
-            signal.throwIfAborted();
-            if (done) break;
-            chunks.push(decoder.decode(value, { stream: true }));
-          }
-        }
-        chunks.push(decoder.decode());
-        return JSON.parse(chunks.join(""));
-      } finally {
-        signal.removeEventListener("abort", cancel);
-        reader?.releaseLock();
+        if (done) break;
+        chunks.push(value);
       }
-    },
-  };
+    }
+    return new Response(reader ? new Blob(chunks) : null, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
+  } catch (error) {
+    logSafeError("Payment provider request failed", signal.aborted ? signal.reason : error);
+    throw error;
+  } finally {
+    signal.removeEventListener("abort", cancel);
+    reader?.releaseLock();
+  }
+};
+
+export const createDodoTransport = (options) => {
+  const signal = providerDeadline();
+  return new DodoPayments({
+    ...options,
+    maxRetries: 0,
+    timeout: 8000,
+    fetch: (url, init) => requestProvider(url, {
+      ...init, signal: AbortSignal.any([signal, init.signal]),
+    }),
+  });
 };

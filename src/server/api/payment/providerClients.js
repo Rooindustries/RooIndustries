@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { requestProvider } from "./providerRequest.js";
+import { providerDeadline, requestProvider } from "./providerRequest.js";
 import providerConfig from "./providerConfig.js";
 import { logSafeError } from "../../safeErrorLog.js";
 
@@ -89,6 +89,11 @@ export const resolveRazorpayCredentials = () => {
   };
 };
 
+const orderCreationFailure = (provider, cause) => Object.assign(
+  new Error(`${provider} order creation failed`, { cause }),
+  { status: 500, code: `${provider}_order_create_failed` }
+);
+
 const getRazorpayAuthorization = (credentials) =>
   `Basic ${Buffer.from(`${credentials.keyId}:${credentials.keySecret}`).toString(
     "base64"
@@ -107,6 +112,7 @@ export const inspectRazorpayOrderByReceipt = async ({
   amount,
   currency = DEFAULT_RAZORPAY_CURRENCY,
   credentials = resolveRazorpayCredentials(),
+  signal = providerDeadline(),
 }) => {
   if (!credentials.enabled || !receipt) {
     return {
@@ -122,6 +128,7 @@ export const inspectRazorpayOrderByReceipt = async ({
     response = await requestProvider(
       `https://api.razorpay.com/v1/orders?receipt=${encodeURIComponent(receipt)}&count=10`,
       {
+        signal,
         headers: {
           Authorization: getRazorpayAuthorization(credentials),
         },
@@ -200,12 +207,14 @@ export const createRazorpayOrder = async ({
     throw error;
   }
 
+  const signal = providerDeadline();
   const stableReceipt = String(receipt || "").trim();
   const lookup = await inspectRazorpayOrderByReceipt({
     receipt: stableReceipt,
     amount,
     currency,
     credentials,
+    signal,
   });
   if (lookup.state === "found" && lookup.order?.orderId) return lookup.order;
   if (lookupOnly) {
@@ -226,6 +235,7 @@ export const createRazorpayOrder = async ({
   let upstream;
   try {
     upstream = await requestProvider("https://api.razorpay.com/v1/orders", {
+      signal,
       method: "POST",
       headers: {
         Authorization: getRazorpayAuthorization(credentials),
@@ -239,16 +249,18 @@ export const createRazorpayOrder = async ({
       }),
     });
   } catch (error) {
+    if (signal.aborted) throw orderCreationFailure("razorpay", error);
     const recovered = await inspectRazorpayOrderByReceipt({
       receipt: stableReceipt,
       amount,
       currency,
       credentials,
+      signal,
     });
     if (recovered.state === "found" && recovered.order?.orderId) {
       return recovered.order;
     }
-    throw error;
+    throw orderCreationFailure("razorpay", error);
   }
 
   const order = await upstream.json().catch(() => ({}));
@@ -258,6 +270,7 @@ export const createRazorpayOrder = async ({
       amount,
       currency,
       credentials,
+      signal,
     });
     if (recovered.state === "found" && recovered.order?.orderId) {
       return recovered.order;
@@ -392,6 +405,7 @@ export const verifyRazorpayPayment = async ({
     return { ok: false, reason: "razorpay_unavailable_in_runtime" };
   }
 
+  const signal = providerDeadline();
   try {
     const basic = Buffer.from(
       `${credentials.keyId}:${credentials.keySecret}`
@@ -399,6 +413,7 @@ export const verifyRazorpayPayment = async ({
     const response = await requestProvider(
       `https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}`,
       {
+        signal,
         headers: {
           Authorization: `Basic ${basic}`,
         },
@@ -459,7 +474,7 @@ export const verifyRazorpayPayment = async ({
       for (let page = 0; page < 5; page += 1) {
         const response = await requestProvider(
           `https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}/refunds?count=100&skip=${page * 100}`,
-          { headers: { Authorization: `Basic ${basic}` } }
+          { signal, headers: { Authorization: `Basic ${basic}` } }
         );
         if (!response.ok) return { ok: false, captured: true, reason: `razorpay_refund_lookup_failed_${response.status}` };
         const payload = await response.json();
@@ -505,7 +520,7 @@ export const verifyRazorpayWebhookSignature = ({
     crypto.timingSafeEqual(providedBuffer, expectedBuffer);
 };
 
-export const getPayPalToken = async () => {
+export const getPayPalToken = async (signal = providerDeadline()) => {
   const runtimePolicy = resolvePaymentRuntimePolicy();
   const { clientId, clientSecret } = getPayPalCredentials();
   const mode = resolvePayPalMode(runtimePolicy);
@@ -521,6 +536,7 @@ export const getPayPalToken = async () => {
   const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
   try {
     const response = await requestProvider(`${getPayPalBaseUrl(runtimePolicy)}/v1/oauth2/token`, {
+      signal,
       method: "POST",
       headers: {
         Authorization: `Basic ${basic}`,
@@ -566,7 +582,8 @@ export const createPayPalOrder = async ({
   customId = "",
   requestId = "",
 }) => {
-  const tokenResult = await getPayPalToken();
+  const signal = providerDeadline();
+  const tokenResult = await getPayPalToken(signal);
   if (!tokenResult.ok) {
     const error = new Error(tokenResult.reason || "PayPal token unavailable");
     error.status = 500;
@@ -575,6 +592,7 @@ export const createPayPalOrder = async ({
   }
 
   const response = await requestProvider(`${getPayPalBaseUrl()}/v2/checkout/orders`, {
+    signal,
     method: "POST",
     headers: {
       Authorization: `Bearer ${tokenResult.token}`,
@@ -594,7 +612,7 @@ export const createPayPalOrder = async ({
         },
       ],
     }),
-  });
+  }).catch(error => { throw orderCreationFailure("paypal", error); });
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok || !data?.id) {
@@ -659,7 +677,8 @@ const inspectPayPalDetails = (details = {}) => {
 };
 
 export const inspectPayPalOrder = async ({ orderId }) => {
-  const tokenResult = await getPayPalToken();
+  const signal = providerDeadline();
+  const tokenResult = await getPayPalToken(signal);
   if (!tokenResult.ok || !orderId) {
     return {
       state: "unavailable",
@@ -672,7 +691,7 @@ export const inspectPayPalOrder = async ({ orderId }) => {
   try {
     const response = await requestProvider(
       `${getPayPalBaseUrl()}/v2/checkout/orders/${encodeURIComponent(orderId)}`,
-      { headers: { Authorization: `Bearer ${tokenResult.token}` } }
+      { signal, headers: { Authorization: `Bearer ${tokenResult.token}` } }
     );
     if (!response.ok) {
       return { state: "unavailable", reason: `paypal_lookup_failed_${response.status}` };
@@ -693,7 +712,8 @@ export const verifyPayPalOrder = async ({
   expectedAmount,
   expectedCurrency = DEFAULT_PAYPAL_CURRENCY,
 }) => {
-  const tokenResult = await getPayPalToken();
+  const signal = providerDeadline();
+  const tokenResult = await getPayPalToken(signal);
   if (!tokenResult.ok) {
     return { ok: false, reason: tokenResult.reason || "paypal_token_missing" };
   }
@@ -702,6 +722,7 @@ export const verifyPayPalOrder = async ({
     const response = await requestProvider(
       `${getPayPalBaseUrl()}/v2/checkout/orders/${encodeURIComponent(orderId)}`,
       {
+        signal,
         headers: {
           Authorization: `Bearer ${tokenResult.token}`,
         },
@@ -827,10 +848,12 @@ export const getPayPalRefundCaptureId = (resource = {}) => {
 
 export const inspectPayPalCapture = async ({ paymentId }) => {
   if (!paymentId) return { state: "unavailable", reason: "paypal_payment_id_missing" };
-  const tokenResult = await getPayPalToken();
+  const signal = providerDeadline();
+  const tokenResult = await getPayPalToken(signal);
   if (!tokenResult.ok) return { state: "unavailable", reason: tokenResult.reason };
   try {
     const response = await requestProvider(`${getPayPalBaseUrl()}/v2/payments/captures/${encodeURIComponent(paymentId)}`, {
+      signal,
       headers: { Authorization: `Bearer ${tokenResult.token}` },
     });
     if (!response.ok) return { state: "unavailable", reason: `paypal_capture_lookup_failed_${response.status}` };
@@ -885,7 +908,8 @@ export const verifyPayPalWebhookSignature = async ({
     return { ok: false, reason: "paypal_webhook_headers_missing" };
   }
 
-  const tokenResult = await getPayPalToken();
+  const signal = providerDeadline();
+  const tokenResult = await getPayPalToken(signal);
   if (!tokenResult.ok) {
     return { ok: false, retryable: true, reason: tokenResult.reason || "paypal_token_missing" };
   }
@@ -902,6 +926,7 @@ export const verifyPayPalWebhookSignature = async ({
     response = await requestProvider(
       `${getPayPalBaseUrl()}/v1/notifications/verify-webhook-signature`,
       {
+        signal,
         method: "POST",
         headers: {
           Authorization: `Bearer ${tokenResult.token}`,

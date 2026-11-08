@@ -30,7 +30,11 @@ export default [
     rules: { ...ruleSet([...navigationRules]), "react-hooks/refs": "error" },
   },
   {
-    files: ["src/server/api/payment/providerClients.js"],
+    files: [
+      "src/server/api/payment/**/providerClients.{js,mjs,cjs}",
+      "src/server/api/payment/**/*Provider.{js,mjs,cjs}",
+      "src/server/api/payment/providers/**/*.{js,mjs,cjs}",
+    ],
     rules: {
       "no-restricted-globals": [
         "error",
@@ -39,8 +43,16 @@ export default [
           message: "Use requestProvider so the deadline also cancels the response body.",
         })),
       ],
+      "no-restricted-syntax": ["error", {
+        selector: "ImportExpression",
+        message: "Use requestProvider for provider transport imports.",
+      }],
       "no-restricted-imports": ["error", {
-        patterns: ["undici", "undici/*", "http", "https", "node:http*"],
+        patterns: [{
+          regex: "^(?!(?:crypto|\\./providerRequest\\.js|\\./providerConfig\\.js|" +
+            "\\.\\./\\.\\./safeErrorLog\\.js|\\.\\./\\.\\./referrals/disputeAccounting\\.js)$)",
+          message: "Use requestProvider for provider transport imports.",
+        }],
       }],
     },
   },

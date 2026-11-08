@@ -76,7 +76,7 @@ export const checkProviderBodyTimeouts = async ({
       return { provider, result, retry, saved, creates };
     });
   }
-  for (const provider of ['paypal', 'razorpay']) for (const action of ['finalize', 'cancel', 'reconcile', 'webhook']) {
+  for (const provider of ['paypal', 'razorpay', 'dodo']) for (const action of ['finalize', 'cancel', 'reconcile', 'webhook']) {
     await run(`recovery-body-timeout-${provider}-${action}`, async () => {
       const checkout = await a1Start(provider);
       const initial = (await row(checkout.id)).payload;
@@ -88,7 +88,8 @@ export const checkProviderBodyTimeouts = async ({
       const pending = new Set();
       setProviderHook(async (request, req, res) => {
         if (!['/v2/checkout/orders/order-fixture', '/v1/payments/payment-fixture',
-          '/v1/orders/order-fixture/payments'].includes(request.path)) return false;
+          '/v1/orders/order-fixture/payments', '/checkouts/order-fixture',
+          '/payments/payment-fixture'].includes(request.path)) return false;
         res.writeHead(200, { 'content-type': 'application/json' });
         res.write('{');
         pending.add(res);
@@ -105,7 +106,8 @@ export const checkProviderBodyTimeouts = async ({
         result = await Promise.race([request, new Promise((_, reject) => {
           timer = setTimeout(() => reject(new Error('Payment body read exceeded its deadline')), 11000);
         })]);
-        const expectedStatus = action === 'reconcile' ? 200 : action === 'cancel' ? 503 : 202;
+        const expectedStatus = action === 'reconcile' ? 200
+          : action === 'cancel' || provider === 'dodo' ? 503 : 202;
         assert.equal(result.status, expectedStatus, JSON.stringify(result));
         const payment = (await row(checkout.id)).payload;
         assert.equal(payment.bookingId, '');

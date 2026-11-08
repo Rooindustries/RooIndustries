@@ -1,4 +1,4 @@
-import DodoPayments from "dodopayments";
+import { createDodoTransport } from "./providerRequest.js";
 import providerConfig from "./providerConfig.js";
 import { isTerminalDisputeStatus } from "../../referrals/disputeAccounting.js";
 
@@ -13,11 +13,9 @@ export const createDodoClient = () => {
   }
   const mode = environment === "test_mode" ? "test" : "live";
   if (!providerConfig.allowProviderModeInRuntime(mode)) throw failure("dodo_environment_disabled", 409);
-  return new DodoPayments({
+  return createDodoTransport({
     bearerToken: read("DODO_PAYMENTS_API_KEY"),
     environment,
-    maxRetries: 0,
-    timeout: 8000,
   });
 };
 

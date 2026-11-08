@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { checkProviderDeadlines } from '../tests/payment-provider-deadlines.mjs';
 import { checkProviderBodyTimeouts } from '../tests/payment-provider-body.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -1207,6 +1208,15 @@ try{
       clearTimeout(timer);
       for (const response of pending) response.destroy();
     }
+  });
+
+  await checkProviderDeadlines({
+    run, startInput, row, sql, requestFlow, seed, dodoReq, originalNow,
+    prepareDodoRefund: () => {
+      dodoPayment.refund_status = 'full';
+      dodoPayment.refunds = [{ ...dodoRefund, amount: null, currency: null }];
+    },
+    setProviderHook: hook => { providerHook = hook; },
   });
 
   await checkProviderBodyTimeouts({
