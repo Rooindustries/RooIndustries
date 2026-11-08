@@ -311,6 +311,7 @@ describe("payment client request and accessibility behavior", () => {
       fingerprint: JSON.stringify({ packageTitle: checkout.packageTitle, originalOrderId: "", startTimeUTC: checkout.startTimeUTC, email: checkout.email, referralCode: "", couponCode: "" }),
     }));
     global.fetch = jest.fn(async (url) => {
+      if (url === "/api/payment/start") return response({ ok: true, recovered: false });
       if (url === "/api/payment/cancel") return response({
         ok: true, cancelled: true,
         refreshedHold: {
@@ -329,7 +330,7 @@ describe("payment client request and accessibility behavior", () => {
     </MemoryRouter>);
     await screen.findByText("Payment method released. Choose a payment method below.");
     await act(async () => { jest.advanceTimersByTime(60_001); await flushMicrotasks(); });
-    expect(screen.getByText("Expired checkout")).toBeInTheDocument();
+    expect(await screen.findByText("Expired checkout")).toBeInTheDocument();
   });
 
   test("offers Dodo checkout resumption and restores method selection after release", async () => {

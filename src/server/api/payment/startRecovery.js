@@ -1,6 +1,6 @@
 import { verifyHoldToken } from "../../booking/holdToken.js";
 import { checkoutRecoveryDecision } from "../../../lib/checkoutRecovery.js";
-import { verifyUpgradeIntentToken } from "../ref/upgradeIntentToken.js";
+import { verifyUpgradeIntentToken, verifyFrozenUpgradeIntent } from "../ref/upgradeIntentToken.js";
 import {
   buildPaymentSessionRecordId, buildPaymentSessionScope, getPaymentRecordById,
   PAYMENT_STATUS_STARTED,
@@ -21,7 +21,7 @@ export const findStartedPayment = async ({ client, bookingPayload, backend, cuto
   const proof = upgrade
     ? verifyUpgradeIntentToken({ token: bookingPayload.upgradeIntentToken,
       bookingId: bookingPayload.originalOrderId, email: bookingPayload.email,
-      targetPackageTitle: bookingPayload.packageTitle, backend, cutoverGeneration })
+      targetPackageTitle: bookingPayload.packageTitle, backend, cutoverGeneration, ignoreExpiry: true })
     : verifyHoldToken({ token: bookingPayload.slotHoldToken, holdId: bookingPayload.slotHoldId,
       startTimeUTC: bookingPayload.startTimeUTC, backend, cutoverGeneration, ignoreExpiry: true });
   if (!proof?.n) return null;
@@ -33,7 +33,10 @@ export const findStartedPayment = async ({ client, bookingPayload, backend, cuto
     key => String(stored[key] || "") === String(bookingPayload[key] || "")
   ) && String(stored.email || "").trim().toLowerCase() === bookingPayload.email.toLowerCase();
   const sameOwner = upgrade
-    ? record.upgradeIntentSnapshot?.intentId === proof.n
+    ? record.upgradeIntentSnapshot?.intentId === proof.n && verifyFrozenUpgradeIntent({
+      snapshot: record.upgradeIntentSnapshot, bookingId: bookingPayload.originalOrderId,
+      email: bookingPayload.email, targetPackageTitle: bookingPayload.packageTitle,
+    })
     : stored.slotHoldId === bookingPayload.slotHoldId && Boolean(verifyHoldToken({
       token: stored.slotHoldToken, holdId: bookingPayload.slotHoldId, startTimeUTC: bookingPayload.startTimeUTC,
       holdNonce: proof.n, backend, cutoverGeneration: proof.gen, ignoreExpiry: true,

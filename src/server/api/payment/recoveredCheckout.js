@@ -1,6 +1,7 @@
 import { checkoutRecoveryDecision } from "../../../lib/checkoutRecovery.js";
 import { inspectPayPalOrder, inspectRazorpayOrder, parseMoneySubunits, toSubunits } from "./providerClients.js";
 import { inspectDodoCheckout } from "./dodoProvider.js";
+import { logSafeError } from "../../safeErrorLog.js";
 
 const paymentHasSettlement = record => Boolean(record.bookingId || record.providerPaymentId ||
   record.verificationState === "server_verified");
@@ -15,6 +16,13 @@ export const recoveredCheckout = async (record, payload, inspect = false) => {
     : record.provider === "razorpay"
       ? await inspectRazorpayOrder({ orderId: record.providerOrderId, includeOrderDetails: true })
       : await inspectDodoCheckout({ record });
+  if (["unavailable", "disabled"].includes(inspection.state)) {
+    const error = Object.assign(new Error("The payment provider could not confirm checkout. Please try again."), {
+      status: 503, code: "provider_checkout_unavailable", reason: inspection.reason,
+    });
+    logSafeError("Checkout recovery provider lookup failed", error);
+    throw error;
+  }
   const currency = String(record.pricingSnapshot?.currency || record.providerPublicData?.currency || "").toUpperCase();
   const amount = toSubunits(record.pricingSnapshot?.netAmount, currency);
   const details = inspection.details;

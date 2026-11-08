@@ -53,6 +53,14 @@ export const normalizePaymentSession = session => {
 };
 
 const PAYMENT_SESSION_STORAGE_KEY = "payment_session_state";
+const PENDING_START_STORAGE_KEY = "checkout_pending_start";
+
+export const rememberCheckoutStart = identity =>
+  writeBrowserStorage("sessionStorage", PENDING_START_STORAGE_KEY, identity);
+
+export const checkoutStartNeedsRecovery = identity => {
+  try { return sessionStorage.getItem(PENDING_START_STORAGE_KEY) === identity; } catch { return false; }
+};
 
 const readPaymentCache = () => {
   try { return JSON.parse(sessionStorage.getItem(PAYMENT_SESSION_STORAGE_KEY) || "null"); } catch { return null; }
@@ -80,4 +88,5 @@ export const writeStoredPaymentSession = session => {
 
 export const clearStoredPaymentSession = () => {
   try { sessionStorage.removeItem(PAYMENT_SESSION_STORAGE_KEY); } catch {}
+  try { sessionStorage.removeItem(PENDING_START_STORAGE_KEY); } catch {}
 };

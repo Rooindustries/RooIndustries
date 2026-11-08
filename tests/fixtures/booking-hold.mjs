@@ -71,12 +71,14 @@ export async function createBookingHoldFixture() {
       NEXT_PUBLIC_SUPABASE_URL: database.origin, NEXT_PUBLIC_SUPABASE_ANON_KEY: database.token });
     let checkoutCount = 0;
     let paymentStatus = null;
+    let providerOutage = false;
     const sessions = new Map();
     const orders = new Map();
     let loseOrderResponse = false;
     let hideOrderLookup = false;
     database.setProviderHandler(async request => {
       evidence.providerRequests.push(request);
+      if (providerOutage) return { status: 503, body: {} };
       if (request.path === "/emails") return { body: { id: "email_fixture" } };
       if (request.path === "/v1/oauth2/token") return { body: { access_token: "fixture-token" } };
       if (["/v2/checkout/orders", "/v1/orders"].includes(request.path) && request.method === "POST") {
@@ -166,6 +168,7 @@ export async function createBookingHoldFixture() {
       "/api/holdSlot": "../../src/server/booking/holdSlot.js",
       "/api/payment/quote": "../../src/server/api/payment/quote.js",
       "/api/payment/providers": "../../src/server/api/payment/providers.js",
+      "/api/ref/validateCoupon": "../../src/server/api/ref/validateCoupon.js",
       "/api/payment/start": "../../src/server/api/payment/start.js",
       "/api/payment/finalize": "../../src/server/api/payment/finalize.js",
       "/api/payment/status": "../../src/server/api/payment/status.js",
@@ -250,7 +253,7 @@ export async function createBookingHoldFixture() {
     const details = { email: "visitor@example.invalid", discord: "fixture_visitor", specs: "Ryzen 7700 / RTX 4070",
       mainGame: "CS2", message: "Fixture booking", localTimeZone: "Asia/Kolkata", deferEmailsUntilConfirmation: true };
     let nextDate = 0;
-    const nextSlotDate = () => dates[nextDate++];
+    const nextSlotDate = () => { globalThis.__rooRateLimitBuckets?.clear(); return dates[nextDate++]; };
     const hold = async () => {
       const startTimeUTC = `${nextSlotDate()}T04:30:00.000Z`;
       const response = await post("/api/holdSlot", { startTimeUTC, packageTitle: "Performance Vertex Overhaul" });
@@ -284,6 +287,7 @@ export async function createBookingHoldFixture() {
       createUpgrade,
       loseOrderResponse: () => { loseOrderResponse = true; },
       advanceClock: ms => { clockShiftMs += ms; },
+      setProviderOutage: value => { providerOutage = value; },
       setPaymentStatus, holdRunsOut, restoreClock, reconcile, paymentSucceeded };
   } catch (error) { await stop(); throw error; }
 }
@@ -295,7 +299,7 @@ if (process.argv.includes("--worker")) {
   process.once("SIGINT", shutdown);
   process.once("disconnect", () => { fixture.stop(); });
   const forwardedMethods = ["get", "setPaymentStatus", "holdRunsOut", "restoreClock", "reconcile", "paymentSucceeded",
-    "loseOrderResponse", "advanceClock", "createUpgrade"];
+    "loseOrderResponse", "advanceClock", "createUpgrade", "setProviderOutage"];
   process.on("message", async ({ id, method, args = [] }) => {
     try {
       let value;

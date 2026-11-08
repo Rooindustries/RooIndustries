@@ -1,4 +1,4 @@
-import { runCheckoutRecoveryMatrix } from "./lib/checkout-recovery-scenarios.mjs";
+import { runCheckoutRecoveryMatrix, runCheckoutFixScenarios } from "./lib/checkout-recovery-scenarios.mjs";
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -405,6 +405,8 @@ try{
       return true;
     };
   };
+  await runCheckoutFixScenarios({ run, a1Start, row, commerce, requestFlow, setUnpaidCheckout, creations,
+    setProviderHook: hook => { providerHook = hook; } });
   await runCheckoutRecoveryMatrix({ run, a1Start, row, commerce, requestFlow, setUnpaidCheckout, creations });
 
   for (const [provider, variant] of [
@@ -475,24 +477,29 @@ try{
           res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); return true;
         };
         const result = await requestFlow('start', { body: checkout.input });
-        assert.equal(result.status, 200, JSON.stringify(result));
+        assert.equal(result.status, variant === 'unavailable' ? 503 : 200, JSON.stringify(result));
+        if (variant === 'unavailable') {
+          assert.equal(result.body.code, 'provider_checkout_unavailable');
+          assert.equal(result.body.providerPayload, undefined);
+          return { provider, variant, visibleFailure: true };
+        }
         const expected = variant === 'unpaid' ? 'resumable'
           : ['expired', 'amount', 'currency'].includes(variant) ? 'start_again'
           : 'confirming';
         assert.equal(result.body.checkoutState, expected, JSON.stringify(result));
         assert.deepEqual(result.body.providerPayload, expected === 'resumable' ? checkout.started.body.providerPayload : null);
-        if (expected === 'resumable') {
+        if (expected === 'resumable' || variant === 'captured') {
           providerHook = null;
           const finalized = await requestFlow('finalize', {
-            paymentAccessToken: result.body.paymentAccessToken, body: checkout.proof,
+            paymentAccessToken: result.body.paymentAccessToken, body: variant === 'captured' ? {} : checkout.proof,
           });
           assert.equal(finalized.status, 200, JSON.stringify(finalized));
           assert.ok(['booked', 'email_partial'].includes(finalized.body.status));
         }
         if (expected === 'start_again') {
           const cancelled = await requestFlow('cancel', { paymentAccessToken: result.body.paymentAccessToken });
-          assert.equal(cancelled.status, 200, JSON.stringify(cancelled));
-          assert.equal(cancelled.body.cancelled, true);
+          assert.equal(cancelled.status, 409, JSON.stringify(cancelled));
+          assert.equal(cancelled.body.code, 'provider_checkout_live');
         }
         if (variant === 'paid-order') {
           const cancelled = await requestFlow('cancel', { paymentAccessToken: result.body.paymentAccessToken });
@@ -508,9 +515,7 @@ try{
     const checkout = await a1Start('paypal', variant);
     paypalOrder.status = 'CREATED';
     paypalOrder.purchase_units[0].payments = { captures: [] };
-    const cancelled = await requestFlow('cancel', { paymentAccessToken: checkout.started.body.paymentAccessToken });
-    assert.equal(cancelled.status, 200, JSON.stringify(cancelled));
-    assert.equal(cancelled.body.cancelled, true);
+    await commerce.patch(checkout.id).set({ status: 'abandoned' }).commit();
     assert.equal((await row(checkout.id)).payload.status, 'abandoned');
     const before = await snapshot();
     const replay = await requestFlow('start', { body: checkout.input });
@@ -1276,11 +1281,13 @@ try{
     const first = await requestFlow('start', { body: input });
     assert.equal(first.status, 200, JSON.stringify(first));
     const before = await snapshot({ receipts: true });
-    const requestsBefore = providerRequests.length;
+    const requestsBefore = creations();
     const second = await requestFlow('start', { body: { ...input, provider: 'razorpay' } });
-    assert.equal(second.status, 409, JSON.stringify(second));
+    assert.equal(second.status, 200, JSON.stringify(second));
+    assert.equal(second.body.provider, 'paypal');
+    assert.equal(second.body.checkoutConflict, 'This checkout already started with its original price and codes. Finish it or release the payment before changing codes.');
     assert.deepEqual(await snapshot({ receipts: true }), before);
-    assert.equal(providerRequests.length, requestsBefore);
+    assert.equal(creations(), requestsBefore);
     return { firstStatus: first.status, second, secondProviderOrderRequests: 0, unchanged: true };
   });
   for(const revisionState of ['absent','null'])await run(`missing-start-hold-authorizing-revision${revisionState==='null'?'-null':''}`,async()=>{
@@ -1289,7 +1296,7 @@ try{
     const result=await requestFlow('start',{body:input});assert.equal(raced,true);assert.ok(result.status>=400);assert.deepEqual(await snapshot(),before);assert.equal(providerRequests.filter(r=>r.path==='/v2/checkout/orders').length,0);return{httpStatus:result.status,revisionState,newerHoldOwnerRetained:true,noClaimRecordProviderCreation:true};
   });
   for(const revisionState of ['absent','null'])await run(`missing-release-hold-authorizing-revision${revisionState==='null'?'-null':''}`,async()=>{
-    const r=await seed('paypal','started',{record:{bookingId:'',holdSnapshot:{slotHoldId:'slotHold.fixture',slotHoldExpiresAt:new Date(originalNow()-1000).toISOString()}}});paypalOrder.status='CREATED';paypalOrder.purchase_units[0].payments={captures:[]};
+    const r=await seed('free','started',{record:{bookingId:'',providerOrderId:'',providerPaymentId:'',holdSnapshot:{slotHoldId:'slotHold.fixture',slotHoldExpiresAt:new Date(originalNow()-1000).toISOString()}}});paypalOrder.status='CREATED';paypalOrder.purchase_units[0].payments={captures:[]};
     await commerce.create({_id:'slotHold.fixture',_type:'slotHold',backendOwner:'supabase',cutoverGeneration:0,startTimeUTC:'2099-01-01T10:00:00.000Z',packageTitle:'Vertex Essentials',phase:'holding',paymentRecordId:recordId,paymentProvider:'paypal',holdNonce:'old-release-owner',expiresAt:new Date(originalNow()+30000).toISOString()});await commerce.patch('slotHold.fixture').set({phase:'payment_pending'}).commit();await removeRevision('slotHold.fixture',revisionState);let raced=false,before;
     fixture.setRequestHook(async(phase,request)=>{if(phase!=='after'||raced||!JSON.stringify(request.response).includes('old-release-owner'))return;raced=true;fixture.setRequestHook(null);await commerce.patch('slotHold.fixture').set({holdNonce:'newer-release-owner',expiresAt:new Date(originalNow()+120000).toISOString()}).commit();before=await snapshot();});
     Date.now=()=>originalNow()+91000;const result=await requestFlow('cancel',{paymentAccessToken:tokenFor(r)});assert.equal(raced,true);assert.deepEqual(await snapshot(),before);assert.notEqual((await row('slotHold.fixture')).payload.phase,'released');return{httpStatus:result.status,revisionState,newerHoldOwnerRetained:true};

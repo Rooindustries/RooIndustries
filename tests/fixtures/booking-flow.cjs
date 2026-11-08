@@ -39,7 +39,8 @@ const test = base.extend({
     try {
       await ready;
       await use(Object.fromEntries(["post", "get", "nextSlotDate", "evidence", "createCoupon", "setPaymentProvider",
-        "reconcile", "loseOrderResponse", "setPaymentStatus", "expirePayment", "advanceClock", "createUpgrade"]
+        "reconcile", "loseOrderResponse", "setPaymentStatus", "expirePayment", "advanceClock", "createUpgrade",
+        "setProviderOutage", "restoreClock"]
         .map(method => [method, (...args) => call(method, ...args)])));
     } finally {
       if (child.exitCode === null) {
@@ -187,6 +188,7 @@ const test = base.extend({
         } });
       }
       if (path === "/api/payment/start") {
+        if (request.postDataJSON()?.recoverOnly) return json(route, { ok: true, recovered: false });
         return json(route, {
           ok: true, paymentAccessToken: "fixture-payment", status: "started",
           providerPayload: { orderId: "fixture-dodo", checkoutUrl: `${baseURL}/__test/checkout-handoff` },

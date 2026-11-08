@@ -23,6 +23,7 @@ test("while one payment method is starting checkout, another can't start a secon
   const gate = new Promise(resolve => { release = resolve; });
   const starts = [];
   await page.route("**/api/payment/start", async route => {
+    if (route.request().postDataJSON()?.recoverOnly) return route.fallback();
     starts.push(route.request().postDataJSON()?.provider || "unknown");
     await gate;
     await route.fallback();
@@ -49,6 +50,7 @@ test("a coupon edit shares the pending start and keeps the original checkout", a
   const gate = new Promise(resolve => { release = resolve; });
   const starts = [];
   await page.route("**/api/payment/start", async route => {
+    if (route.request().postDataJSON()?.recoverOnly) return route.fallback();
     starts.push(route.request().postDataJSON());
     await gate;
     await route.fallback();
@@ -171,6 +173,7 @@ test("a PayPal order created after another method started checkout is refused", 
   const gate = new Promise(resolve => { release = resolve; });
   const starts = [];
   await page.route("**/api/payment/start", async route => {
+    if (route.request().postDataJSON()?.recoverOnly) return route.fallback();
     starts.push(route.request().postDataJSON()?.provider || "unknown");
     await gate;
     await route.fallback();
@@ -210,6 +213,7 @@ test("clicking PayPal while another method is starting checkout is refused", asy
   const gate = new Promise(resolve => { release = resolve; });
   const starts = [];
   await page.route("**/api/payment/start", async route => {
+    if (route.request().postDataJSON()?.recoverOnly) return route.fallback();
     starts.push(route.request().postDataJSON()?.provider || "unknown");
     await gate;
     await route.fallback();
@@ -245,6 +249,7 @@ test("while Razorpay is starting checkout, Pay your way can't start a second one
   const gate = new Promise(resolve => { release = resolve; });
   const starts = [];
   await page.route("**/api/payment/start", async route => {
+    if (route.request().postDataJSON()?.recoverOnly) return route.fallback();
     starts.push(route.request().postDataJSON()?.provider || "unknown");
     await gate;
     await route.fallback();
@@ -289,6 +294,7 @@ test("a free booking can't be confirmed while a paid checkout is starting", asyn
   const gate = new Promise(resolve => { release = resolve; });
   const starts = [];
   await page.route("**/api/payment/start", async route => {
+    if (route.request().postDataJSON()?.recoverOnly) return route.fallback();
     starts.push(route.request().postDataJSON()?.provider || "unknown");
     await gate;
     await route.fallback();
@@ -322,6 +328,7 @@ test.describe("checkout start recovery", () => {
   test.skip(!process.env.PG_BIN || !process.env.POSTGREST_BIN, "Needs the native PostgreSQL fixture.");
 
   const routeNative = async (context, native, flow, provider = "dodo") => {
+    await native.restoreClock();
     await native.setPaymentProvider(provider);
     await native.setPaymentStatus(null);
     const date = await native.nextSlotDate();
@@ -337,6 +344,11 @@ test.describe("checkout start recovery", () => {
     }));
     await context.route("**/api/payment/providers", async route => {
       const response = await native.get("/api/payment/providers");
+      await route.fulfill({ status: response.status, json: response.body });
+    });
+    await context.route("**/api/ref/validateCoupon?**", async route => {
+      const url = new URL(route.request().url());
+      const response = await native.get(url.pathname + url.search);
       await route.fulfill({ status: response.status, json: response.body });
     });
   };
@@ -396,7 +408,7 @@ test.describe("checkout start recovery", () => {
     });
 
   for (const mode of ["pay", "empty", "expired"]) {
-    test(`a recovered Razorpay creation ${mode === "expired" ? "starts again when expired" :
+    test(`a recovered Razorpay creation ${mode === "expired" ? "keeps its lock while the provider order is live" :
       mode === "empty" ? "refreshes an empty saved checkout" : "can finish payment"}`,
       async ({ page, context, flow, bookingNative }, testInfo) => {
         await routeNative(context, bookingNative, flow, "razorpay");
@@ -422,33 +434,31 @@ test.describe("checkout start recovery", () => {
         const orderId = requests.find(call => /^\/v1\/orders\/[^/]+\/payments$/.test(call.path))
           .path.split("/")[3];
         if (mode === "expired") await bookingNative.expirePayment(orderId);
-        if (mode === "empty") {
-          await page.route("**/api/payment/start", async route => {
-            const result = await bookingNative.post("/api/payment/start", route.request().postDataJSON());
-            await route.fulfill({ status: result.status,
-              json: { ...result.body, checkoutState: "recovering", providerPayload: {} } });
-            await page.unroute("**/api/payment/start");
-          });
-        }
         await pay.click();
         if (mode === "empty") {
-          await expect.poll(async () => (await saved(page)).session?.providerPayload).toBeNull();
+          await expect.poll(() => page.evaluate(() => window.__checkout?.order_id)).toBe(orderId);
+          await page.evaluate(() => {
+            const session = JSON.parse(sessionStorage.getItem("payment_session_state"));
+            session.providerPayload = {};
+            session.result.providerPayload = {};
+            sessionStorage.setItem("payment_session_state", JSON.stringify(session));
+          });
           await page.reload();
           await pay.click();
         }
         if (mode === "expired") {
           await expect(page.getByRole("button", { name: "Start again", exact: true })).toBeVisible();
           const session = (await saved(page)).session;
-          expect(session.providerPayload).toBeNull();
+          expect(session.providerPayload).toEqual({});
           expect(session.result.checkoutState).toBe("start_again");
           expect(await page.evaluate(() => Boolean(window.__checkout))).toBe(false);
           await page.screenshot({ path: testInfo.outputPath("start-again.png") });
           await page.getByRole("button", { name: "Start again", exact: true }).click();
-          await expect(page.getByRole("button", { name: "Change payment method", exact: true })).toHaveCount(0);
-          await expect(pay).toBeEnabled();
-          await pay.click();
-          await expect.poll(() => page.evaluate(() => window.__checkout?.order_id || "")).toMatch(/^order_fixture_/);
-          expect(await page.evaluate(() => window.__checkout.order_id)).not.toBe(orderId);
+          await expect(page.getByText("This checkout can still accept payment. Continue with the existing checkout.",
+            { exact: true })).toBeVisible();
+          await expect(pay).toBeDisabled();
+          expect((await bookingNative.evidence()).providerRequests.slice(requestOffset)
+            .filter(call => call.path === "/v1/orders" && call.method === "POST")).toHaveLength(1);
           return;
         }
         await expect.poll(() => page.evaluate(() => window.__checkout?.order_id)).toBe(orderId);
@@ -484,6 +494,7 @@ test.describe("checkout start recovery", () => {
         let reserved;
         const lostResponse = new Promise(resolve => { reserved = resolve; });
         await page.route("**/api/payment/start", async route => {
+    if (route.request().postDataJSON()?.recoverOnly) return route.fallback();
           if (first) return route.fallback();
           const request = route.request();
           first = await bookingNative.post("/api/payment/start", request.postDataJSON());
@@ -550,6 +561,7 @@ test.describe("checkout start recovery", () => {
           let release;
           const gate = new Promise(resolve => { release = resolve; });
           await page.route("**/api/payment/start", async route => {
+    if (route.request().postDataJSON()?.recoverOnly) return route.fallback();
             if (intercepted) return route.fallback();
             intercepted = true;
             first = await bookingNative.post("/api/payment/start", route.request().postDataJSON());
@@ -610,6 +622,7 @@ test.describe("checkout start recovery", () => {
       let first;
       const gate = new Promise(resolve => { release = resolve; });
       await page.route("**/api/payment/start", async route => {
+    if (route.request().postDataJSON()?.recoverOnly) return route.fallback();
         first = await bookingNative.post("/api/payment/start", route.request().postDataJSON());
         await gate;
         await route.fulfill({ status: first.status, json: first.body });
@@ -646,4 +659,153 @@ test.describe("checkout start recovery", () => {
         expect((await saved(second)).session.providerPayload.orderId).toBe(first.body.providerPayload.orderId);
       } finally { await second.close(); }
     });
+
+  test("another tab cannot release a checkout that still accepts payment", async ({ page, context, flow, bookingNative }) => {
+    await routeNative(context, bookingNative, flow);
+    const ordersBefore = (await bookingNative.evidence()).providerRequests.filter(call =>
+      call.method === "POST" && call.path === "/checkouts").length;
+    await flow.review();
+    await flow.payment();
+    await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Reserved checkout", exact: true })).toBeVisible();
+    await page.goBack();
+    const checkout = await saved(page);
+    const second = await context.newPage();
+    try {
+      await second.goto("/booking");
+      await second.evaluate(value => sessionStorage.setItem("checkout_booking_state", JSON.stringify(value)), checkout.booking);
+      await second.goto("/payment");
+      await second.getByRole("button", { name: "Pay your way", exact: true }).click();
+      await expect(second.getByRole("heading", { name: "Reserved checkout", exact: true })).toBeVisible();
+      await second.goBack();
+      await expect(second.getByRole("button", { name: "Resume checkout", exact: true })).toBeEnabled();
+      const released = await bookingNative.post("/api/payment/cancel", {},
+        "Bearer " + (await saved(second)).session.paymentAccessToken);
+      expect(released.status).toBe(409);
+      expect(released.body.code).toBe("provider_checkout_live");
+      const restarted = await bookingNative.post("/api/payment/start", {
+        provider: "razorpay", bookingPayload: checkout.booking, quoteFingerprint: "replacement" });
+      expect(restarted.status).toBe(200);
+      expect(restarted.body.providerPayload.orderId).toBe(checkout.session.providerPayload.orderId);
+      await page.getByRole("button", { name: "Resume checkout", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Reserved checkout", exact: true })).toBeVisible();
+      expect((await bookingNative.evidence()).providerRequests.filter(call =>
+        call.method === "POST" && call.path === "/checkouts")).toHaveLength(ordersBefore + 1);
+    } finally { await second.close(); }
+  });
+
+  for (const provider of ["dodo", "razorpay"]) {
+  test(`a captured ${provider} lost start goes straight to confirmation on reload`, async ({ page, context, flow, bookingNative }) => {
+    await routeNative(context, bookingNative, flow, provider);
+    if (provider === "razorpay") await page.route("https://checkout.razorpay.com/v1/checkout.js", route => route.fulfill({
+      contentType: "application/javascript", body: "window.Razorpay = function () { return { open() {}, on() {} }; };",
+    }));
+    await flow.review();
+    await flow.payment();
+    await page.route("**/api/payment/start", async route => {
+      if (route.request().postDataJSON()?.recoverOnly) return route.fallback();
+      const response = await bookingNative.post("/api/payment/start", route.request().postDataJSON());
+      expect(response.status).toBe(200);
+      await bookingNative.setPaymentStatus(provider === "razorpay" ? "captured" : "succeeded");
+      await route.abort("failed");
+    });
+    await page.getByRole("button", { name: provider === "razorpay" ? "Pay with Razorpay" : "Pay your way", exact: true }).click();
+    await expect(page.getByText("Failed to fetch", { exact: false })).toBeVisible();
+    await page.reload();
+    await expect(page).toHaveURL(/payment-success$/);
+    expect((await bookingNative.evidence()).http.some(call => call.path === "/api/payment/finalize")).toBe(true);
+  });
+
+  }
+
+  test("a provider outage during recovery is visible and reported", async ({ page, context, flow, bookingNative }) => {
+    await routeNative(context, bookingNative, flow);
+    await page.route("**/api/payment/start", async route => {
+      if (route.request().postDataJSON()?.recoverOnly) return route.fallback();
+      const result = await bookingNative.post("/api/payment/start", route.request().postDataJSON());
+      expect(result.status).toBe(200);
+      await route.abort("failed");
+    });
+    await flow.review();
+    await flow.payment();
+    await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+    await expect(page.getByText("Failed to fetch", { exact: false })).toBeVisible();
+    await bookingNative.setProviderOutage(true);
+    try {
+      await page.reload();
+      await expect(page.getByText("The payment provider could not confirm checkout. Please try again.", { exact: true }))
+        .toBeVisible();
+      const calls = (await bookingNative.evidence()).http.filter(call => call.path === "/api/payment/start");
+      expect(calls.at(-1).status).toBe(503);
+      expect(calls.at(-1).response.code).toBe("provider_checkout_unavailable");
+    } finally { await bookingNative.setProviderOutage(false); }
+  });
+
+  for (const free of [false, true]) {
+    test(free ? "a completed free upgrade needs no new quote on reload"
+      : "a live upgrade survives its expired start authorization", async ({ page, context, flow, bookingNative }) => {
+      await routeNative(context, bookingNative, flow);
+      if (free) await bookingNative.createCoupon("free-recovery", 100);
+      const booking = { ...await bookingNative.createUpgrade(), ...(free ? { couponCode: "free-recovery" } : {}) };
+      let started;
+      await page.route("**/api/payment/start", async route => {
+        if (route.request().postDataJSON()?.recoverOnly) {
+          if (!free) return route.fallback();
+          const recovered = await bookingNative.post("/api/payment/start", route.request().postDataJSON());
+          await expect(page.getByRole("button", { name: "Remove coupon", exact: true })).toBeAttached();
+          return route.fulfill({ status: recovered.status, json: recovered.body });
+        }
+        started = await bookingNative.post("/api/payment/start", route.request().postDataJSON());
+        await route.abort("failed");
+      });
+      await page.goto("/booking");
+      await page.evaluate(value => sessionStorage.setItem("checkout_booking_state", JSON.stringify(value)), booking);
+      await page.goto("/payment");
+      await page.getByRole("button", { name: free ? "Confirm Free Booking" : "Pay your way", exact: true }).click();
+      await expect.poll(() => started?.status).toBe(200);
+      await expect(page.getByText("Failed to fetch", { exact: false })).toBeVisible();
+      if (!free) await bookingNative.advanceClock(16 * 60_000);
+      let quotes = 0;
+      await page.route("**/api/payment/quote", async route => { quotes++; await route.fallback(); });
+      try {
+        await page.reload();
+        if (free) {
+          expect(started.body.status).toMatch(/^(booked|email_partial)$/);
+          await expect(page).toHaveURL(/thank-you$/);
+        } else {
+          await expect(page.getByRole("button", { name: "Resume checkout", exact: true })).toBeEnabled();
+          expect((await saved(page)).session.providerPayload.orderId).toBe(started.body.providerPayload.orderId);
+          await page.getByRole("button", { name: "Resume checkout", exact: true }).click();
+          await expect(page.getByRole("heading", { name: "Reserved checkout", exact: true })).toBeVisible();
+        }
+        expect(quotes).toBe(0);
+      } finally { await bookingNative.restoreClock(); }
+    });
+  }
+
+  test("a lost start refreshes the hold before the browser leaves payment", async ({ page, context, flow, bookingNative }) => {
+    await routeNative(context, bookingNative, flow);
+    await page.clock.install();
+    let started;
+    await page.route("**/api/payment/start", async route => {
+      if (route.request().postDataJSON()?.recoverOnly) return route.fallback();
+      started = await bookingNative.post("/api/payment/start", route.request().postDataJSON());
+      await route.abort("failed");
+    });
+    await flow.review();
+    await flow.payment();
+    const before = (await saved(page)).booking.slotHoldExpiresAt;
+    const advance = Math.max(0, Date.parse(before) - await page.evaluate(() => Date.now()) - 30_000);
+    await bookingNative.advanceClock(advance);
+    await page.clock.fastForward(advance);
+    await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+    await expect.poll(() => started?.status).toBe(200);
+    await expect(page.getByRole("button", { name: "Pay your way", exact: true })).toBeEnabled();
+    await page.clock.fastForward(Math.max(1, Date.parse(before) - await page.evaluate(() => Date.now()) + 100));
+    await expect(page.getByRole("button", { name: "Resume checkout", exact: true })).toBeEnabled();
+    await expect(page).toHaveURL(/payment$/);
+    expect((await saved(page)).booking.slotHoldExpiresAt).toBe(started.body.refreshedHold.slotHoldExpiresAt);
+    await bookingNative.restoreClock();
+  });
+
 });

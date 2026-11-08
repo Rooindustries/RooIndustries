@@ -940,57 +940,23 @@ describe("payment session flow", () => {
     });
   });
 
-  test("an unpaid provider session can be released without losing the slot", async () => {
+  test("a live provider checkout keeps its slot and payment lock", async () => {
     const hold = createHold();
     const started = await startPaymentSession({
-      body: {
-        provider: "paypal",
-        bookingPayload: baseBookingPayload({
-          slotHoldToken: issueTokenForHold(hold),
-        }),
-      },
+      body: { provider: "paypal", bookingPayload: baseBookingPayload({ slotHoldToken: issueTokenForHold(hold) }) },
       client: mockClient,
     });
     const paymentRecordId = getOnlyPaymentRecord()._id;
     const oldNonce = store.slotHolds[0].holdNonce;
-
-    const cancelled = await cancelPaymentSession({
-      paymentAccessToken: started.body.paymentAccessToken,
-      client: mockClient,
-    });
-
-    expect(cancelled).toMatchObject({
-      httpStatus: 200,
-      body: {
-        ok: true,
-        cancelled: true,
-        status: paymentRecordConstants.PAYMENT_STATUS_ABANDONED,
-        refreshedHold: {
-          slotHoldId: hold._id,
-          phase: paymentRecordConstants.HOLD_PHASE_HOLDING,
-        },
-      },
-    });
-    expect(getPaymentRecord(paymentRecordId)).toMatchObject({
-      status: paymentRecordConstants.PAYMENT_STATUS_ABANDONED,
-      recoveryReason: "customer_changed_payment_method",
-    });
-    expect(store.slotHolds[0]).toMatchObject({
-      phase: paymentRecordConstants.HOLD_PHASE_HOLDING,
-      paymentRecordId: "",
-      paymentProvider: "",
-    });
-    expect(store.slotHolds[0].holdNonce).not.toBe(oldNonce);
-    expect(store.paymentStartClaims).toHaveLength(0);
-
-    const replay = await cancelPaymentSession({
-      paymentAccessToken: started.body.paymentAccessToken,
-      client: mockClient,
-    });
-    expect(replay).toMatchObject({
-      httpStatus: 200,
-      body: { ok: true, cancelled: true },
-    });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const cancelled = await cancelPaymentSession({ paymentAccessToken: started.body.paymentAccessToken, client: mockClient });
+      expect(cancelled).toMatchObject({ httpStatus: 409,
+        body: { ok: false, cancelled: false, code: "provider_checkout_live" } });
+      expect(getPaymentRecord(paymentRecordId).status).toBe(paymentRecordConstants.PAYMENT_STATUS_STARTED);
+      expect(store.slotHolds[0]).toMatchObject({ phase: paymentRecordConstants.HOLD_PHASE_PAYMENT_PENDING,
+        paymentRecordId, paymentProvider: "paypal", holdNonce: oldNonce });
+      expect(store.paymentStartClaims).toHaveLength(1);
+    }
   });
 
   test("release refuses pending or unavailable provider states without unlocking the hold", async () => {
@@ -1034,7 +1000,7 @@ describe("payment session flow", () => {
 
   test("release cannot overwrite finalization or release its coupon during a race", async () => {
     const hold = createHold();
-    const started = await startPaymentSession({
+    await startPaymentSession({
       body: {
         provider: "paypal",
         bookingPayload: baseBookingPayload({
@@ -1044,6 +1010,12 @@ describe("payment session flow", () => {
       client: mockClient,
     });
     const storedRecord = getOnlyPaymentRecord();
+    Object.assign(storedRecord, { provider: "free", providerOrderId: "", providerPaymentId: "" });
+    store.slotHolds[0].paymentProvider = "free";
+    const { createPaymentAccessToken } = require("../server/api/payment/accessToken");
+    const paymentAccessToken = createPaymentAccessToken({ paymentRecordId: storedRecord._id,
+      provider: "free", pricingFingerprint: storedRecord.pricingFingerprint,
+      backend: storedRecord.backendOwner, cutoverGeneration: storedRecord.cutoverGeneration });
     storedRecord.couponReservationId = "couponRedemption.cancel-race";
     clonePaymentReads = true;
     const releaseCouponReservation = jest.fn();
@@ -1063,7 +1035,7 @@ describe("payment session flow", () => {
     });
 
     const result = await cancelPaymentSession({
-      paymentAccessToken: started.body.paymentAccessToken,
+      paymentAccessToken,
       client: mockClient,
       releaseCouponReservation,
       prepareCouponRelease,
@@ -1453,8 +1425,8 @@ describe("payment session flow", () => {
         paymentAccessToken: started.body.paymentAccessToken,
       });
       expect(cancelled).toMatchObject({
-        httpStatus: 200,
-        body: { ok: true, cancelled: true },
+        httpStatus: 409,
+        body: { ok: false, cancelled: false, code: "provider_checkout_live" },
       });
       expect(mockCreateCommerceWriteClient).toHaveBeenLastCalledWith({
         backendOverride: "supabase",
@@ -4398,7 +4370,7 @@ describe('Dodo checkout lifecycle',()=>{
     });
   });
   afterEach(()=>{delete process.env.DODO_PAYMENTS_PRODUCT_ID;delete process.env.DODO_PAYMENTS_ENVIRONMENT;delete process.env.DODO_PAYMENTS_PRODUCT_IDS;});
-  test('an unpaid Dodo checkout releases its payment lock for another method', async () => {
+  test('an unpaid Dodo checkout keeps its lock while it can accept payment', async () => {
     const started = await startDodo();
     latest.status = 'requires_payment_method';
     const originalFetch = global.fetch;
@@ -4411,10 +4383,10 @@ describe('Dodo checkout lifecycle',()=>{
     try {
       await withRuntimeEnv({ DODO_PAYMENTS_API_KEY: 'offline-key', VERCEL_ENV: 'development' }, async () => {
         const result = await cancelPaymentSession({ paymentAccessToken: started.body.paymentAccessToken, client: mockClient });
-        expect(result).toMatchObject({ httpStatus: 200, body: { cancelled: true, refreshedHold: { phase: 'holding' } } });
-        expect(store.slotHolds[0]).toMatchObject({ phase: 'holding', paymentRecordId: '', paymentProvider: '' });
-        expect(getOnlyPaymentRecord()).toMatchObject({ status: 'abandoned', resourceReleasePending: false });
-        expect(store.paymentStartClaims).toHaveLength(0);
+        expect(result).toMatchObject({ httpStatus: 409, body: { cancelled: false, code: 'provider_checkout_live' } });
+        expect(store.slotHolds[0]).toMatchObject({ phase: 'payment_pending', paymentProvider: 'dodo' });
+        expect(getOnlyPaymentRecord()).toMatchObject({ status: 'started', providerOrderId: 'cks_dodo' });
+        expect(store.paymentStartClaims).toHaveLength(1);
         expect(mockCreateBooking).not.toHaveBeenCalled();
       });
     } finally {

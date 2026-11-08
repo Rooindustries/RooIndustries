@@ -59,13 +59,72 @@ export const runCheckoutRecoveryMatrix = async ({ run, a1Start, row, commerce, r
           }
           if (state === 'expired') {
             const cancelled = await requestFlow('cancel', { paymentAccessToken: result.body.paymentAccessToken });
-            assert.equal(cancelled.status, 200, JSON.stringify(cancelled));
-            assert.equal(cancelled.body.cancelled, true);
-            assert.equal((await row(checkout.id)).payload.status, 'abandoned');
+            assert.equal(cancelled.status, provider === 'free' ? 200 : 409, JSON.stringify(cancelled));
+            if (provider === 'free') {
+              assert.equal(cancelled.body.cancelled, true);
+              assert.equal((await row(checkout.id)).payload.status, 'abandoned');
+            } else {
+              assert.equal(cancelled.body.code, 'provider_checkout_live');
+              assert.equal((await row(checkout.id)).payload.status, 'started');
+            }
           }
         }
         assert.equal(creations(), before);
         return { kind, provider, state, status: result.status, outcome: result.body.checkoutState };
       });
   }
+};
+
+export const runCheckoutFixScenarios = async ({ run, a1Start, row, commerce, requestFlow,
+  setUnpaidCheckout, creations, setProviderHook }) => {
+  for (const provider of ['dodo', 'paypal', 'razorpay']) {
+    await run(`checkout-fix-live-release-${provider}`, async () => {
+      const checkout = await a1Start(provider);
+      setUnpaidCheckout(provider, (await row(checkout.id)).payload);
+      const before = creations();
+      const result = await requestFlow('cancel', { paymentAccessToken: checkout.started.body.paymentAccessToken });
+      assert.equal(result.status, 409, JSON.stringify(result));
+      assert.equal(result.body.code, 'provider_checkout_live');
+      const replay = await requestFlow('start', { body: { ...checkout.input, provider: 'free' } });
+      assert.equal(replay.status, 200, JSON.stringify(replay));
+      assert.equal(replay.body.providerPayload.orderId, checkout.started.body.providerPayload.orderId);
+      assert.equal((await row(checkout.id)).payload.status, 'started');
+      assert.equal(creations(), before);
+      return { provider, replacementDenied: true, originalOrderRetained: true };
+    });
+    await run(`checkout-fix-outage-${provider}`, async () => {
+      const checkout = await a1Start(provider);
+      const reports = [];
+      const key = Symbol.for('roo.reportServerError');
+      const previous = globalThis[key];
+      globalThis[key] = (...args) => reports.push(args);
+      setProviderHook(async (request, req, res) => { res.writeHead(503); res.end('{}'); return true; });
+      try {
+        const result = await requestFlow('start', { body: { ...checkout.input, recoverOnly: true } });
+        assert.equal(result.status, 503, JSON.stringify(result));
+        assert.equal(result.body.code, 'provider_checkout_unavailable');
+        assert.match(result.body.error, /payment provider/);
+        assert.equal(reports.length, 1);
+        assert.equal(reports[0][2].code, 'provider_checkout_unavailable');
+        return { provider, buyerSeesOutage: true, monitored: true };
+      } finally { globalThis[key] = previous; }
+    });
+  }
+  for (const provider of ['dodo', 'free']) await run(`checkout-fix-expired-upgrade-proof-${provider}`, async () => {
+    const checkout = await a1Start(provider, 'upgrade');
+    if (provider !== 'free') setUnpaidCheckout(provider, (await row(checkout.id)).payload);
+    const before = creations();
+    const originalNow = Date.now;
+    Date.now = () => originalNow() + 16 * 60_000;
+    try {
+      const result = await requestFlow('start', { body: { ...checkout.input, recoverOnly: true,
+        quoteFingerprint: 'expired-price', bookingPayload: { ...checkout.input.bookingPayload, couponCode: 'expired' } } });
+      assert.equal(result.status, 200, JSON.stringify(result));
+      assert.equal(result.body.checkoutState, provider === 'free' ? 'confirming' : 'resumable');
+      if (provider === 'free') assert.equal(result.body.bookingId, checkout.started.body.bookingId);
+      else assert.equal(result.body.providerPayload.orderId, checkout.started.body.providerPayload.orderId);
+      assert.equal(creations(), before);
+      return { provider, originalAuthorizationRetained: true, noFreshQuote: true };
+    } finally { Date.now = originalNow; }
+  });
 };

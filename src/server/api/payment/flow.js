@@ -3126,7 +3126,19 @@ const buildPaymentStartResult = async ({ client, record, bookingPayload, request
   let httpStatus = 200;
   let checkout = await recoveredCheckout(record, buildProviderPayloadFromRecord(record),
     recovering || record.status === PAYMENT_STATUS_NEEDS_RECOVERY);
-  if (provider === "free" && checkout.checkoutState === "resumable") {
+  if (record.status === PAYMENT_STATUS_NEEDS_RECOVERY && record.provider !== "free" &&
+      record.reconciliationRecoveryTerminal !== true && record.providerRecoveryTerminal !== true &&
+      canReleaseUnpaidCheckout(record) && checkout.checkoutRecovery.providerState === "unpaid" &&
+      checkout.checkoutRecovery.amountMatches && isFutureIso(record.sessionExpiresAt)) {
+    record = await patchPaymentRecord({ client, record,
+      set: { status: PAYMENT_STATUS_STARTED, recoveryReason: "", nextRecoveryAt: "" },
+      event: buildPaymentRecordEvent({ status: PAYMENT_STATUS_STARTED, source: "start", reason: "provider_order_recovered" }),
+    });
+    status = buildPublicStatusBody(record);
+    checkout = await recoveredCheckout(record, buildProviderPayloadFromRecord(record));
+  }
+  if (provider === "free" && ![PAYMENT_STATUS_BOOKED, PAYMENT_STATUS_EMAIL_PARTIAL].includes(record.status) &&
+      ["resumable", "confirming"].includes(checkout.checkoutState)) {
     const finalized = await finalizePaymentRecordInternal({ client, record, source: "start", providerData: {} });
     status = finalized.response;
     httpStatus = finalized.httpStatus;
@@ -3201,6 +3213,9 @@ export const startPaymentSession = async ({
   try {
     const recovered = await recover();
     if (recovered) return await respond(recovered, true);
+    if (requestBody.recoverOnly === true) {
+      return { httpStatus: 200, body: { ok: true, recovered: false } };
+    }
     let contact = {};
     if (!String(rawBookingPayload.originalOrderId || "").trim()) {
       const holdId = String(rawBookingPayload.slotHoldId || "").trim();
@@ -3400,7 +3415,9 @@ export const startPaymentSession = async ({
     }
     return buildPublicFailure({
       error,
-      fallbackMessage: "Failed to start payment.",
+      fallbackMessage: error?.code === "provider_checkout_unavailable"
+        ? "The payment provider could not confirm checkout. Please try again."
+        : "Failed to start payment.",
     });
   }
 };
@@ -3485,11 +3502,28 @@ export const finalizePaymentSession = async ({
     };
   }
 
+  let confirmationSource = "client";
+  let confirmationData = flatProviderData;
+  if (record.provider === "razorpay" && !flatProviderData.razorpaySignature) {
+    const inspection = await inspectProviderOrderForRecovery(record);
+    if (inspection.state === "unavailable") {
+      const error = Object.assign(new Error("Payment confirmation is temporarily unavailable."), {
+        status: 503, code: "provider_confirmation_unavailable",
+      });
+      logSafeError("Payment confirmation provider lookup failed", error);
+      return buildPublicFailure({ error, fallbackMessage: error.message });
+    }
+    if (!["captured", "refunded"].includes(inspection.state)) {
+      return { httpStatus: 202, body: buildPublicStatusBody(record) };
+    }
+    confirmationSource = "reconcile";
+    confirmationData = inspection.providerData;
+  }
   const finalized = await finalizePaymentRecordInternal({
     client,
     record,
-    source: "client",
-    providerData: flatProviderData,
+    source: confirmationSource,
+    providerData: confirmationData,
   });
 
   return {
@@ -3588,6 +3622,13 @@ export const cancelPaymentSession = async ({
             : "Payment approval is already in progress. Close the provider checkout before changing methods.",
       },
     };
+  }
+
+  if (record.provider !== "free" && record.providerOrderId) {
+    return { httpStatus: 409, body: {
+      ...buildPublicStatusBody(record), ok: false, cancelled: false, code: "provider_checkout_live",
+      error: "This checkout can still accept payment. Continue with the existing checkout.",
+    } };
   }
 
   const holdId = String(record?.bookingPayload?.slotHoldId || "").trim();
