@@ -1217,91 +1217,57 @@ run("no-unchecked-group-signal", {
 run("no-parent-ipc-disconnect", {
   valid: [
     `if (process.connected) process.disconnect();`,
+    `const { disconnect } = process; disconnect();`,
     `child.channel?.unref();`,
     `class Tracked extends Base { disconnect() { return super.disconnect(); } }`,
-    `new MutationObserver(f).disconnect();`,
-    `const observer = new MutationObserver(f); observer.disconnect();`,
-    `let observer = null; observer = new ResizeObserver(f); observer?.disconnect();`,
     `await page.evaluate(() => { const observer = new MutationObserver(f); observer.disconnect(); });`,
-    `if (typeof window !== "undefined") window.addEventListener("resize", f); new ResizeObserver(f).disconnect();`,
-    `const width = globalThis.innerWidth; ({ observer = window.ResizeObserver } = options);
-      new ResizeObserver(f).disconnect();`,
-    `function swap(window) { window.ResizeObserver = fork; } new ResizeObserver(f).disconnect();`,
-    `if (window === globalThis && self != null) new ResizeObserver(f).disconnect();`,
-    `window.window.addEventListener("resize", f); new ResizeObserver(f).disconnect();`,
-    `if ("MutationObserver" in window.window && !self && globalThis instanceof Object) {
-      new MutationObserver(f).disconnect();
-    }`,
+    `await page.evaluate(() => new ResizeObserver(f).disconnect());`,
+    `await page.evaluate(() => { const { disconnect: stop } = window.__watcher; stop(); });`,
+    `await locator.evaluate((node) => { const seen = new ResizeObserver(f); seen.observe(node); seen.disconnect(); });`,
+    `await page.addInitScript(() => { const watcher = new MutationObserver(f); addEventListener("load", () => watcher.disconnect()); });`,
+    `evaluateBrowserTask(page, ({ path }) => new Promise((resolve) => {
+      const observer = new MutationObserver(resolve);
+      observer.disconnect();
+    }), { path });`,
   ],
   invalid: [
     {
-      name: "static template keys keep the receiver exemptions",
-      code: 'child[`disconnect`](); new MutationObserver(f)[`disconnect`](); process[`disconnect`]();' +
-        ' child[`dis${suffix}`](); child[method]();',
+      name: "scripts run in Node, where an observer constructor can be anything",
+      code: `new MutationObserver(f).disconnect();
+        const observer = new MutationObserver(f); observer.disconnect();
+        let watcher = null; watcher = new ResizeObserver(f); watcher?.disconnect();
+        globalThis.MutationObserver = fork; new MutationObserver(f).disconnect();
+        globalThis instanceof { [Symbol.hasInstance](g) { g.MutationObserver = fork; return true; } };
+        new MutationObserver("worker.js").disconnect();`,
+      errors: Array.from({ length: 5 }, () => ({ messageId: "parent" })),
+    },
+    {
+      name: "page code only owns what it declares",
+      code: `await page.evaluate(() => child.disconnect());
+        await page.evaluate(() => { const { disconnect } = child; disconnect(); });
+        evaluateBrowserTask(page, () => supervisor.child.disconnect());
+        const Watch = fork; await page.evaluate(() => new Watch("worker.js").disconnect());`,
+      errors: Array.from({ length: 4 }, () => ({ messageId: "parent" })),
+    },
+    {
+      name: "only the global process ends its own channel",
+      code: `const process = fork("worker.js"); process.disconnect();`,
       errors: [{ messageId: "parent" }],
     },
+    {
+      name: "static keys and destructuring are the same call",
+      code: 'child[\`disconnect\`](); child["disconnect"](); process[\`disconnect\`](); child[\`dis${suffix}\`]();',
+      errors: [{ messageId: "parent" }, { messageId: "parent" }],
+    },
     ...[
-      `const { disconnect } = child; disconnect();
-        const { disconnect: stopObserver } = new MutationObserver(f); stopObserver();
-        const { disconnect: stopProcess } = process; stopProcess();`,
-      `const { disconnect: stop } = child; stop();`,
+      `const { disconnect } = child; disconnect();`,
       `const { "disconnect": stop } = child; stop();`,
-      'const { [`disconnect`]: stop } = child; stop();',
+      'const { [\`disconnect\`]: stop } = child; stop();',
       `let stop; ({ disconnect: stop } = child); stop();`,
       `const { disconnect: stop = noop } = child; stop();`,
       `function release({ disconnect }) { disconnect(); }`,
       `const { child: { disconnect } } = supervisor; disconnect();`,
     ].map((code) => ({ code, errors: [{ messageId: "parent" }] })),
-    ...[
-      `MutationObserver = fork; const watcher = new MutationObserver(f); watcher.disconnect();`,
-      `const watcher = new ResizeObserver(f); watcher.disconnect(); ResizeObserver = fork;`,
-      `function replace() { IntersectionObserver = fork; } new IntersectionObserver(f).disconnect();`,
-      `({ observer: PerformanceObserver } = replacements); new PerformanceObserver(f).disconnect();`,
-      `for (ReportingObserver of constructors) {} new ReportingObserver(f).disconnect();`,
-      `globalThis.MutationObserver = fork; new MutationObserver(f).disconnect();`,
-      `new ResizeObserver(f).disconnect(); window.ResizeObserver = fork;`,
-      `function replace() { self.IntersectionObserver = fork; } new IntersectionObserver(f).disconnect();`,
-      `globalThis["PerformanceObserver"] = fork; new PerformanceObserver(f).disconnect();`,
-      'self[`ReportingObserver`] = fork; new ReportingObserver(f).disconnect();',
-      `window.ResizeObserver ||= fork; new ResizeObserver(f).disconnect();`,
-      `globalThis.MutationObserver++; new MutationObserver(f).disconnect();`,
-      `({ observer: window.ResizeObserver } = replacements); new ResizeObserver(f).disconnect();`,
-      `for (self.IntersectionObserver of constructors) {} new IntersectionObserver(f).disconnect();`,
-      `delete globalThis.ReportingObserver; new ReportingObserver(f).disconnect();`,
-      `global.MutationObserver = fork; new MutationObserver(f).disconnect();`,
-      `Object.defineProperty(globalThis, "MutationObserver", { value: fork }); new MutationObserver(f).disconnect();`,
-      `Object.assign(window, { ResizeObserver: fork }); new ResizeObserver(f).disconnect();`,
-      `Reflect.set(self, "IntersectionObserver", fork); new IntersectionObserver(f).disconnect();`,
-      `const scope = globalThis; scope.MutationObserver = fork; new MutationObserver(f).disconnect();`,
-      `globalThis[name] = fork; new PerformanceObserver(f).disconnect();`,
-      `delete window?.ReportingObserver; new ReportingObserver(f).disconnect();`,
-      `global.global.MutationObserver = fork; new MutationObserver(f).disconnect();`,
-      `parent.MutationObserver = fork; top.frames.ResizeObserver = fork; new MutationObserver(f).disconnect();`,
-      `window.self["ResizeObserver"] = fork; new ResizeObserver(f).disconnect();`,
-      `Object.assign(globalThis.window, { IntersectionObserver: fork }); new IntersectionObserver(f).disconnect();`,
-    ].map((code) => ({ code, errors: [{ messageId: "parent" }] })),
-    {
-      name: "configured globals are checked in script scope",
-      languageOptions: {
-        sourceType: "script",
-        globals: { MutationObserver: "writable", globalThis: "readonly" },
-      },
-      code: `MutationObserver = fork; new MutationObserver(f).disconnect();
-        globalThis.ResizeObserver = fork; new ResizeObserver(f).disconnect();`,
-      errors: [{ messageId: "parent" }, { messageId: "parent" }],
-    },
-    {
-      name: "global writes only affect their own observer constructor",
-      code: `globalThis.MutationObserver = fork; new MutationObserver(f).disconnect();
-        new ResizeObserver(f).disconnect();
-        function replace(window, self, globalThis, ResizeObserver) {
-          window.ResizeObserver = fork; self.ResizeObserver = fork; globalThis.ResizeObserver = fork;
-          ResizeObserver = fork;
-        }
-        window.__probe = state; delete window.__probe;
-        ({ observer = globalThis.ResizeObserver } = replacements);`,
-      errors: [{ messageId: "parent" }],
-    },
     {
       name: "held port hand-over before #320's close fix",
       code: `const finish = () => { if (child.connected) child.disconnect(); };`,
