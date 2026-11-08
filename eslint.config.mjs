@@ -6,6 +6,7 @@ const emailTextRules = new Set(["no-hand-built-dollars"]);
 const pageOnly = "A file in tests/fixtures/browser is one function the page runs; the fixtures read it as text.";
 const scriptRules = new Set(["no-parent-ipc-disconnect", "no-unchecked-group-signal", "no-linux-only-test-tooling"]);
 const navigationRules = new Set(["no-secure-context-navigation-keys"]);
+const testRules = new Set(["no-page-route-removal"]);
 const testFiles = "src/**/__tests__/**";
 const ruleSet = (names) => Object.fromEntries(names.map((name) => [`roo/${name}`, "error"]));
 
@@ -22,7 +23,7 @@ export default [
     },
     plugins: { roo, "react-hooks": reactHooks },
     rules: ruleSet(Object.keys(rules).filter((name) =>
-      !emailTextRules.has(name) && !scriptRules.has(name) && !navigationRules.has(name)
+      !emailTextRules.has(name) && !scriptRules.has(name) && !navigationRules.has(name) && !testRules.has(name)
     )),
   },
   {
@@ -37,6 +38,11 @@ export default [
     rules: {
       ...ruleSet(["no-hand-built-node-options", "no-unchecked-group-signal"]),
     },
+  },
+  {
+    files: ["tests/**/*.{js,mjs,cjs}"],
+    ignores: ["tests/fixtures/held-routes.cjs"],
+    rules: ruleSet([...testRules]),
   },
   {
     files: [

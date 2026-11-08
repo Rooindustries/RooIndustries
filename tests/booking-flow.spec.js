@@ -1,3 +1,4 @@
+const { routePage, removePageRoutes } = require("./fixtures/held-routes.cjs");
 const { test, expect } = require("./fixtures/booking-flow.cjs");
 const fs = require("node:fs/promises");
 
@@ -98,14 +99,14 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await flow.reserve();
         await flow.details();
         const original = await hold(page);
-        await page.route("**/api/releaseHold", (route) => route.fulfill({
+        await routePage(page, "**/api/releaseHold", (route) => route.fulfill({
           status: 409, contentType: "application/json", body: JSON.stringify({ ok: false, message }),
         }));
         await page.getByRole("button", { name: "Release Slot", exact: true }).click();
         await expect(page.getByRole("alert").filter({ hasText: message })).toBeVisible();
         expect(await hold(page)).toEqual(original);
         await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toHaveValue("visitor@example.invalid");
-        await page.unroute("**/api/releaseHold");
+        await removePageRoutes(page, "**/api/releaseHold");
         await page.getByRole("button", { name: "Release Slot", exact: true }).click();
         await expect.poll(() => hold(page)).toBeNull();
       });
@@ -212,7 +213,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
 
     test("same-slot refresh 403 clears the refused hold and shows the server message", async ({ page, flow }) => {
       await flow.reserve();
-      await page.route("**/api/holdSlot", (route) => route.fulfill({
+      await routePage(page, "**/api/holdSlot", (route) => route.fulfill({
         status: 403,
         contentType: "application/json",
         body: JSON.stringify({ ok: false, message: "Invalid hold token" }),

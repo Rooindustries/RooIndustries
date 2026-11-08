@@ -4,7 +4,7 @@ const { navLink } = require("./fixtures/nav-link.cjs");
 const { clickAtHomeArrival } = require("./fixtures/home-arrival-click.cjs");
 const { clickAtRouteCommit: clickAtCommit } = require("./fixtures/route-commit-click.cjs");
 const { waitForHydrated, waitForRouteCommitted } = require("./fixtures/react-hydration.cjs");
-const { holdRoutes } = require("./fixtures/held-routes.cjs");
+const { holdRoutes, routePage, removePageRoutes } = require("./fixtures/held-routes.cjs");
 
 const CPU_THROTTLE_RATE = Number(process.env.NAV_CPU_THROTTLE_RATE || 4);
 const FINAL_OFFSET_MAX = 160;
@@ -269,7 +269,7 @@ for (const thirdClick of [false, true]) {
     page.on("console", onConsole);
     let releaseFAQ;
     const faqReleased = new Promise(resolve => { releaseFAQ = resolve; });
-    await page.route("**/faq", async route => {
+    await routePage(page, "**/faq", async route => {
       await faqReleased;
       await route.continue();
     });
@@ -313,7 +313,7 @@ for (const thirdClick of [false, true]) {
     } finally {
       releaseFAQ();
       page.off("console", onConsole);
-      await page.unrouteAll({ behavior: "wait" });
+      await removePageRoutes(page);
       await historySession?.detach();
     }
     if (!thirdClick) {
@@ -421,7 +421,7 @@ test("a route link clicked while the homepage trip is in flight wins", async ({ 
 test("a delayed FAQ document consumes the abandoned Home entry once", async ({ page }) => {
   await openPage(page, "/reviews", "desktop");
   const startLength = await historyLength(page);
-  await page.route("**/faq", async (route) => {
+  await routePage(page, "**/faq", async (route) => {
     await new Promise(resolve => setTimeout(resolve, 4000));
     await route.continue();
   });

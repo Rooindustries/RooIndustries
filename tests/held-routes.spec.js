@@ -1,5 +1,5 @@
 const { test, expect } = require("@playwright/test");
-const { holdRoutes } = require("./fixtures/held-routes.cjs");
+const { holdRoutes, routePage, removePageRoutes } = require("./fixtures/held-routes.cjs");
 
 test.use({ javaScriptEnabled: true });
 
@@ -100,3 +100,42 @@ test("holding one page leaves a second tab free to finish its request", async ({
   }
   expect(await page.evaluate(() => window.__heldRequest)).toBe("finished");
 });
+
+for (const removal of ["handler", "all"]) {
+  test(`${removal} removal drains a request burst and preserves downstream routes`, async ({ page, context }) => {
+    const pattern = "**/__held-route/**";
+    await context.route(pattern, route => route.fulfill({ json: "context" }));
+    await routePage(page, pattern, route => route.fulfill({ json: "page" }));
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    const received = [];
+    const handler = async route => {
+      received.push(route.request().url());
+      await gate;
+      await route.fallback();
+    };
+    await routePage(page, pattern, handler);
+    try {
+      await page.evaluate(() => {
+        window.__heldRequests = Promise.all(Array.from({ length: 12 }, (_, index) =>
+          fetch(`/__held-route/${index}`).then(response => response.json())
+        ));
+      });
+      await expect.poll(() => received.length).toBe(12);
+      let removed = false;
+      const removing = (removal === "handler" ? removePageRoutes(page, pattern, handler) : removePageRoutes(page))
+        .then(() => { removed = true; });
+      const expected = removal === "handler" ? "page" : "context";
+      expect(await page.evaluate(() => fetch("/__held-route/probe").then(response => response.json()))).toBe(expected);
+      expect(removed).toBe(false);
+      release();
+      await removing;
+      expect(await page.evaluate(() => window.__heldRequests)).toEqual(Array(12).fill(expected));
+      expect(await page.evaluate(() => fetch("/__held-route/next").then(response => response.json()))).toBe(expected);
+      await removePageRoutes(page, pattern, handler);
+    } finally {
+      release();
+      await removePageRoutes(page);
+    }
+  });
+}

@@ -1,3 +1,4 @@
+const { routePage, removePageRoutes } = require("./fixtures/held-routes.cjs");
 const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
 const { test, expect } = require("./fixtures/booking-flow.cjs");
 const fs = require("node:fs/promises");
@@ -185,7 +186,7 @@ test.beforeEach(async ({ page, flow }) => {
     };
     requestAnimationFrame(sampleFrame);
   });
-  await page.route("**/api/ref/sendBookingEmails", route => {
+  await routePage(page, "**/api/ref/sendBookingEmails", route => {
     flow.state.calls.push({ path: "/api/ref/sendBookingEmails", body: route.request().postDataJSON() });
     return route.fulfill({ json: { ok: true, emailDispatch: { allSent: true } } });
   });
@@ -250,7 +251,7 @@ function watchErrors(page, expectedEmailStatus = 0) {
 
 async function openPendingPaidCheckout(page, flow) {
   let finalizeRoute;
-  await page.route("**/api/payment/finalize", route => {
+  await routePage(page, "**/api/payment/finalize", route => {
     expect(route.request().headers().authorization).toBe("Bearer fixture-payment");
     finalizeRoute = route;
   });
@@ -310,13 +311,13 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         const quote = { grossAmount: 84.99, netAmount: 0, isFree: true };
         const providers = { dodo: { enabled: true, mode: "test" }, paypal: { enabled: false }, razorpay: { enabled: false } };
         if (kind === "free") {
-          await page.route("**/api/payment/quote", route => route.fulfill({ json: { ok: true, quoteFingerprint: "fixture-free-quote", providers, quote } }));
-          await page.route("**/api/payment/start", route => {
+          await routePage(page, "**/api/payment/quote", route => route.fulfill({ json: { ok: true, quoteFingerprint: "fixture-free-quote", providers, quote } }));
+          await routePage(page, "**/api/payment/start", route => {
             expect(route.request().postDataJSON().provider).toBe("free");
             return route.fulfill({ json: { ...completed, quote } });
           });
         } else {
-          await page.route("**/api/payment/finalize", route => {
+          await routePage(page, "**/api/payment/finalize", route => {
             expect(route.request().headers().authorization).toBe("Bearer fixture-payment");
             finalizeRoute = route;
           });
@@ -443,7 +444,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
             sessionStorage.setItem("booking_confirmation_state", JSON.stringify(confirmation));
             history.replaceState({ ...history.state, usr: { bookingConfirmation: confirmation, modal: true, backgroundLocation: { pathname: "/" }, retained: "fixture-retained" } }, "");
           }, receipt);
-          await page.route("**/api/ref/sendBookingEmails", request => {
+          await routePage(page, "**/api/ref/sendBookingEmails", request => {
             expect(request.request().postDataJSON()).toEqual(receipt);
             dispatchCalls += 1;
             dispatchRoute = request;
@@ -574,7 +575,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
           emailDispatchToken: "",
         };
         let finalizeRoute;
-        await page.route("**/api/payment/finalize", route => {
+        await routePage(page, "**/api/payment/finalize", route => {
           expect(route.request().headers().authorization).toBe("Bearer fixture-payment");
           finalizeRoute = route;
         });
@@ -599,7 +600,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
           await route.fulfill({ response, body });
           chunk.fulfilledAt = Date.now();
         };
-        await page.route("**/_next/static/chunks/**", interceptChunk);
+        await routePage(page, "**/_next/static/chunks/**", interceptChunk);
         try {
           await page.goto("/payment?dodo_return=1", { waitUntil: "domcontentloaded" });
           await expect.poll(() => Boolean(finalizeRoute)).toBe(true);
@@ -631,7 +632,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
           expect(pageErrors).toEqual([]);
           await capture(page, testInfo, `${chunkState}-chunk-arrival`);
           if (chunkState === "failed") {
-            await page.unroute("**/_next/static/chunks/**", interceptChunk);
+            await removePageRoutes(page, "**/_next/static/chunks/**", interceptChunk);
             await page.getByRole("button", { name: "Reload page", exact: true }).click();
             await expect(page.getByRole("heading", { level: 1, name: "Payment Successful", exact: true })).toBeVisible();
           }
@@ -641,7 +642,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         } finally {
           clearTimeout(delayTimer);
           releaseChunk();
-          await page.unrouteAll({ behavior: "wait" });
+          await removePageRoutes(page);
         }
       });
     }
@@ -663,21 +664,21 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         let cancelCalls = 0;
         if (free) {
           const quote = { grossAmount: 84.99, netAmount: 0, isFree: true };
-          await page.route("**/api/payment/quote", request => request.fulfill({ json: {
+          await routePage(page, "**/api/payment/quote", request => request.fulfill({ json: {
             ok: true, quoteFingerprint: "fixture-free-quote", quote,
             providers: { dodo: { enabled: true, mode: "test" }, paypal: { enabled: false }, razorpay: { enabled: false } },
           } }));
-          await page.route("**/api/payment/start", request => {
+          await routePage(page, "**/api/payment/start", request => {
             expect(request.request().postDataJSON().provider).toBe("free");
             return request.fulfill({ json: { ...completed, quote } });
           });
         } else {
-          await page.route("**/api/payment/finalize", request => {
+          await routePage(page, "**/api/payment/finalize", request => {
             expect(request.request().headers().authorization).toBe("Bearer fixture-payment");
             finalizeRoute = request;
           });
           if (completion === "recovery poll") {
-            await page.route("**/api/payment/status", request => {
+            await routePage(page, "**/api/payment/status", request => {
               expect(request.request().headers().authorization).toBe("Bearer fixture-payment");
               statusCalls += 1;
               return request.fulfill({ json: {
@@ -687,10 +688,10 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
             });
           }
           if (completion === "webhook completed") {
-            await page.route("**/api/payment/start", request => request.fulfill({ json: completed }));
+            await routePage(page, "**/api/payment/start", request => request.fulfill({ json: completed }));
           }
           if (completion === "captured payment") {
-            await page.route("**/api/payment/cancel", request => {
+            await routePage(page, "**/api/payment/cancel", request => {
               expect(request.request().headers().authorization).toBe("Bearer fixture-payment");
               cancelCalls += 1;
               return request.fulfill({ json: { ...completed, captured: true } });

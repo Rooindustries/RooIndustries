@@ -1,3 +1,4 @@
+const { routePage, removePageRoutes } = require("./fixtures/held-routes.cjs");
 const { test, expect } = require("./fixtures/booking-flow.cjs");
 
 test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata", actionTimeout: 10000, reducedMotion: "reduce" });
@@ -5,10 +6,10 @@ test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata", actionTimeout: 1
 const bookingId = "fixture-free-confirmation";
 
 const openFreePayment = async (page, flow) => {
-  await page.route("**/api/ref/validateCoupon?code=free100*", route => route.fulfill({
+  await routePage(page, "**/api/ref/validateCoupon?code=free100*", route => route.fulfill({
     json: { ok: true, coupon: { code: "free100", discountType: "percent", discountPercent: 100, canCombineWithReferral: true } },
   }));
-  await page.route("**/api/payment/quote", route => {
+  await routePage(page, "**/api/payment/quote", route => {
     const free = route.request().postDataJSON().couponCode === "free100";
     return route.fulfill({ json: {
       ok: true,
@@ -27,7 +28,7 @@ const holdConfirmation = async (page, fail = false) => {
   let release;
   const pending = new Promise(resolve => { release = resolve; });
   const requests = [];
-  await page.route("**/api/payment/start", async route => {
+  await routePage(page, "**/api/payment/start", async route => {
     const payload = route.request().postDataJSON();
     requests.push({ payload, startedAt: Date.now() });
     await pending;
@@ -113,7 +114,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         expect(pending.requests).toHaveLength(1);
       } finally {
         pending.release();
-        await page.unrouteAll({ behavior: "wait" });
+        await removePageRoutes(page);
       }
     });
 
@@ -135,7 +136,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         expect(pending.requests).toHaveLength(1);
       } finally {
         pending.release();
-        await page.unrouteAll({ behavior: "wait" });
+        await removePageRoutes(page);
       }
     });
 
@@ -154,7 +155,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
             await validation;
             await route.fallback();
           };
-          await page.route(pattern, handler);
+          await routePage(page, pattern, handler);
           try {
             const input = page.locator(`#${id}`);
             await input.fill(code);
@@ -167,7 +168,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
             releaseValidation();
           }
           await expect(page.getByRole("button", { name: "Confirm Free Booking", exact: true })).toBeEnabled();
-          await page.unroute(pattern, handler);
+          await removePageRoutes(page, pattern, handler);
         }
         await page.getByRole("button", { name: "Confirm Free Booking", exact: true }).click();
         await expect.poll(() => pending.requests.length).toBe(1);
@@ -177,7 +178,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         expect(pending.requests).toHaveLength(1);
       } finally {
         pending.release();
-        await page.unrouteAll({ behavior: "wait" });
+        await removePageRoutes(page);
       }
     });
 
@@ -201,7 +202,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         expect(await page.evaluate(() => sessionStorage.getItem("booking_confirmation_state"))).toBeNull();
       } finally {
         pending.release();
-        await page.unrouteAll({ behavior: "wait" });
+        await removePageRoutes(page);
       }
     });
   });

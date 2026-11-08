@@ -1,3 +1,4 @@
+const { routePage, removePageRoutes, removeContextRoutes } = require("./fixtures/held-routes.cjs");
 const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
 const { waitForRouteCommitted } = require("./fixtures/react-hydration.cjs");
 const { test, expect } = require('@playwright/test');
@@ -45,11 +46,11 @@ async function holdAccountReply(page, endpoint, reply) {
     await gate;
     try { await (reply === 'abort' ? route.abort('failed') : route.fulfill(reply)); } finally { finished(); }
   };
-  await page.route(`**${endpoint}`, handler);
+  await routePage(page, `**${endpoint}`, handler);
   return { arrived, release: async () => {
     unblock();
     if (received) await completed;
-    await page.unroute(`**${endpoint}`, handler);
+    await removePageRoutes(page, `**${endpoint}`, handler);
   } };
 }
 
@@ -126,7 +127,7 @@ test("reset acknowledgment persists without clearing or resending the email", as
     await fixture.configureApiFixture(baseURL, { reset: true });
     const response = await fixture.requestRoute(fixture.apiFixtureOrigin(baseURL), "/__portal", { data: { reset: true } });
     expect(response.status).toBe(200);
-    await context.unroute("**/*");
+    await removeContextRoutes(context, "**/*");
     const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
     const local = new URL(baseURL);
     local.hostname = "localhost";
@@ -190,7 +191,7 @@ test.describe('replacement confirmation links in the same tab', () => {
     let releaseFresh;
     const staleHeld = new Promise(resolve => { releaseStale = resolve; });
     const freshHeld = new Promise(resolve => { releaseFresh = resolve; });
-    await page.route(endpoint, async route => {
+    await routePage(page, endpoint, async route => {
       if (route.request().postDataJSON().token === stale) {
         await staleHeld;
         await route.fulfill({ status: 400, json: { ok: false, error: 'Invalid or expired confirmation link.' } });
@@ -229,7 +230,7 @@ test.describe('replacement confirmation links in the same tab', () => {
       releaseFresh();
       if (tokens.includes(stale)) await staleResponse.then(response => response.finished()).catch(() => {});
       if (tokens.includes(fresh)) await freshResponse.then(response => response.finished()).catch(() => {});
-      await page.unrouteAll({ behavior: 'wait' });
+      await removePageRoutes(page);
     }
   });
 
@@ -237,7 +238,7 @@ test.describe('replacement confirmation links in the same tab', () => {
     const tokens = collectTokens(page);
     let release;
     const held = new Promise(resolve => { release = resolve; });
-    await page.route(endpoint, async route => { await held; await route.fallback(); });
+    await routePage(page, endpoint, async route => { await held; await route.fallback(); });
     const response = page.waitForResponse(endpoint);
     response.catch(() => {});
     try {
@@ -258,7 +259,7 @@ test.describe('replacement confirmation links in the same tab', () => {
     } finally {
       release();
       if (tokens.length) await response.then(result => result.finished()).catch(() => {});
-      await page.unrouteAll({ behavior: 'wait' });
+      await removePageRoutes(page);
     }
   });
 
@@ -286,7 +287,7 @@ test.describe('replacement confirmation links in the same tab', () => {
       [fresh]: new Promise(resolve => { release[fresh] = resolve; }),
       [stale]: new Promise(resolve => { release[stale] = resolve; }),
     };
-    await page.route(endpoint, async route => {
+    await routePage(page, endpoint, async route => {
       const token = route.request().postDataJSON().token;
       await held[token];
       if (token === stale) await route.fulfill({ status: 400, json: { ok: false, error: 'Invalid or expired confirmation link.' } });
@@ -317,7 +318,7 @@ test.describe('replacement confirmation links in the same tab', () => {
     } finally {
       release[fresh]();
       release[stale]();
-      await page.unrouteAll({ behavior: 'wait' });
+      await removePageRoutes(page);
     }
   });
 });
@@ -327,7 +328,7 @@ test.describe('portal requests that stall', () => {
 
   test.beforeEach(async ({ page, context, baseURL }) => {
     await signIn(context, baseURL);
-    await page.route('**/api/auth/identities?flow=referral', route => route.fulfill({ json: { ok: true, domainAccount: true, providers: ['email', 'google'], unlinkableProviders: ['email', 'google'] } }));
+    await routePage(page, '**/api/auth/identities?flow=referral', route => route.fulfill({ json: { ok: true, domainAccount: true, providers: ['email', 'google'], unlinkableProviders: ['email', 'google'] } }));
   });
 
   const stall = async (page, endpoint, method) => {
@@ -343,11 +344,11 @@ test.describe('portal requests that stall', () => {
       await gate;
       try { await route.abort(); } catch {} finally { finished(); }
     };
-    await page.route(`**${endpoint}`, handler);
+    await routePage(page, `**${endpoint}`, handler);
     return { arrived, count: () => count, release: async () => {
       unblock();
       if (count) await completed;
-      await page.unroute(`**${endpoint}`, handler);
+      await removePageRoutes(page, `**${endpoint}`, handler);
     } };
   };
 
@@ -431,9 +432,9 @@ test.describe('portal requests that stall', () => {
     const forward = route => route.continue({ url: `${target.origin}/api/ref/updateSplit` });
     try {
       const { guardBrowserContext } = await import('../scripts/lib/test-target-safety.mjs');
-      await context.unroute('**/*');
+      await removeContextRoutes(context, '**/*');
       await guardBrowserContext(context, [baseURL, fixture.apiFixtureOrigin(baseURL), target.origin]);
-      await page.route('**/api/ref/updateSplit', forward);
+      await routePage(page, '**/api/ref/updateSplit', forward);
       await page.goto('/referrals/dashboard');
       await page.getByText('Commission (%)', { exact: true }).locator('..').getByRole('button', { name: '+', exact: true }).click();
       const headers = page.waitForResponse(response => new URL(response.url()).pathname === '/api/ref/updateSplit');
@@ -446,7 +447,7 @@ test.describe('portal requests that stall', () => {
       expect(requests).toBe(1);
       await record(page, testInfo, 'stalled-settings-body', { headersStatus: 200, bodyCompleted: false, requests, unknownOutcomeShown: true });
     } finally {
-      await page.unroute('**/api/ref/updateSplit', forward);
+      await removePageRoutes(page, '**/api/ref/updateSplit', forward);
       await new Promise(resolve => {
         server.close(resolve);
         server.closeAllConnections();
@@ -473,7 +474,7 @@ test.describe('portal requests that stall', () => {
   });
 
   test('a stalled password change reports an unknown outcome', async ({ page }, testInfo) => {
-    await page.route('**/api/auth/reauth', route => route.fulfill({ json: { ok: true } }));
+    await routePage(page, '**/api/auth/reauth', route => route.fulfill({ json: { ok: true } }));
     const held = await stall(page, '/api/ref/hashPassword', 'POST');
     try {
       await page.goto('/referrals/change-password');
@@ -490,9 +491,9 @@ test.describe('portal requests that stall', () => {
   });
 
   test('an unreadable reply to a sent password change reports an unknown outcome', async ({ page }) => {
-    await page.route('**/api/auth/reauth', route => route.fulfill({ json: { ok: true } }));
+    await routePage(page, '**/api/auth/reauth', route => route.fulfill({ json: { ok: true } }));
     const unreadable = { status: 200, contentType: 'text/html', body: '<html>' };
-    await page.route('**/api/ref/hashPassword', route => route.fulfill(unreadable));
+    await routePage(page, '**/api/ref/hashPassword', route => route.fulfill(unreadable));
     await page.goto('/referrals/change-password');
     await page.getByLabel('Current Password', { exact: true }).fill('Synthetic-password1!');
     await page.getByLabel('New Password', { exact: true }).fill('Fresh-password-22!');
@@ -535,7 +536,7 @@ test.describe('portal requests that stall', () => {
 
   test('a failed sign-in check on signup can be tried again', async ({ page }) => {
     let failing = true;
-    await page.route('**/api/auth/identities?flow=referral', route => (failing
+    await routePage(page, '**/api/auth/identities?flow=referral', route => (failing
       ? route.fulfill({ status: 503, json: { ok: false, error: 'Temporarily unavailable.' } })
       : route.fallback()));
     await page.goto('/referrals/register');
@@ -565,7 +566,7 @@ test.describe('portal requests that stall', () => {
   });
 
   test('stalled unlink reports an unknown outcome', async ({ page }, testInfo) => {
-    await page.route('**/api/auth/reauth', route => route.fulfill({ json: { ok: true } }));
+    await routePage(page, '**/api/auth/reauth', route => route.fulfill({ json: { ok: true } }));
     const held = await stall(page, '/api/auth/identities', 'POST');
     try {
       await page.goto('/referrals/dashboard');
@@ -586,7 +587,7 @@ test.describe('portal requests that stall', () => {
 
 test('an upstream Auth outage stays explained after a connected-account password edit', async ({ page, baseURL }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.route('**/api/auth/identities?flow=referral', route => route.fulfill({ json: { ok: true, domainAccount: true, providers: ['email', 'google'], unlinkableProviders: ['email', 'google'] } }));
+  await routePage(page, '**/api/auth/identities?flow=referral', route => route.fulfill({ json: { ok: true, domainAccount: true, providers: ['email', 'google'], unlinkableProviders: ['email', 'google'] } }));
   await page.goto('/referrals/login');
   await page.getByLabel('Referral code or login email', { exact: true }).fill('fixture-creator');
   await page.getByLabel('Password', { exact: true }).fill('Synthetic-password1!');
@@ -618,7 +619,7 @@ test('an upstream Auth outage stays explained after a connected-account password
     await gate;
     try { await route.fulfill({ status: response.status, headers, json: body }); } finally { finished(); }
   };
-  await page.route('**/api/auth/reauth', handler);
+  await routePage(page, '**/api/auth/reauth', handler);
   const password = page.getByLabel('Current password', { exact: true });
   const confirm = page.getByRole('button', { name: 'Confirm identity', exact: true });
   try {
@@ -641,7 +642,7 @@ test('an upstream Auth outage stays explained after a connected-account password
     await expect(notice).toBeVisible();
   } finally {
     unblock();
-    await page.unroute('**/api/auth/reauth', handler);
+    await removePageRoutes(page, '**/api/auth/reauth', handler);
   }
 });
 
@@ -656,13 +657,13 @@ for (const viewport of [{ width: 360, height: 740 }, { width: 390, height: 844 }
       await page.goto('/referrals/forgot');
       const account = await evaluateBrowserTask(page, async () => (await fetch('/api/ref/getData', { cache: 'no-store' })).json());
       expect(account.ok).toBe(true);
-      await page.route('**/api/ref/getData', route => route.fulfill({ json: { ...account, referral: { ...account.referral, name, slug: { current: code } } } }));
+      await routePage(page, '**/api/ref/getData', route => route.fulfill({ json: { ...account, referral: { ...account.referral, name, slug: { current: code } } } }));
       const payouts = await evaluateBrowserTask(page, async () => (await fetch('/api/ref/payouts', { cache: 'no-store' })).json());
       expect(payouts.logs.xoc.length).toBeGreaterThan(0);
       expect(payouts.logs.vertex.length).toBeGreaterThan(0);
       const note = 'PayPal receipt: https://www.paypal.com/activity/payment/5HG1234567890123A?ref=creator-dashboard-receipt';
       const withNote = entries => entries.map(entry => ({ ...entry, note }));
-      await page.route('**/api/ref/payouts', route => route.fulfill({ json: { ...payouts, logs: { ...payouts.logs, xoc: withNote(payouts.logs.xoc), vertex: withNote(payouts.logs.vertex) } } }));
+      await routePage(page, '**/api/ref/payouts', route => route.fulfill({ json: { ...payouts, logs: { ...payouts.logs, xoc: withNote(payouts.logs.xoc), vertex: withNote(payouts.logs.vertex) } } }));
       await page.goto('/referrals/dashboard');
       const heading = page.getByRole('heading', { name: `Welcome, ${name}`, exact: true });
       await expect(heading).toBeVisible();
@@ -793,9 +794,9 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await expect(page.getByRole('button', { name: 'Log Out', exact: true })).toBeVisible();
       await page.evaluate(() => sessionStorage.setItem('creatorId', 'synthetic-existing-state'));
       const outcomes = [];
-      await page.route('**/api/ref/sessionStatus', route => route.fulfill({ status: 200, json: { ok: true, authenticated: false } }));
+      await routePage(page, '**/api/ref/sessionStatus', route => route.fulfill({ status: 200, json: { ok: true, authenticated: false } }));
       for (const failure of ['http', 'network']) {
-        await page.route('**/api/ref/logout', route => failure === 'http'
+        await routePage(page, '**/api/ref/logout', route => failure === 'http'
           ? route.fulfill({ status: 503, json: { ok: false, error: 'Synthetic logout outage.' } })
           : route.abort('failed'));
         await page.getByRole('button', { name: 'Log Out', exact: true }).click();
@@ -807,10 +808,10 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         expect(await page.evaluate(() => sessionStorage.getItem('creatorId'))).toBe('synthetic-existing-state');
         expect((await context.cookies()).some(cookie => cookie.name === 'ref_session')).toBe(true);
         outcomes.push({ failure, retainedState: true });
-        await page.unroute('**/api/ref/logout');
+        await removePageRoutes(page, '**/api/ref/logout');
       }
-      await page.unroute('**/api/ref/sessionStatus');
-      await page.route('**/api/ref/logout', async route => {
+      await removePageRoutes(page, '**/api/ref/sessionStatus');
+      await routePage(page, '**/api/ref/logout', async route => {
         const response = await fixture.requestRoute(baseURL, '/api/ref/logout', {
           data: {}, headers: { cookie: await route.request().headerValue('cookie') || '' },
         });
@@ -831,21 +832,21 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     test('dashboard and password reset outcomes are announced', async ({ page, context, baseURL }, testInfo) => {
       await signIn(context, baseURL);
       await page.goto('/referrals/dashboard');
-      await page.route('**/api/ref/updateSplit', route => route.fulfill({ status: 503, json: { ok: false, error: 'Synthetic save outage.' } }));
+      await routePage(page, '**/api/ref/updateSplit', route => route.fulfill({ status: 503, json: { ok: false, error: 'Synthetic save outage.' } }));
       await page.getByRole('button', { name: 'Save Settings', exact: true }).click();
       await expect(page.locator('#main-content').getByRole('alert')).toHaveText('Synthetic save outage.');
-      await page.unroute('**/api/ref/updateSplit');
+      await removePageRoutes(page, '**/api/ref/updateSplit');
       await page.getByRole('button', { name: 'Save Settings', exact: true }).click();
       await expect(page.locator('#main-content').getByRole('status')).toContainText(/saved/i);
       await page.goto('/referrals/forgot');
       const email = page.getByLabel('Creator Email', { exact: true });
       await expect(email).toHaveAttribute('autocomplete', 'email');
       await email.fill('creator@fixture.invalid');
-      await page.route('**/api/ref/forgot', route => route.fulfill({ status: 503, json: { ok: false, error: 'Synthetic forgot outage.' } }));
+      await routePage(page, '**/api/ref/forgot', route => route.fulfill({ status: 503, json: { ok: false, error: 'Synthetic forgot outage.' } }));
       await page.getByRole('button', { name: 'Send Reset Link', exact: true }).click();
       await expect(page.locator('#main-content').getByRole('alert')).toHaveText('Synthetic forgot outage.');
       await expect(email).toHaveValue('creator@fixture.invalid');
-      await page.unroute('**/api/ref/forgot');
+      await removePageRoutes(page, '**/api/ref/forgot');
       await page.getByRole('button', { name: 'Send Reset Link', exact: true }).click();
       await expect(page.locator('#main-content').getByRole('status')).toHaveText("If an account matches that email, we've sent a reset link. Check your inbox and spam folder.");
       await expect(email).toHaveValue('creator@fixture.invalid');
@@ -854,7 +855,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
 
     test('connected-account password errors follow the current password', async ({ page, context, baseURL }, testInfo) => {
       await signIn(context, baseURL);
-      await page.route('**/api/auth/identities?flow=referral', route => route.fulfill({ json: { ok: true, domainAccount: true, providers: ['email', 'google'], unlinkableProviders: ['email', 'google'] } }));
+      await routePage(page, '**/api/auth/identities?flow=referral', route => route.fulfill({ json: { ok: true, domainAccount: true, providers: ['email', 'google'], unlinkableProviders: ['email', 'google'] } }));
       await page.goto('/referrals/dashboard');
       const password = page.getByLabel('Current password', { exact: true });
       const confirm = page.getByRole('button', { name: 'Confirm identity', exact: true });
@@ -873,7 +874,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await page.waitForTimeout(250);
         await expect(error).toHaveCount(0);
       } finally { await held.release(); }
-      await page.route('**/api/auth/reauth', route => route.fulfill(reply));
+      await routePage(page, '**/api/auth/reauth', route => route.fulfill(reply));
       await confirm.click();
       await expect(error).toBeVisible();
       await password.fill('Another-current-password3!');
@@ -883,7 +884,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
 
     test('connected-account security errors survive password edits', async ({ page, context, baseURL }, testInfo) => {
       await signIn(context, baseURL);
-      await page.route('**/api/auth/identities?flow=referral', route => route.fulfill({ json: { ok: true, domainAccount: true, providers: ['email', 'google'], unlinkableProviders: ['email', 'google'] } }));
+      await routePage(page, '**/api/auth/identities?flow=referral', route => route.fulfill({ json: { ok: true, domainAccount: true, providers: ['email', 'google'], unlinkableProviders: ['email', 'google'] } }));
       await page.goto('/referrals/dashboard');
       const password = page.getByLabel('Current password', { exact: true });
       const observed = [];
@@ -913,7 +914,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     test('unlink password errors follow the current password without hiding operation errors', async ({ page, context, baseURL }, testInfo) => {
       await signIn(context, baseURL);
       let unlinkPosts = 0;
-      await page.route('**/api/auth/identities?flow=referral', route => route.fulfill({ json: { ok: true, domainAccount: true, providers: ['email', 'google'], unlinkableProviders: ['email', 'google'] } }));
+      await routePage(page, '**/api/auth/identities?flow=referral', route => route.fulfill({ json: { ok: true, domainAccount: true, providers: ['email', 'google'], unlinkableProviders: ['email', 'google'] } }));
       await page.goto('/referrals/dashboard');
       const password = page.getByLabel('Current password', { exact: true });
       const unlink = page.getByRole('button', { name: 'Unlink google', exact: true });
@@ -934,7 +935,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await expect(page.getByRole('status').filter({ hasText: 'Password is incorrect.' })).toHaveCount(0);
         expect(unlinkPosts).toBe(0);
       } finally { await held.release(); }
-      await page.route('**/api/auth/reauth', route => route.fulfill({ json: { ok: true } }));
+      await routePage(page, '**/api/auth/reauth', route => route.fulfill({ json: { ok: true } }));
       const operation = await holdAccountReply(page, '/api/auth/identities', { status: 409, json: { ok: false, error: 'Synthetic unlink operation conflict.' } });
       try {
         await unlink.click();
@@ -988,7 +989,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       const failAfterEdit = async (endpoint, message, buttonName, edit, label) => {
         let edited;
         const changed = new Promise(resolve => { edited = resolve; });
-        await page.route(`**${endpoint}`, async route => {
+        await routePage(page, `**${endpoint}`, async route => {
           await new Promise(resolve => setTimeout(resolve, 800));
           await changed;
           await route.fulfill({ status: endpoint === '/api/ref/reset' ? 409 : 401, json: { ok: false, error: message, ...(endpoint === '/api/auth/reauth' ? { reason: 'password_incorrect' } : {}) } });
@@ -1012,7 +1013,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         } finally {
           edited();
           await response.catch(() => {});
-          await page.unroute(`**${endpoint}`);
+          await removePageRoutes(page, `**${endpoint}`);
         }
       };
       await openForm(page, '/referrals/login', '/api/ref/sessionStatus');
@@ -1020,13 +1021,13 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       const password = page.getByLabel('Password', { exact: true });
       await identifier.fill('fixture-creator');
       await password.fill('Wrong-password1!');
-      await page.route('**/api/ref/login', route => route.fulfill({ status: 401, json: { ok: false, error: 'Synthetic current login failure.' } }));
+      await routePage(page, '**/api/ref/login', route => route.fulfill({ status: 401, json: { ok: false, error: 'Synthetic current login failure.' } }));
       await page.getByRole('button', { name: 'Login', exact: true }).click();
       const currentError = page.locator('#main-content').getByRole('alert').filter({ hasText: 'Synthetic current login failure.' });
       await expect(currentError).toBeVisible();
       await password.fill('Synthetic-password1!');
       await expect(currentError).toHaveCount(0);
-      await page.unroute('**/api/ref/login');
+      await removePageRoutes(page, '**/api/ref/login');
       await failAfterEdit('/api/ref/login', 'Synthetic earlier login failure.', 'Login', async () => {
         await identifier.fill('edited-creator');
         await password.fill('Edited-password3!');
@@ -1059,7 +1060,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await confirm.fill('Different-password3!');
         let edited;
         const changed = new Promise(resolve => { edited = resolve; });
-        await page.route('**/api/ref/reset', async route => {
+        await routePage(page, '**/api/ref/reset', async route => {
           await changed;
           await route.fulfill({ status, json: { ok: false, error: message } });
         });
@@ -1082,7 +1083,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         } finally {
           edited();
           await response.catch(() => {});
-          await page.unroute('**/api/ref/reset');
+          await removePageRoutes(page, '**/api/ref/reset');
         }
       }
     });
@@ -1097,7 +1098,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         const endpoint = stage === 'session' ? '/api/ref/sessionStatus' : '/api/ref/login';
         let respond;
         const held = new Promise(resolve => { respond = resolve; });
-        await page.route(`**${endpoint}`, async route => { await held; await route.continue(); });
+        await routePage(page, `**${endpoint}`, async route => { await held; await route.continue(); });
         const requested = page.waitForRequest(`**${endpoint}`);
         const completed = page.waitForResponse(`**${endpoint}`);
         completed.catch(() => {});
@@ -1128,7 +1129,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         } finally {
           respond();
           await completed.catch(() => {});
-          await page.unroute(`**${endpoint}`);
+          await removePageRoutes(page, `**${endpoint}`);
         }
       }
     });
@@ -1168,19 +1169,19 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await page.goto('/referrals/dashboard');
       const commission = page.getByText('Commission (%)', { exact: true }).locator('..');
       const discount = page.getByText('Viewer Discount (%)', { exact: true }).locator('..');
-      await page.route('**/api/ref/updateSplit', route => route.fulfill({ status: 409, json: { ok: false, error: 'Synthetic split conflict.' } }));
+      await routePage(page, '**/api/ref/updateSplit', route => route.fulfill({ status: 409, json: { ok: false, error: 'Synthetic split conflict.' } }));
       await commission.getByRole('button', { name: '+', exact: true }).click();
       await page.getByRole('button', { name: 'Save Settings', exact: true }).click();
       const splitError = await persistentError('Synthetic split conflict.', 'Save Settings', 'settings');
       await discount.getByRole('button', { name: '+', exact: true }).click();
       await expect(splitError).toHaveCount(0);
-      await page.unroute('**/api/ref/updateSplit');
+      await removePageRoutes(page, '**/api/ref/updateSplit');
 
       await page.goto('/referrals/forgot');
       await waitForRouteCommitted(page);
       const email = page.getByLabel('Creator Email', { exact: true });
       await email.fill('creator@fixture.invalid');
-      await page.route('**/api/ref/forgot', route => route.fulfill({ status: 503, json: { ok: false, error: 'Synthetic forgot outage.' } }));
+      await routePage(page, '**/api/ref/forgot', route => route.fulfill({ status: 503, json: { ok: false, error: 'Synthetic forgot outage.' } }));
       await page.getByRole('button', { name: 'Send Reset Link', exact: true }).click();
       const forgotError = await persistentError('Synthetic forgot outage.', 'Send Reset Link', 'forgot');
       await email.fill('changed@fixture.invalid');
@@ -1191,7 +1192,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       let submitting = false;
       let validationRequests = 0;
       let registrationPosts = 0;
-      await page.route('**/api/ref/validateReferral*', async route => {
+      await routePage(page, '**/api/ref/validateReferral*', async route => {
         if (!submitting) {
           await route.fulfill({ status: 503, json: { ok: false, reason: 'unavailable' } });
           return;
@@ -1200,7 +1201,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await new Promise(resolve => setTimeout(resolve, 800));
         await route.fulfill({ status: 200, json: { ok: false, reason: 'available', error: 'Not found' } });
       });
-      await page.route('**/api/ref/register', route => {
+      await routePage(page, '**/api/ref/register', route => {
         registrationPosts += 1;
         return route.fulfill({ status: 202, json: { ok: true, pendingVerification: true } });
       });
@@ -1230,7 +1231,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await commission.getByRole('button', { name: '+', exact: true }).click();
       await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: baseURL });
       await page.clock.pauseAt(new Date(start.getTime() + 60 * 60 * 1000));
-      await page.route('**/api/ref/updateSplit', async route => {
+      await routePage(page, '**/api/ref/updateSplit', async route => {
         await new Promise(resolve => setTimeout(resolve, 1200));
         await route.fallback();
       });
@@ -1252,7 +1253,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
 
     test('edited forms ignore errors from earlier submissions', async ({ page, context, baseURL }, testInfo) => {
       const failAfterEdit = async (path, message, buttonName, edit, label) => {
-        await page.route(`**${path}`, async route => {
+        await routePage(page, `**${path}`, async route => {
           await new Promise(resolve => setTimeout(resolve, 800));
           await route.fulfill({ status: 503, json: { ok: false, error: message } });
         });
@@ -1274,7 +1275,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       let checkingSubmission = false;
       let editedCheckFinished;
       const editedCheck = new Promise(resolve => { editedCheckFinished = resolve; });
-      await page.route('**/api/ref/validateReferral*', async route => {
+      await routePage(page, '**/api/ref/validateReferral*', async route => {
         const code = new URL(route.request().url()).searchParams.get('code');
         if (code === 'edited-creator') {
           await route.fulfill({ status: 200, json: { ok: false, reason: 'available' } });
@@ -1303,7 +1304,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await expect(page.getByText('This referral code is already taken.', { exact: true })).toHaveCount(0);
       await expect(page.locator('#main-content').getByRole('alert')).toHaveCount(0);
       await record(page, testInfo, `referral-code-edited-during-submit-${size}`, { editedCode: 'edited-creator', previousCodeAvailability: 'reserved' });
-      await page.unroute('**/api/ref/validateReferral*');
+      await removePageRoutes(page, '**/api/ref/validateReferral*');
 
       await openForm(page, '/referrals/register', '/api/auth/identities');
       await fillRegistration(page);
@@ -1428,16 +1429,16 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
 
     test('unauthorized account reads route by status even without JSON', async ({ page, context, baseURL }, testInfo) => {
       await signIn(context, baseURL);
-      await page.route('**/api/ref/sessionStatus', route => route.fulfill({ status: 200, json: { ok: true, authenticated: false } }));
+      await routePage(page, '**/api/ref/sessionStatus', route => route.fulfill({ status: 200, json: { ok: true, authenticated: false } }));
       const outcomes = [];
       for (const path of ['/referrals/dashboard', '/referrals/change-password']) {
         for (const body of ['', '<h1>Unauthorized</h1>']) {
-          await page.route('**/api/ref/getData', route => route.fulfill({ status: 401, contentType: 'text/html', body }));
+          await routePage(page, '**/api/ref/getData', route => route.fulfill({ status: 401, contentType: 'text/html', body }));
           await page.goto(path);
           await expect(page.getByRole('heading', { name: 'Referral Creator Login', exact: true })).toBeVisible();
           expect(await page.evaluate(() => sessionStorage.getItem('creatorId'))).toBeNull();
           outcomes.push({ path, body, redirected: true });
-          await page.unroute('**/api/ref/getData');
+          await removePageRoutes(page, '**/api/ref/getData');
         }
       }
       await record(page, testInfo, `unauthorized-bodies-${size}`, { outcomes });
@@ -1499,12 +1500,12 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     });
 
     test('a transient verification error retains its token for reload', async ({ page }, testInfo) => {
-      await page.route('**/api/ref/verifyRegistration', route => route.fulfill({ status: 503, json: { ok: false, error: 'Account confirmation is temporarily unavailable. Please try again.' } }));
+      await routePage(page, '**/api/ref/verifyRegistration', route => route.fulfill({ status: 503, json: { ok: false, error: 'Account confirmation is temporarily unavailable. Please try again.' } }));
       await page.goto('/referrals/verify#token=' + 'b'.repeat(43));
       await expect(page.getByRole('status')).toContainText('temporarily unavailable');
       await record(page, testInfo, `verify-outage-${size}`, { storageTokenKept: await page.evaluate(() => Boolean(sessionStorage.getItem('referral_registration_verification'))) });
       expect(await page.evaluate(() => Boolean(sessionStorage.getItem('referral_registration_verification')))).toBe(true);
-      await page.unroute('**/api/ref/verifyRegistration');
+      await removePageRoutes(page, '**/api/ref/verifyRegistration');
       await page.reload();
       await expect(page.getByRole('status')).toContainText('Email confirmed');
     });
@@ -1604,14 +1605,14 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       for (const status of [400, 429, 503, 0]) {
         await expect(page.getByLabel('Referral code or login email', { exact: true })).toHaveValue('fixture-creator');
         await expect(page.getByLabel('Password', { exact: true })).toHaveValue('Synthetic-password1!');
-        await page.route('**/api/ref/login', route => status ? route.fulfill({ status, json: { ok: false, error: `Synthetic ${status} login failure.` } }) : route.abort('failed'));
+        await routePage(page, '**/api/ref/login', route => status ? route.fulfill({ status, json: { ok: false, error: `Synthetic ${status} login failure.` } }) : route.abort('failed'));
         await page.getByRole('button', { name: 'Login', exact: true }).click();
         await expect(page.locator('form').getByRole('alert')).toContainText(status ? `Synthetic ${status}` : 'Login could not be completed');
         await expect(page.getByRole('button', { name: 'Login', exact: true })).toBeEnabled();
         await expect(page.getByLabel('Referral code or login email', { exact: true })).toHaveValue('fixture-creator');
         await expect(page.getByLabel('Password', { exact: true })).toHaveValue('Synthetic-password1!');
         outcomes.push({ status, message: await page.locator('form').getByRole('alert').innerText() });
-        await page.unroute('**/api/ref/login');
+        await removePageRoutes(page, '**/api/ref/login');
       }
       await record(page, testInfo, `login-errors-${size}`, { outcomes });
     });
@@ -1697,13 +1698,13 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       let hashCase = { status: 200, json: { ok: true } };
       let release;
       let held;
-      await page.route('**/api/auth/reauth', async route => {
+      await routePage(page, '**/api/auth/reauth', async route => {
         const body = route.request().postDataJSON();
         calls.push({ route: 'reauth', flow: body.flow, purpose: body.purpose, passwordMatches: body.password === 'Synthetic-password1!', status: reauthCase.status });
         if (held) await held;
         if (reauthCase.status) await route.fulfill(reauthCase); else await route.abort('failed');
       });
-      await page.route('**/api/ref/hashPassword', async route => {
+      await routePage(page, '**/api/ref/hashPassword', async route => {
         calls.push({ route: 'hashPassword', passwordMatches: route.request().postDataJSON().password === 'Replacement-password2!', status: hashCase.status });
         if (hashCase.status) await route.fulfill(hashCase); else await route.abort('failed');
       });
@@ -1822,7 +1823,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     test('settings error messages are announced', async ({ page, context, baseURL }, testInfo) => {
       await signIn(context, baseURL);
       await page.goto('/referrals/dashboard');
-      await page.route('**/api/ref/updateSplit', route => route.fulfill({ status: 403, json: { ok: false, error: 'Synthetic settings rejection.' } }));
+      await routePage(page, '**/api/ref/updateSplit', route => route.fulfill({ status: 403, json: { ok: false, error: 'Synthetic settings rejection.' } }));
       await page.getByRole('button', { name: 'Save Settings', exact: true }).click();
       const toast = page.getByText('Synthetic settings rejection.', { exact: true });
       await expect(toast).toBeVisible();
@@ -1839,16 +1840,16 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await page.getByLabel('Confirm Password', { exact: true }).fill('Replacement-password2!');
       const outcomes = [];
       for (const status of [400, 409, 429, 503, 0]) {
-        await page.route('**/api/ref/reset', route => status ? route.fulfill({ status, json: { ok: false, error: `Synthetic ${status} reset failure.` } }) : route.abort('failed'));
+        await routePage(page, '**/api/ref/reset', route => status ? route.fulfill({ status, json: { ok: false, error: `Synthetic ${status} reset failure.` } }) : route.abort('failed'));
         await page.getByRole('button', { name: 'Update Password', exact: true }).click();
         await expect(page.locator('form').getByRole('alert')).toContainText(status ? `Synthetic ${status}` : 'could not be completed');
         await expect(page.getByRole('button', { name: 'Update Password', exact: true })).toBeEnabled();
         outcomes.push({ status, message: await page.locator('form').getByRole('alert').innerText() });
-        await page.unroute('**/api/ref/reset');
+        await removePageRoutes(page, '**/api/ref/reset');
       }
       let release;
       const held = new Promise(resolve => { release = resolve; });
-      await page.route('**/api/ref/reset', async route => { await held; await route.abort('timedout').catch(() => {}); });
+      await routePage(page, '**/api/ref/reset', async route => { await held; await route.abort('timedout').catch(() => {}); });
       const requested = page.waitForRequest('**/api/ref/reset');
       await page.getByRole('button', { name: 'Update Password', exact: true }).click();
       await requested;
@@ -1863,7 +1864,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       const outcomes = [];
       let registrationPosts = 0;
       page.on('request', request => { if (new URL(request.url()).pathname === '/api/ref/register' && request.method() === 'POST') registrationPosts += 1; });
-      await page.route('**/api/ref/validateReferral?*', route => route.fulfill({ status: 503, json: { ok: false, reason: 'unavailable', error: 'Synthetic validation outage.' } }));
+      await routePage(page, '**/api/ref/validateReferral?*', route => route.fulfill({ status: 503, json: { ok: false, reason: 'unavailable', error: 'Synthetic validation outage.' } }));
       await openForm(page, '/referrals/register', '/api/auth/identities');
       await fillRegistration(page);
       const validationPromise = page.waitForResponse('**/api/ref/validateReferral?*');
@@ -1876,14 +1877,14 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       expect(registrationPosts).toBe(0);
       outcomes.push({ route: 'validateReferral', status: 503, registrationPosts, message: 'Could not validate referral code. Try again.' });
       await record(page, testInfo, `registration-validation-outage-${size}`, { outcomes });
-      await page.unroute('**/api/ref/validateReferral?*');
-      await page.route('**/api/ref/validateReferral?*', route => route.fulfill({ status: 200, json: { ok: false, reason: 'available', error: 'Not found' } }));
+      await removePageRoutes(page, '**/api/ref/validateReferral?*');
+      await routePage(page, '**/api/ref/validateReferral?*', route => route.fulfill({ status: 200, json: { ok: false, reason: 'available', error: 'Not found' } }));
       await page.getByLabel('Referral Code', { exact: true }).fill('retry-creator');
       await expect(page.getByText('Referral code is available.', { exact: true })).toBeVisible();
       const registrationUnclear =
         "We couldn't tell if your account was created. Check your email for a confirmation link before trying again.";
       for (const status of [400, 409, 429, 503, 0]) {
-        await page.route('**/api/ref/register', route => status ? route.fulfill({ status, json: { ok: false, error: `Synthetic ${status} registration failure.` } }) : route.abort('failed'));
+        await routePage(page, '**/api/ref/register', route => status ? route.fulfill({ status, json: { ok: false, error: `Synthetic ${status} registration failure.` } }) : route.abort('failed'));
         await submitRegistration(page);
         const expected = status ? `Synthetic ${status} registration failure.` : registrationUnclear;
         await expect(page.getByText(expected, { exact: true })).toBeVisible();
@@ -1892,11 +1893,11 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         const message = page.getByText(expected, { exact: true });
         expect(await message.evaluate(element => Boolean(element.closest('[aria-live],[role=alert],[role=status]')))).toBe(true);
         outcomes.push({ route: 'register', status, registrationPosts, fieldsRetained: true, message: await message.innerText() });
-        await page.unroute('**/api/ref/register');
+        await removePageRoutes(page, '**/api/ref/register');
       }
       expect(registrationPosts).toBe(5);
       await record(page, testInfo, `registration-errors-${size}`, { outcomes });
-      await page.route('**/api/ref/register', route => route.fulfill({ status: 202, json: { ok: true, pendingVerification: true } }));
+      await routePage(page, '**/api/ref/register', route => route.fulfill({ status: 202, json: { ok: true, pendingVerification: true } }));
       await page.getByRole('button', { name: 'Register', exact: true }).click();
       await expect(page.getByText('Check your email and use the confirmation link to finish creating your account.')).toBeVisible();
       outcomes.push({ route: 'register-retry', status: 202, registrationPosts });
@@ -1904,7 +1905,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await page.getByRole('button', { name: 'Forgot your password?', exact: true }).click();
       await expect(page.getByRole('heading', { name: 'Forgot Password', exact: true })).toBeVisible();
       for (const status of [400, 429, 503, 0]) {
-        await page.route('**/api/ref/forgot', route => status ? route.fulfill({ status, json: { ok: false, error: `Synthetic ${status} forgot failure.` } }) : route.abort('failed'));
+        await routePage(page, '**/api/ref/forgot', route => status ? route.fulfill({ status, json: { ok: false, error: `Synthetic ${status} forgot failure.` } }) : route.abort('failed'));
         const email = page.getByLabel('Creator Email', { exact: true });
         await email.fill('creator@fixture.invalid');
         await expect(email).toHaveValue('creator@fixture.invalid');
@@ -1919,15 +1920,15 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await expect(page.getByRole('button', { name: 'Send Reset Link', exact: true })).toBeEnabled();
         await expect(email).toHaveValue('creator@fixture.invalid');
         outcomes.push({ route: 'forgot', status, fieldsRetained: true, message: await message.innerText() });
-        await page.unroute('**/api/ref/forgot');
+        await removePageRoutes(page, '**/api/ref/forgot');
       }
       await signIn(context, baseURL);
-      await page.route('**/api/auth/identities?flow=referral', route => route.fulfill({ status: 503, json: { ok: false, error: 'Synthetic connections outage.' } }));
+      await routePage(page, '**/api/auth/identities?flow=referral', route => route.fulfill({ status: 503, json: { ok: false, error: 'Synthetic connections outage.' } }));
       await page.goto('/referrals/dashboard');
       await expect(page.getByText('Synthetic connections outage.', { exact: true })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
       await expect(page.getByRole('heading', { name: 'Welcome, Synthetic Creator' })).toBeVisible();
-      await page.unroute('**/api/auth/identities?flow=referral');
+      await removePageRoutes(page, '**/api/auth/identities?flow=referral');
       const recoveryPromise = page.waitForResponse('**/api/auth/identities?flow=referral');
       await page.getByRole('button', { name: 'Retry', exact: true }).click();
       expect((await recoveryPromise).status()).toBe(200);
