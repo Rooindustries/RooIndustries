@@ -437,6 +437,36 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       expect(errors).toEqual([]);
     });
 
+    test("the Max package refund warning shows inside the booking dialog on every step", async ({ page, flow }) => {
+      const errors = watchErrors(page);
+      const warning = page.locator('[role="dialog"].ri-booking').getByText(/^Refunds will not be issued/);
+      await page.goto("/packages");
+      await page.locator(".ri-package-card", { hasText: "Performance Vertex Max" }).getByRole("link", { name: "Book Now" }).click();
+      await expect(page).toHaveURL(/\/booking$/);
+      for (const advance of [
+        () => page.getByRole("button", { name: /^Earliest available:/ }).click(),
+        () => page.getByRole("button", { name: "10:00 AM", exact: true }).click(),
+        () => page.getByRole("button", { name: "Next", exact: true }).last().click(),
+      ]) {
+        await expect(warning).toBeVisible();
+        await warning.scrollIntoViewIfNeeded();
+        expect(await warning.evaluate(node => {
+          const box = node.getBoundingClientRect();
+          return node.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+        })).toBe(true);
+        await advance();
+      }
+      await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toBeVisible();
+      await expect(warning).toBeVisible();
+      expect(errors).toEqual([]);
+    });
+
+    test("other packages show no Max refund warning", async ({ page, flow }) => {
+      await flow.booking();
+      await expect(page.getByRole("button", { name: "10:00 AM", exact: true })).toBeVisible();
+      await expect(page.getByText(/^Refunds will not be issued/)).toHaveCount(0);
+    });
+
     test("focus stays in the dialog when booking continues to payment", async ({ page, flow }) => {
       const errors = watchErrors(page);
       await flow.review();
