@@ -9,6 +9,7 @@ import {
   groupPattern,
   listSpecFiles,
   FIXED_GROUPS,
+  JOB_RESERVE_MS,
   REST_1_EXTRA_SECONDS,
   REST_GROUPS,
 } from "../scripts/playwright-groups.mjs";
@@ -16,6 +17,19 @@ import { mergeTimings } from "../scripts/playwright-timings.mjs";
 
 const specFiles = listSpecFiles();
 const timings = JSON.parse(fs.readFileSync(".github/playwright-timings.json", "utf8"));
+const readMatrix = (timingFile = ".github/playwright-timings.json") => JSON.parse(execFileSync(process.execPath,
+  ["scripts/playwright-groups.mjs", "matrix", timingFile],
+  { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
+
+const assertBudgetsFit = (suites) => {
+  for (const suite of suites) {
+    const extraMs = suite.name === "rest-1" ? REST_1_EXTRA_SECONDS * 1000 : 0;
+    assert.ok(suite.timeoutMs + extraMs + JOB_RESERVE_MS <= suite.timeoutMinutes * 60000,
+      `${suite.name} must leave the full reserve for setup, shutdown and artifacts`);
+    assert.ok(Number.isInteger(suite.timeoutMinutes) && suite.timeoutMinutes <= 360,
+      `${suite.name} must fit a valid job limit`);
+  }
+};
 
 const fixedPatterns = ["/section-nav\\.spec\\.js$", "/booking-flow\\.spec\\.js$"];
 
@@ -58,37 +72,51 @@ test("the same timings always give the same groups", () => {
   assert.deepEqual(assignRestGroups([...specFiles].reverse(), timings), assignRestGroups(specFiles, timings));
 });
 
-test("the workflow gets each browser group's files and deadline from its measured timings", () => {
-  const job = yaml.safeLoad(fs.readFileSync(".github/workflows/tests.yml", "utf8")).jobs.playwright;
-  assert.ok(job.steps.some(step => step.run?.includes('timings.json env >> "$GITHUB_ENV"')));
+test("the workflow gets group files, graceful deadlines and job limits from one measured plan", () => {
+  const jobs = yaml.safeLoad(fs.readFileSync(".github/workflows/tests.yml", "utf8")).jobs;
+  const job = jobs.playwright;
+  assert.ok(job.needs.includes("playwright-plan"));
+  assert.equal(job.strategy.matrix, "${{ fromJSON(needs.playwright-plan.outputs.matrix) }}");
+  assert.equal(job["timeout-minutes"], "${{ matrix.suite.timeoutMinutes }}");
+  assert.equal(job.env.PW_GROUP_TIMEOUT_MS, "${{ matrix.suite.timeoutMs }}");
+  assert.equal(job.env.PW_FILES, "${{ matrix.suite.pattern }}");
+  const planJob = jobs["playwright-plan"];
+  assert.equal(planJob.outputs.matrix, "${{ steps.plan.outputs.matrix }}");
+  assert.ok(planJob.steps.some(step => step.id === "plan" &&
+    step.run?.includes("scripts/playwright-groups.mjs matrix .playwright-timings/timings.json") &&
+    step.run.includes('"matrix=$matrix" >> "$GITHUB_OUTPUT"')));
+  const { suite } = readMatrix();
+  assert.deepEqual(suite.map(group => group.name), [...Object.keys(FIXED_GROUPS), ...REST_GROUPS]);
+  assertBudgetsFit(suite);
+  const owners = Object.fromEntries(specFiles.map(file => [file, 0]));
   const fullDuration = Object.values(timings).reduce((total, seconds) => total + seconds, 0);
-  for (const group of [...Object.keys(FIXED_GROUPS), ...REST_GROUPS]) {
-    const plan = execFileSync(process.execPath, ["scripts/playwright-groups.mjs", group,
-      ".github/playwright-timings.json", "env"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-    const env = Object.fromEntries(plan.trim().split("\n").map(line => line.split("=")));
-    const files = specFiles.filter(file => new RegExp(env.PW_FILES).test(`/tests/${file}`));
-    assert.ok(files.length, group);
+  for (const group of suite) {
+    const files = specFiles.filter(file => new RegExp(group.pattern).test(`/tests/${file}`));
+    assert.ok(files.length, group.name);
+    for (const file of files) owners[file] += 1;
     const measured = files.reduce((total, file) => total + (timings[file] || 0), 0);
-    const deadline = Number(env.PW_GROUP_TIMEOUT_MS);
-    assert.ok(deadline > measured * 1000, `${group} needs time beyond its healthy measured run`);
-    assert.ok(deadline < fullDuration * 1000, `${group} must use its own workload`);
-    assert.ok(deadline + 120000 < job["timeout-minutes"] * 60000, `${group} needs time to save reports`);
+    assert.ok(group.timeoutMs > measured * 1000, `${group.name} needs time beyond its healthy measured run`);
+    assert.ok(group.timeoutMs < fullDuration * 1000, `${group.name} must use its own workload`);
+    assert.equal(group.relocate, group.name === "navigation");
   }
+  for (const [file, count] of Object.entries(owners)) assert.equal(count, 1, `${file} ran in ${count} groups`);
 });
 
-test("a changed measurement updates the workflow deadline", () => {
+test("a 1,200-second booking run gets a job limit beyond its graceful deadline and reserve", () => {
   fs.mkdirSync("test-results", { recursive: true });
   const dir = fs.mkdtempSync(path.resolve("test-results", "playwright-budget-"));
   const timingFile = path.join(dir, "timings.json");
-  const deadlines = [];
+  const budgets = [];
   try {
-    for (const seconds of [10, 100]) {
-      fs.writeFileSync(timingFile, JSON.stringify({ "booking-flow.spec.js": seconds }));
-      const plan = execFileSync(process.execPath, ["scripts/playwright-groups.mjs", "booking", timingFile, "env"],
-        { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-      deadlines.push(Number(plan.match(/PW_GROUP_TIMEOUT_MS=(\d+)/)[1]));
+    for (const seconds of [10, 100, 1200]) {
+      fs.writeFileSync(timingFile, JSON.stringify({ ...timings, "booking-flow.spec.js": seconds }));
+      const { suite } = readMatrix(timingFile);
+      assertBudgetsFit(suite);
+      budgets.push(suite.find(group => group.name === "booking"));
     }
-    assert.ok(deadlines[1] > deadlines[0], "The deadline must follow the selected group's measured time.");
+    assert.ok(budgets[1].timeoutMs > budgets[0].timeoutMs, "The deadline must follow the measured time.");
+    assert.ok(budgets[2].timeoutMs > 30 * 60000, "The valid slow run needs more than the old job limit.");
+    assert.ok(budgets[2].timeoutMinutes > 30, "The job limit must grow with the graceful deadline.");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

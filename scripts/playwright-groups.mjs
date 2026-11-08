@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 export const FIXED_GROUPS = { navigation: ["section-nav.spec.js"], booking: ["booking-flow.spec.js"] };
 export const REST_GROUPS = ["rest-1", "rest-2", "rest-3", "rest-4"];
 export const REST_1_EXTRA_SECONDS = 250;
+export const JOB_RESERVE_MS = 10 * 60 * 1000;
 
 const playwrightCli = createRequire(import.meta.url).resolve("@playwright/test/cli");
 
@@ -81,26 +82,45 @@ const readTimings = (candidates) => {
   throw new Error(`No Playwright timings file found in ${candidates.filter(Boolean).join(", ")}`);
 };
 
+const browserMatrix = (specFiles, timings) => {
+  const rest = assignRestGroups(specFiles, timings);
+  const suite = [...Object.keys(FIXED_GROUPS), ...REST_GROUPS].map((name) => {
+    const fixedFiles = FIXED_GROUPS[name];
+    const assigned = fixedFiles ? {
+      files: specFiles.filter(file => fixedFiles.includes(path.posix.basename(file))),
+      load: fixedFiles.reduce((total, file) => total + (timings[file] ?? median(Object.values(timings))), 0),
+    } : rest[name];
+    if (!assigned.files.length) throw new Error(`Browser group ${name} has no spec files`);
+    const extraMs = name === "rest-1" ? REST_1_EXTRA_SECONDS * 1000 : 0;
+    const timeoutMs = Math.ceil((assigned.load * 1000 - extraMs) * 1.5 + 180000);
+    const timeoutMinutes = Math.ceil((timeoutMs + extraMs + JOB_RESERVE_MS) / 60000);
+    console.error(`${name}: ${assigned.files.length} files, about ${Math.round(assigned.load)}s`);
+    return {
+      name,
+      relocate: name === "navigation",
+      pattern: groupPattern(assigned.files),
+      timeoutMs,
+      timeoutMinutes,
+    };
+  });
+  return { suite };
+};
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [group, timingsFile, format] = process.argv.slice(2);
-  if (!REST_GROUPS.includes(group) && !Object.hasOwn(FIXED_GROUPS, group)) {
+  if (group !== "matrix" && !REST_GROUPS.includes(group) && !Object.hasOwn(FIXED_GROUPS, group)) {
     throw new Error(`Unknown browser group "${group}"`);
   }
   const specFiles = listSpecFiles();
   const timings = readTimings([timingsFile, path.join(".github", "playwright-timings.json")]);
-  const fixedFiles = FIXED_GROUPS[group];
-  const assigned = fixedFiles ? {
-    files: specFiles.filter(file => fixedFiles.includes(path.posix.basename(file))),
-    load: fixedFiles.reduce((total, file) => total + (timings[file] ?? median(Object.values(timings))), 0),
-  } : assignRestGroups(specFiles, timings)[group];
-  if (!assigned.files.length) throw new Error(`Browser group ${group} has no spec files`);
-  console.error(`${group}: ${assigned.files.length} files, about ${Math.round(assigned.load)}s`);
-  const pattern = groupPattern(assigned.files);
-  if (format === "env") {
-    const seconds = assigned.load - (group === "rest-1" ? REST_1_EXTRA_SECONDS : 0);
-    const timeoutMs = Math.ceil((seconds * 1.5 + 180) * 1000);
+  const matrix = browserMatrix(specFiles, timings);
+  if (group === "matrix") {
+    process.stdout.write(`${JSON.stringify(matrix)}\n`);
+  } else if (format === "env") {
+    const { pattern, timeoutMs } = matrix.suite.find(suite => suite.name === group);
     process.stdout.write(`PW_FILES=${pattern}\nPW_GROUP_TIMEOUT_MS=${timeoutMs}\n`);
   } else {
+    const { pattern } = matrix.suite.find(suite => suite.name === group);
     process.stdout.write(`${pattern}\n`);
   }
 }
