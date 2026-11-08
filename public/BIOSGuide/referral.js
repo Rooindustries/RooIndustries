@@ -18,7 +18,12 @@ import { referralSession, CHECKOUT_SAVE_NOTICE, hasCheckoutSaveFailure, subscrib
     }
   };
   subscribeCheckoutSaveFailure(() => {
-    if (!hasCheckoutSaveFailure() || document.querySelector("[data-checkout-save-notice]")) return;
+    const existing = document.querySelector("[data-checkout-save-notice]");
+    if (!hasCheckoutSaveFailure()) {
+      existing?.remove();
+      return;
+    }
+    if (existing) return;
     const notice = document.createElement("p");
     notice.dataset.checkoutSaveNotice = "";
     notice.setAttribute("role", "alert");
