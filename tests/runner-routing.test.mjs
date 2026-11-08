@@ -22,7 +22,7 @@ const INSTALLS = /\bsudo\b|apt-get|install-deps|--with-deps/;
 const files = fs.readdirSync(".github/workflows");
 const workflows = files
   .filter((file) => /\.ya?ml$/.test(file))
-  .map((file) => ({ file, workflow: yaml.load(fs.readFileSync(path.join(".github/workflows", file), "utf8")) }));
+  .map((file) => ({ file, workflow: yaml.safeLoad(fs.readFileSync(path.join(".github/workflows", file), "utf8")) }));
 const jobs = workflows.flatMap(({ file, workflow }) => Object.entries(workflow.jobs).map(([id, job]) => ({ file, workflow, id, job })));
 const actions = fs.readdirSync(".github/actions").map((name) => path.join(".github/actions", name, "action.yml"));
 
@@ -62,13 +62,18 @@ const checkForkRouting = (job) => {
     assert.ok(forkLabel !== undefined, `${where}: a repository variable would choose the runner for forks' pull requests`);
     assert.match(forkLabel, GITHUB_HOSTED, `${where} runs forks' pull requests on ${forkLabel}`);
   }
+  if (route.variable !== undefined || !GITHUB_HOSTED.test(route.label)) {
+    const allowed = job.file === "production-smoke.yml" ? ["deployment_status"] : ["push", "pull_request", "schedule", "workflow_dispatch"];
+    const untrusted = triggers.filter((trigger) => !allowed.includes(trigger));
+    assert.deepEqual(untrusted, [], `${where}: a dedicated runner is reachable from ${untrusted.join(", ")}`);
+  }
 };
 
 test("pull request jobs from forks run only on GitHub-hosted runners", () => {
   for (const job of jobs) checkForkRouting(job);
 });
 
-test("the fork routing check rejects routes a fork could reach", () => {
+test("the routing check rejects routes a fork or an untrusted event could reach", () => {
   const template = "${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-24.04' || vars.TESTS_RUNNER || 'roo-site' }}";
   const fixture = (on, runsOn) => ({ file: "fixture.yml", id: "job", workflow: { on }, job: { "runs-on": runsOn } });
   for (const [on, runsOn] of [
@@ -77,10 +82,21 @@ test("the fork routing check rejects routes a fork could reach", () => {
     [["pull_request_target"], template],
     [{ pull_request_target: null }, "${{ vars.TESTS_RUNNER || 'ubuntu-24.04' }}"],
     [["push", "pull_request"], "self-hosted"],
+    [["pull_request_review"], template],
+    [["issue_comment"], "roo-site"],
+    [{ workflow_run: { workflows: ["Tests"] } }, "${{ vars.TESTS_RUNNER || 'ubuntu-24.04' }}"],
+    [["deployment_status"], "roo-site"],
   ]) {
     assert.throws(() => checkForkRouting(fixture(on, runsOn)), assert.AssertionError, `${JSON.stringify(on)} ${runsOn}`);
   }
-  for (const [on, runsOn] of [["pull_request", template], ["pull_request", "ubuntu-24.04"], [["pull_request_target"], "ubuntu-24.04"], ["push", "${{ vars.TESTS_RUNNER || 'roo-site' }}"]]) {
+  for (const [on, runsOn] of [
+    ["pull_request", template],
+    ["pull_request", "ubuntu-24.04"],
+    [["pull_request_target"], "ubuntu-24.04"],
+    ["push", "${{ vars.TESTS_RUNNER || 'roo-site' }}"],
+    [["schedule", "workflow_dispatch"], "roo-site"],
+    [["pull_request_review", "issue_comment"], "ubuntu-24.04"],
+  ]) {
     checkForkRouting(fixture(on, runsOn));
   }
 });
@@ -110,7 +126,7 @@ test("production smoke has a lane of its own and runs only for deployments", () 
 test("system packages are installed only on GitHub-hosted runners", () => {
   const steps = [
     ...jobs.flatMap(({ file, job }) => (job.steps ?? []).map((step) => ({ file, step }))),
-    ...actions.flatMap((file) => yaml.load(fs.readFileSync(file, "utf8")).runs.steps.map((step) => ({ file, step }))),
+    ...actions.flatMap((file) => yaml.safeLoad(fs.readFileSync(file, "utf8")).runs.steps.map((step) => ({ file, step }))),
   ];
   const hostedOnly = (condition) => typeof condition === "string" && !/\|\||\$\{\{|[()]|!(?!=)/.test(condition) && condition.split(" && ").includes(HOSTED);
   let guarded = 0;
