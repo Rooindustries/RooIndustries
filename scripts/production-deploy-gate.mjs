@@ -8,20 +8,23 @@ const LIVE_WAIT_MS = Number(process.env.GATE_LIVE_WAIT_MS || 10000);
 const annotate = (level, message) => console.log(process.env.GITHUB_ACTIONS === "true" ? `::${level}::${message}` : `${level}: ${message}`);
 
 const runNode = (script, args, { env = process.env, capture = false } = {}) => new Promise((resolve) => {
-  const child = spawn(process.execPath, [path.join(scripts, script), ...args], { env, stdio: ["ignore", capture ? "pipe" : "inherit", "inherit"] });
+  const child = spawn(process.execPath, [path.join(scripts, script), ...args], { env, stdio: ["ignore", capture ? "pipe" : "inherit", capture ? "pipe" : "inherit"] });
   let stdout = "";
+  let stderr = "";
   child.stdout?.on("data", (chunk) => { stdout += chunk; });
-  child.on("close", (code) => resolve({ code, stdout }));
+  child.stderr?.on("data", (chunk) => { stderr += chunk; process.stderr.write(chunk); });
+  child.on("close", (code) => resolve({ code, stdout, stderr }));
 });
 
 const liveDeploymentUrl = async () => {
-  const { code, stdout } = await runNode("deploy-rollback.mjs", ["--status"], { capture: true });
-  if (code !== 0) return null;
+  const { code, stdout, stderr } = await runNode("deploy-rollback.mjs", ["--status"], { capture: true });
+  if (code !== 0) return { error: stderr.trim() || stdout.trim() || `deploy-rollback --status exited with code ${code}.` };
   try {
     const host = JSON.parse(stdout)?.live?.url;
-    return host ? `https://${host}` : null;
+    if (typeof host !== "string" || !host.trim()) return { error: "deploy-rollback --status did not return a live deployment URL." };
+    return { url: `https://${host}` };
   } catch {
-    return null;
+    return { error: "deploy-rollback --status returned invalid JSON." };
   }
 };
 
@@ -34,16 +37,18 @@ const main = async () => {
   const hasToken = Boolean(String(process.env.VERCEL_TOKEN || "").trim());
 
   let confirmedLive = false;
+  let lookupError = null;
   if (hasToken) {
-    let live = null;
+    let live = { error: "No live deployment lookup was attempted." };
     for (let attempt = 1; attempt <= LIVE_ATTEMPTS; attempt += 1) {
       live = await liveDeploymentUrl();
-      if (live === deploymentUrl) break;
+      if (live.url === deploymentUrl) break;
       if (attempt < LIVE_ATTEMPTS) await new Promise((resolve) => setTimeout(resolve, LIVE_WAIT_MS));
     }
-    confirmedLive = live === deploymentUrl;
-    if (!confirmedLive) {
-      annotate("notice", `${deploymentUrl} is not serving production (live: ${live || "unknown"}); the smoke still checks production but won't roll anything back.`);
+    lookupError = live.error || null;
+    confirmedLive = live.url === deploymentUrl;
+    if (!confirmedLive && !lookupError) {
+      annotate("notice", `${deploymentUrl} is not serving production (live: ${live.url || "unknown"}); the smoke still checks production but won't roll anything back.`);
     }
   } else {
     annotate("warning", `VERCEL_TOKEN is not set: can't confirm ${deploymentUrl} is live, and a failed smoke can't roll back.`);
@@ -53,6 +58,13 @@ const main = async () => {
   delete smokeEnv.VERCEL_TOKEN;
   const smokeArgs = process.env.SMOKE_BASE_URL ? ["--base", process.env.SMOKE_BASE_URL] : [];
   const smoke = await runNode("production-smoke.mjs", smokeArgs, { env: smokeEnv });
+  if (lookupError) {
+    if (smoke.code === 2) annotate("error", `The money-path smoke failed on ${deploymentUrl}, so nothing was rolled back.`);
+    else if (smoke.code !== 0) annotate("error", "The money-path smoke could not run, so nothing was rolled back.");
+    const detail = lookupError.replace(/[\r\n]+/g, " ");
+    annotate("error", `Automatic rollback was unavailable because the live deployment could not be read: ${process.env.GITHUB_ACTIONS === "true" ? detail.replaceAll("%", "%25") : detail}`);
+    return 1;
+  }
   if (smoke.code === 0) return 0;
   if (smoke.code !== 2) {
     annotate("error", "The money-path smoke could not run, so nothing was rolled back.");
