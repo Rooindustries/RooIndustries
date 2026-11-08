@@ -9,7 +9,6 @@ import { test } from "node:test";
 import { freeTcpPort, reserveTcpPorts } from "../scripts/lib/free-tcp-port.mjs";
 import { spawnContained, startChildOnPorts, stopChild } from "../scripts/lib/start-on-port.mjs";
 import { spawnGroup } from "../scripts/lib/process-group.mjs";
-
 import { spawnSync as runFixture, startChildOnPorts as startFixtureOnPorts } from "../scripts/lib/fixture-tools.mjs";
 
 const host = "127.0.0.1";
@@ -40,6 +39,74 @@ const within = (promise, timeout) => {
   let timer;
   return Promise.race([promise, new Promise((resolve, reject) => { timer = setTimeout(() => reject(new Error(`still running after ${timeout} ms`)), timeout); })]).finally(() => clearTimeout(timer));
 };
+
+test("fixture entry points refuse unlisted programs and daemon modes before starting a child", async () => {
+  for (const [command, args] of [
+    ["git", ["daemon", "--detach"]],
+    ["perl", ["-e", "fork && exit; sleep 60"]],
+  ]) {
+    assert.throws(() => runFixture(command, args), /listed foreground mode/);
+  }
+  for (const [command, args] of [
+    ["/bin/sh", ["-c", "sleep 60 &"]],
+    ["pg_ctl", ["start"]],
+    [process.execPath, ["-e", "setInterval(() => {}, 1000)"]],
+    [process.execPath, ["node_modules/next/dist/bin/next", "unknown-mode"]],
+  ]) {
+    let port;
+    await assert.rejects(startFixtureOnPorts({
+      host, requested: [0], output: () => "",
+      spawnChild: ([picked], launch) => {
+        port = picked;
+        return launch.spawn(command, args);
+      },
+    }), /listed foreground mode/);
+    const server = await competitor(port);
+    await close(server);
+  }
+});
+
+test("another harness cannot allocate a running fixture's port while its socket is closed", async () => {
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "port-lock-competitor-"));
+  let started;
+  try {
+    started = await startChildOnPorts({
+      host, requested: [0], output: () => "", isReady: answers,
+      spawnChild: ([port], launch) => launch.spawn(process.execPath, ["-e", `
+        const server = require("http").createServer((request, response) => response.end("child"));
+        server.listen(${port}, "127.0.0.1");
+        process.stdin.once("data", () => server.close(() => console.log("closed")));
+        setInterval(() => {}, 1000);
+      `], { stdio: ["pipe", "pipe", "inherit"] }),
+    });
+    const closed = once(started.child.stdout, "data");
+    started.child.stdin.write("close\n");
+    assert.match(String((await closed)[0]), /closed/);
+    const [port] = started.ports;
+    const program = `import { reserveTcpPorts, releaseTcpPorts } from ${library("free-tcp-port.mjs")};
+      let result;
+      try { await reserveTcpPorts(${JSON.stringify(host)}, [${port}]); result = "stolen"; }
+      catch (error) { if (error.code !== "EADDRINUSE") throw error; result = "reserved"; }
+      const picks = await reserveTcpPorts(${JSON.stringify(host)}, [0]);
+      console.log(JSON.stringify({ result, picks }));
+      await releaseTcpPorts(${JSON.stringify(host)}, [${port}, ...picks]);`;
+    const probe = () => {
+      const result = spawnSync(process.execPath, ["--input-type=module", "-e", program], {
+        encoding: "utf8", env: { ...process.env, TMPDIR: scratch },
+      });
+      assert.equal(result.status, 0, result.stderr);
+      return JSON.parse(result.stdout);
+    };
+    const { result, picks } = probe();
+    assert.equal(result, "reserved", "another harness took the port after the child closed its socket");
+    assert.ok(!picks.includes(port));
+    await stopChild(started.child);
+    assert.equal(probe().result, "stolen", "the reservation survived completed cleanup");
+  } finally {
+    if (started) await stopChild(started.child);
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+});
 
 test("a stolen automatic port is retried and a competitor's answer never counts as ready", async () => {
   const output = [];
@@ -175,8 +242,8 @@ test("an explicit port that is taken fails without trying another", async () => 
         attempts += 1;
         return httpChild(launch, candidate);
       },
-    }), /exited before it was ready/);
-    assert.equal(attempts, 1);
+    }), { code: "EADDRINUSE" });
+    assert.equal(attempts, 0);
   } finally {
     await close(thief);
   }
@@ -281,6 +348,7 @@ test("a leader reaped alongside another is never signalled by number while its e
   const { child: second } = await start();
   const zombie = (pid) => {
     try {
+      if (process.platform === "darwin") return spawnSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim().startsWith("Z");
       return fs.readFileSync(`/proc/${pid}/stat`, "utf8").split(") ")[1].startsWith("Z");
     } catch {
       return false;
@@ -435,7 +503,7 @@ test("a listener on another host never counts as the child's port", async () => 
       isReady: answers,
       spawnChild: ([port], launch) => {
         thief = competitor(port);
-        return launch.spawn(process.execPath, ["-e", `require("http").createServer((q, s) => s.end("child")).listen(${port}, "127.0.0.2")`]);
+        return launch.spawn(process.execPath, ["-e", `require("http").createServer((q, s) => s.end("child")).listen(${port}, "::1")`]);
       },
     }), /not ready/);
   } finally {
@@ -517,26 +585,26 @@ const silenced = async (port, timeout = 3000) => {
 const dismiss = (port) => fetch(`http://${host}:${port}/exit`).catch(() => {});
 
 test("a double-forked daemon with a scrubbed environment is stopped with its child", async () => {
-  const daemonPort = await freeTcpPort(host);
-  const intermediate = `require("node:child_process").spawn(process.execPath, ["-e", ${JSON.stringify(server(daemonPort, true))}], { stdio: "ignore", detached: true, env: {} }).unref();`;
+  let daemonPort;
+  let fixture;
+  const intermediate = (port) => `require("node:child_process").spawn(process.execPath, ["-e", ${JSON.stringify(server(port, true))}], { stdio: "ignore", detached: true, env: {} }).unref();`;
   try {
-    const { child } = await startChildOnPorts({
+    fixture = await startChildOnPorts({
       host,
-      requested: [0],
-      isReady: answers,
+      requested: [0, 0],
+      isReady: async (ports) => (await Promise.all(ports.map(answering))).every(Boolean),
       output: () => "",
-      spawnChild: ([port], launch) => launch.spawn(process.execPath, ["-e", `require("node:child_process").spawn(process.execPath, ["-e", ${JSON.stringify(intermediate)}], { stdio: "ignore", detached: true, env: {} }).unref();
-${server(port, false)}`]),
+      spawnChild: ([port, daemon], launch) => {
+        daemonPort = daemon;
+        return launch.spawn(process.execPath, ["-e", `require("node:child_process").spawn(process.execPath, ["-e", ${JSON.stringify(intermediate(daemon))}], { stdio: "ignore", detached: true, env: {} }).unref();
+${server(port, false)}`], { daemons: [{ port: daemon, command: process.execPath, args: ["-e", server(daemon, true)] }] });
+      },
     });
-    const deadline = Date.now() + 5000;
-    while (!await answering(daemonPort)) {
-      assert.ok(Date.now() < deadline, "the daemon never started");
-      await pause(50);
-    }
-    await stopChild(child);
+    await stopChild(fixture.child);
     assert.ok(await silenced(daemonPort), "the daemon outlived its fixture child");
   } finally {
-    await dismiss(daemonPort);
+    if (fixture) await stopChild(fixture.child);
+    if (daemonPort) await dismiss(daemonPort);
   }
 });
 
@@ -562,25 +630,55 @@ setInterval(() => {}, 1000);`]);
   }
 });
 
-test("children die with a fixture process that is killed outright", async () => {
-  const parent = spawn(process.execPath, ["--input-type=module", "-e", `const { startChildOnPorts } = await import(${library("start-on-port.mjs")});
-const server = ${server.toString()};
-const { ports } = await startChildOnPorts({ host: "127.0.0.1", requested: [0], output: () => "", spawnChild: ([port], launch) => launch.spawn(process.execPath, ["-e", server(port, true)]) });
-console.log(ports[0]);
-setInterval(() => {}, 1000);`], { stdio: ["ignore", "pipe", "inherit"] });
-  const [line] = await once(parent.stdout, "data");
-  const port = Number(line);
+test("a listener with another command on an allocated daemon port is never accepted or stopped", async () => {
+  let thief;
   try {
-    assert.ok(await answering(port));
-    parent.kill("SIGKILL");
-    await once(parent, "exit");
-    assert.ok(await silenced(port), "the child outlived its killed fixture process");
+    await assert.rejects(startChildOnPorts({
+      host, requested: [0, 0], timeout: 1000, output: () => "",
+      spawnChild: ([port, daemonPort], launch) => {
+        thief = competitor(daemonPort);
+        return launch.spawn(process.execPath, ["-e", server(port, false)], {
+          daemons: [{ port: daemonPort, command: process.execPath, args: ["-e", server(daemonPort, false)] }],
+        });
+      },
+    }), /not ready/);
+    const listener = await thief;
+    assert.equal(await (await fetch(`http://${host}:${listener.address().port}/`)).text(), "competitor");
   } finally {
-    await dismiss(port);
+    if (thief) await close(await thief);
   }
 });
 
-test("a fixture whose exit callback stops another that exited with it never signals the reused PID", async () => {
+test("stopping a killed launcher drains the server it already owned", async () => {
+  const { child, ports: [port] } = await startChildOnPorts({
+    host, requested: [0], output: () => "", isReady: answers,
+    spawnChild: ([picked], launch) => httpChild(launch, picked),
+  });
+  child.kill("SIGKILL");
+  await once(child, "exit");
+  await stopChild(child);
+  assert.ok(await silenced(port), "the owned server survived its launcher");
+});
+
+test("children die with a fixture process that is killed outright", async () => {
+  const parent = spawn(process.execPath, ["--input-type=module", "-e", `const { startChildOnPorts } = await import(${library("start-on-port.mjs")});
+const server = ${server.toString()};
+const { ports } = await startChildOnPorts({ host: "127.0.0.1", requested: [0, 0], output: () => "", spawnChild: ([port, daemon], launch) => launch.spawn(process.execPath, ["-e", \`require("node:child_process").spawn(process.execPath, ["-e", \${JSON.stringify(server(daemon, true))}], { detached: true, stdio: "ignore", env: {} }).unref();\n\${server(port, true)}\`], { daemons: [{ port: daemon, command: process.execPath, args: ["-e", server(daemon, true)] }] }) });
+console.log(JSON.stringify(ports));
+setInterval(() => {}, 1000);`], { stdio: ["ignore", "pipe", "inherit"] });
+  const [line] = await once(parent.stdout, "data");
+  const ports = JSON.parse(String(line));
+  try {
+    for (const port of ports) assert.ok(await answering(port));
+    parent.kill("SIGKILL");
+    await once(parent, "exit");
+    for (const port of ports) assert.ok(await silenced(port), "a server outlived its killed fixture process");
+  } finally {
+    await Promise.all(ports.map(dismiss));
+  }
+});
+
+test("a fixture whose exit callback stops another that exited with it never signals the reused PID", { skip: process.platform !== "linux" }, async () => {
   const program = `import fs from "node:fs";
 import { spawn } from "node:child_process";
 const { startChildOnPorts, stopChild } = await import(${library("start-on-port.mjs")});
@@ -614,7 +712,7 @@ process.exit(0);`;
   assert.equal(result.victimAlive, true, "stopping the second fixture signalled the unrelated process that took its PID");
 });
 
-test("stopChild waits for a namespace that outlives its reaped wrapper before the port is reused", async () => {
+test("stopChild waits for a namespace that outlives its reaped wrapper before the port is reused", { skip: process.platform !== "linux" }, async () => {
   const syscalls = { x64: 101, arm64: 117 };
   assert.ok(syscalls[process.arch], `no ptrace syscall number for ${process.arch}`);
   const marker = `held-at-exit-${process.pid}`;
@@ -660,7 +758,7 @@ test("stopChild waits for a namespace that outlives its reaped wrapper before th
   }
 });
 
-test("a fixture started while its parent dies never runs", async () => {
+test("a fixture started while its parent dies never runs", { skip: process.platform !== "linux" }, async () => {
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), "roo-paused-setpriv-"));
   const real = spawnSync("sh", ["-c", "command -v setpriv"], { encoding: "utf8" }).stdout.trim();
   fs.writeFileSync(path.join(bin, "setpriv"), `#!/bin/sh\nfor last; do :; done\nif [ "$last" != true ]; then echo $$ > "${bin}/pid"; kill -STOP $$; fi\nexec ${real} "$@"\n`, { mode: 0o755 });
@@ -691,7 +789,7 @@ await startChildOnPorts({ host: "127.0.0.1", requested: [0], output: () => "", s
   }
 });
 
-test("a machine that refuses PID namespaces stops the start with a clear error", () => {
+test("a machine that refuses PID namespaces stops the start with a clear error", { skip: process.platform !== "linux" }, () => {
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), "roo-no-userns-"));
   fs.writeFileSync(path.join(bin, "unshare"), "#!/bin/sh\necho 'unshare: unshare failed: Operation not permitted' >&2\nexit 1\n", { mode: 0o755 });
   try {
@@ -701,31 +799,5 @@ await startChildOnPorts({ host: "127.0.0.1", requested: [0], output: () => "", s
     assert.match(run.stderr, /refused to create one: unshare: unshare failed: Operation not permitted/);
   } finally {
     fs.rmSync(bin, { recursive: true, force: true });
-  }
-});
-
-test("fixture entry points refuse unlisted programs and daemon modes before starting a child", async () => {
-  for (const [command, args] of [
-    ["git", ["daemon", "--detach"]],
-    ["perl", ["-e", "fork && exit; sleep 60"]],
-  ]) {
-    assert.throws(() => runFixture(command, args), /listed foreground mode/);
-  }
-  for (const [command, args] of [
-    ["/bin/sh", ["-c", "sleep 60 &"]],
-    ["pg_ctl", ["start"]],
-    [process.execPath, ["-e", "setInterval(() => {}, 1000)"]],
-    [process.execPath, ["node_modules/next/dist/bin/next", "unknown-mode"]],
-  ]) {
-    let port;
-    await assert.rejects(startFixtureOnPorts({
-      host, requested: [0], output: () => "",
-      spawnChild: ([picked], launch) => {
-        port = picked;
-        return launch.spawn(command, args);
-      },
-    }), /listed foreground mode/);
-    const server = await competitor(port);
-    await close(server);
   }
 });

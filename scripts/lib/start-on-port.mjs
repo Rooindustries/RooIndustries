@@ -1,10 +1,12 @@
 import fs from "node:fs";
 import net from "node:net";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { exited, isRunning, isTrackedLeader, leaderProc, signalGroup, trackGroupLeader } from "./process-group.mjs";
-import { passHeldTcpPorts, releaseTcpPorts, reserveTcpPorts, shiftTcpPortReservations,
-  takeTcpPortReservations } from "./free-tcp-port.mjs";
-import { drainFixtureScope, fixtureScope, rememberFixtureScope, scopeOf } from "./fixture-run.mjs";
+import { passHeldTcpPorts, releaseTcpPorts, reserveTcpPorts, takeTcpPortReservations } from "./free-tcp-port.mjs";
+import { allocationTime, descriptorPath, drainMacGroup, ownsMacPorts, processTable } from "./macos-process.mjs";
 
 export const addressInUse = (output) => /EADDRINUSE|Address already in use|\(Address in use\)/.test(output);
 
@@ -80,9 +82,11 @@ const namespaceMembers = (namespace) => namespace
 
 const pins = new WeakMap();
 const drains = new WeakMap();
+const macChildren = new WeakMap();
 const portReservations = new WeakMap();
 
 const pinNamespace = (child) => {
+  if (process.platform === "darwin") return true;
   if (pins.has(child)) return true;
   if (!running(child)) return false;
   let fd;
@@ -106,15 +110,19 @@ const pinNamespace = (child) => {
 const drain = (child) => {
   if (!drains.has(child)) {
     drains.set(child, (async () => {
+      if (macChildren.has(child)) {
+        const state = macChildren.get(child);
+        try { await drainMacGroup(state); }
+        finally { fs.rmSync(state.directory, { recursive: true, force: true }); }
+        return;
+      }
       const pinned = pins.get(child);
+      if (!pinned) return;
       try {
-        await drainFixtureScope(scopeOf(child));
-        if (pinned) while (namespaceMembers(pinned.namespace).length) await pause(50);
+        while (namespaceMembers(pinned.namespace).length) await pause(50);
       } finally {
-        if (pinned) {
-          pins.delete(child);
-          fs.closeSync(pinned.fd);
-        }
+        pins.delete(child);
+        fs.closeSync(pinned.fd);
       }
     })().finally(() => {
       for (const fd of portReservations.get(child) || []) fs.closeSync(fd);
@@ -125,6 +133,7 @@ const drain = (child) => {
 };
 
 export const ownsPorts = (child, host, ports) => {
+  if (process.platform === "darwin") return ownsMacPorts(child, host, ports, macChildren.get(child));
   const open = new Set();
   for (const member of namespaceMembers(pins.get(child)?.namespace)) {
     try {
@@ -143,6 +152,14 @@ export const stopChild = (child, grace = 5000) => {
   if (!isTrackedLeader(child)) return Promise.reject(new Error("stopChild only stops children started with launch.spawn, spawnContained or spawnGroup."));
   if (!stops.has(child)) {
     stops.set(child, (async () => {
+      if (macChildren.has(child)) {
+        if (exited(child)) return drain(child);
+        const ended = new Promise((resolve) => child.once("exit", resolve));
+        macChildren.get(child).lifeline.write(`${JSON.stringify({ grace })}\n`);
+        await ended;
+        await drain(child);
+        return;
+      }
       pinNamespace(child);
       if (!exited(child)) {
         const ended = new Promise((resolve) => child.once("exit", resolve));
@@ -180,7 +197,8 @@ const requireContainment = () => {
 
 const logFiles = (stdio) => [...new Set(stdio.slice(1, 3).filter(Number.isInteger).flatMap((fd) => {
   try {
-    return [fs.readlinkSync(`/proc/self/fd/${fd}`)];
+    const file = process.platform === "darwin" ? descriptorPath(fd) : fs.readlinkSync(`/proc/self/fd/${fd}`);
+    return file ? [file] : [];
   } catch {
     return [];
   }
@@ -204,24 +222,38 @@ const captureOutput = (child, stdio, logs) => {
   }).join("");
 };
 
-const launcher = (held, reservations = []) => (command, args, options = {}) => {
-  requireContainment();
+const launcher = (held, ports = [], allocatedAt, reservations = []) => (command, args, options = {}) => {
+  const { daemons = [], ...spawnOptions } = options;
+  if (daemons.some(({ port }) => !ports.includes(port))) throw new Error("Daemon cleanup requires an allocated fixture port.");
+  if (process.platform !== "darwin") requireContainment();
   const stdio = typeof options.stdio === "string" ? Array(3).fill(options.stdio) : [...(options.stdio || ["ignore", "ignore", "ignore"])];
   const logs = logFiles(stdio);
-  const scope = fixtureScope(shiftTcpPortReservations(options.env || process.env, 1 + held.stdio.length));
-  const child = spawn("setpriv", [...containment, ...init, command, ...args], {
-    ...options,
+  const mac = process.platform === "darwin";
+  const allocations = ports.map((port) => ({ command, args, ...daemons.find((daemon) => daemon.port === port),
+    port, allocatedAt }));
+  const directory = mac ? fs.mkdtempSync(path.join(os.tmpdir(), "fixture-members-")) : undefined;
+  const extra = [...held.stdio, ...stdio.slice(3)];
+  const supervisor = fileURLToPath(new URL("./macos-fixture-child.mjs", import.meta.url));
+  const program = mac ? process.execPath : "setpriv";
+  const parameters = mac
+    ? [supervisor, JSON.stringify({ command, args, extra, ipc: extra.includes("ipc"), ports, directory, allocations })]
+    : [...containment, ...init, command, ...args];
+  const child = spawn(program, parameters, {
+    ...spawnOptions,
     detached: true,
-    env: { ...scope.env, ...held.env },
+    env: { ...(options.env || process.env), ...held.env },
     stdio: [...stdio.slice(0, 3), "pipe", ...held.stdio, ...stdio.slice(3), ...reservations],
   });
-  rememberFixtureScope(child, scope);
   portReservations.set(child, reservations);
   trackGroupLeader(child, () => drain(child));
   const lifeline = child.stdio[3];
+  if (mac) macChildren.set(child, {
+    lifeline, ports, directory, allocations, members: new Map(), leader: processTable().find(({ pid }) => pid === child.pid),
+  });
   lifeline?.on("error", () => {});
   lifeline?.once("data", () => {
-    if (!stops.has(child) && pinNamespace(child)) lifeline.end("\n", () => lifeline.destroy());
+    if (mac && !stops.has(child)) lifeline.write("\n");
+    else if (!stops.has(child) && pinNamespace(child)) lifeline.end("\n", () => lifeline.destroy());
     else lifeline.destroy();
   });
   launched.add(child);
@@ -237,7 +269,7 @@ const waitUntilReady = async ({ child, host, ports, isReady, output, timeout, fa
   while (Date.now() < deadline) {
     if (failure()) throw failure();
     if (exited(child)) throw new Error(`Child exited before it was ready (exit ${child.exitCode ?? child.signalCode}):\n${output()}`);
-    if (ownsPorts(child, host, ports) && await isReady(ports) && !exited(child) && ownsPorts(child, host, ports)) return;
+    if (await ownsPorts(child, host, ports) && await isReady(ports) && !exited(child) && await ownsPorts(child, host, ports)) return;
     await pause(100);
   }
   throw new Error(`Child was not ready within ${timeout} ms:\n${output()}`);
@@ -263,11 +295,12 @@ export const startChildOnPorts = async ({ host, requested, preferred, spawnChild
       : await reserveTcpPorts(host, requested);
     const reservations = takeTcpPortReservations(host, ports);
     if (!passHeld) await releaseTcpPorts(host, ports);
+    const allocatedAt = allocationTime();
     let child;
     let spawnError;
     try {
       const held = passHeld ? passHeldTcpPorts(host, ports) : { stdio: [], env: {} };
-      const launch = launcher(held, reservations);
+      const launch = launcher(held, ports, allocatedAt, reservations);
       const returned = spawnChild(ports, { spawn: (...args) => (child = launch(...args)) });
       if (returned !== child || !launched.has(child)) throw new Error("spawnChild must start its child with launch.spawn.");
       child.once("error", (error) => { spawnError = error; });

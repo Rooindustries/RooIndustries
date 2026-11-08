@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { test } from "node:test";
 import { holdGroupMembers, releaseGroupMembers, signalGroup, spawnGroup } from "../scripts/lib/process-group.mjs";
@@ -7,6 +8,9 @@ import { spawnContained, stopChild } from "../scripts/lib/start-on-port.mjs";
 
 const zombie = (pid) => {
   try {
+    if (process.platform === "darwin") {
+      return spawnSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim().startsWith("Z");
+    }
     return fs.readFileSync(`/proc/${pid}/stat`, "utf8").split(") ")[1].startsWith("Z");
   } catch {
     return false;
