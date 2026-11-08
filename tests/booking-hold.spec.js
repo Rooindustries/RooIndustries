@@ -272,7 +272,8 @@ for (const [shape, sameSlot] of [["refreshed", false], ["refreshed", true], ["ex
         await page.getByRole("button", { name: "Release payment", exact: true }).click();
         await expect.poll(() => delayed?.body.cancelled).toBe(true);
         const payload = { ...JSON.parse(original.checkout_booking_state),
-          startTimeUTC: sameSlot ? oldHold.startTimeUTC : `${date}T05:30:00.000Z` };
+          startTimeUTC: sameSlot ? oldHold.startTimeUTC : `${date}T05:30:00.000Z`,
+          displayTime: sameSlot ? "10:00 AM" : "11:00 AM" };
         const held = await native.post("/api/holdSlot", { packageTitle: payload.packageTitle,
           startTimeUTC: payload.startTimeUTC, previousHoldId: delayed.body.refreshedHold?.slotHoldId,
           previousHoldToken: delayed.body.refreshedHold?.slotHoldToken });
@@ -290,9 +291,10 @@ for (const [shape, sameSlot] of [["refreshed", false], ["refreshed", true], ["ex
         Object.assign(nextHold, { holdToken: refreshed.slotHoldToken, expiresAt: refreshed.slotHoldExpiresAt,
           phase: "payment_pending" });
         Object.assign(payload, { slotHoldToken: refreshed.slotHoldToken, slotHoldExpiresAt: refreshed.slotHoldExpiresAt });
-        const nextSession = { ...JSON.parse(original.payment_session_state),
-          fingerprint: JSON.stringify({ ...JSON.parse(JSON.parse(original.payment_session_state).fingerprint),
-            startTimeUTC: payload.startTimeUTC }),
+        const nextSession = { provider: started.body.provider,
+          fingerprint: JSON.stringify({ packageTitle: payload.packageTitle, originalOrderId: payload.originalOrderId || "",
+            startTimeUTC: payload.startTimeUTC, email: payload.email,
+            referralCode: payload.referralCode || "", couponCode: payload.couponCode || "" }),
           paymentAccessToken: started.body.paymentAccessToken, providerPayload: started.body.providerPayload,
           result: started.body };
         await page.evaluate(({ nextHold, payload, nextSession }) => {
