@@ -10,6 +10,7 @@ import {
 
 const AUTO_SCROLL_PIXELS_PER_SECOND = 24;
 const AUTO_SCROLL_RESUME_DELAY_MS = 1500;
+const AUTO_SCROLL_START_DELAY_MS = 3000;
 const AUTO_SCROLL_RAMP_MS = 900;
 const WHEEL_ACTIVE_MS = 150;
 const ARROW_SCROLL_MS = 450;
@@ -227,10 +228,10 @@ function ReviewCard({ review, groupIndex }) {
       }}
     >
       <div className="ri-review-head flex items-center justify-between gap-3 text-[11px] font-bold uppercase tracking-[0.12em]">
-        <p className={`ri-review-kind ${isCreator ? "ri-review-champagne-text" : "text-ink-secondary"}`}>
+        <p className={`ri-review-kind shrink-0 ${isCreator ? "ri-review-champagne-text" : "text-ink-secondary"}`}>
           {isCreator ? "Creator review" : "Player review"}
         </p>
-        <p className="ri-review-game text-ink-secondary">{review.game || "PC performance"}</p>
+        <p className="ri-review-game min-w-0 text-right text-ink-secondary">{review.game || "PC performance"}</p>
       </div>
 
       <div className={`ri-review-stats mt-3 flex min-h-4 flex-wrap items-end gap-x-3 gap-y-1 ${result ? "justify-between" : "justify-end"}`}>
@@ -239,7 +240,7 @@ function ReviewCard({ review, groupIndex }) {
             <span className="ri-review-result-label mr-2 text-[11px] uppercase tracking-[0.1em] text-ink-secondary">
               {result.label}
             </span>
-            <span className="whitespace-nowrap">
+            <span className="inline-block">
               <span className="text-lg text-ink">{result.before}</span>
               <span className="mx-1.5 text-base" style={{ color: "#f5c954" }}>
                 →
@@ -261,7 +262,7 @@ function ReviewCard({ review, groupIndex }) {
       </div>
 
       <blockquote className="ri-review-quote mt-3 flex-1">
-        <p className="text-ink text-[15px] leading-[1.5] break-words whitespace-normal">
+        <p className="text-ink text-[15px] leading-[1.5] whitespace-normal">
           “{review.text}”
         </p>
       </blockquote>
@@ -270,7 +271,7 @@ function ReviewCard({ review, groupIndex }) {
         <ReviewerAvatar review={review} isCreator={isCreator} />
         <div className="min-w-0">
           <p
-            className={`font-bold text-[15px] leading-tight text-ink break-words ${
+            className={`font-bold text-[15px] leading-tight text-ink ${
               isCreator ? "ri-review-champagne-text" : ""
             }`}
           >
@@ -299,9 +300,11 @@ function AutoReviewCarousel({ reviews }) {
     touching: false,
     wheelAt: -Infinity,
     interactedAt: -Infinity,
+    shownAt: null,
     wake: null,
   });
   const [groupCount, setGroupCount] = useState(1);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -341,7 +344,7 @@ function AutoReviewCarousel({ reviews }) {
     if (!viewport) return undefined;
     const motion = motionRef.current;
     let paused = false;
-    let visible = true;
+    let visible = typeof IntersectionObserver === "undefined";
     let previousTime = 0;
     let frameId = 0;
     const needsFrames = () => Boolean(motion.arrow) || (visible && !paused);
@@ -353,6 +356,7 @@ function AutoReviewCarousel({ reviews }) {
       const { groupWidth, arrow } = motion;
       if (groupWidth) {
         let position = readReviewScroll(viewport, motion);
+        if (motion.shownAt === null && visible && !paused) motion.shownAt = time;
         if (arrow) {
           arrow.startedAt ??= time;
           const progress = Math.min(1, (time - arrow.startedAt) / ARROW_SCROLL_MS);
@@ -362,7 +366,10 @@ function AutoReviewCarousel({ reviews }) {
         if (arrow || motion.drag || motion.touching || motion.focused || time - motion.wheelAt < WHEEL_ACTIVE_MS) {
           motion.interactedAt = time;
         } else if (!paused && visible) {
-          const idle = time - motion.interactedAt - AUTO_SCROLL_RESUME_DELAY_MS;
+          const idle = time - Math.max(
+            motion.interactedAt + AUTO_SCROLL_RESUME_DELAY_MS,
+            motion.shownAt + AUTO_SCROLL_START_DELAY_MS
+          );
           if (idle > 0) {
             position +=
               (AUTO_SCROLL_PIXELS_PER_SECOND * easeOut(Math.min(1, idle / AUTO_SCROLL_RAMP_MS)) * elapsed) /
@@ -415,6 +422,7 @@ function AutoReviewCarousel({ reviews }) {
       }
     };
     viewport.addEventListener("scroll", onScroll, { passive: true });
+    setReady(true);
 
     return () => {
       if (frameId) window.cancelAnimationFrame(frameId);
@@ -506,7 +514,7 @@ function AutoReviewCarousel({ reviews }) {
       <button
         type="button"
         onClick={() => scrollReviews(-1)}
-        className={REVIEW_ARROW_CLASS}
+        className={`${REVIEW_ARROW_CLASS}${ready ? "" : " invisible"}`}
         aria-label="Scroll reviews left"
       >
         ←
@@ -561,7 +569,7 @@ function AutoReviewCarousel({ reviews }) {
       <button
         type="button"
         onClick={() => scrollReviews(1)}
-        className={REVIEW_ARROW_CLASS}
+        className={`${REVIEW_ARROW_CLASS}${ready ? "" : " invisible"}`}
         aria-label="Scroll reviews right"
       >
         →

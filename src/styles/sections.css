@@ -57,6 +57,10 @@
   mask-image: var(--reviews-mask);
 }
 
+.ri-review-card {
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 639.98px) {
   .ri-reviews-viewport > .ri-reviews-auto-track {
     --review-card-width: min(320px, 100% - 2 * var(--reviews-fade));
@@ -117,6 +121,7 @@
   .ri-review-card .ri-review-game {
     grid-area: game;
     align-self: center;
+    max-width: 9rem;
   }
 
   .ri-review-card .ri-review-stars {
@@ -140,6 +145,7 @@
     grid-area: result;
     align-self: center;
     justify-self: end;
+    max-width: 12rem;
     margin-top: 0.75rem;
     text-align: right;
   }
@@ -163,4 +169,29 @@ html.perf-reduced-effects-mode .ri-reviews-viewport,
 .ri-reviews-viewport:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: -2px;
+}
+
+@media (scripting: none) {
+  .ri-reviews-frame {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ri-reviews-frame > button {
+    display: none;
+  }
+
+  .ri-reviews-viewport {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border-strong) transparent;
+  }
+
+  .ri-reviews-viewport::-webkit-scrollbar {
+    display: block;
+    height: 8px;
+  }
+
+  .ri-reviews-viewport::-webkit-scrollbar-thumb {
+    border-radius: 9999px;
+    background: var(--color-border-strong);
+  }
 }

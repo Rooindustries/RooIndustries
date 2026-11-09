@@ -284,6 +284,93 @@ const placeOpening = (frame) => {
   };
 };
 
+const cardLayout = (region) =>
+  region.evaluate((el) => {
+    const cards = [...el.querySelectorAll(".ri-review-card")];
+    const range = document.createRange();
+    const spilled = [];
+    const clipped = [];
+    for (const card of cards) {
+      const box = card.getBoundingClientRect();
+      const walker = document.createTreeWalker(card, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (!node.textContent.trim() || node.parentElement.closest(".sr-only")) continue;
+        range.selectNodeContents(node);
+        for (const rect of range.getClientRects()) {
+          if (rect.width < 1 || rect.height < 1) continue;
+          const px = Math.max(box.left - rect.left, rect.right - box.right, box.top - rect.top, rect.bottom - box.bottom);
+          if (px > 1) spilled.push({ id: card.dataset.reviewId, text: node.textContent.trim().slice(0, 40), px: Math.round(px) });
+        }
+      }
+      for (const node of card.querySelectorAll("*")) {
+        if (node.closest(".sr-only") || node.getBoundingClientRect().width <= 1) continue;
+        const rect = node.getBoundingClientRect();
+        const px = Math.max(box.left - rect.left, rect.right - box.right, box.top - rect.top, rect.bottom - box.bottom);
+        if (px > 1) spilled.push({ id: card.dataset.reviewId, text: node.tagName, px: Math.round(px) });
+        const style = getComputedStyle(node);
+        if (style.textOverflow === "ellipsis" ||
+          (style.overflow !== "visible" && (node.scrollWidth > node.clientWidth + 1 || node.scrollHeight > node.clientHeight + 1))) {
+          clipped.push({ id: card.dataset.reviewId, tag: node.tagName });
+        }
+      }
+    }
+    const first = el.firstElementChild.children[1]?.firstElementChild || cards[0];
+    return {
+      heights: [...new Set(cards.map((card) => Math.round(card.getBoundingClientRect().height)))],
+      spilled: spilled.filter((entry, index) => spilled.findIndex((other) => other.id === entry.id && other.text === entry.text) === index),
+      clipped,
+      firstId: first.dataset.reviewId,
+      quoteSize: getComputedStyle(first.querySelector("blockquote p")).fontSize,
+      firstCopyText: [...el.querySelectorAll('[data-group-index="0"]')].map((card) => card.textContent),
+    };
+  });
+
+const waitForAutoplay = async (page, region) => {
+  const scrollLeft = () => region.evaluate((el) => el.scrollLeft);
+  await expect
+    .poll(async () => {
+      const start = await scrollLeft();
+      await page.waitForTimeout(300);
+      return Math.abs((await scrollLeft()) - start);
+    }, { timeout: 15000 })
+    .toBeGreaterThan(1);
+  await page.waitForTimeout(1000);
+};
+
+const expectOpeningHold = async (page, width, name) => {
+  const region = await openCarousel(page, { width, height: 900 });
+  const { positioned } = await openingFrames(page);
+  const start = placeOpening(positioned);
+  const held = await probe(page, "record", 2000);
+  const heldPoints = unwrap(held.samples, held.groupWidth);
+  const drift = Math.max(...heldPoints.map((point) => Math.abs(point.u - heldPoints[0].u)));
+  const settled = await region.evaluate((el) => {
+    const view = el.getBoundingClientRect();
+    const card = el.firstElementChild.children[1].firstElementChild.getBoundingClientRect();
+    return { left: card.left - view.left, right: card.right - view.left };
+  });
+  await waitForAutoplay(page, region);
+  const moving = await probe(page, "record", 1500);
+  const speed = speedOf(unwrap(moving.samples, moving.groupWidth));
+  const result = {
+    width,
+    fade: start.fade,
+    firstAtStart: start.first,
+    firstAfterHold: { left: round(settled.left), right: round(settled.right) },
+    heldMs: round(heldPoints[heldPoints.length - 1].t - heldPoints[0].t),
+    driftDuringHoldPx: round(drift),
+    speedAfterHoldPxPerSecond: round(speed),
+  };
+  writeEvidence(name, result);
+  expect(start.first).not.toBeNull();
+  expect(result.heldMs).toBeGreaterThanOrEqual(1900);
+  expect(result.driftDuringHoldPx).toBeLessThanOrEqual(0.5);
+  expect(Math.abs(settled.left - start.first.left)).toBeLessThanOrEqual(0.5);
+  expect(settled.left).toBeGreaterThanOrEqual(start.fade - 0.5);
+  expect(speed).toBeGreaterThanOrEqual(CRUISE * 0.7);
+  expect(speed).toBeLessThanOrEqual(CRUISE * 1.3);
+};
+
 const NARROW_WIDTHS = [320, 360, 390];
 const OPENING_CASES = [
   ...[...NARROW_WIDTHS, 1024, 1440].map((width) => ({ width, containerQueries: true, suffix: "" })),
@@ -433,7 +520,7 @@ test.describe("review carousel", () => {
 
     test("autoplay-moves", async () => {
       const region = await openCarousel(page);
-      await page.waitForTimeout(300);
+      await waitForAutoplay(page, region);
       await region.screenshot({ path: path.join(EVIDENCE_DIR, "autoplay-moves-start.png") });
       const recording = await probe(page, "record", 2000);
       await region.screenshot({ path: path.join(EVIDENCE_DIR, "autoplay-moves-end.png") });
@@ -613,7 +700,7 @@ test.describe("review carousel", () => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     const region = await openCarousel(page);
     const prefersReduced = await page.evaluate(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches);
-    await page.waitForTimeout(300);
+    await waitForAutoplay(page, region);
     const recording = await probe(page, "record", 2000);
     const points = unwrap(recording.samples, recording.groupWidth);
     const speed = speedOf(points);
@@ -803,31 +890,12 @@ test.describe("review carousel", () => {
     test(`cards-fit-and-line-up-${width}${suffix}`, async ({ page }) => {
       const region = await openCarousel(page, { width, height: 900 }, { containerQueries });
       const { painted, positioned } = await openingFrames(page);
-      const layout = await region.evaluate((el) => {
-        const cards = [...el.querySelectorAll(".ri-review-card")];
-        const clipped = cards.filter((card) => {
-          const box = card.getBoundingClientRect();
-          return [...card.querySelectorAll("*")]
-            .filter((node) => !node.closest(".sr-only") && node.getBoundingClientRect().width > 1)
-            .some((node) => {
-              const rect = node.getBoundingClientRect();
-              const style = getComputedStyle(node);
-              return rect.right > box.right + 1 || rect.bottom > box.bottom + 1 || style.textOverflow === "ellipsis" ||
-                (style.overflow !== "visible" && (node.scrollWidth > node.clientWidth + 1 || node.scrollHeight > node.clientHeight + 1));
-            });
-        }).map((card) => card.dataset.reviewId);
-        const first = el.firstElementChild.children[1].firstElementChild;
-        return {
-          heights: [...new Set(cards.map((card) => Math.round(card.getBoundingClientRect().height)))],
-          clipped,
-          firstId: first.dataset.reviewId,
-          quoteSize: getComputedStyle(first.querySelector("blockquote p")).fontSize,
-        };
-      });
+      const layout = await cardLayout(region);
       const start = placeOpening(positioned);
       const firstPaint = placeOpening(painted);
       writeEvidence(`cards-fit-and-line-up-${width}${suffix}`, { ...layout, start, firstPaint });
       expect(layout.heights).toHaveLength(1);
+      expect(layout.spilled).toEqual([]);
       expect(layout.clipped).toEqual([]);
       expect(layout.quoteSize).toBe("15px");
       expect(start.first?.id).toBe(layout.firstId);
@@ -843,6 +911,42 @@ test.describe("review carousel", () => {
       }
     });
   }
+
+  for (const width of [640, 1024, 1440]) {
+    test(`opening-holds-first-card-${width}`, async ({ page }) => {
+      await expectOpeningHold(page, width, `opening-holds-first-card-${width}`);
+    });
+  }
+
+  test("arrows-wait-for-the-carousel-script", async ({ page }) => {
+    await page.setViewportSize(DESKTOP);
+    const blocked = [];
+    await page.route(/\/_next\/static\/chunks\//, (route) => {
+      blocked.push(route.request().url());
+      return route.abort();
+    });
+    await page.goto("/", { waitUntil: "load" });
+    const region = page.getByRole("region", { name: "Player reviews" });
+    await region.scrollIntoViewIfNeeded();
+    const arrows = page.locator('button[aria-label^="Scroll reviews"]');
+    const withoutScript = {
+      blockedChunks: blocked.length,
+      cards: await region.locator(".ri-review-card").count(),
+      visibleArrows: await arrows.evaluateAll((buttons) => buttons.filter((button) => button.checkVisibility({ visibilityProperty: true })).length),
+    };
+    await page.unroute(/\/_next\/static\/chunks\//);
+    await openCarousel(page);
+    const withScript = {
+      visibleArrows: await arrows.evaluateAll((buttons) => buttons.filter((button) => button.checkVisibility({ visibilityProperty: true })).length),
+      scrollbarPx: await region.evaluate((el) => el.offsetHeight - el.clientHeight),
+    };
+    writeEvidence("arrows-wait-for-the-carousel-script", { withoutScript, withScript });
+    expect(withoutScript.blockedChunks).toBeGreaterThan(0);
+    expect(withoutScript.cards).toBeGreaterThan(0);
+    expect(withoutScript.visibleArrows).toBe(0);
+    expect(withScript.visibleArrows).toBe(2);
+    expect(withScript.scrollbarPx).toBe(0);
+  });
 
   test("idle-frames-offscreen", async ({ page }) => {
     await page.addInitScript(() => {
@@ -944,7 +1048,29 @@ test.describe("review carousel with two reviews", () => {
     expectInfinite(backward);
     expectInfinite(forward);
   });
+
+  for (const width of [640, 1024, 1440]) {
+    test(`two-reviews-opening-holds-first-card-${width}`, async ({ page }) => {
+      await expectOpeningHold(page, width, `two-reviews-opening-holds-first-card-${width}`);
+    });
+  }
 });
+
+const control = async (request, baseURL, data) => {
+  const origin = new URL(baseURL);
+  origin.port = String(fixturePort("TOOLING_CONTENT_PORT"));
+  const response = await request.post(new URL("/__content", origin).href, { data });
+  expect(response.status()).toBe(200);
+};
+
+const waitForHome = async (request, text) => {
+  await expect
+    .poll(async () => {
+      const response = await request.get("/");
+      return response.status() === 200 && (await response.text()).includes(text);
+    }, { timeout: 85000, intervals: [1000, 3000] })
+    .toBe(true);
+};
 
 test.describe("review carousel order", () => {
   test.skip(REVIEW_COUNT === 2, "Runs against the default four-review fixture.");
@@ -964,22 +1090,6 @@ test.describe("review carousel order", () => {
     rating: 5,
     optimizationResult: "Average FPS: 200 to 240",
   }));
-
-  const control = async (request, baseURL, data) => {
-    const origin = new URL(baseURL);
-    origin.port = String(fixturePort("TOOLING_CONTENT_PORT"));
-    const response = await request.post(new URL("/__content", origin).href, { data });
-    expect(response.status()).toBe(200);
-  };
-
-  const waitForHome = async (request, text) => {
-    await expect
-      .poll(async () => {
-        const response = await request.get("/");
-        return response.status() === 200 && (await response.text()).includes(text);
-      }, { timeout: 85000, intervals: [1000, 3000] })
-      .toBe(true);
-  };
 
   test.beforeAll(async ({ request, baseURL }) => {
     test.setTimeout(120000);
@@ -1018,6 +1128,78 @@ test.describe("review carousel order", () => {
   }
 });
 
+test.describe("review carousel with long words", () => {
+  test.skip(REVIEW_COUNT === 2, "Runs against the default four-review fixture.");
+
+  const long = {
+    name: "xXNoScopeLegendOfTheEternalStreamXx",
+    profession: "twitch.tv/TheLongestUnbrokenStreamerChannelNameEverWritten",
+    game: "CounterStrikeGlobalOffensiveLegacyEdition",
+    label: "OnePercentLowsAtCompetitiveSettings",
+    before: "1,000,000,000,000",
+    after: "2,000,000,000,000",
+    link: "rooindustries.com/reviews/averyveryverylongpathwithoutanybreaksatallthatkeepsgoing",
+  };
+  const review = (name, extra = {}) => ({
+    name,
+    profession: "Top 500 Support Main",
+    text: "The session helped me compare my PC's performance.",
+    game: "Overwatch 2",
+    rating: 5,
+    optimizationResult: "Average FPS: 200 → 240",
+    ...extra,
+  });
+  const longFields = () => ({
+    profession: long.profession,
+    game: long.game,
+    optimizationResult: `${long.label}: ${long.before} → ${long.after}`,
+    text: `Night and day. Full write-up at ${long.link} if you want the details.`,
+  });
+  const cms = [
+    review("Vulture", { isVip: true }),
+    review(long.name, { isVip: true, ...longFields() }),
+    review("Player short"),
+    review(`${long.name}Player`, longFields()),
+  ];
+
+  test.beforeAll(async ({ request, baseURL }) => {
+    test.setTimeout(120000);
+    await control(request, baseURL, { patch: { _id: "tooling-proReviewsCarousel", reviews: cms } });
+    await waitForHome(request, long.profession);
+  });
+
+  test.afterAll(async ({ request, baseURL }) => {
+    test.setTimeout(120000);
+    await control(request, baseURL, { reset: true });
+    await waitForHome(request, "Reviewer 3");
+  });
+
+  for (const { width, containerQueries, suffix } of [...OPENING_CASES, { width: 640, containerQueries: true, suffix: "" }]) {
+    test(`long-words-wrap-inside-cards-${width}${suffix}`, async ({ page }) => {
+      const region = await openCarousel(page, { width, height: 900 }, { containerQueries });
+      const layout = await cardLayout(region);
+      const sizes = await region.evaluate((el) => {
+        const card = el.querySelector('[data-group-index="0"] footer');
+        const [name, profession] = card.querySelectorAll("p");
+        return { name: getComputedStyle(name).fontSize, profession: getComputedStyle(profession).fontSize };
+      });
+      const shown = layout.firstCopyText.map((text) => text.replace(/\s+/g, " "));
+      writeEvidence(`long-words-wrap-inside-cards-${width}${suffix}`, { ...layout, sizes });
+      expect(layout.spilled).toEqual([]);
+      expect(layout.clipped).toEqual([]);
+      expect(layout.heights).toHaveLength(1);
+      expect(layout.quoteSize).toBe("15px");
+      expect(sizes).toEqual({ name: "15px", profession: "13px" });
+      for (const name of [long.name, `${long.name}Player`]) {
+        const text = shown.find((entry) => entry.includes(name));
+        for (const value of [long.profession, long.game, long.label, long.before, long.after, long.link]) {
+          expect(text, `${name} shows ${value}`).toContain(value);
+        }
+      }
+    });
+  }
+});
+
 test.describe("review carousel without JavaScript", () => {
   test.skip(REVIEW_COUNT === 2, "Runs against the default four-review fixture.");
   test.use({ javaScriptEnabled: false });
@@ -1042,6 +1224,49 @@ test.describe("review carousel without JavaScript", () => {
     expect(result.renderedFirstCopyCards).toBe(4);
     expect(result.firstCardVisible).toBe(true);
   });
+
+  for (const width of [640, 1024, 1440]) {
+    test(`no-js-mouse-and-keyboard-navigation-${width}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto("/", { waitUntil: "load" });
+      const region = page.getByRole("region", { name: "Player reviews" });
+      await region.evaluate((el) => el.scrollIntoView({ block: "center" }));
+      const arrows = page.locator('button[aria-label^="Scroll reviews"]');
+      const measure = () => region.evaluate((el) => ({
+        scrollLeft: el.scrollLeft,
+        scrollWidth: el.scrollWidth,
+        clientWidth: el.clientWidth,
+        scrollbarPx: el.offsetHeight - el.clientHeight,
+      }));
+      const start = await measure();
+      const visibleArrows = await arrows.evaluateAll((buttons) => buttons.filter((button) => button.checkVisibility({ visibilityProperty: true })).length);
+      writeEvidence(`no-js-mouse-and-keyboard-navigation-${width}`, { visibleArrows, start });
+      expect(start.scrollWidth).toBeGreaterThan(start.clientWidth);
+      expect(visibleArrows).toBe(0);
+      expect(start.scrollbarPx).toBeGreaterThan(0);
+      const box = await region.boundingBox();
+      const thumb = (start.clientWidth * start.clientWidth) / start.scrollWidth;
+      const y = box.y + box.height - start.scrollbarPx / 2;
+      await page.mouse.move(box.x + thumb / 2, y);
+      await page.mouse.down();
+      await page.mouse.move(box.x + thumb / 2 + 200, y, { steps: 10 });
+      await page.mouse.up();
+      const dragged = await measure();
+      await region.focus();
+      await page.keyboard.press("ArrowRight");
+      await expect.poll(async () => (await measure()).scrollLeft).toBeGreaterThan(dragged.scrollLeft);
+      const keyed = await measure();
+      const result = {
+        visibleArrows,
+        start,
+        draggedScrollLeft: dragged.scrollLeft,
+        keyedScrollLeft: keyed.scrollLeft,
+      };
+      writeEvidence(`no-js-mouse-and-keyboard-navigation-${width}`, result);
+      expect(result.draggedScrollLeft).toBeGreaterThan(100);
+      expect(result.keyedScrollLeft).toBeGreaterThan(result.draggedScrollLeft);
+    });
+  }
 });
 
 test.beforeEach(async ({ context, baseURL }) => {
