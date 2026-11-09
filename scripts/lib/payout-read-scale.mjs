@@ -106,6 +106,7 @@ export const checkPayoutCronScale = async ({sql, seed, documents, commerce, fixt
   const errors = [];
   globalThis[monitor] = (label, error, metadata) => errors.push({label, code: error.code, metadata});
   const cron = async () => {
+    const errorStart = errors.length;
     const response = await fetch(`${origin}/api/ref/cronSyncAll`, {
       headers: {authorization: 'Bearer fixture'},
     });
@@ -122,11 +123,11 @@ export const checkPayoutCronScale = async ({sql, seed, documents, commerce, fixt
       assert.equal(body.complete, false);
       assert.ok(rows.filter(row => row.id !== failed.id).every(row => !row.pending));
       assert.equal(rows.find(row => row.id === `${prefix}${String(count).padStart(4, '0')}`).pending, undefined);
-      assert.ok(errors.some(error => error.label === 'Referral cron batch failed' &&
+      assert.ok(errors.slice(errorStart).some(error => error.label === 'Referral cron batch failed' &&
         error.code === 'COMMERCE_PAYLOAD_BUDGET_EXCEEDED'));
     } else {
       assert.ok(rows.every(row => !row.pending));
-      assert.equal(errors.length, 0);
+      assert.equal(errors.length, errorStart);
     }
     return {total: body.total, synced: body.synced, pending: rows.filter(row => row.pending).length};
   };

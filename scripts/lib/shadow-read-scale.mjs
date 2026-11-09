@@ -24,17 +24,18 @@ export const checkGroupReadScale = async ({sql, seed, commerce, fixture, reader}
     updatedAt: '2026-11-08T10:00:00.000Z', nextRecoveryAt: '',
     emailDispatchStatus: 'failed', emailDispatchNextAttemptAt: '',
     title: `Group package ${index}`, packageTitle: state.packageDoc.title,
-    startTimeUTC: "2026-12-01T10:00:00.000Z", localTimeZone: "UTC", currency: "USD",
+    startTimeUTC: new Date(Date.UTC(2035, 0, 1, 0, Number(state.key.split('-').at(-1)) * 5 + index)).toISOString(),
+    localTimeZone: "UTC", currency: "USD",
     discord: "fixture", specs: "fixture computer", mainGame: "fixture", netAmount: 54.95,
   }));
-  await insert(sql, documents);
-  if (["payment", "booking-email"].includes(reader)) await sql`select public.roo_project_operational_shadow()`;
   const monitor = Symbol.for('roo.reportServerError');
   const previous = globalThis[monitor];
   const errors = [];
   globalThis[monitor] = (label, error) => errors.push({label, code: error.code});
   const extraIds = [];
   try {
+    await insert(sql, documents);
+    if (["payment", "booking-email"].includes(reader)) await sql`select public.roo_project_operational_shadow()`;
     let found;
     if (reader === 'cms') {
       const {listContentDocuments} = await import('../../src/server/cms/documents.js');
