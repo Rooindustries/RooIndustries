@@ -2,6 +2,8 @@ name: Tests
 
 on:
   pull_request:
+  merge_group:
+    types: [checks_requested]
   push:
     branches: [main]
 
@@ -502,3 +504,57 @@ jobs:
           name: tested-tree-${{ steps.tree.outputs.tree }}
           path: tested-tree/
           retention-days: 30
+
+  tests-passed:
+    name: All tests passed
+    permissions:
+      actions: read
+      contents: read
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-24.04' || vars.TESTS_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 5
+    needs: [tested-tree, monitoring, jest, booking-model, playwright, routes, native, native-payouts, revalidation, record-tested-tree]
+    if: always()
+    steps:
+      - env:
+          NEEDS: ${{ toJSON(needs) }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          failed="$(jq -r --arg event "$GITHUB_EVENT_NAME" '
+            if $event == "pull_request" or $event == "merge_group" then
+              to_entries | map(select(.value.result != (if .key == "tested-tree" then "skipped" else "success" end)))
+            elif $event == "push" and all(.[]; .result == "success") then
+              []
+            elif $event == "push" and .["tested-tree"].result == "success" and .["tested-tree"].outputs.tested == "true" then
+              to_entries | map(select(.value.result != (if .key == "tested-tree" then "success" else "skipped" end)))
+            elif $event == "push" then
+              to_entries | map(select(.value.result != "success"))
+            else
+              to_entries
+            end
+            | map("\(.key)=\(.value.result)") | join(", ")
+          ' <<< "$NEEDS")"
+          if [ -n "$failed" ]; then
+            echo "Tests did not pass: $failed"
+            exit 1
+          fi
+          shortcut="$(jq -r --arg event "$GITHUB_EVENT_NAME" '
+            $event == "push" and .["tested-tree"].result == "success"
+            and .["tested-tree"].outputs.tested == "true"
+            and (all(.[]; .result == "success") | not)
+          ' <<< "$NEEDS")"
+          jobs="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100")"
+          failed="$(jq -sr --arg event "$GITHUB_EVENT_NAME" --argjson shortcut "$shortcut" '
+            [.[].jobs[] | select(.name != "All tests passed")] as $jobs
+            | [$jobs[] | select(
+                .status != "completed" or
+                .conclusion != (if .name == "Check for an already tested tree" then
+                  if $event == "push" then "success" else "skipped" end
+                elif $shortcut then "skipped" else "success" end)
+              ) | "\(.name)=\(.status)/\(.conclusion // "null")"]
+            + (if any($jobs[]; (.name | startswith("Playwright ")) and .name != "Playwright creator portal and API routes" and .name != "Playwright revalidation") then [] else ["No Playwright matrix jobs listed"] end)
+            | join(", ")
+          ' <<< "$jobs")"
+          if [ -n "$failed" ]; then
+            echo "Tests did not pass: $failed"
+            exit 1
+          fi
