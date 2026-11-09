@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { ESLint } from "eslint";
 
 const eslint = new ESLint();
-const files = ["providerClients.js", "dodoProvider.js", "otherProvider.mjs", "providers/new.js"]
+const files = ["providerClients.js", "dodoProvider.js", "otherProvider.mjs", "providers/new.js", "razorpay.js"]
   .map(name => `src/server/api/payment/${name}`);
 const transports = [
   "fetch(url, { signal: AbortSignal.timeout(8000) });",
@@ -17,6 +17,7 @@ const transports = [
   'import DodoPayments from "dodopayments"; new DodoPayments();',
   'import send from "cross-fetch"; send(url);',
   'import send from "./local-fetch.js"; send(url);',
+  'export { fetch as send } from "undici";',
   'import { request } from "node:https"; request(url);',
   'const { default: send } = await import("node-fetch"); send(url);',
   'const load = require; const send = load("node-fetch"); send(url);',
@@ -26,13 +27,19 @@ test("provider modules keep every transport behind the shared request module", a
   for (const filePath of files) {
     for (const code of transports) {
       const [result] = await eslint.lintText(code, { filePath });
-      assert.ok(result.messages.some(message => message.ruleId?.startsWith("no-restricted-")), `${filePath}: ${code}`);
+      assert.ok(result.messages.some(message => message.ruleId?.startsWith("no-restricted-") || message.ruleId === "provider/imports"), `${filePath}: ${code}`);
     }
     const [result] = await eslint.lintText(
-      'import { requestProvider } from "./providerRequest.js"; requestProvider(url);', { filePath },
+      `import { requestProvider } from "${filePath.includes("/providers/") ? "../" : "./"}providerRequest.js"; requestProvider(url);`, { filePath },
     );
     assert.equal(result.errorCount, 0, filePath);
   }
+});
+
+test("nested providers cannot import a different local transport", async () => {
+  const [result] = await eslint.lintText('import { requestProvider } from "./providerRequest.js";',
+    { filePath: "src/server/api/payment/providers/new.js" });
+  assert.ok(result.messages.some(message => message.ruleId === "provider/imports"));
 });
 
 test("transport restrictions leave non-provider modules alone", async () => {

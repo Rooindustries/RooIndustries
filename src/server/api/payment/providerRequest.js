@@ -6,7 +6,9 @@ export const providerDeadline = () => AbortSignal.timeout(8000);
 export const requestProvider = async (url, options = {}) => {
   const signal = options.signal || providerDeadline();
   let reader;
-  const cancel = () => { reader?.cancel(signal.reason).catch(() => {}); };
+  const cancel = () => {
+    reader?.cancel(signal.reason).catch(error => logSafeError("Payment provider body cancellation failed", error));
+  };
   try {
     signal.throwIfAborted();
     const response = await fetch(url, { ...options, signal });
@@ -37,8 +39,7 @@ export const requestProvider = async (url, options = {}) => {
   }
 };
 
-export const createDodoTransport = (options) => {
-  const signal = providerDeadline();
+export const createDodoTransport = (options, signal = providerDeadline()) => {
   return new DodoPayments({
     ...options,
     maxRetries: 0,

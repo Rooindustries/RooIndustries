@@ -1211,10 +1211,13 @@ try{
   });
 
   await checkProviderDeadlines({
-    run, startInput, row, sql, requestFlow, seed, dodoReq, originalNow,
-    prepareDodoRefund: () => {
+    run, startInput, row, sql, commerce, requestFlow, seed, dodoReq, originalNow,
+    prepareDodoRefund: (multiple = false) => {
       dodoPayment.refund_status = 'full';
-      dodoPayment.refunds = [{ ...dodoRefund, amount: null, currency: null }];
+      dodoPayment.refunds = multiple
+        ? [{ ...dodoRefund, refund_id: 'refund-first', amount: null, currency: null },
+          { ...dodoRefund, refund_id: 'refund-second', amount: null, currency: null }]
+        : [{ ...dodoRefund, amount: null, currency: null }];
     },
     setProviderHook: hook => { providerHook = hook; },
   });

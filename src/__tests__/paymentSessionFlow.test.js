@@ -1,3 +1,5 @@
+const providerResponse = require("../../tests/fixtures/provider-response.cjs");
+
 let handleDodoWebhook;
 const mockCreateDodoCheckout = jest.fn();
 const mockInspectDodoCheckout = jest.fn();
@@ -4400,7 +4402,7 @@ describe('Dodo checkout lifecycle',()=>{
     global.fetch = jest.fn(async input => {
       const path = new URL(typeof input === 'string' ? input : input.url).pathname;
       const data = path.startsWith('/checkouts/') ? { id: 'cks_dodo', payment_id: latest.payment_id } : latest;
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'content-type': 'application/json' } });
+      return providerResponse(data);
     });
     mockInspectDodoCheckout.mockImplementationOnce(({ record }) => jest.requireActual('../server/api/payment/dodoProvider').inspectDodoCheckout({ record }));
     try {

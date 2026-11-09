@@ -1,4 +1,5 @@
 import { buildBrowserCompletionBody } from "./bookingSummary.js";
+import { providerDeadline } from "./providerRequest.js";
 import envValue from "../../supabase/envValue.cjs";
 import { calculateCreatorCommission, originalBookingCommission } from "../../referrals/commissionMoney.js";
 import { isTerminalDisputeStatus, resolveDisputeReferralAccounting } from "../../referrals/disputeAccounting.js";
@@ -4474,7 +4475,8 @@ export const reconcilePaymentSessions = async ({
       const ageMinutes = getPaymentAgeMinutes(record);
       let dodoInspection = null;
       if (record.provider === "dodo" && record.providerOrderId && !localRecovery) {
-        dodoInspection = await inspectDodoCheckout({ record });
+        const signal = providerDeadline();
+        dodoInspection = await inspectDodoCheckout({ record, signal });
         if (dodoInspection.retryable === false) {
           await patchPaymentRecord({ client, record, set: {
             status: PAYMENT_STATUS_NEEDS_RECOVERY,
@@ -4489,7 +4491,7 @@ export const reconcilePaymentSessions = async ({
         }
         if (dodoInspection.payment) {
           const result = await refreshDodoPayment({ client, record, payment: dodoInspection.payment,
-            source: "reconcile", applyBookingRefund, deferFinalization: true });
+            source: "reconcile", applyBookingRefund, deferFinalization: true, signal });
           Object.assign(record, await getPaymentRecordById(client, record._id));
           dodoInspection = result.httpStatus >= 400
             ? { state: "unavailable", reason: result.body?.code || "dodo_refund_reconciliation_failed" }
@@ -5871,8 +5873,8 @@ export const handlePayPalWebhook = async ({
   return result;
 };
 
-export const refreshDodoPayment = async ({ client, record, payment = null, source = "reconcile", applyBookingRefund = null, deferFinalization = false }) => {
-  const inspection = payment ? { payment } : await inspectDodoCheckout({ record });
+export const refreshDodoPayment = async ({ client, record, payment = null, source = "reconcile", applyBookingRefund = null, deferFinalization = false, signal = providerDeadline() }) => {
+  const inspection = payment ? { payment } : await inspectDodoCheckout({ record, signal });
   payment = inspection.payment;
   if (!payment) {
     if (inspection.state === "disabled") {
@@ -6057,7 +6059,7 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
     }
     let refund = summary;
     if (refund.amount == null || !refund.currency) {
-      try { refund = await retrieveDodoRefund(refund.refund_id); }
+      try { refund = await retrieveDodoRefund(refund.refund_id, signal); }
       catch { return { httpStatus: 503, body: { ok: false, code: "dodo_refund_lookup_pending" } }; }
       if (refund.refund_id !== summary.refund_id || refund.payment_id !== payment.payment_id || refund.status !== "succeeded") {
         return { httpStatus: 503, body: { ok: false, code: "dodo_refund_details_pending" } };
@@ -6185,8 +6187,9 @@ export const handleDodoWebhook = async ({ req, client = null, applyBookingRefund
   if (!paymentId) return { httpStatus: 400, body: { ok: false, error: "Missing payment ID." } };
   let payment;
   let record;
+  const signal = providerDeadline();
   try {
-    payment = await retrieveDodoPayment(paymentId);
+    payment = await retrieveDodoPayment(paymentId, signal);
     record = await getPaymentRecordById(client, String(payment.metadata?.paymentRecordId || ""));
   } catch (error) {
     if (error.retryable === false) return { httpStatus: 409, body: { ok: false, code: "dodo_configuration_unavailable", error: "Dodo Payments is not available in this environment." } };
@@ -6212,7 +6215,7 @@ export const handleDodoWebhook = async ({ req, client = null, applyBookingRefund
     body: { ok: claim.processed, duplicate: true, processing: !claim.processed } };
   let result;
   try {
-    result = await refreshDodoPayment({ client, record, payment, source: "webhook", applyBookingRefund });
+    result = await refreshDodoPayment({ client, record, payment, source: "webhook", applyBookingRefund, signal });
     if (result.httpStatus === 409 && result.body?.code === "dodo_payment_binding_mismatch") {
       result = { httpStatus: 200, body: { ok: true, rejected: true, code: "dodo_payment_binding_mismatch" } };
       await completeWebhookReceipt({ client, receipt: claim.receipt, result });

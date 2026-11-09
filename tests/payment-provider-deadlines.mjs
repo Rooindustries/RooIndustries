@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 
 export const checkProviderDeadlines = async ({
-  run, startInput, row, sql, requestFlow, seed, dodoReq, prepareDodoRefund, setProviderHook, originalNow,
+  run, startInput, row, sql, commerce, requestFlow, seed, dodoReq, prepareDodoRefund, setProviderHook, originalNow,
 }) => {
   const bounded = async (operation, pending) => {
     let timer;
@@ -33,7 +33,9 @@ export const checkProviderDeadlines = async ({
     const input = { ...await startInput(), provider: 'dodo' };
     const pending = new Set();
     const observed = observeErrors();
+    let creates = 0;
     setProviderHook(async (request, req, res) => {
+      if (request.path === '/checkouts') creates++;
       if (request.path === (stage === 'product' ? '/products/pdt_fixture' : '/checkouts')) {
         return stall(res, pending);
       }
@@ -54,7 +56,18 @@ export const checkProviderDeadlines = async ({
       assert.equal(saved.payload.orderState, 'creation_ambiguous');
       assert.equal((await row(input.bookingPayload.slotHoldId)).payload.phase, 'payment_pending');
       assert.ok(observed.events.some(event => ['TimeoutError', 'AbortError'].includes(event.name)));
-      return { stage, result, elapsedMs: originalNow() - began, errors: observed.events };
+      const retry = await requestFlow('start', { body: input });
+      assert.equal(retry.status, 409, JSON.stringify(retry));
+      const old = new Date(originalNow() - 600000).toISOString();
+      const current = (await row(saved.payload._id)).payload;
+      await commerce.patch(current._id).ifRevisionId(current._rev).set({
+        createdAt: old, updatedAt: old, nextRecoveryAt: old,
+      }).commit();
+      await requestFlow('reconcile');
+      assert.equal(creates, stage === 'checkout' ? 1 : 0);
+      assert.equal((await sql`select count(*)::int as count from commerce.payment_records`)[0].count, 1);
+      assert.equal((await sql`select count(*)::int as count from commerce.bookings`)[0].count, 0);
+      return { stage, result, retry, creates, elapsedMs: originalNow() - began, errors: observed.events };
     } finally { observed.restore(); }
   });
   await run('recovery-body-dodo-refund', async () => {
@@ -77,6 +90,36 @@ export const checkProviderDeadlines = async ({
       assert.equal((await row('booking.fixture')).payload.status, 'refunded');
       return { result, retry, errors: observed.events };
     } finally { observed.restore(); }
+  });
+  await run('recovery-body-dodo-refund-shared-deadline', async () => {
+    await seed('dodo');
+    prepareDodoRefund(true);
+    const before = (await row('booking.fixture')).payload;
+    const pending = new Set();
+    let secondLookup = false;
+    setProviderHook(async (request, req, res) => {
+      if (request.path === '/refunds/refund-first') {
+        const timer = setTimeout(() => {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ refund_id: 'refund-first', payment_id: 'payment-fixture',
+            status: 'succeeded', amount: 499, currency: 'USD' }));
+        }, 5000);
+        res.once('close', () => clearTimeout(timer));
+        return true;
+      }
+      if (request.path === '/refunds/refund-second') {
+        secondLookup = true;
+        return stall(res, pending);
+      }
+      return false;
+    });
+    const began = originalNow();
+    const result = await bounded(requestFlow('dodo', { req: dodoReq() }), pending);
+    assert.equal(result.status, 503, JSON.stringify(result));
+    assert.equal(result.body.code, 'dodo_refund_lookup_pending');
+    assert.equal(secondLookup, true);
+    assert.deepEqual((await row('booking.fixture')).payload, before);
+    return { result, elapsedMs: originalNow() - began };
   });
   for (const mode of ['found', 'stalled', 'disconnected', 'lookup-stalled']) {
     await run(`recovery-body-razorpay-receipt-${mode}`, async () => {
@@ -107,14 +150,14 @@ export const checkProviderDeadlines = async ({
       try {
         const result = await bounded(requestFlow('start', { body: input }), pending);
         assert.ok(observed.events.some(event => event.label === 'Payment provider request failed'));
-        if (mode === 'disconnected') {
+        if (mode === 'disconnected' || mode === 'found') {
           assert.equal(result.status, 200, JSON.stringify(result));
           assert.equal(result.body.providerPayload.orderId, 'order-fixture');
           assert.equal(lookups, 2);
         } else {
           assert.equal(result.status, 500, JSON.stringify(result));
           assert.equal(result.body.code, 'razorpay_order_create_failed');
-          assert.equal(lookups, 1);
+          assert.equal(lookups, mode === 'lookup-stalled' ? 1 : 2);
           assert.equal(created, mode !== 'lookup-stalled');
           assert.ok(observed.events.some(event => event.name === 'TimeoutError'));
           assert.equal((await row(input.bookingPayload.slotHoldId)).payload.phase, 'payment_pending');

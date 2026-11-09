@@ -6,7 +6,7 @@ export const DODO_CURRENCY = "USD";
 const read = (key) => String(process.env[key] || "").trim();
 const failure = (code, status = 503) => Object.assign(new Error(code), { code, status, retryable: status >= 500 });
 
-export const createDodoClient = () => {
+export const createDodoClient = (signal) => {
   const environment = read("DODO_PAYMENTS_ENVIRONMENT");
   if (!["test_mode", "live_mode"].includes(environment) || !read("DODO_PAYMENTS_API_KEY")) {
     throw failure("dodo_credentials_missing", 409);
@@ -16,7 +16,7 @@ export const createDodoClient = () => {
   return createDodoTransport({
     bearerToken: read("DODO_PAYMENTS_API_KEY"),
     environment,
-  });
+  }, signal);
 };
 
 export const createDodoCheckout = async ({ record, lookupOnly = false }) => {
@@ -109,8 +109,8 @@ export const validateDodoPayment = ({ record, payment }) => {
   return { ok: true };
 };
 
-export const retrieveDodoPayment = (paymentId) => createDodoClient().payments.retrieve(paymentId);
-export const retrieveDodoRefund = (refundId) => createDodoClient().refunds.retrieve(refundId);
+export const retrieveDodoPayment = (paymentId, signal) => createDodoClient(signal).payments.retrieve(paymentId);
+export const retrieveDodoRefund = (refundId, signal) => createDodoClient(signal).refunds.retrieve(refundId);
 
 export const settledDodoPaymentState = (payment) => {
   if (payment?.refund_status === "full") return "refunded";
@@ -121,9 +121,9 @@ export const settledDodoPaymentState = (payment) => {
   return String(payment?.status || "").trim();
 };
 
-export const inspectDodoCheckout = async ({ record }) => {
+export const inspectDodoCheckout = async ({ record, signal }) => {
   try {
-    const client = createDodoClient();
+    const client = createDodoClient(signal);
     const session = await client.checkoutSessions.retrieve(record.providerOrderId);
     if (session.id !== record.providerOrderId) return { state: "unavailable", retryable: false, reason: "dodo_session_mismatch" };
     if (!session.payment_id) return { state: "unpaid" };

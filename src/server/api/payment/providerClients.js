@@ -208,13 +208,14 @@ export const createRazorpayOrder = async ({
   }
 
   const signal = providerDeadline();
+  const creationSignal = AbortSignal.any([signal, AbortSignal.timeout(6000)]);
   const stableReceipt = String(receipt || "").trim();
   const lookup = await inspectRazorpayOrderByReceipt({
     receipt: stableReceipt,
     amount,
     currency,
     credentials,
-    signal,
+    signal: lookupOnly ? signal : creationSignal,
   });
   if (lookup.state === "found" && lookup.order?.orderId) return lookup.order;
   if (lookupOnly) {
@@ -232,10 +233,11 @@ export const createRazorpayOrder = async ({
     throw error;
   }
 
+  if (creationSignal.aborted) throw orderCreationFailure("razorpay", creationSignal.reason);
   let upstream;
   try {
     upstream = await requestProvider("https://api.razorpay.com/v1/orders", {
-      signal,
+      signal: creationSignal,
       method: "POST",
       headers: {
         Authorization: getRazorpayAuthorization(credentials),
@@ -249,7 +251,6 @@ export const createRazorpayOrder = async ({
       }),
     });
   } catch (error) {
-    if (signal.aborted) throw orderCreationFailure("razorpay", error);
     const recovered = await inspectRazorpayOrderByReceipt({
       receipt: stableReceipt,
       amount,

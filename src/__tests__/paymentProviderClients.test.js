@@ -1,20 +1,9 @@
-const { ReadableStream } = require("node:stream/web");
+const response = require("../../tests/fixtures/provider-response.cjs");
 
 const loadProviderClients = () => {
   jest.resetModules();
   return require("../server/api/payment/providerClients.js");
 };
-
-const response = (body) => ({
-  ok: true,
-  status: 200,
-  body: new ReadableStream({
-    start(controller) {
-      controller.enqueue(new TextEncoder().encode(JSON.stringify(body)));
-      controller.close();
-    },
-  }),
-});
 
 const buildPayPalOrder = ({ captureStatus = "COMPLETED", capture = true } = {}) => ({
   id: "paypal_order_status_check",
