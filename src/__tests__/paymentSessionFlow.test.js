@@ -2338,7 +2338,7 @@ describe("payment session flow", () => {
     );
   });
 
-  test("an expired late-capture watch stops after a definitive missing order", async () => {
+  test("an expired late-capture watch requires review after a missing order", async () => {
     store.paymentRecords.push({
       _id: "paymentRecord.paypal.expired-missing-watch",
       _rev: nextRevision(),
@@ -2366,17 +2366,16 @@ describe("payment session flow", () => {
     });
 
     expect(result.body.summary).toMatchObject({
-      abandoned: 1,
+      abandoned: 0,
       providerUnavailable: 0,
-      recovery: 0,
+      recovery: 1,
     });
     expect(getOnlyPaymentRecord()).toMatchObject({
       status: paymentRecordConstants.PAYMENT_STATUS_ABANDONED,
-      lateCaptureWatchUntil: "",
-      nextRecoveryAt: "",
-      providerRecoveryTerminal: true,
-      providerRecoveryTerminalReason:
-        "provider_order_not_found_after_late_capture_watch",
+      lateCaptureWatchUntil: "2000-01-01T00:00:00.000Z",
+      nextRecoveryAt: "9999-12-31T23:59:59.999Z",
+      reconciliationRecoveryTerminal: true,
+      recoveryReason: "late_capture_watch_unverified_owner_review",
     });
   });
 
@@ -3987,7 +3986,7 @@ describe("payment session flow", () => {
     );
   });
 
-  test("reconcile abandons an expired missing provider order without infinite retries", async () => {
+  test("reconcile retains a PayPal payment when its order cannot be found", async () => {
     const hold = createHold();
     await startPaymentSession({
       body: {
@@ -4013,21 +4012,19 @@ describe("payment session flow", () => {
       client: mockClient,
     });
 
-    expect(result.body.summary).toMatchObject({ abandoned: 1, recovery: 0 });
+    expect(result.body.summary).toMatchObject({ abandoned: 0, recovery: 1 });
     expect(getOnlyPaymentRecord()).toMatchObject({
-      status: paymentRecordConstants.PAYMENT_STATUS_ABANDONED,
-      recoveryReason: "provider_order_not_found_after_expiry",
-      resourceReleasePending: false,
-      lateCaptureWatchUntil: expect.any(String),
+      status: paymentRecordConstants.PAYMENT_STATUS_NEEDS_RECOVERY,
+      recoveryReason: "paypal_lookup_failed_404",
       nextRecoveryAt: expect.any(String),
     });
     expect(store.slotHolds[0]).toMatchObject({
-      phase: "released",
-      paymentRecordId: "",
+      phase: "payment_pending",
+      paymentRecordId: record._id,
     });
   });
 
-  test("reconcile abandons an expired missing Razorpay order without infinite retries", async () => {
+  test("reconcile retains a Razorpay payment when its order cannot be found", async () => {
     const hold = createHold();
     await startPaymentSession({
       body: {
@@ -4053,18 +4050,16 @@ describe("payment session flow", () => {
       client: mockClient,
     });
 
-    expect(result.body.summary).toMatchObject({ abandoned: 1, recovery: 0 });
+    expect(result.body.summary).toMatchObject({ abandoned: 0, recovery: 1 });
     expect(getOnlyPaymentRecord()).toMatchObject({
       provider: "razorpay",
-      status: paymentRecordConstants.PAYMENT_STATUS_ABANDONED,
-      recoveryReason: "provider_order_not_found_after_expiry",
-      resourceReleasePending: false,
-      lateCaptureWatchUntil: expect.any(String),
+      status: paymentRecordConstants.PAYMENT_STATUS_NEEDS_RECOVERY,
+      recoveryReason: "razorpay_lookup_failed_404",
       nextRecoveryAt: expect.any(String),
     });
     expect(store.slotHolds[0]).toMatchObject({
-      phase: "released",
-      paymentRecordId: "",
+      phase: "payment_pending",
+      paymentRecordId: record._id,
     });
   });
 
