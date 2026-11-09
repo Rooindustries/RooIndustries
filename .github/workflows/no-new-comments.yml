@@ -1,6 +1,8 @@
 name: No new comments
 
 on:
+  merge_group:
+    types: [checks_requested]
   pull_request:
     types: [opened, synchronize, reopened, edited]
   pull_request_target:
@@ -10,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: no-new-comments-${{ github.event_name }}-${{ github.event.pull_request.number }}
+  group: no-new-comments-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -35,7 +37,7 @@ jobs:
         run: node --test tests/no-new-comments.test.mjs
 
   policy:
-    if: github.event_name == 'pull_request_target'
+    if: github.event_name == 'pull_request_target' || github.event_name == 'merge_group'
     name: Comment policy
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -43,8 +45,9 @@ jobs:
       contents: read
       statuses: write
     env:
-      BASE_SHA: ${{ github.event.pull_request.base.sha }}
-      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+      MERGE_GROUP: ${{ github.event_name == 'merge_group' }}
     steps:
       - name: Mark the policy as running on the pull request commit
         id: pending
@@ -56,20 +59,22 @@ jobs:
             -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
           fetch-depth: 0
           filter: blob:none
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install locked dependencies
-        run: npm ci --ignore-scripts
-      - name: Fetch the pull request commit
+      - name: Fetch the commit to check
         id: fetch
         env:
           GH_TOKEN: ${{ github.token }}
-        run: git -c credential.helper='!gh auth git-credential' fetch --no-tags origin "$HEAD_SHA"
+        run: |
+          git -c credential.helper='!gh auth git-credential' fetch --no-tags origin "$HEAD_SHA"
+          if [[ ! -f .github/no-new-comments.mjs ]]; then git checkout "$HEAD_SHA" -- .; fi
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
       - name: No new comments or authorship credits
         id: policy
         env:

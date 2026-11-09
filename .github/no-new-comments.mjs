@@ -1,5 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { Linter } from "eslint";
+import { builtinRules } from "eslint/use-at-your-own-risk";
+import config from "../eslint.config.mjs";
 import tsParser from "@typescript-eslint/parser";
 import rule, {
   consumeComment, inRanges, normalizeComment, whollyChanged,
@@ -18,14 +20,19 @@ const publicTextViolation = (text) => text.split(/\r?\n/).some((line) =>
   names.test(line) || credits.test(line) || processWords.test(line) ||
   /(^|[^A-Za-z])Sol([^A-Za-z]|$)/.test(line) || line.includes("—"));
 const linter = new Linter();
+const ruleNames = [...new Set([...builtinRules.keys(), ...config.flatMap((entry) => [
+  ...Object.keys(entry.rules || {}),
+  ...Object.entries(entry.plugins || {}).flatMap(([name, plugin]) =>
+    Object.keys(plugin.rules || {}).map((rule) => name + "/" + rule)),
+])])];
 function inspect(text, path, {
-  retainedComments, removedComments = [],
+  retainedComments, removedComments = [], copyrightLines = [],
 } = {}) {
   let comments = [];
   const capture = {
     create: (context) => ({ Program() { comments = context.sourceCode.getAllComments(); } }),
   };
-  const extension = path.match(/\.[^.]+$/)[0];
+  const extension = path.match(/\.(?:js|jsx|mjs|cjs|ts|tsx|mts|cts)$/)?.[0] || ".js";
   const messages = linter.verify(text, [{
     files: ["**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}"],
     languageOptions: {
@@ -36,7 +43,8 @@ function inspect(text, path, {
     plugins: { roo: { rules: { "no-new-comments": rule, capture } } },
     rules: {
       "roo/capture": "error",
-      "roo/no-new-comments": retainedComments ? ["error", { retainedComments, removedComments }] : "off",
+      "roo/no-new-comments": retainedComments ?
+        ["error", { retainedComments, removedComments, copyrightLines, ruleNames }] : "off",
     },
   }], { filename: `file${extension}`, allowInlineConfig: false });
   return { comments, messages };
@@ -46,13 +54,26 @@ try {
   const head = git("rev-parse", "--verify", `${process.env.HEAD_SHA || "HEAD"}^{commit}`).trim();
   const base = git("merge-base", process.env.BASE_SHA || "origin/main", head).trim();
   const paths = git("diff", "--name-status", "--no-renames", "-z", base, head).split("\0");
+  let copyrightMatches = "";
+  try {
+    copyrightMatches = git("grep", "-I", "-h", "-i", "-E", "Copyright|©", base, "--", ".");
+  } catch (error) {
+    if (error.status !== 1) throw error;
+  }
+  const copyrightLines = copyrightMatches.split("\n").map((line) =>
+    line.match(/^\s*(?:\/\/|\/\*|\*)\s*((?:Copyright|©) .+?)(?:\s*\*\/)?\s*$/i)?.[1])
+    .filter(Boolean);
   const changes = [];
   const removedComments = [];
   const problems = [];
   for (let index = 0; index + 1 < paths.length; index += 2) {
     const [status, path] = paths.slice(index, index + 2);
     const prose = /\.(?:md|mdx|markdown|txt|text|rst|adoc)$/i.test(path);
-    if (!prose && !/\.(?:js|jsx|mjs|cjs|ts|tsx|mts|cts)$/.test(path)) continue;
+    const jsExtension = /\.(?:js|jsx|mjs|cjs|ts|tsx|mts|cts)$/.test(path);
+    const oldText = status === "A" ? "" : git("show", `${base}:${path}`);
+    const newText = status === "D" ? "" : git("show", `${head}:${path}`);
+    const nodeScript = (text) => /^#![^\n]*\bnode(?:js)?(?:\s|$)/.test(text);
+    if (!prose && !jsExtension && !nodeScript(oldText) && !nodeScript(newText)) continue;
     const addedRanges = [];
     const deletedRanges = [];
     const retainedComments = [];
@@ -70,7 +91,7 @@ try {
       continue;
     }
     if (status !== "A") {
-      const previous = inspect(git("show", `${base}:${path}`), path);
+      const previous = inspect(oldText, path);
       for (const message of previous.messages) problems.push(`${JSON.stringify(path)} (base): ${message.message}`);
       for (const comment of previous.comments) {
         if (comment.type === "Shebang") continue;
@@ -78,10 +99,10 @@ try {
         pool.push(normalizeComment(comment.value));
       }
     }
-    if (status !== "D") changes.push({ path, retainedComments, text: git("show", `${head}:${path}`) });
+    if (status !== "D") changes.push({ path, retainedComments, text: newText });
   }
   for (const { path, text, retainedComments } of changes) {
-    const { comments, messages } = inspect(text, path, { retainedComments, removedComments });
+    const { comments, messages } = inspect(text, path, { retainedComments, removedComments, copyrightLines });
     for (const message of messages) problems.push(`${JSON.stringify(path)}:${message.line}: ${message.message}`);
     for (const comment of comments) {
       if (!consumeComment(comment.value, retainedComments) && comment.type !== "Shebang") {
@@ -89,7 +110,8 @@ try {
       }
     }
   }
-  const commits = git("rev-list", `${base}..${head}`).trim().split("\n").filter(Boolean);
+  const commits = process.env.MERGE_GROUP === "true" ? [head] :
+    git("rev-list", `${base}..${head}`).trim().split("\n").filter(Boolean);
   const texts = [];
   const authors = new Set();
   for (const sha of commits) {
@@ -102,7 +124,9 @@ try {
     texts.push([label, message.join("\n")]);
   }
   if (authors.size > 1) problems.push("Rewrite commit authors to use one identity before squashing.");
-  texts.push(["PR title", process.env.PR_TITLE || ""], ["PR body", process.env.PR_BODY || ""]);
+  if (process.env.MERGE_GROUP !== "true") {
+    texts.push(["PR title", process.env.PR_TITLE || ""], ["PR body", process.env.PR_BODY || ""]);
+  }
   for (const [label, text] of texts) {
     if (publicTextViolation(text)) problems.push(`${label}: Contains disallowed public text.`);
   }

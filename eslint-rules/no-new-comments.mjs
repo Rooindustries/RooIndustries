@@ -1,3 +1,4 @@
+import parseSpdx from "spdx-expression-parse";
 import { ConfigCommentParser } from "@eslint/plugin-kit";
 import ts from "typescript";
 import { extract, parseWithComments } from "jest-docblock";
@@ -95,7 +96,7 @@ function webpackDirective(comment, source) {
     return false;
   });
 }
-function isDirective(comment, source) {
+function isDirective(comment, source, ruleNames) {
   const body = comment.value.trim();
   if (/^[#@]__PURE__$/.test(body)) return comment.type === "Block" &&
     directlyBefore(comment, source, ["CallExpression", "NewExpression"]);
@@ -121,9 +122,12 @@ function isDirective(comment, source) {
   const { label, value } = directive;
   if (/^eslint-(?:disable(?:-(?:next-)?line)?|enable)$/.test(label)) {
     if (label === "eslint-disable-line" && comment.loc.start.line !== comment.loc.end.line) return false;
-    return Object.keys(commentParser.parseListConfig(value)).every((name) => /^[\w@./-]+$/.test(name));
+    return Object.keys(commentParser.parseListConfig(value)).every((name) => ruleNames.includes(name));
   }
-  if (label === "eslint") return commentParser.parseJSONLikeConfig(value).ok;
+  if (label === "eslint") {
+    const parsed = commentParser.parseJSONLikeConfig(value);
+    return parsed.ok && Object.keys(parsed.config).every((name) => ruleNames.includes(name));
+  }
   if (label === "exported") {
     const declared = source.scopeManager.scopes.flatMap((scope) => scope.variables)
       .filter((variable) => variable.identifiers.length).map(({ name }) => name);
@@ -131,11 +135,10 @@ function isDirective(comment, source) {
     return names.length > 0 && names.every((name) => declared.includes(name));
   }
   if (label === "global" || label === "globals") {
-    const unresolved = source.scopeManager.globalScope.through.map(({ identifier }) => identifier.name);
     const names = Object.entries(commentParser.parseStringConfig(value));
     const parts = value.replace(/\s*:\s*/g, ":").split(/[\s,]+/).filter(Boolean);
     return parts.every((part) => part.split(":").length <= 2) &&
-      names.length > 0 && names.every(([name, setting]) => unresolved.includes(name) &&
+      names.length > 0 && names.every(([name, setting]) => /^[$\p{ID_Start}_][$\p{ID_Continue}\u200c\u200d]*$/u.test(name) &&
       [null, "readonly", "writable", "readable", "writeable", "off", "true", "false"].includes(setting));
   }
   return false;
@@ -161,15 +164,23 @@ const apache = [
   'WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.',
   'See the License for the specific language governing permissions and limitations under the License.',
 ].join(" ");
-const copyright = /^(?:Copyright (?:\(c\)|©)|©) \d{4}(?:-\d{4})? /u;
-const copyrightHolder = /^[\p{L}\p{N}][\p{L}\p{M}\p{N} .,&'’()-]*$/u;
-function license(value) {
-  const lines = value.split("\n").map((line) => normalizeComment(line)).filter(Boolean);
-  const prose = lines.filter((line) =>
-    !/^SPDX-License-Identifier: \(*[\w.+-]+\)*(?: (?:AND|OR|WITH) \(*[\w.+-]+\)*)*$/.test(line) &&
-    !(copyright.test(line) &&
-      copyrightHolder.test(line.replace(copyright, "").replace(/ All rights reserved\.$/, "")))).join(" ");
-  return lines.length > 0 && (!prose || prose === mit || prose === apache);
+function license(value, copyrightLines) {
+  const lines = value.split("\n").map((line) => line.replace(/^\s*\* ?/, "").trim()).filter(Boolean);
+  const prose = [];
+  for (const line of lines) {
+    if (/^Copyright \(c\) \d{4}(?:-\d{4})? Roo Industries$/.test(line) || copyrightLines.includes(line)) continue;
+    if (line.startsWith("SPDX-License-Identifier: ")) {
+      try {
+        parseSpdx(line.slice("SPDX-License-Identifier: ".length));
+      } catch {
+        return false;
+      }
+      continue;
+    }
+    prose.push(line);
+  }
+  return lines.length > 0 && (prose.length ?
+    [mit, apache].includes(prose.join(" ").replace(/\s+/g, " ")) : lines.length === 1);
 }
 
 export default {
@@ -180,6 +191,8 @@ export default {
       properties: {
         retainedComments: { type: "array", items: { type: "string" } },
         removedComments: { type: "array", items: { type: "string" } },
+        copyrightLines: { type: "array", items: { type: "string" } },
+        ruleNames: { type: "array", items: { type: "string" } },
       },
       additionalProperties: false,
     }],
@@ -187,15 +200,28 @@ export default {
   },
   create(context) {
     if (!context.options.length) return {};
-    const { retainedComments = [], removedComments = [] } = context.options[0];
+    const { retainedComments = [], removedComments = [], copyrightLines = [], ruleNames = [] } = context.options[0];
     const retained = [...retainedComments];
     const removed = [...removedComments];
     return {
       Program() {
-        for (const comment of context.sourceCode.getAllComments()) {
+        const comments = context.sourceCode.getAllComments();
+        const licenses = new Set();
+        for (let i = 0; i < comments.length; i++) {
+          const group = [comments[i]];
+          while (comments[i].type === "Line" && comments[i + 1]?.type === "Line" &&
+              comments[i + 1].loc.start.line === comments[i].loc.end.line + 1 &&
+              !context.sourceCode.text.slice(comments[i].range[1], comments[i + 1].range[0]).trim()) {
+            group.push(comments[++i]);
+          }
+          if (license(group.map((comment) => comment.value).join("\n"), copyrightLines)) {
+            for (const comment of group) licenses.add(comment);
+          }
+        }
+        for (const comment of comments) {
           if (comment.type === "Shebang" || consumeComment(comment.value, retained) ||
-              consumeComment(comment.value, removed) || isDirective(comment, context.sourceCode) ||
-              license(comment.value)) continue;
+              consumeComment(comment.value, removed) || isDirective(comment, context.sourceCode, ruleNames) ||
+              license(comment.value, copyrightLines) || licenses.has(comment)) continue;
           context.report({ loc: comment.loc, messageId: "added" });
         }
       },
