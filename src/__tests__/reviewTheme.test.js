@@ -38,7 +38,7 @@ describe("review carousel design", () => {
     expect(componentSource).not.toContain("text-yellow");
     expect(componentSource).not.toContain("FocusedReviewCarousel");
     expect(componentSource).not.toContain("newCreatorReviews");
-    expect(componentSource).toContain("const reviews = data?.reviews || [];");
+    expect(componentSource).toContain("const reviews = orderReviews(data?.reviews || []);");
   });
 
   test("uses champagne gold for FPS results, stars, and creator accents", () => {

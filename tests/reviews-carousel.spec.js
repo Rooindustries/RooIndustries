@@ -1,4 +1,5 @@
 const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
+const { fixturePort } = require("./fixtures/fixture-ports.cjs");
 const { test, expect } = require("@playwright/test");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -774,6 +775,86 @@ test.describe("review carousel with two reviews", () => {
     expectInfinite(backward);
     expectInfinite(forward);
   });
+});
+
+test.describe("review carousel order", () => {
+  test.skip(REVIEW_COUNT === 2, "Runs against the default four-review fixture.");
+
+  const ordered = ["Vulture", "SkinzOW", "Hydro", "Creator other", "Player first", "Player last"];
+  const cms = [
+    { name: "Player first" },
+    { name: "Hydro", isVip: true },
+    { name: "Creator other", isVip: true },
+    { name: "Vulture", isVip: true },
+    { name: "Player last" },
+    { name: "SkinzOW", isVip: true },
+  ].map((review) => ({
+    ...review,
+    text: "The session helped me compare my PC's performance.",
+    game: "Overwatch 2",
+    rating: 5,
+    optimizationResult: "Average FPS: 200 to 240",
+  }));
+
+  const control = async (request, baseURL, data) => {
+    const origin = new URL(baseURL);
+    origin.port = String(fixturePort("TOOLING_CONTENT_PORT"));
+    const response = await request.post(new URL("/__content", origin).href, { data });
+    expect(response.status()).toBe(200);
+  };
+
+  const waitForHome = async (request, text) => {
+    await expect
+      .poll(async () => {
+        const response = await request.get("/");
+        return response.status() === 200 && (await response.text()).includes(text);
+      }, { timeout: 85000, intervals: [1000, 3000] })
+      .toBe(true);
+  };
+
+  test.beforeAll(async ({ request, baseURL }) => {
+    test.setTimeout(120000);
+    await control(request, baseURL, { patch: { _id: "tooling-proReviewsCarousel", reviews: cms } });
+    await waitForHome(request, "Creator other");
+  });
+
+  test.afterAll(async ({ request, baseURL }) => {
+    test.setTimeout(120000);
+    await control(request, baseURL, { reset: true });
+    await waitForHome(request, "Reviewer 3");
+  });
+
+  test("server-html-leads-with-named-creators", async ({ request }) => {
+    const html = await (await request.get("/")).text();
+    const firstCopy = [...html.matchAll(/data-review-id="([^"]+)"[^>]*data-group-index="0"/g)].map((match) => match[1]);
+    writeEvidence("order-server-html", { firstCopy });
+    expect(firstCopy).toEqual(ordered);
+  });
+
+  for (const width of [390, 1024, 1440]) {
+    test(`starts-on-vulture-${width}`, async ({ page }) => {
+      const region = await openCarousel(page, { width, height: 900 });
+      const start = await region.evaluate((el) => {
+        const view = el.getBoundingClientRect();
+        const stops = [...getComputedStyle(el).maskImage.matchAll(/([\d.]+)px/g)].map((match) => Number(match[1]));
+        const fade = stops[1] || 0;
+        const drift = el.scrollLeft - el.firstElementChild.firstElementChild.scrollWidth;
+        const visible = [...el.querySelectorAll(".ri-review-card")]
+          .map((card) => ({ id: card.dataset.reviewId, rect: card.getBoundingClientRect() }))
+          .map(({ id, rect }) => ({ id, left: rect.left - view.left + drift, right: rect.right - view.left + drift }))
+          .filter(({ left, right }) => left >= fade - 0.5 && right <= view.width - fade + 0.5)
+          .sort((a, b) => a.left - b.left)
+          .map(({ id }) => id);
+        const order = [...el.querySelectorAll('[data-group-index="1"]')].map((card) => card.dataset.reviewId);
+        return { order, visible, drift };
+      });
+      writeEvidence(`order-start-${width}`, start);
+      expect(Math.abs(start.drift)).toBeLessThan(120);
+      expect(start.order).toEqual(ordered);
+      expect(start.visible).toEqual(ordered.slice(0, start.visible.length));
+      expect(start.visible.length).toBeGreaterThanOrEqual(width < 640 ? 1 : width < 1280 ? 2 : 3);
+    });
+  }
 });
 
 test.describe("review carousel without JavaScript", () => {

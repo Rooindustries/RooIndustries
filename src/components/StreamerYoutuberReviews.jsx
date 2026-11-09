@@ -25,7 +25,16 @@ const REVIEW_ARROW_CLASS =
   "bg-panel text-lg leading-none text-ink-secondary shadow-lg hover:border-line-accent hover:text-ink focus-visible:outline " +
   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-accent)]";
 
+const LEAD_CREATOR_REVIEWERS = ["vulture", "skinzow", "hydro"];
+
 const getReviewKey = (review) => review._id || review.name || "review";
+const getReviewRank = (review) => {
+  if (!review.isVip) return LEAD_CREATOR_REVIEWERS.length + 1;
+  const lead = LEAD_CREATOR_REVIEWERS.indexOf(String(review.name || "").trim().toLowerCase());
+  return lead === -1 ? LEAD_CREATOR_REVIEWERS.length : lead;
+};
+const orderReviews = (reviews) =>
+  [...reviews].sort((a, b) => getReviewRank(a) - getReviewRank(b));
 const easeInOut = (progress) =>
   progress < 0.5 ? 2 * progress * progress : 1 - (2 - 2 * progress) ** 2 / 2;
 const easeOut = (progress) => 1 - (1 - progress) ** 3;
@@ -124,7 +133,7 @@ export default function StreamerYoutuberReviews({ initialData = null }) {
   const defaultTitle = "Results Players Felt";
   const defaultSubtitle =
     "The FPS graph matters. The real test is whether ranked feels cleaner after the tune.";
-  const reviews = data?.reviews || [];
+  const reviews = orderReviews(data?.reviews || []);
   const isLoading = shouldLoad && !data;
 
   return (
