@@ -551,7 +551,7 @@ jobs:
                   if $event == "push" then "success" else "skipped" end
                 elif $shortcut then "skipped" else "success" end)
               ) | "\(.name)=\(.status)/\(.conclusion // "null")"]
-            + (if any($jobs[]; .name | startswith("Playwright ")) then [] else ["No Playwright jobs listed"] end)
+            + (if any($jobs[]; (.name | startswith("Playwright ")) and .name != "Playwright creator portal and API routes" and .name != "Playwright revalidation") then [] else ["No Playwright matrix jobs listed"] end)
             | join(", ")
           ' <<< "$jobs")"
           if [ -n "$failed" ]; then
