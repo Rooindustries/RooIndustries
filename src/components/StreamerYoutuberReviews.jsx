@@ -21,7 +21,7 @@ const REVIEW_SKELETON_CLASS =
   `${REVIEW_CARD_WIDTH} h-[296px] sm:h-[222px] rounded-2xl bg-skeleton animate-pulse flex-shrink-0`;
 const REVIEW_SWIPE_ONLY_QUERY = "(max-width: 639.98px)";
 const REVIEW_ARROW_CLASS =
-  "absolute top-1/2 -translate-y-1/2 z-10 hidden sm:grid h-10 w-10 place-items-center rounded-full border border-line-soft " +
+  "hidden sm:grid h-10 w-10 place-items-center rounded-full border border-line-soft " +
   "bg-panel text-lg leading-none text-ink-secondary shadow-lg hover:border-line-accent hover:text-ink focus-visible:outline " +
   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-accent)]";
 
@@ -151,7 +151,7 @@ export default function StreamerYoutuberReviews({ initialData = null }) {
       </div>
 
       {isLoading ? (
-        <div className="px-4 flex gap-4 overflow-hidden">
+        <div className="px-4 sm:px-20 flex gap-4 overflow-hidden">
           <div className={REVIEW_SKELETON_CLASS} />
           <div className={REVIEW_SKELETON_CLASS} />
           <div className={`hidden lg:block ${REVIEW_SKELETON_CLASS}`} />
@@ -502,7 +502,15 @@ function AutoReviewCarousel({ reviews }) {
   };
 
   return (
-    <div className="relative">
+    <div className="ri-reviews-frame">
+      <button
+        type="button"
+        onClick={() => scrollReviews(-1)}
+        className={REVIEW_ARROW_CLASS}
+        aria-label="Scroll reviews left"
+      >
+        ←
+      </button>
       <div
         ref={viewportRef}
         className="ri-reviews-viewport w-full overflow-x-auto overflow-y-hidden cursor-grab active:cursor-grabbing select-none"
@@ -549,16 +557,8 @@ function AutoReviewCarousel({ reviews }) {
 
       <button
         type="button"
-        onClick={() => scrollReviews(-1)}
-        className={`${REVIEW_ARROW_CLASS} left-4`}
-        aria-label="Scroll reviews left"
-      >
-        ←
-      </button>
-      <button
-        type="button"
         onClick={() => scrollReviews(1)}
-        className={`${REVIEW_ARROW_CLASS} right-4`}
+        className={REVIEW_ARROW_CLASS}
         aria-label="Scroll reviews right"
       >
         →

@@ -30,8 +30,8 @@ describe("review carousel design", () => {
     expect(componentSource).toContain("onPointerDown={onPointerDown}");
     expect(componentSource).toContain("Scroll reviews left");
     expect(componentSource).toContain("Scroll reviews right");
-    expect(componentSource).toContain("${REVIEW_ARROW_CLASS} left-4");
-    expect(componentSource).toContain("${REVIEW_ARROW_CLASS} right-4");
+    expect(componentSource).toContain('className="ri-reviews-frame"');
+    expect(stylesheet).toContain("grid-template-columns: 2.5rem minmax(0, 1fr) 2.5rem;");
     expect(stylesheet).toContain(".ri-reviews-viewport::-webkit-scrollbar");
     expect(componentSource).toContain('color: "var(--color-accent)"');
     expect(componentSource).not.toContain("bg-yellow");

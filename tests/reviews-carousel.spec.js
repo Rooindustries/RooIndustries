@@ -613,16 +613,80 @@ test.describe("review carousel", () => {
     await expect.poll(mask).toContain("linear-gradient");
   });
 
-  for (const width of [640, 1024, 1440]) {
-    test(`arrows-sit-on-faded-edges-${width}`, async ({ page }) => {
+  for (const width of [640, 800, 1024, 1440]) {
+    test(`arrows-never-cover-review-text-${width}`, async ({ page }) => {
       const region = await openCarousel(page, { width, height: 900 });
-      const mask = await region.evaluate((el) => getComputedStyle(el).maskImage);
-      const clear = Number(/rgba\(0, 0, 0, 0\) ([\d.]+)px/.exec(mask)?.[1]);
-      const edges = await region.boundingBox();
-      const left = await page.getByRole("button", { name: "Scroll reviews left" }).boundingBox();
-      const right = await page.getByRole("button", { name: "Scroll reviews right" }).boundingBox();
-      expect(left.x + left.width - edges.x, mask).toBeLessThanOrEqual(clear);
-      expect(edges.x + edges.width - right.x, mask).toBeLessThanOrEqual(clear);
+      const left = page.getByRole("button", { name: "Scroll reviews left" });
+      const right = page.getByRole("button", { name: "Scroll reviews right" });
+      await expect(left).toBeVisible();
+      await expect(right).toBeVisible();
+      const inspect = (state) => region.evaluate((el, state) => {
+        const view = el.getBoundingClientRect();
+        const buttons = [...document.querySelectorAll('button[aria-label^="Scroll reviews"]')].map((button) => ({
+          label: button.getAttribute("aria-label"),
+          rect: button.getBoundingClientRect(),
+        }));
+        const covered = [];
+        const range = document.createRange();
+        const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+        let lines = 0;
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          if (!node.textContent.trim()) continue;
+          range.selectNodeContents(node);
+          for (const rect of range.getClientRects()) {
+            const leftEdge = Math.max(rect.left, view.left);
+            const rightEdge = Math.min(rect.right, view.right);
+            if (rightEdge - leftEdge < 1 || rect.height < 1) continue;
+            lines += 1;
+            const text = node.textContent.trim().slice(0, 32);
+            for (const { label, rect: box } of buttons) {
+              if (leftEdge < box.right && rightEdge > box.left && rect.top < box.bottom && rect.bottom > box.top) {
+                covered.push({ state, by: label, text });
+              }
+            }
+            for (const x of [leftEdge + 0.5, (leftEdge + rightEdge) / 2, rightEdge - 0.5]) {
+              const hit = document.elementFromPoint(x, (rect.top + rect.bottom) / 2);
+              if (hit && !el.contains(hit)) covered.push({ state, by: hit.getAttribute("aria-label") || hit.tagName, text });
+            }
+          }
+        }
+        const overlap = buttons.map(({ label, rect }) => ({
+          label,
+          px: Math.max(0, Math.min(rect.right, view.right) - Math.max(rect.left, view.left)),
+        }));
+        return { state, lines, covered, overlap, focused: document.activeElement?.getAttribute("aria-label") || null };
+      }, state);
+      const states = [];
+      const record = async (state) => {
+        const result = await inspect(state);
+        states.push(result);
+        writeEvidence(`arrows-never-cover-review-text-${width}`, states);
+        expect(result.lines, state).toBeGreaterThan(0);
+        expect(result.covered, state).toEqual([]);
+        expect(result.overlap.map(({ px }) => px), state).toEqual([0, 0]);
+      };
+      await record("rest");
+      await page.keyboard.press("Shift");
+      await region.focus();
+      await expect.poll(() => region.evaluate((el) => getComputedStyle(el).maskImage)).toBe("none");
+      await record("region-focus");
+      const { groupWidth, pitch } = await probe(page, "state");
+      for (let step = 1; step <= 8; step += 1) {
+        await region.evaluate((el, value) => { el.scrollLeft = value; }, groupWidth + (pitch * step) / 8);
+        await record(`region-focus-scrolled-${step}`);
+      }
+      await page.keyboard.press("Shift+Tab");
+      await expect(left).toBeFocused();
+      await record("left-arrow-focus");
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Tab");
+      await expect(right).toBeFocused();
+      await record("right-arrow-focus");
+      await page.keyboard.press("Enter");
+      await page.waitForTimeout(600);
+      await record("after-arrow-press");
+      await page.evaluate(() => document.documentElement.classList.add("perf-reduced-effects-mode"));
+      await record("reduced-effects");
     });
   }
 
