@@ -266,14 +266,6 @@ if (process.argv.includes("--worker")) {
   process.once("disconnect", () => { fixture.stop(); });
   process.on("message", async ({ id, method, args = [] }) => {
     try {
-      if (method === "stop") {
-        await fixture.stop();
-        process.send({ id, value: true }, () => {
-          endOwnChannel();
-          process.exit(0);
-        });
-        return;
-      }
       if (!["request", "pay", "webhook", "state", "snapshot", "nextSlotDate"].includes(method) && method !== "evidence") {
         throw new Error(`Unknown referral payment fixture operation: ${method}`);
       }

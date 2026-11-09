@@ -349,6 +349,29 @@ test("a guide creator link still reaches packages when storage is blocked", asyn
   await expect.poll(() => storedCode(page)).toBe("friend");
 });
 
+test("the guide clears its save warning after a later successful save", async ({ page }, testInfo) => {
+  await page.addInitScript(() => {
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (key === "referral_session" && new URLSearchParams(location.search).has("blockSave")) {
+        throw new DOMException("Storage blocked", "SecurityError");
+      }
+      return setItem.call(this, key, value);
+    };
+  });
+  await page.goto("/BIOSGuide?ref=friend&blockSave=1");
+  const notice = page.locator("[data-checkout-save-notice]");
+  await expect(notice).toBeVisible();
+  await notice.scrollIntoViewIfNeeded();
+  await testInfo.attach("save-failed", { body: await page.screenshot(), contentType: "image/png" });
+  await page.evaluate(() => history.replaceState(null, "", "/BIOSGuide?ref=friend"));
+  await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
+  await expect.poll(() => storedCode(page)).toBe("friend");
+  await expect(notice).toHaveCount(0);
+  await expect(packagesLink(page)).toHaveAttribute("href", "/packages?ref=friend");
+  await testInfo.attach("save-recovered", { body: await page.screenshot(), contentType: "image/png" });
+});
+
 for (const query of ["", "?ref=", "?ref=%20%20"]) {
   test(`guide without a nonempty code preserves storage: ${query || "no query"}`, async ({ page }) => {
     await page.goto("/?ref=friend");
