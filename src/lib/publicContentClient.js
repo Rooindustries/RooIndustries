@@ -35,11 +35,11 @@ export const getPublicContentEntry = async (resource, params, options) => {
     } catch (error) {
       if (markCancelled(error, response).requestCancelled || !response) throw error;
     }
-    if (!response.ok || body?.ok !== true) {
+    if (!response.ok || body?.ok !== true || !Object.hasOwn(body, "data")) {
       throw new Error(body?.error || "Public content could not be loaded.");
     }
     const revision = Number.isSafeInteger(body.revision) && body.revision >= 0 ? body.revision : null;
-    return { data: body.data ?? null, revision };
+    return { data: body.data, revision };
   } finally {
     pendingRequests -= 1;
   }

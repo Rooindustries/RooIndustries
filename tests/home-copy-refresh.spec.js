@@ -49,11 +49,11 @@ test("returning home through site links refreshes copy edited in the CMS", async
   expect(await page.evaluate(() => window.__copyDocument)).toBe(true);
 });
 
-for (const state of ["updated", "missing", "failed"]) {
+for (const state of ["updated", "missing", "failed", "malformed"]) {
   test(`a stale homepage seed refreshes on mount with ${state} content`, async ({ page }) => {
     const errors = [];
     page.on("console", message => {
-      if (message.type() === "error" && message.text().includes("Synthetic homepage refresh failure")) {
+      if (message.type() === "error" && (message.text().includes("Synthetic homepage refresh failure") || message.text().includes("Public content could not be loaded"))) {
         errors.push(message.text());
       }
     });
@@ -67,7 +67,7 @@ for (const state of ["updated", "missing", "failed"]) {
       const data = state === "missing" ? null : { headingLine1: "Updated stale heading" };
       await route.fulfill(state === "failed"
         ? { status: 503, json: { ok: false, error: "Synthetic homepage refresh failure" } }
-        : { json: { ok: true, data, revision: 999 } });
+        : { json: state === "malformed" ? { ok: true, revision: 999 } : { ok: true, data, revision: 999 } });
     });
     try {
       await page.goto("/");
@@ -75,7 +75,7 @@ for (const state of ["updated", "missing", "failed"]) {
       await expect(page.locator("#top h1")).toContainText("Fixture Hero Heading One");
       await expect.poll(() => refreshes).toBe(1);
       release();
-      if (state === "failed") {
+      if (state === "failed" || state === "malformed") {
         await expect.poll(() => errors.length).toBe(1);
         await expect(page.locator("#top h1")).toContainText("Fixture Hero Heading One");
       } else {

@@ -43,7 +43,7 @@ const seedContent = (resource, data, revision, renderedAt) => {
   notify(resource);
 };
 
-export const loadContent = (resource) => {
+const loadContent = (resource) => {
   const current = entries.get(resource);
   if (current && !isStale(current.receivedAt)) return Promise.resolve(current.data);
   const pending = inflight.get(resource);
