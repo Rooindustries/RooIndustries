@@ -51,10 +51,14 @@ export const mergeTimings = (reports) => {
 };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const [dir] = process.argv.slice(2);
-  if (!dir) throw new Error("Usage: node scripts/playwright-timings.mjs <directory of Playwright JSON reports>");
+  const args = process.argv.slice(2);
+  const allowEmpty = args.includes("--allow-empty");
+  const [dir] = args.filter((arg) => arg !== "--allow-empty");
+  if (!dir) {
+    throw new Error("Usage: node scripts/playwright-timings.mjs [--allow-empty] <directory of Playwright JSON reports>");
+  }
   const reports = reportFiles(dir).map((file) => JSON.parse(fs.readFileSync(file, "utf8")));
   const timings = mergeTimings(reports);
-  if (!Object.keys(timings).length) throw new Error(`No Playwright test timings found under ${dir}`);
+  if (!allowEmpty && !Object.keys(timings).length) throw new Error(`No Playwright test timings found under ${dir}`);
   process.stdout.write(`${JSON.stringify(timings, null, 2)}\n`);
 }

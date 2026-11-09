@@ -238,14 +238,14 @@ jobs:
         if: success()
         run: |
           mkdir -p "$RUNNER_TEMP/reduced-timings"
-          node scripts/playwright-timings.mjs "${SUITE_DIR:-$GITHUB_WORKSPACE}/test-timings" > "$RUNNER_TEMP/reduced-timings/$PW_SUITE.json"
+          node scripts/playwright-timings.mjs --allow-empty "${SUITE_DIR:-$GITHUB_WORKSPACE}/test-timings" > "$RUNNER_TEMP/reduced-timings/$PW_SUITE.json"
       - uses: actions/upload-artifact@v4
         if: success()
         with:
           name: test-timings-${{ matrix.suite.name }}
           path: ${{ runner.temp }}/reduced-timings/${{ matrix.suite.name }}.json
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 8
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
