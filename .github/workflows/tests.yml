@@ -106,6 +106,7 @@ jobs:
       - run: npm run test:reproducible-build
       - run: npm run test:build-lock
       - run: npm run test:tooling:dependencies
+      - run: node scripts/check-browser-deps-cache.mjs
       - run: npm run check:seo
       - run: npm run check:supabase:migrations
       - run: npm run test:deploy:rollback

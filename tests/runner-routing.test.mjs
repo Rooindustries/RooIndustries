@@ -19,12 +19,12 @@ const OUTSIDE_DEVBOX_DEPS = [
   `\${{ ${OUTSIDE_DEVBOX} && '--with-deps' || '' }}`,
   `\${{ inputs.browser-deps == 'true' && ${OUTSIDE_DEVBOX} && '--with-deps' || '' }}`,
 ];
-const INSTALLS = /\bsudo\b|apt-get|install-deps|--with-deps/;
+const INSTALLS = /\bsudo\b|apt-get|install-deps|install-browser-deps\.sh|--with-deps/;
 
 const files = fs.readdirSync(".github/workflows");
 const workflows = files
   .filter((file) => /\.ya?ml$/.test(file))
-  .map((file) => ({ file, workflow: yaml.safeLoad(fs.readFileSync(path.join(".github/workflows", file), "utf8")) }));
+  .map((file) => ({ file, workflow: yaml.load(fs.readFileSync(path.join(".github/workflows", file), "utf8")) }));
 const jobs = workflows.flatMap(({ file, workflow }) => Object.entries(workflow.jobs).map(([id, job]) => ({ file, workflow, id, job })));
 const actions = fs.readdirSync(".github/actions").map((name) => path.join(".github/actions", name, "action.yml"));
 
@@ -190,16 +190,21 @@ const checkInstall = ({ file, step }) => {
 test("system packages are installed only outside the dev box runners", () => {
   const steps = [
     ...jobs.flatMap(({ file, job }) => (job.steps ?? []).map((step) => ({ file, step }))),
-    ...actions.flatMap((file) => yaml.safeLoad(fs.readFileSync(file, "utf8")).runs.steps.map((step) => ({ file, step }))),
+    ...actions.flatMap((file) => yaml.load(fs.readFileSync(file, "utf8")).runs.steps.map((step) => ({ file, step }))),
   ];
-  assert.equal(steps.reduce((count, step) => count + checkInstall(step), 0), 2);
+  assert.equal(steps.reduce((count, step) => count + checkInstall(step), 0), 1);
 });
 
 test("package installs remain guarded in workflows and actions", () => {
-  const install = { run: "npx playwright install --with-deps chromium" };
+  const installs = [
+    { run: "npx playwright install --with-deps chromium" },
+    { run: "bash scripts/install-browser-deps.sh chromium" },
+  ];
   for (const file of ["fixture.yml", ".github/actions/fixture/action.yml"]) {
-    assert.throws(() => checkInstall({ file, step: install }), assert.AssertionError, file);
-    checkInstall({ file, step: { ...install, if: OUTSIDE_DEVBOX } });
+    for (const install of installs) {
+      assert.throws(() => checkInstall({ file, step: install }), assert.AssertionError, file);
+      checkInstall({ file, step: { ...install, if: OUTSIDE_DEVBOX } });
+    }
     assert.throws(() => checkInstall({ file, step: { run: "echo ${{ vars.TEST }}" } }), assert.AssertionError, file);
   }
 });
