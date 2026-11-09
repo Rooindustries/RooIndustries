@@ -690,7 +690,7 @@ test.describe("review carousel", () => {
     });
   }
 
-  for (const width of [390, 1024, 1440]) {
+  for (const width of [320, 360, 390, 1024, 1440]) {
     test(`cards-fit-and-line-up-${width}`, async ({ page }) => {
       const region = await openCarousel(page, { width, height: 900 });
       const layout = await region.evaluate((el) => {
@@ -723,17 +723,22 @@ test.describe("review carousel", () => {
           firstRight: first.right - view.left + drift,
           previousRight: previous.right - view.left + drift,
           width: view.width,
+          cardWidth: first.width,
+          quoteSize: getComputedStyle(group.firstElementChild.querySelector("blockquote p")).fontSize,
         };
       });
       writeEvidence(`cards-fit-and-line-up-${width}`, layout);
       expect(layout.heights).toHaveLength(1);
       expect(layout.clipped).toEqual([]);
       expect(Math.abs(layout.drift)).toBeLessThan(120);
+      expect(layout.quoteSize).toBe("15px");
+      expect(layout.firstLeft).toBeGreaterThanOrEqual(layout.fade - 0.5);
+      expect(layout.firstRight).toBeLessThanOrEqual(layout.width - layout.fade + 0.5);
       if (width < 640) {
         expect(Math.abs(layout.firstLeft - (layout.width - layout.firstRight))).toBeLessThanOrEqual(2);
+        expect(layout.cardWidth).toBe(Math.min(320, layout.width - 2 * layout.fade));
       } else {
-        expect(layout.firstLeft).toBeGreaterThanOrEqual(layout.fade - 0.5);
-        expect(layout.firstRight).toBeLessThanOrEqual(layout.width - layout.fade + 0.5);
+        expect(layout.cardWidth).toBe(410);
         expect(layout.previousRight).toBeLessThanOrEqual(layout.clear + 0.5);
       }
     });
@@ -895,7 +900,7 @@ test.describe("review carousel order", () => {
     expect(firstCopy).toEqual(ordered);
   });
 
-  for (const width of [390, 1024, 1440]) {
+  for (const width of [320, 360, 390, 1024, 1440]) {
     test(`starts-on-vulture-${width}`, async ({ page }) => {
       const region = await openCarousel(page, { width, height: 900 });
       const start = await region.evaluate((el) => {

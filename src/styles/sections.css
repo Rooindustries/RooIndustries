@@ -61,6 +61,23 @@
   padding-left: max(0px, calc((100% - 320px) / 2));
 }
 
+@supports (width: 1cqi) {
+  @media (max-width: 639.98px) {
+    .ri-reviews-viewport {
+      container-type: inline-size;
+    }
+
+    .ri-reviews-auto-track {
+      --review-card-width: min(320px, 100cqi - 2 * var(--reviews-fade));
+      padding-left: calc((100cqi - var(--review-card-width)) / 2);
+    }
+
+    .ri-reviews-auto-track .ri-review-card {
+      width: var(--review-card-width);
+    }
+  }
+}
+
 @media (min-width: 640px) {
   .ri-reviews-frame {
     display: grid;
