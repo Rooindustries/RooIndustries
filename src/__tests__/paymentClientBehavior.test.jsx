@@ -140,6 +140,7 @@ describe("payment client request and accessibility behavior", () => {
     const booking = { ...checkout, slotHoldExpiresAt: "2000-01-01T00:00:00.000Z" };
     sessionStorage.setItem("checkout_booking_state", JSON.stringify(booking));
     sessionStorage.setItem("payment_session_state", JSON.stringify({
+      sessionExpiresAt: checkout.slotHoldExpiresAt, result: { status: "started" },
       provider: "dodo",
       paymentAccessToken: "dodo-return-token",
       providerPayload: { orderId: "cks_return" },
@@ -173,6 +174,7 @@ describe("payment client request and accessibility behavior", () => {
     const held = { ok: true, status: "needs_recovery", manualReviewRequired: true, recoveryReason: message };
     sessionStorage.setItem("checkout_booking_state", JSON.stringify(booking));
     sessionStorage.setItem("payment_session_state", JSON.stringify({
+      sessionExpiresAt: checkout.slotHoldExpiresAt, result: { status: "started" },
       provider: "dodo", paymentAccessToken: "dodo-review-token", providerPayload: { orderId: "cks_review" },
       fingerprint: JSON.stringify({ packageTitle: booking.packageTitle, originalOrderId: booking.originalOrderId,
         startTimeUTC: booking.startTimeUTC, email: booking.email, referralCode: "", couponCode: "" }),
@@ -214,6 +216,7 @@ describe("payment client request and accessibility behavior", () => {
       phase: "payment_pending",
     }));
     sessionStorage.setItem("payment_session_state", JSON.stringify({
+      sessionExpiresAt: checkout.slotHoldExpiresAt, result: { status: "started" },
       provider: "dodo",
       paymentAccessToken: "dodo-failed-token",
       providerPayload: { orderId: "cks_failed" },
@@ -252,6 +255,7 @@ describe("payment client request and accessibility behavior", () => {
   });
 
   test.each([null, {
+    sessionExpiresAt: checkout.slotHoldExpiresAt, result: { status: "started" },
     provider: "paypal",
     paymentAccessToken: "new-payment-token",
     providerPayload: { orderId: "paypal-new-order" },
@@ -266,6 +270,7 @@ describe("payment client request and accessibility behavior", () => {
   }])("ignores a terminal response after its session was replaced: %s", async (replacement) => {
     sessionStorage.setItem("checkout_booking_state", JSON.stringify(checkout));
     sessionStorage.setItem("payment_session_state", JSON.stringify({
+      sessionExpiresAt: checkout.slotHoldExpiresAt, result: { status: "started" },
       provider: "dodo",
       paymentAccessToken: "old-payment-token",
       providerPayload: { orderId: "cks_old" },
@@ -300,6 +305,7 @@ describe("payment client request and accessibility behavior", () => {
     jest.useFakeTimers();
     sessionStorage.setItem("checkout_booking_state", JSON.stringify(checkout));
     sessionStorage.setItem("payment_session_state", JSON.stringify({
+      sessionExpiresAt: checkout.slotHoldExpiresAt, result: { status: "started" },
       provider: "dodo", paymentAccessToken: "dodo-cancel-token",
       providerPayload: { orderId: "cks_cancel" },
       fingerprint: JSON.stringify({ packageTitle: checkout.packageTitle, originalOrderId: "", startTimeUTC: checkout.startTimeUTC, email: checkout.email, referralCode: "", couponCode: "" }),
@@ -329,6 +335,7 @@ describe("payment client request and accessibility behavior", () => {
   test("offers Dodo checkout resumption and restores method selection after release", async () => {
     sessionStorage.setItem("checkout_booking_state", JSON.stringify(checkout));
     sessionStorage.setItem("payment_session_state", JSON.stringify({
+      sessionExpiresAt: checkout.slotHoldExpiresAt, result: { status: "started" },
       provider: "dodo", paymentAccessToken: "dodo-cancel-token",
       providerPayload: { orderId: "cks_cancel", checkoutUrl: "https://checkout.dodopayments.com/session/cks_cancel" },
       fingerprint: JSON.stringify({ packageTitle: checkout.packageTitle, originalOrderId: "", startTimeUTC: checkout.startTimeUTC, email: checkout.email }),
@@ -348,7 +355,7 @@ describe("payment client request and accessibility behavior", () => {
     await screen.findByText("Payment method released. Choose a payment method below.");
     expect(sessionStorage.getItem("payment_session_state")).toBeNull();
     expect(JSON.parse(sessionStorage.getItem("my_slot_hold"))).toMatchObject({ phase: "holding", holdToken: "refreshed-token" });
-    expect(screen.getByRole("button", { name: "Pay your way" })).toBeEnabled();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Pay your way" })).toBeEnabled());
   });
 
   test("aborts a stalled quote and exposes an assertive retry message", async () => {
@@ -415,6 +422,7 @@ describe("payment client request and accessibility behavior", () => {
       if (requestUrl === "/api/payment/start") {
         return Promise.resolve(
           response({
+            sessionExpiresAt: checkout.slotHoldExpiresAt,
             ok: true,
             status: "started",
             paymentAccessToken: "payment-access-token",

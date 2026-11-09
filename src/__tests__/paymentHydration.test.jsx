@@ -37,6 +37,8 @@ const checkoutFingerprint = JSON.stringify({
   couponCode: "LOCKED10",
 });
 const paymentSession = {
+  sessionExpiresAt: checkout.slotHoldExpiresAt,
+  result: { status: "started" },
   provider: "razorpay",
   fingerprint: checkoutFingerprint,
   paymentAccessToken: "payment-access-token",
