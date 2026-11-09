@@ -71,12 +71,12 @@ jobs:
             npm run test:monitoring:deployments
           fi
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: failure()
         with:
           name: monitoring-deployments
           path: test-results/
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 3
 
   jest:
     name: Jest
@@ -234,20 +234,27 @@ jobs:
           path: ${{ runner.temp }}/build-fingerprint/
           if-no-files-found: error
           retention-days: 7
+      - name: Reduce test timings
+        if: success()
+        run: |
+          mkdir -p "$RUNNER_TEMP/reduced-timings"
+          node scripts/playwright-timings.mjs --allow-empty "${SUITE_DIR:-$GITHUB_WORKSPACE}/test-timings" > "$RUNNER_TEMP/reduced-timings/$PW_SUITE.json"
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: success()
         with:
           name: test-timings-${{ matrix.suite.name }}
-          path: ${{ env.SUITE_DIR || github.workspace }}/test-timings/
-          if-no-files-found: ignore
-          retention-days: 30
+          path: ${{ runner.temp }}/reduced-timings/${{ matrix.suite.name }}.json
+          if-no-files-found: error
+          retention-days: 8
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: test-results-${{ matrix.suite.name }}
-          path: ${{ env.SUITE_DIR || github.workspace }}/test-results/
+          path: |
+            ${{ env.SUITE_DIR || github.workspace }}/test-results/
+            ${{ env.SUITE_DIR || github.workspace }}/test-timings/
           if-no-files-found: ignore
-          retention-days: 7
+          retention-days: 3
 
   routes:
     name: Playwright creator portal and API routes
@@ -297,7 +304,7 @@ jobs:
           name: test-results-routes
           path: test-results/
           if-no-files-found: ignore
-          retention-days: 7
+          retention-days: 3
 
   native:
     name: Native PostgreSQL 17 suites
@@ -374,12 +381,12 @@ jobs:
             .next-e2e-native-admin/cache/webpack
             .next-e2e-native-booking/cache/webpack
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: failure()
         with:
           name: test-results-native
           path: test-results/
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 3
 
   native-payouts:
     name: Native PostgreSQL 17 payout and recovery suites
@@ -411,12 +418,12 @@ jobs:
         with:
           suites: creator-payouts:postgres17 booking-payment-window payment-recovery:postgres17
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: failure()
         with:
           name: test-results-native-payouts
           path: test-results/
           if-no-files-found: ignore
-          retention-days: 7
+          retention-days: 3
 
   revalidation:
     name: Playwright revalidation
@@ -463,7 +470,7 @@ jobs:
           name: test-results-revalidation
           path: test-results/
           if-no-files-found: ignore
-          retention-days: 7
+          retention-days: 3
 
   record-tested-tree:
     name: Record the tested tree
