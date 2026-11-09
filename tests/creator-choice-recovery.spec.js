@@ -456,3 +456,33 @@ test("unsaved sessions stay recoverable for their own restored booking", async (
   expect(starts).toBe(2);
   await info.attach("unsaved-session-recovery", { body: JSON.stringify({ starts, tokens }), contentType: "application/json" });
 });
+
+test("a malformed saved draft is reported and preserved when choosing a package", async ({ page, context }) => {
+  await context.addInitScript(() => {
+    sessionStorage.setItem("booking_draft", "{broken draft");
+    window.draftErrors = 0;
+    window.addEventListener("checkout-draft-error", () => { window.draftErrors += 1; });
+  });
+  await page.goto("/packages");
+  await page.getByRole("link", { name: /Book Now/i }).first().click();
+  await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.draftErrors)).toBe(1);
+  expect(await page.evaluate(() => sessionStorage.getItem("booking_draft"))).toBe("{broken draft");
+});
+
+test("a valid saved draft still loads when choosing its package", async ({ page, context }) => {
+  await context.addInitScript(() => {
+    sessionStorage.setItem("booking_draft", JSON.stringify({
+      lastTitle: "Performance Vertex Overhaul",
+      packages: { "Performance Vertex Overhaul": {
+        form: { email: "saved@example.invalid" },
+        selectedPackage: { title: "Performance Vertex Overhaul", price: "$84.99" },
+      } },
+    }));
+  });
+  await page.goto("/booking");
+  await page.getByRole("button", { name: /^Earliest available:/ }).click();
+  await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).last().click();
+  await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toHaveValue("saved@example.invalid");
+});

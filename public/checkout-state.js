@@ -1,5 +1,30 @@
 const unsaved = new Map();
 const unsavedChoices = new Set();
+let reportedDraft = null;
+
+const hasMalformedDraft = () => {
+  let value;
+  try {
+    value = window.sessionStorage.getItem("booking_draft");
+  } catch {
+    return false;
+  }
+  if (value === null) {
+    reportedDraft = null;
+    return false;
+  }
+  try {
+    JSON.parse(value);
+    reportedDraft = null;
+    return false;
+  } catch {
+    if (reportedDraft !== value) {
+      reportedDraft = value;
+      window.dispatchEvent(new Event("checkout-draft-error"));
+    }
+    return true;
+  }
+};
 const SAVE_STATE_EVENT = "checkout-save-state";
 const announce = () => window.dispatchEvent(new Event(SAVE_STATE_EVENT));
 const hasCodes = (value) => Boolean(
@@ -20,6 +45,7 @@ export const subscribeCheckoutSaveFailure = (listener) => {
 const createStore = (key, text, hasChoices) => {
   const read = () => {
     if (typeof window === "undefined") return null;
+    if (key === "booking_draft" && !unsaved.has(key) && hasMalformedDraft()) return null;
     try {
       const value = unsaved.has(key) ? unsaved.get(key) : window.sessionStorage.getItem(key);
       return value === null || text ? value : JSON.parse(value);
@@ -32,6 +58,11 @@ const createStore = (key, text, hasChoices) => {
     const serialized = value == null || (text && !value) ? null : text ? String(value) : JSON.stringify(value);
     const carriedChoices = hasChoices(value) || hasChoices(read()) || unsavedChoices.has(key);
     unsaved.set(key, serialized);
+    if (key === "booking_draft" && hasMalformedDraft()) {
+      if (carriedChoices) unsavedChoices.add(key);
+      announce();
+      return false;
+    }
     let saved = false;
     try {
       const storage = window.sessionStorage;
@@ -50,6 +81,7 @@ const createStore = (key, text, hasChoices) => {
     return saved;
   };
   const remove = (matches) => {
+    if (typeof window !== "undefined" && key === "booking_draft" && hasMalformedDraft()) return false;
     if (matches && typeof window !== "undefined") {
       try {
         const stored = window.sessionStorage.getItem(key);
