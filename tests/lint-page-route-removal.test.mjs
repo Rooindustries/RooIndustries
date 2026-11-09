@@ -10,8 +10,13 @@ new RuleTester().run("no-page-route-removal", rules["no-page-route-removal"], {
     "await removePageRoutes(page);",
     'await routePage(page, "**/chunk", handler);',
     'const label = { unroute: "example" };',
+    'object.unroute();',
+    'const object = { unroute() {} }; object.unroute();',
   ],
   invalid: [
+    'removeContextRoutes(page, "**/*");',
+    'test(async ({ page: tab }) => tab.unrouteAll());',
+    'const tab = await context.newPage(); tab.unrouteAll();',
     'await page.unrouteAll({ behavior: "wait" });',
     'await page.unroute("**/_next/static/chunks/**", interceptChunk);',
     'const tab = page; const remove = tab.unroute; remove("**/chunk");',

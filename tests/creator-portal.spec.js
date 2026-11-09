@@ -1,4 +1,4 @@
-const { routePage, removePageRoutes, removeContextRoutes } = require("./fixtures/held-routes.cjs");
+const { routePage, removePageRoutes } = require("./fixtures/held-routes.cjs");
 const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
 const { waitForRouteCommitted } = require("./fixtures/react-hydration.cjs");
 const { test, expect } = require('@playwright/test');
@@ -22,7 +22,9 @@ test.beforeEach(async ({ baseURL, context }) => {
   await fixture.configureApiFixture(baseURL, { reset: true });
   await configure(baseURL, { reset: true });
   const { guardBrowserContext } = await import('../scripts/lib/test-target-safety.mjs');
-  await guardBrowserContext(context, [baseURL, fixture.apiFixtureOrigin(baseURL)]);
+  const local = new URL(baseURL);
+  local.hostname = "localhost";
+  await guardBrowserContext(context, [baseURL, local.origin, fixture.apiFixtureOrigin(baseURL)]);
 });
 
 async function configure(baseURL, data) {
@@ -127,11 +129,8 @@ test("reset acknowledgment persists without clearing or resending the email", as
     await fixture.configureApiFixture(baseURL, { reset: true });
     const response = await fixture.requestRoute(fixture.apiFixtureOrigin(baseURL), "/__portal", { data: { reset: true } });
     expect(response.status).toBe(200);
-    await removeContextRoutes(context, "**/*");
-    const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
     const local = new URL(baseURL);
     local.hostname = "localhost";
-    await guardBrowserContext(context, [baseURL, local.origin, fixture.apiFixtureOrigin(baseURL)]);
     page.on("request", request => { if (new URL(request.url()).pathname === "/api/ref/forgot") sends += 1; });
     const message = "If an account matches that email, we've sent a reset link. Check your inbox and spam folder.";
     for (const email of ["creator@fixture.invalid", "unknown@fixture.invalid"]) {
@@ -431,9 +430,6 @@ test.describe('portal requests that stall', () => {
     target.port = String(server.address().port);
     const forward = route => route.continue({ url: `${target.origin}/api/ref/updateSplit` });
     try {
-      const { guardBrowserContext } = await import('../scripts/lib/test-target-safety.mjs');
-      await removeContextRoutes(context, '**/*');
-      await guardBrowserContext(context, [baseURL, fixture.apiFixtureOrigin(baseURL), target.origin]);
       await routePage(page, '**/api/ref/updateSplit', forward);
       await page.goto('/referrals/dashboard');
       await page.getByText('Commission (%)', { exact: true }).locator('..').getByRole('button', { name: '+', exact: true }).click();

@@ -1,23 +1,39 @@
 const { expect } = require("@playwright/test");
 
 const pageRoutes = new WeakMap();
-const removeContextRoutes = (context, pattern, handler) => context.unroute(pattern, handler);
+const terminalMethods = new Set(["abort", "continue", "fallback", "fulfill"]);
 
 const routePage = async (page, pattern, callback) => {
   const context = page.context();
   const inFlight = new Set();
+  let removed = false;
   const handler = async route => {
+    const request = route.request();
+    let requestPage;
+    try { requestPage = request.frame().page(); } catch { return route.fallback(); }
+    if (removed || requestPage !== page) return route.fallback();
+    let finish;
+    const finished = new Promise(resolve => { finish = resolve; });
+    const failed = failedRequest => { if (failedRequest === request) finish(); };
+    context.on("requestfailed", failed);
+    const tracked = new Proxy(route, {
+      get(target, property) {
+        const value = target[property];
+        if (typeof value !== "function") return value;
+        if (!terminalMethods.has(property)) return value.bind(target);
+        return (...args) => Promise.resolve(value.apply(target, args)).finally(finish);
+      },
+    });
     const handling = (async () => {
-      const request = route.request();
-      if (request.frame().page() !== page) return route.fallback();
-      await callback(route, request);
+      try {
+        await callback(tracked, request);
+        await finished;
+      } finally {
+        context.off("requestfailed", failed);
+      }
     })();
     inFlight.add(handling);
-    try {
-      await handling;
-    } finally {
-      inFlight.delete(handling);
-    }
+    try { await handling; } finally { inFlight.delete(handling); }
   };
   const registrations = pageRoutes.get(page) || new Set();
   pageRoutes.set(page, registrations);
@@ -27,8 +43,9 @@ const routePage = async (page, pattern, callback) => {
     callback,
     remove: () => {
       removing ||= (async () => {
-        await removeContextRoutes(context, pattern, handler);
+        removed = true;
         await Promise.all(inFlight);
+        await context.unroute(pattern, handler);
         registrations.delete(registration);
       })();
       return removing;
@@ -71,4 +88,4 @@ const holdRoutes = async (page, pattern, shouldHold = () => true) => {
   };
 };
 
-module.exports = { holdRoutes, routePage, removePageRoutes, removeContextRoutes };
+module.exports = { holdRoutes, routePage, removePageRoutes };

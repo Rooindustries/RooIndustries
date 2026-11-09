@@ -611,6 +611,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
           await page.evaluate(() => window.__resetConfirmationMetrics());
           const completedAt = Date.now();
           await finalizeRoute.fulfill({ json: completed });
+          finalizeRoute = undefined;
           await expect(page).toHaveURL(/\/payment-success$/, { timeout: 3000 });
           const navigationMs = Date.now() - completedAt;
           await expect(page.getByRole("heading", { level: 2, name: "Complete Payment", exact: true })).toHaveCount(0);
@@ -642,6 +643,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         } finally {
           clearTimeout(delayTimer);
           releaseChunk();
+          if (finalizeRoute) await finalizeRoute.abort().catch(() => {});
           await removePageRoutes(page);
         }
       });

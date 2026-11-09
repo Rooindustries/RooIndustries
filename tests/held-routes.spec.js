@@ -139,3 +139,40 @@ for (const removal of ["handler", "all"]) {
     }
   });
 }
+
+test("removing the last route waits for a saved reply", async ({ browser, baseURL }) => {
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  let saved;
+  try {
+    await page.goto(`${baseURL}/contact`);
+    await routePage(page, "**/__held-route/last", route => { saved = route; });
+    await page.evaluate(() => {
+      window.__lastRequest = fetch("/__held-route/last").then(response => response.json());
+    });
+    await expect.poll(() => Boolean(saved)).toBe(true);
+    let removed = false;
+    const removing = removePageRoutes(page).then(() => { removed = true; });
+    expect(await page.evaluate(() => fetch("/__held-route/last").then(response => response.status))).toBe(404);
+    expect(removed).toBe(false);
+    await saved.fulfill({ json: "saved" });
+    await removing;
+    expect(await page.evaluate(() => window.__lastRequest)).toBe("saved");
+  } finally {
+    await context.close();
+  }
+});
+
+test("a popup can navigate while another page has a matching route", async ({ page, context, baseURL }) => {
+  await routePage(page, "**/contact?popup=1", route => route.fulfill({ body: "wrong page" }));
+  try {
+    const opened = context.waitForEvent("page");
+    await page.evaluate(() => window.open("/contact?popup=1"));
+    const popup = await opened;
+    await popup.waitForLoadState("domcontentloaded");
+    expect(popup.url()).toBe(`${baseURL}/contact?popup=1`);
+    await popup.close();
+  } finally {
+    await removePageRoutes(page);
+  }
+});

@@ -1,4 +1,4 @@
-import { constValue } from "./util.mjs";
+import { bindingDefinition, constValue } from "./util.mjs";
 
 const removals = new Set(["unroute", "unrouteAll"]);
 const staticName = (context, node, seen = new Set()) => {
@@ -10,6 +10,22 @@ const staticName = (context, node, seen = new Set()) => {
   return null;
 };
 
+const browserTarget = (context, node, seen = new Set()) => {
+  if (!node || seen.has(node)) return false;
+  seen.add(node);
+  if (node.type === "Identifier") {
+    const value = constValue(context, node);
+    if (value) return browserTarget(context, value, seen);
+    const definition = bindingDefinition(context, node);
+    const property = definition?.type === "Parameter" ? definition.name.parent : null;
+    return ["page", "context"].includes(node.name) ||
+      (property?.type === "Property" && ["page", "context"].includes(property.key.name));
+  }
+  if (node.type === "AwaitExpression") return browserTarget(context, node.argument, seen);
+  return node.type === "CallExpression" && node.callee.type === "MemberExpression" &&
+    ["context", "newPage", "newContext"].includes(node.callee.property.name);
+};
+
 export default {
   meta: {
     type: "problem",
@@ -18,17 +34,22 @@ export default {
     schema: [],
   },
   create(context) {
-    const check = (node, property, computed) => {
+    const check = (node, property, computed, target) => {
       const name = computed ? staticName(context, property) : property.name;
-      if (removals.has(name)) context.report({ node, messageId: "removal" });
+      if (removals.has(name) && browserTarget(context, target)) context.report({ node, messageId: "removal" });
     };
     return {
       MemberExpression(node) {
-        check(node, node.property, node.computed);
+        check(node, node.property, node.computed, node.object);
       },
       Property(node) {
-        if (node.parent.type === "ObjectPattern") {
-          check(node, node.key, node.computed || node.key.type === "Literal");
+        if (node.parent.type === "ObjectPattern" && node.parent.parent.type === "VariableDeclarator") {
+          check(node, node.key, node.computed || node.key.type === "Literal", node.parent.parent.init);
+        }
+      },
+      Identifier(node) {
+        if (node.name === "removeContextRoutes" && node.parent.type !== "Property") {
+          context.report({ node, messageId: "removal" });
         }
       },
     };
