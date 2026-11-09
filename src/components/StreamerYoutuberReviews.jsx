@@ -535,7 +535,10 @@ function AutoReviewCarousel({ reviews }) {
         onPointerCancel={onPointerUp}
         onLostPointerCapture={onPointerUp}
       >
-        <div className="ri-reviews-auto-track flex w-max items-stretch">
+        <div
+          className="ri-reviews-auto-track flex w-max items-stretch"
+          style={{ "--review-count": orderedReviews.length }}
+        >
         {Array.from({ length: groupCount }, (_, groupIndex) => (
           <div
             key={groupIndex}
