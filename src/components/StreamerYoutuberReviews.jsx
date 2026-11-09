@@ -16,9 +16,9 @@ const ARROW_SCROLL_MS = 450;
 const MAX_FRAME_MS = 100;
 const REVIEW_CARD_GAP = 16;
 const MIN_REVIEW_GROUPS = 3;
-const REVIEW_CARD_WIDTH = "w-[320px] sm:w-[380px]";
+const REVIEW_CARD_WIDTH = "w-[320px] sm:w-[410px]";
 const REVIEW_SKELETON_CLASS =
-  `${REVIEW_CARD_WIDTH} h-[296px] sm:h-[286px] rounded-2xl bg-skeleton animate-pulse flex-shrink-0`;
+  `${REVIEW_CARD_WIDTH} h-[296px] sm:h-[222px] rounded-2xl bg-skeleton animate-pulse flex-shrink-0`;
 const REVIEW_SWIPE_ONLY_QUERY = "(max-width: 639.98px)";
 const REVIEW_ARROW_CLASS =
   "absolute top-1/2 -translate-y-1/2 z-10 hidden sm:grid h-10 w-10 place-items-center rounded-full border border-line-soft " +
@@ -207,7 +207,7 @@ function ReviewCard({ review, groupIndex }) {
       data-group-index={groupIndex}
       className={`ri-review-card ${
         isCreator ? "ri-review-card-creator" : "ri-review-card-standard"
-      } flex flex-col ${REVIEW_CARD_WIDTH} min-h-[232px] p-5 rounded-2xl text-left flex-shrink-0`}
+      } flex flex-col ${REVIEW_CARD_WIDTH} p-5 sm:py-4 rounded-2xl text-left flex-shrink-0`}
       style={{
         background: isCreator
           ? "linear-gradient(145deg, rgba(250, 219, 120, 0.12), var(--color-surface-solid) 52%)"
@@ -217,17 +217,17 @@ function ReviewCard({ review, groupIndex }) {
           : "inset 0 0 0 1px var(--color-border-soft), 0 16px 40px rgba(0, 0, 0, 0.18)",
       }}
     >
-      <div className="flex items-center justify-between gap-3 text-[11px] font-bold uppercase tracking-[0.12em]">
-        <p className={isCreator ? "ri-review-champagne-text" : "text-ink-secondary"}>
+      <div className="ri-review-head flex items-center justify-between gap-3 text-[11px] font-bold uppercase tracking-[0.12em]">
+        <p className={`ri-review-kind ${isCreator ? "ri-review-champagne-text" : "text-ink-secondary"}`}>
           {isCreator ? "Creator review" : "Player review"}
         </p>
-        <p className="text-ink-secondary">{review.game || "PC performance"}</p>
+        <p className="ri-review-game text-ink-secondary">{review.game || "PC performance"}</p>
       </div>
 
-      <div className={`mt-3 flex min-h-4 flex-wrap items-end gap-x-3 gap-y-1 ${result ? "justify-between" : "justify-end"}`}>
+      <div className={`ri-review-stats mt-3 flex min-h-4 flex-wrap items-end gap-x-3 gap-y-1 ${result ? "justify-between" : "justify-end"}`}>
         {result && (
-          <p className="min-w-0 font-black leading-none tracking-[-0.04em] tabular-nums">
-            <span className="mr-2 text-[11px] uppercase tracking-[0.1em] text-ink-secondary">
+          <p className="ri-review-result min-w-0 font-black leading-none tracking-[-0.04em] tabular-nums">
+            <span className="ri-review-result-label mr-2 text-[11px] uppercase tracking-[0.1em] text-ink-secondary">
               {result.label}
             </span>
             <span className="whitespace-nowrap">
@@ -242,7 +242,7 @@ function ReviewCard({ review, groupIndex }) {
           </p>
         )}
         <p
-          className="ri-review-champagne-text text-xs font-bold tracking-[0.08em] flex-shrink-0 ml-auto"
+          className="ri-review-stars ri-review-champagne-text text-xs font-bold tracking-[0.08em] flex-shrink-0 ml-auto"
           role="img"
           aria-label={`${rating} out of 5 stars`}
         >
@@ -251,17 +251,17 @@ function ReviewCard({ review, groupIndex }) {
         </p>
       </div>
 
-      <blockquote className="mt-3 flex-1">
+      <blockquote className="ri-review-quote mt-3 flex-1">
         <p className="text-ink text-[15px] leading-[1.5] break-words whitespace-normal">
           “{review.text}”
         </p>
       </blockquote>
 
-      <footer className="mt-4 flex items-center gap-3">
+      <footer className="ri-review-person mt-4 flex items-center gap-3">
         <ReviewerAvatar review={review} isCreator={isCreator} />
         <div className="min-w-0">
           <p
-            className={`font-bold text-[15px] leading-tight text-ink truncate ${
+            className={`font-bold text-[15px] leading-tight text-ink break-words ${
               isCreator ? "ri-review-champagne-text" : ""
             }`}
           >
@@ -291,7 +291,6 @@ function AutoReviewCarousel({ reviews }) {
     wheelAt: -Infinity,
     interactedAt: -Infinity,
     wake: null,
-    centered: false,
   });
   const [groupCount, setGroupCount] = useState(1);
 
@@ -314,11 +313,8 @@ function AutoReviewCarousel({ reviews }) {
         return;
       }
       if (motion.groupWidth !== groupWidth) {
-        const firstCardWidth = firstGroup.firstElementChild?.offsetWidth || 0;
-        const startOffset = motion.centered ? 0 : Math.max(0, (viewport.clientWidth - firstCardWidth) / 2);
-        const position = motion.groupWidth ? readReviewScroll(viewport, motion) : viewport.scrollLeft - startOffset;
+        const position = motion.groupWidth ? readReviewScroll(viewport, motion) : viewport.scrollLeft;
         motion.groupWidth = groupWidth;
-        motion.centered = true;
         commitReviewScroll(viewport, motion, position);
       }
     };

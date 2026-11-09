@@ -20,8 +20,8 @@ describe("review carousel design", () => {
     );
     expect(componentSource).toContain("function AutoReviewCarousel");
     expect(componentSource).toContain("ri-reviews-auto-track");
-    expect(componentSource).toContain("${REVIEW_CARD_WIDTH} min-h-[232px]");
-    expect(componentSource).toContain('const REVIEW_CARD_WIDTH = "w-[320px] sm:w-[380px]";');
+    expect(componentSource).toContain("flex flex-col ${REVIEW_CARD_WIDTH} p-5 sm:py-4");
+    expect(componentSource).toContain('const REVIEW_CARD_WIDTH = "w-[320px] sm:w-[410px]";');
     expect(componentSource).toContain("Array.from({ length: groupCount }");
     expect(componentSource).toContain("“{review.text}”");
     expect(componentSource).toContain("AUTO_SCROLL_PIXELS_PER_SECOND = 24");
@@ -53,7 +53,7 @@ describe("review carousel design", () => {
       'className="ri-review-champagne-text text-[28px]"'
     );
     expect(componentSource).toContain(
-      'className="ri-review-champagne-text text-xs font-bold'
+      'className="ri-review-stars ri-review-champagne-text text-xs font-bold'
     );
     expect(stylesheet).toContain(".ri-review-champagne-text");
     expect(stylesheet).toContain("#fadb78 52%");

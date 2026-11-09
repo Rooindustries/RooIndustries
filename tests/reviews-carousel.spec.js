@@ -625,6 +625,55 @@ test.describe("review carousel", () => {
     });
   }
 
+  for (const width of [390, 1024, 1440]) {
+    test(`cards-fit-and-line-up-${width}`, async ({ page }) => {
+      const region = await openCarousel(page, { width, height: 900 });
+      const layout = await region.evaluate((el) => {
+        const view = el.getBoundingClientRect();
+        const cards = [...el.querySelectorAll(".ri-review-card")];
+        const clipped = cards.filter((card) => {
+          const box = card.getBoundingClientRect();
+          return [...card.querySelectorAll("*")]
+            .filter((node) => !node.closest(".sr-only") && node.getBoundingClientRect().width > 1)
+            .some((node) => {
+              const rect = node.getBoundingClientRect();
+              const style = getComputedStyle(node);
+              return rect.right > box.right + 1 || rect.bottom > box.bottom + 1 || style.textOverflow === "ellipsis" ||
+                (style.overflow !== "visible" && (node.scrollWidth > node.clientWidth + 1 || node.scrollHeight > node.clientHeight + 1));
+            });
+        }).map((card) => card.dataset.reviewId);
+        const group = el.firstElementChild.children[1];
+        const first = group.firstElementChild.getBoundingClientRect();
+        const previous = el.firstElementChild.children[0].lastElementChild.getBoundingClientRect();
+        const mask = getComputedStyle(el).maskImage;
+        const stops = [...mask.matchAll(/([\d.]+)px/g)].map((match) => Number(match[1]));
+        const drift = el.scrollLeft - el.firstElementChild.firstElementChild.scrollWidth;
+        return {
+          heights: [...new Set(cards.map((card) => Math.round(card.getBoundingClientRect().height)))],
+          clipped,
+          drift,
+          clear: stops[0],
+          fade: stops[1],
+          firstLeft: first.left - view.left + drift,
+          firstRight: first.right - view.left + drift,
+          previousRight: previous.right - view.left + drift,
+          width: view.width,
+        };
+      });
+      writeEvidence(`cards-fit-and-line-up-${width}`, layout);
+      expect(layout.heights).toHaveLength(1);
+      expect(layout.clipped).toEqual([]);
+      expect(Math.abs(layout.drift)).toBeLessThan(120);
+      if (width < 640) {
+        expect(Math.abs(layout.firstLeft - (layout.width - layout.firstRight))).toBeLessThanOrEqual(2);
+      } else {
+        expect(layout.firstLeft).toBeGreaterThanOrEqual(layout.fade - 0.5);
+        expect(layout.firstRight).toBeLessThanOrEqual(layout.width - layout.fade + 0.5);
+        expect(layout.previousRight).toBeLessThanOrEqual(layout.clear + 0.5);
+      }
+    });
+  }
+
   test("idle-frames-offscreen", async ({ page }) => {
     await page.addInitScript(() => {
       const requestFrame = window.requestAnimationFrame.bind(window);
