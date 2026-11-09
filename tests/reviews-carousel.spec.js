@@ -753,6 +753,7 @@ test.describe("review carousel", () => {
     const region = await openCarousel(page, { width: 390, height: 844 });
     await expect(page.getByRole("button", { name: "Scroll reviews left" })).toBeHidden();
     await expect(page.getByRole("button", { name: "Scroll reviews right" })).toBeHidden();
+    await expect(page.getByRole("button", { name: /^(Pause|Play) reviews$/ })).toBeHidden();
     const spilled = await page.locator(".ri-review-card").evaluateAll((cards) => cards
       .filter((card) => {
         const edge = card.getBoundingClientRect().right + 1;
@@ -818,7 +819,7 @@ test.describe("review carousel", () => {
       await expect(right).toBeVisible();
       const inspect = (state) => region.evaluate((el, state) => {
         const view = el.getBoundingClientRect();
-        const buttons = [...document.querySelectorAll('button[aria-label^="Scroll reviews"]')].map((button) => ({
+        const buttons = [...document.querySelectorAll('button[aria-label^="Scroll reviews"], button[aria-label$=" reviews"]')].map((button) => ({
           label: button.getAttribute("aria-label"),
           rect: button.getBoundingClientRect(),
         }));
@@ -859,7 +860,7 @@ test.describe("review carousel", () => {
         writeEvidence(`arrows-never-cover-review-text-${width}`, states);
         expect(result.lines, state).toBeGreaterThan(0);
         expect(result.covered, state).toEqual([]);
-        expect(result.overlap.map(({ px }) => px), state).toEqual([0, 0]);
+        expect(result.overlap.map(({ px }) => px), state).toEqual([0, 0, 0]);
       };
       await record("rest");
       await page.keyboard.press("Shift");
@@ -918,34 +919,80 @@ test.describe("review carousel", () => {
     });
   }
 
-  test("arrows-wait-for-the-carousel-script", async ({ page }) => {
-    await page.setViewportSize(DESKTOP);
-    const blocked = [];
-    await page.route(/\/_next\/static\/chunks\//, (route) => {
-      blocked.push(route.request().url());
-      return route.abort();
+  test("pause-button-stops-autoplay-until-played", async ({ page }) => {
+    await page.addInitScript(() => {
+      const requestFrame = window.requestAnimationFrame.bind(window);
+      window.__rafCount = 0;
+      window.requestAnimationFrame = (callback) => {
+        window.__rafCount += 1;
+        return requestFrame(callback);
+      };
     });
-    await page.goto("/", { waitUntil: "load" });
-    const region = page.getByRole("region", { name: "Player reviews" });
-    await region.scrollIntoViewIfNeeded();
-    const arrows = page.locator('button[aria-label^="Scroll reviews"]');
-    const withoutScript = {
-      blockedChunks: blocked.length,
-      cards: await region.locator(".ri-review-card").count(),
-      visibleArrows: await arrows.evaluateAll((buttons) => buttons.filter((button) => button.checkVisibility({ visibilityProperty: true })).length),
+    const region = await openCarousel(page);
+    await waitForAutoplay(page, region);
+    const pause = page.getByRole("button", { name: "Pause reviews" });
+    const play = page.getByRole("button", { name: "Play reviews" });
+    const travel = async (ms) => {
+      const recording = await probe(page, "record", ms);
+      const points = unwrap(recording.samples, recording.groupWidth);
+      return round(points[points.length - 1].u - points[0].u);
     };
-    await page.unroute(/\/_next\/static\/chunks\//);
-    await openCarousel(page);
-    const withScript = {
-      visibleArrows: await arrows.evaluateAll((buttons) => buttons.filter((button) => button.checkVisibility({ visibilityProperty: true })).length),
-      scrollbarPx: await region.evaluate((el) => el.offsetHeight - el.clientHeight),
+    const rafCount = () => page.evaluate(() => window.__rafCount);
+
+    await expect(pause).toBeVisible();
+    const box = await pause.boundingBox();
+    const regionBox = await region.boundingBox();
+    await pause.click();
+    await page.mouse.move(regionBox.x + regionBox.width / 2, regionBox.y + regionBox.height / 2);
+    await page.mouse.move(10, 10);
+    await expect(play).toBeVisible();
+    await page.waitForTimeout(200);
+    const framesBefore = await rafCount();
+    await page.waitForTimeout(1000);
+    const idleFrames = (await rafCount()) - framesBefore;
+    const pausedByMouse = await travel(3500);
+
+    await page.mouse.move(regionBox.x + regionBox.width / 2, regionBox.y + regionBox.height / 2);
+    await page.mouse.wheel(120, 0);
+    await page.mouse.move(10, 10);
+    await page.waitForTimeout(400);
+    const pausedAfterWheel = await travel(3000);
+    await expect(play).toBeVisible();
+
+    await play.focus();
+    await page.keyboard.press("Enter");
+    await expect(pause).toBeFocused();
+    await page.waitForTimeout(2600);
+    const resumedByKeyboard = await travel(1500);
+
+    await page.keyboard.press("Space");
+    await expect(play).toBeFocused();
+    await page.waitForTimeout(300);
+    const pausedByKeyboard = await travel(3000);
+
+    await play.click();
+    await page.mouse.move(10, 10);
+    await page.waitForTimeout(2600);
+    const resumedByMouse = await travel(1500);
+
+    const result = {
+      button: { width: round(box.width), height: round(box.height), left: round(box.x - regionBox.x), bottom: round(regionBox.y + regionBox.height - (box.y + box.height)) },
+      idleFramesWhilePaused: idleFrames,
+      pausedByMousePx: pausedByMouse,
+      pausedAfterWheelPx: pausedAfterWheel,
+      resumedByKeyboardPx: resumedByKeyboard,
+      pausedByKeyboardPx: pausedByKeyboard,
+      resumedByMousePx: resumedByMouse,
     };
-    writeEvidence("arrows-wait-for-the-carousel-script", { withoutScript, withScript });
-    expect(withoutScript.blockedChunks).toBeGreaterThan(0);
-    expect(withoutScript.cards).toBeGreaterThan(0);
-    expect(withoutScript.visibleArrows).toBe(0);
-    expect(withScript.visibleArrows).toBe(2);
-    expect(withScript.scrollbarPx).toBe(0);
+    writeEvidence("pause-button-stops-autoplay-until-played", result);
+    expect(result.button.width).toBeGreaterThanOrEqual(24);
+    expect(result.button.height).toBeGreaterThanOrEqual(24);
+    expect(idleFrames).toBeLessThanOrEqual(2);
+    expect(Math.abs(pausedByMouse)).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(pausedAfterWheel)).toBeLessThanOrEqual(0.5);
+    expect(resumedByKeyboard).toBeGreaterThanOrEqual(CRUISE * 1.5 * 0.7);
+    expect(Math.abs(pausedByKeyboard)).toBeLessThanOrEqual(0.5);
+    expect(resumedByMouse).toBeGreaterThanOrEqual(CRUISE * 1.5 * 0.7);
   });
 
   test("idle-frames-offscreen", async ({ page }) => {
@@ -1023,6 +1070,101 @@ test.describe("review carousel", () => {
     expect(resumedMs).not.toBeNull();
     expect(resumedDelta).toBeGreaterThanOrEqual(5);
   });
+});
+
+const controlButtons = 'button[aria-label^="Scroll reviews"], button[aria-label$=" reviews"]';
+const visibleControls = (page) =>
+  page.locator(controlButtons).evaluateAll((buttons) => buttons.filter((button) => button.checkVisibility({ visibilityProperty: true })).length);
+const frameState = (region) =>
+  region.evaluate((el) => ({
+    scrollLeft: el.scrollLeft,
+    scrollWidth: el.scrollWidth,
+    clientWidth: el.clientWidth,
+    scrollbarPx: el.offsetHeight - el.clientHeight,
+    frameHeight: el.closest("section").getBoundingClientRect().height,
+  }));
+const dragScrollbar = async (page, region, start) => {
+  const box = await region.boundingBox();
+  const thumb = (start.clientWidth * start.clientWidth) / start.scrollWidth;
+  const y = box.y + box.height - start.scrollbarPx / 2;
+  const x = box.x + Math.max(thumb / 2, 40);
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + 200, y, { steps: 10 });
+  await page.mouse.up();
+  return (await frameState(region)).scrollLeft;
+};
+const swipe = async (page, region) => {
+  const box = await region.boundingBox();
+  const session = await page.context().newCDPSession(page);
+  await session.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
+  const x = Math.round(box.x + box.width / 2);
+  const y = Math.round(box.y + box.height / 2);
+  await session.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+  for (let step = 1; step <= 12; step += 1) {
+    await session.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: x - step * 20, y }] });
+    await page.waitForTimeout(16);
+  }
+  await session.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await session.send("Emulation.setTouchEmulationEnabled", { enabled: false });
+  await session.detach();
+  await page.waitForTimeout(500);
+  return (await frameState(region)).scrollLeft;
+};
+const expectFallbackNavigation = async (page, region, name) => {
+  await region.evaluate((el) => el.scrollIntoView({ block: "center", behavior: "instant" }));
+  const start = await frameState(region);
+  const controls = await visibleControls(page);
+  expect(start.scrollWidth).toBeGreaterThan(start.clientWidth);
+  expect(controls).toBe(0);
+  expect(start.scrollbarPx).toBeGreaterThan(0);
+  const rewind = () => region.evaluate((el) => {
+    el.scrollLeft = 0;
+  });
+  await rewind();
+  const dragged = await dragScrollbar(page, region, start);
+  await rewind();
+  const swiped = await swipe(page, region);
+  await rewind();
+  await region.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect.poll(async () => (await frameState(region)).scrollLeft).toBeGreaterThan(0);
+  const keyed = (await frameState(region)).scrollLeft;
+  const result = { visibleControls: controls, start, draggedScrollLeft: dragged, swipedScrollLeft: swiped, keyedScrollLeft: keyed };
+  writeEvidence(name, result);
+  expect(dragged).toBeGreaterThan(100);
+  expect(swiped).toBeGreaterThan(100);
+  expect(keyed).toBeGreaterThan(0);
+  return result;
+};
+
+test.describe("review carousel when its script fails", () => {
+  test.skip(REVIEW_COUNT === 2, "Runs against the default four-review fixture.");
+
+  for (const width of [390, 1024, 1440]) {
+    test(`script-failure-keeps-scrolling-${width}`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      const blocked = [];
+      await page.route(/\/_next\/static\/chunks\//, (route) => {
+        blocked.push(route.request().url());
+        return route.abort();
+      });
+      await page.goto("/", { waitUntil: "load" });
+      const region = page.getByRole("region", { name: "Player reviews" });
+      const failed = await expectFallbackNavigation(page, region, `script-failure-keeps-scrolling-${width}`);
+      expect(blocked.length).toBeGreaterThan(0);
+      await region.screenshot({ path: path.join(EVIDENCE_DIR, `script-failure-${width}.png`) });
+
+      await page.unroute(/\/_next\/static\/chunks\//);
+      await openCarousel(page, { width, height: 900 });
+      const working = await frameState(region);
+      const controls = await visibleControls(page);
+      writeEvidence(`script-failure-keeps-scrolling-${width}-then-loaded`, { failed, working, controls });
+      expect(working.scrollbarPx).toBe(0);
+      expect(controls).toBe(width < 640 ? 0 : 3);
+      expect(Math.abs(working.frameHeight - failed.start.frameHeight)).toBeLessThanOrEqual(1);
+    });
+  }
 });
 
 test.describe("review carousel with two reviews", () => {
@@ -1200,6 +1342,76 @@ test.describe("review carousel with long words", () => {
   }
 });
 
+test.describe("review carousel FPS results", () => {
+  test.skip(REVIEW_COUNT === 2, "Runs against the default four-review fixture.");
+
+  const results = [
+    { name: "Boosted", value: "FPS Boosted", styled: false },
+    { name: "Ascii arrow", value: "Avg FPS: 200 -> 360", styled: true, label: "Avg FPS:", arrow: "->" },
+    { name: "Bare numbers", value: "200 to 240", styled: true, label: null, arrow: "to" },
+    { name: "Lows", value: "1% Lows: 220 → 375", styled: true, label: "1% Lows:", arrow: "→" },
+    { name: "With note", value: "Average FPS: 144 → 240 in ranked", styled: true, label: "Average FPS:", arrow: "→" },
+    { name: "Sentence", value: "Smoother frametimes and zero stutter spikes after the tune", styled: false },
+  ];
+  const cms = results.map(({ name, value }, index) => ({
+    name,
+    isVip: index % 2 === 0,
+    profession: "Top 500 Support Main",
+    text: "The session helped me compare my PC's performance.",
+    game: "Overwatch 2",
+    rating: 5,
+    optimizationResult: value,
+  }));
+
+  test.beforeAll(async ({ request, baseURL }) => {
+    test.setTimeout(120000);
+    await control(request, baseURL, { patch: { _id: "tooling-proReviewsCarousel", reviews: cms } });
+    await waitForHome(request, "Smoother frametimes");
+  });
+
+  test.afterAll(async ({ request, baseURL }) => {
+    test.setTimeout(120000);
+    await control(request, baseURL, { reset: true });
+    await waitForHome(request, "Reviewer 3");
+  });
+
+  for (const width of [390, 1024, 1440]) {
+    test(`fps-results-show-cms-text-${width}`, async ({ page }) => {
+      const region = await openCarousel(page, { width, height: 900 });
+      const layout = await cardLayout(region);
+      const shown = await region.evaluate((el) =>
+        [...el.querySelectorAll('[data-group-index="0"]')].map((card) => {
+          const result = card.querySelector(".ri-review-result");
+          const after = result?.querySelector(".ri-review-champagne-text.text-\\[28px\\]");
+          return {
+            id: card.dataset.reviewId,
+            text: result ? result.textContent : null,
+            label: result?.querySelector(".ri-review-result-label")?.textContent ?? null,
+            arrow: result?.querySelector(".ri-review-result-arrow")?.textContent ?? null,
+            afterSize: after ? getComputedStyle(after).fontSize : null,
+          };
+        })
+      );
+      writeEvidence(`fps-results-show-cms-text-${width}`, { shown, spilled: layout.spilled, clipped: layout.clipped, heights: layout.heights });
+      await region.screenshot({ path: path.join(EVIDENCE_DIR, `fps-results-${width}.png`) });
+      const squash = (text) => String(text).replace(/\s+/g, "");
+      for (const expected of results) {
+        const card = shown.find((entry) => entry.id === expected.name);
+        expect(card, expected.name).toBeTruthy();
+        expect(squash(card.text), expected.name).toBe(squash(expected.value));
+        expect(card.afterSize, expected.name).toBe(expected.styled ? "28px" : null);
+        if (expected.styled) {
+          expect(card.label, expected.name).toBe(expected.label);
+          expect(card.arrow, expected.name).toBe(expected.arrow);
+        }
+      }
+      expect(layout.spilled).toEqual([]);
+      expect(layout.clipped).toEqual([]);
+      expect(layout.heights).toHaveLength(1);
+    });
+  }
+});
+
 test.describe("review carousel without JavaScript", () => {
   test.skip(REVIEW_COUNT === 2, "Runs against the default four-review fixture.");
   test.use({ javaScriptEnabled: false });
@@ -1225,46 +1437,12 @@ test.describe("review carousel without JavaScript", () => {
     expect(result.firstCardVisible).toBe(true);
   });
 
-  for (const width of [640, 1024, 1440]) {
+  for (const width of [390, 640, 1024, 1440]) {
     test(`no-js-mouse-and-keyboard-navigation-${width}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 });
       await page.goto("/", { waitUntil: "load" });
       const region = page.getByRole("region", { name: "Player reviews" });
-      await region.evaluate((el) => el.scrollIntoView({ block: "center" }));
-      const arrows = page.locator('button[aria-label^="Scroll reviews"]');
-      const measure = () => region.evaluate((el) => ({
-        scrollLeft: el.scrollLeft,
-        scrollWidth: el.scrollWidth,
-        clientWidth: el.clientWidth,
-        scrollbarPx: el.offsetHeight - el.clientHeight,
-      }));
-      const start = await measure();
-      const visibleArrows = await arrows.evaluateAll((buttons) => buttons.filter((button) => button.checkVisibility({ visibilityProperty: true })).length);
-      writeEvidence(`no-js-mouse-and-keyboard-navigation-${width}`, { visibleArrows, start });
-      expect(start.scrollWidth).toBeGreaterThan(start.clientWidth);
-      expect(visibleArrows).toBe(0);
-      expect(start.scrollbarPx).toBeGreaterThan(0);
-      const box = await region.boundingBox();
-      const thumb = (start.clientWidth * start.clientWidth) / start.scrollWidth;
-      const y = box.y + box.height - start.scrollbarPx / 2;
-      await page.mouse.move(box.x + thumb / 2, y);
-      await page.mouse.down();
-      await page.mouse.move(box.x + thumb / 2 + 200, y, { steps: 10 });
-      await page.mouse.up();
-      const dragged = await measure();
-      await region.focus();
-      await page.keyboard.press("ArrowRight");
-      await expect.poll(async () => (await measure()).scrollLeft).toBeGreaterThan(dragged.scrollLeft);
-      const keyed = await measure();
-      const result = {
-        visibleArrows,
-        start,
-        draggedScrollLeft: dragged.scrollLeft,
-        keyedScrollLeft: keyed.scrollLeft,
-      };
-      writeEvidence(`no-js-mouse-and-keyboard-navigation-${width}`, result);
-      expect(result.draggedScrollLeft).toBeGreaterThan(100);
-      expect(result.keyedScrollLeft).toBeGreaterThan(result.draggedScrollLeft);
+      await expectFallbackNavigation(page, region, `no-js-mouse-and-keyboard-navigation-${width}`);
     });
   }
 });

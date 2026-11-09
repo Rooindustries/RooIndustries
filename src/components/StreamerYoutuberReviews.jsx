@@ -21,10 +21,13 @@ const REVIEW_CARD_WIDTH = "w-[320px] sm:w-[410px]";
 const REVIEW_SKELETON_CLASS =
   `${REVIEW_CARD_WIDTH} h-[296px] sm:h-[222px] rounded-2xl bg-skeleton animate-pulse flex-shrink-0`;
 const REVIEW_SWIPE_ONLY_QUERY = "(max-width: 639.98px)";
-const REVIEW_ARROW_CLASS =
-  "hidden sm:grid h-10 w-10 place-items-center rounded-full border border-line-soft " +
-  "bg-panel text-lg leading-none text-ink-secondary shadow-lg hover:border-line-accent hover:text-ink focus-visible:outline " +
+const REVIEW_CONTROL_CLASS =
+  "hidden sm:grid place-items-center rounded-full border border-line-soft " +
+  "bg-panel leading-none text-ink-secondary shadow-lg hover:border-line-accent hover:text-ink focus-visible:outline " +
   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-accent)]";
+const REVIEW_ARROW_CLASS = `${REVIEW_CONTROL_CLASS} h-10 w-10 text-lg`;
+const REVIEW_PAUSE_CLASS = `ri-reviews-pause ${REVIEW_CONTROL_CLASS} h-8 w-8`;
+const FPS_RESULT_PATTERN = /^(.*?)(\d[\d,.]*)\s*(→|->|\bto\b)\s*(\d[\d,.]*)(.*)$/is;
 
 const LEAD_CREATOR_REVIEWERS = ["vulture", "skinzow", "hydro"];
 
@@ -140,7 +143,7 @@ export default function StreamerYoutuberReviews({ initialData = null }) {
   return (
     <section
       ref={sectionRef}
-      className="py-6 sm:py-8 text-center text-ink relative overflow-hidden"
+      className="pt-6 pb-4 sm:pt-8 sm:pb-6 text-center text-ink relative overflow-hidden"
     >
       <div className="px-4 sm:px-6 mb-8">
         <h2 className="ri-reviews-heading section-title">
@@ -152,7 +155,7 @@ export default function StreamerYoutuberReviews({ initialData = null }) {
       </div>
 
       {isLoading ? (
-        <div className="px-4 sm:px-20 flex gap-4 overflow-hidden">
+        <div className="px-4 sm:px-20 pb-2 flex gap-4 overflow-hidden">
           <div className={REVIEW_SKELETON_CLASS} />
           <div className={REVIEW_SKELETON_CLASS} />
           <div className={`hidden lg:block ${REVIEW_SKELETON_CLASS}`} />
@@ -193,15 +196,48 @@ function ReviewerAvatar({ review, isCreator }) {
 }
 
 function parseFpsResult(value) {
-  const text = String(value || "").trim();
+  const text = String(value ?? "").trim();
   if (!text) return null;
-  const match = text.match(/^(.*?):?\s*(\d[\d,.]*)\s*(?:→|->|to)\s*(\d[\d,.]*)$/i);
-  if (!match) return null;
-  return {
-    label: match[1].replace(/:$/, "").trim() || "Average FPS",
-    before: match[2],
-    after: match[3],
-  };
+  const match = text.match(FPS_RESULT_PATTERN);
+  if (!match) return { text };
+  const [, label, before, arrow, after, note] = match;
+  return { label: label.trim(), before, arrow, after, note: note.trim() };
+}
+
+function ReviewResult({ result }) {
+  if (result.text) {
+    return (
+      <span className="ri-review-champagne-text text-lg leading-tight tracking-[-0.02em]">
+        {result.text}
+      </span>
+    );
+  }
+
+  return (
+    <>
+      {result.label && (
+        <span
+          className={`ri-review-result-label ${result.label.endsWith(":") ? "mr-1" : "mr-2"} text-[11px] uppercase tracking-[0.1em] text-ink-secondary`}
+        >
+          {result.label}
+        </span>
+      )}
+      <span className="inline-block">
+        <span className="text-lg text-ink">{result.before}</span>
+        <span className="ri-review-result-arrow mx-1.5 text-base" style={{ color: "#f5c954" }}>
+          {result.arrow}
+        </span>
+        <span className="ri-review-champagne-text text-[28px]">
+          {result.after}
+        </span>
+      </span>
+      {result.note && (
+        <span className="ml-1.5 text-[13px] font-bold leading-tight tracking-normal text-ink-secondary">
+          {result.note}
+        </span>
+      )}
+    </>
+  );
 }
 
 function ReviewCard({ review, groupIndex }) {
@@ -237,18 +273,7 @@ function ReviewCard({ review, groupIndex }) {
       <div className={`ri-review-stats mt-3 flex min-h-4 flex-wrap items-end gap-x-3 gap-y-1 ${result ? "justify-between" : "justify-end"}`}>
         {result && (
           <p className="ri-review-result min-w-0 font-black leading-none tracking-[-0.04em] tabular-nums">
-            <span className="ri-review-result-label mr-2 text-[11px] uppercase tracking-[0.1em] text-ink-secondary">
-              {result.label}
-            </span>
-            <span className="inline-block">
-              <span className="text-lg text-ink">{result.before}</span>
-              <span className="mx-1.5 text-base" style={{ color: "#f5c954" }}>
-                →
-              </span>
-              <span className="ri-review-champagne-text text-[28px]">
-                {result.after}
-              </span>
-            </span>
+            <ReviewResult result={result} />
           </p>
         )}
         <p
@@ -302,9 +327,12 @@ function AutoReviewCarousel({ reviews }) {
     interactedAt: -Infinity,
     shownAt: null,
     wake: null,
+    userPaused: false,
+    updatePause: null,
   });
   const [groupCount, setGroupCount] = useState(1);
   const [ready, setReady] = useState(false);
+  const [autoplayPaused, setAutoplayPaused] = useState(false);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -392,10 +420,12 @@ function AutoReviewCarousel({ reviews }) {
     const swipeOnly = window.matchMedia(REVIEW_SWIPE_ONLY_QUERY);
     const updatePause = () => {
       paused =
+        motion.userPaused ||
         swipeOnly.matches ||
         (isPerfDebugEnabled() && getPerfToggleEnabled(PERF_TOGGLE_KEYS.PAUSE_REVIEWS_AUTOPLAY));
       wake();
     };
+    motion.updatePause = updatePause;
     updatePause();
     window.addEventListener(PERF_DEBUG_EVENT, updatePause);
     swipeOnly.addEventListener("change", updatePause);
@@ -427,6 +457,7 @@ function AutoReviewCarousel({ reviews }) {
     return () => {
       if (frameId) window.cancelAnimationFrame(frameId);
       motion.wake = null;
+      motion.updatePause = null;
       viewport.removeEventListener("scroll", onScroll);
       visibilityObserver?.disconnect();
       window.removeEventListener(PERF_DEBUG_EVENT, updatePause);
@@ -463,6 +494,13 @@ function AutoReviewCarousel({ reviews }) {
     }
     motion.arrow = { from: position, to: target, startedAt: null };
     motion.wake?.();
+  };
+
+  const toggleAutoplay = () => {
+    const motion = motionRef.current;
+    motion.userPaused = !motion.userPaused;
+    setAutoplayPaused(motion.userPaused);
+    motion.updatePause?.();
   };
 
   const onWheel = (event) => {
@@ -510,11 +548,21 @@ function AutoReviewCarousel({ reviews }) {
   };
 
   return (
-    <div className="ri-reviews-frame">
+    <div className="ri-reviews-frame" data-ready={ready ? "" : undefined}>
+      <button
+        type="button"
+        onClick={toggleAutoplay}
+        className={`${REVIEW_PAUSE_CLASS}${ready ? "" : " invisible"}`}
+        aria-label={autoplayPaused ? "Play reviews" : "Pause reviews"}
+      >
+        <svg viewBox="0 0 12 12" className="h-3 w-3" fill="currentColor" aria-hidden="true">
+          {autoplayPaused ? <path d="M3 1.5v9l7.5-4.5z" /> : <path d="M2.5 1.5h2.5v9H2.5zM7 1.5h2.5v9H7z" />}
+        </svg>
+      </button>
       <button
         type="button"
         onClick={() => scrollReviews(-1)}
-        className={`${REVIEW_ARROW_CLASS}${ready ? "" : " invisible"}`}
+        className={`ri-reviews-prev ${REVIEW_ARROW_CLASS}${ready ? "" : " invisible"}`}
         aria-label="Scroll reviews left"
       >
         ←
@@ -569,7 +617,7 @@ function AutoReviewCarousel({ reviews }) {
       <button
         type="button"
         onClick={() => scrollReviews(1)}
-        className={`${REVIEW_ARROW_CLASS}${ready ? "" : " invisible"}`}
+        className={`ri-reviews-next ${REVIEW_ARROW_CLASS}${ready ? "" : " invisible"}`}
         aria-label="Scroll reviews right"
       >
         →
