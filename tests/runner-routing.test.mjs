@@ -65,7 +65,7 @@ const checkForkRouting = (job) => {
     assert.match(forkLabel, GITHUB_HOSTED, `${where} runs forks' pull requests on ${forkLabel}`);
   }
   if (route.variable !== undefined || !vmLabel(route.label)) {
-    const allowed = job.file === "production-smoke.yml" ? ["deployment_status"] : ["push", "pull_request"];
+    const allowed = job.file === "production-smoke.yml" ? ["deployment_status"] : ["push", "pull_request", "merge_group"];
     const untrusted = triggers.filter((trigger) => !allowed.includes(trigger));
     assert.deepEqual(untrusted, [], `${where}: a dedicated runner is reachable from ${untrusted.join(", ")}`);
   }
@@ -82,6 +82,8 @@ test("the routing check rejects routes a fork or an untrusted event could reach"
     ["pull_request", "${{ vars.TESTS_RUNNER || 'ubuntu-24.04' }}"],
     ["pull_request", "roo-site"],
     [["pull_request_target"], template],
+    [["pull_request_target"], "roo-site"],
+    [["pull_request_target", "merge_group"], "roo-site"],
     [{ pull_request_target: null }, "${{ vars.TESTS_RUNNER || 'ubuntu-24.04' }}"],
     [["push", "pull_request"], "self-hosted"],
     [["pull_request_review"], template],
@@ -97,6 +99,8 @@ test("the routing check rejects routes a fork or an untrusted event could reach"
   }
   for (const [on, runsOn] of [
     ["pull_request", template],
+    ["merge_group", template],
+    [["push", "pull_request", "merge_group"], template],
     ["pull_request", "ubuntu-24.04"],
     [["pull_request_target"], "ubuntu-24.04"],
     ["push", "${{ vars.TESTS_RUNNER || 'roo-site' }}"],
