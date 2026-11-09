@@ -1,3 +1,4 @@
+const { routePage, removePageRoutes } = require("./fixtures/held-routes.cjs");
 const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
 const { test, expect } = require("@playwright/test");
 const { fixturePort } = require("./fixtures/fixture-ports.cjs");
@@ -85,8 +86,8 @@ const hold = async (page, pattern, { forward = true, method, reply } = {}) => {
     } catch { /* The client deadline can abort an intentionally held response. */ }
     finished();
   };
-  await page.route(pattern, handler);
-  return { arrived, release: async () => { release(); await completed; await page.unroute(pattern, handler); } };
+  await routePage(page, pattern, handler);
+  return { arrived, release: async () => { release(); await completed; await removePageRoutes(page, pattern, handler); } };
 };
 const evidence = async (page, testInfo, details) => {
   const json = testInfo.outputPath("result.json");
@@ -894,7 +895,7 @@ test("ROO-66 FAQ only opens the canonical document and offers no extra creation"
   await page.setViewportSize({ width: 390, height: 844 });
   const legacy = await cms(request, "/api/admin/content/documents/fixture-faq-legacy");
   const canonical = await cms(request, "/api/admin/content/documents/faq");
-  await page.route("**/api/admin/content/documents?type=faqSection", async route => {
+  await routePage(page, "**/api/admin/content/documents?type=faqSection", async route => {
     const response = await route.fetch();
     const body = await response.json();
     body.data.documents.sort((a, b) => a._id === "faq" ? 1 : b._id === "faq" ? -1 : 0);
@@ -1016,7 +1017,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await login(page); await hero(page);
       const text = `Draft kept after ${status} at ${viewport.width} ${randomUUID()}`;
       await page.getByLabel("Main Heading (Line 1)", { exact: true }).fill(text);
-      await page.route("**/api/admin/content/publish", route => route.fulfill({ status, json: { ok: false, ...(status === 423 ? { code: "CMS_WRITES_PAUSED" } : {}), error: "Publishing is temporarily unavailable." } }));
+      await routePage(page, "**/api/admin/content/publish", route => route.fulfill({ status, json: { ok: false, ...(status === 423 ? { code: "CMS_WRITES_PAUSED" } : {}), error: "Publishing is temporarily unavailable." } }));
       const publish = page.getByRole("button", { name: "Publish", exact: true });
       await positionAction(publish);
       await publish.click();
@@ -1032,7 +1033,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await openReferrals(page); await selectCreator(page, creator);
       const reason = "Service failure check; existing creator settings unchanged.";
       await page.getByRole("textbox", { name: "Reason for change", exact: true }).fill(reason);
-      await page.route("**/api/admin/referral-creators", route => route.request().method() === "PATCH" ? route.fulfill({ status: 503, json: { ok: false, error: "Creator settings could not be saved right now." } }) : route.fallback());
+      await routePage(page, "**/api/admin/referral-creators", route => route.request().method() === "PATCH" ? route.fulfill({ status: 503, json: { ok: false, error: "Creator settings could not be saved right now." } }) : route.fallback());
       const save = page.getByRole("button", { name: "Save creator settings", exact: true });
       await positionAction(save);
       await save.click();
@@ -1105,7 +1106,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     });
 
     test("CMS sign-in clears the current credential error on typing", async ({ page }, testInfo) => {
-      await page.route("**/api/admin/content/session", route => route.request().method() === "POST"
+      await routePage(page, "**/api/admin/content/session", route => route.request().method() === "POST"
         ? route.fulfill({ status: 401, json: { ok: false, error: "Invalid credentials." } })
         : route.fallback());
       await page.goto("/admin/content");
@@ -1270,7 +1271,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await login(page);
         const pattern = source === "list" ? "**/api/admin/content/documents?type=hero" : source === "document" ? `**/api/admin/content/documents/${HERO_ID}` : "**/api/admin/content/session";
         const handler = route => route.fulfill({ status: 503, json: { ok: false, error: `Synthetic ${source} outage`, code: "FIXTURE_FAILURE" } });
-        await page.route(pattern, handler);
+        await routePage(page, pattern, handler);
         if (source === "signout") await page.getByRole("button", { name: "Sign out", exact: true }).click();
         else await choose(page, "Hero Section");
         await expect(page.getByRole("alert").filter({ hasText: `Synthetic ${source} outage` })).toBeVisible();
@@ -1280,7 +1281,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
           await expect(page.getByRole("button", { name: "Sign in", exact: true })).toHaveCount(0);
         }
         await evidence(page, testInfo, { source, serverSessionStillActive: source === "signout" });
-        await page.unroute(pattern, handler);
+        await removePageRoutes(page, pattern, handler);
         await page.getByRole("button", { name: "Retry", exact: true }).click();
         if (source === "signout") {
           await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
@@ -1518,7 +1519,7 @@ for (const committed of [true, false]) {
 test("create receipts keep a failed singleton draft after another create commits", async ({ page, request, baseURL }, testInfo) => {
   const control = `http://127.0.0.1:${fixturePort("TOOLING_ADMIN_CONTROL_PORT")}`;
   expect((await request.post(`${control}/booking-create-fixture/legacy`)).ok()).toBe(true);
-  await page.route("**/api/admin/content/documents?type=bookingSettings", route => route.fulfill({ json: { ok: true, data: { documents: [] } } }));
+  await routePage(page, "**/api/admin/content/documents?type=bookingSettings", route => route.fulfill({ json: { ok: true, data: { documents: [] } } }));
   await login(page); await choose(page, "Booking Settings");
   await page.getByRole("group", { name: "Date-Based Time Slots (Vertex / Default)", exact: true }).getByRole("button", { name: "Add item", exact: true }).click();
   await page.getByLabel("Date", { exact: true }).fill("2099-01-11");
@@ -1605,7 +1606,7 @@ test("create reconciliation refuses a status response without a committed receip
     expect(response.ok(), await response.text()).toBe(true);
     const receipt = (await response.json()).data;
     const content = await cms(request, `/api/admin/content/documents/${receipt.documentId}`);
-    await page.route("**/api/admin/content/publish/status", route => route.fulfill({ json: { ok: true, data: { ...content, documentId: receipt.documentId } } }));
+    await routePage(page, "**/api/admin/content/publish/status", route => route.fulfill({ json: { ok: true, data: { ...content, documentId: receipt.documentId } } }));
     await page.clock.fastForward(31000);
     await expect(page.getByRole("alert").filter({ hasText: /not published.*retry/i })).toBeVisible();
     await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toHaveCount(0);
@@ -1740,7 +1741,7 @@ test("#10 uncertain publication keeps its draft and Retry only reads", async ({ 
   const text = `Uncertain café 日本語 ${original.revision}`;
   await page.getByLabel("Main Heading (Line 1)", { exact: true }).fill(text);
   const failedRead = route => route.fulfill({ status: 503, json: { ok: false, error: "Synthetic reconciliation outage" } });
-  await page.route(`**/api/admin/content/documents/${HERO_ID}`, failedRead);
+  await routePage(page, `**/api/admin/content/documents/${HERO_ID}`, failedRead);
   await page.clock.install();
   const pending = await hold(page, "**/api/admin/content/publish");
   let calls = 0;
@@ -1751,7 +1752,7 @@ test("#10 uncertain publication keeps its draft and Retry only reads", async ({ 
     await expect(page.getByRole("alert").filter({ hasText: /could not confirm.*publication/i })).toBeVisible();
     await expect(page.getByRole("button", { name: "Publish", exact: true })).toBeDisabled();
     expect(await page.evaluate(id => JSON.parse(localStorage.getItem(`roo-content-draft:v1:doc:${id}`))?.document.headingLine1, HERO_ID)).toBe(text);
-    await page.unroute(`**/api/admin/content/documents/${HERO_ID}`, failedRead);
+    await removePageRoutes(page, `**/api/admin/content/documents/${HERO_ID}`, failedRead);
     await page.getByRole("button", { name: "Retry", exact: true }).click();
     await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible();
     expect(calls).toBe(1);
@@ -1878,7 +1879,7 @@ test("content fixture reset removes created documents and preserves referrals", 
 });
 
 test("empty Portable Text exposes validation on its accessible field", async ({ page }, testInfo) => {
-  await page.route("**/api/admin/content/documents/tooling-privacyPolicy", async route => {
+  await routePage(page, "**/api/admin/content/documents/tooling-privacyPolicy", async route => {
     const response = await route.fetch();
     const body = await response.json();
     body.data.document.sections = [{ _key: "empty-validation-section", _type: "object", heading: "Empty text section", content: {} }];

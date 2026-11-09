@@ -1,3 +1,4 @@
+const { routePage, removePageRoutes } = require("./fixtures/held-routes.cjs");
 const { test, expect } = require("./fixtures/booking-flow.cjs");
 const fs = require("node:fs/promises");
 
@@ -23,7 +24,7 @@ const holdValidation = async page => {
   const request = new Promise(resolve => { requested = resolve; });
   const response = page.waitForResponse(validation);
   response.catch(() => {});
-  await page.route(validation, async route => {
+  await routePage(page, validation, async route => {
     calls.push(route.request().url());
     requested();
     await gate;
@@ -37,7 +38,7 @@ const holdValidation = async page => {
     finish: async () => {
       release();
       if (calls.length) await response.then(result => result.finished()).catch(() => {});
-      await page.unrouteAll({ behavior: "wait" });
+      await removePageRoutes(page);
     },
   };
 };

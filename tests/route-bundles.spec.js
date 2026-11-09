@@ -1,3 +1,4 @@
+const { routePage, removePageRoutes } = require("./fixtures/held-routes.cjs");
 const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
 const { test, expect } = require("@playwright/test");
 const fs = require("node:fs");
@@ -112,7 +113,7 @@ for (const [route, title] of [["/contact", "Get In Touch"], ["/privacy", "Privac
       const previousHeading = await page.locator("main h1").first().textContent();
       let delayedContentRequests = 0;
       if (route === "/privacy" && state === "delayed") {
-        await page.route("**/api/content/privacy-policy", async entry => {
+        await routePage(page, "**/api/content/privacy-policy", async entry => {
           delayedContentRequests += 1;
           const response = await entry.fetch();
           await new Promise(resolve => setTimeout(resolve, 1100));
@@ -122,7 +123,7 @@ for (const [route, title] of [["/contact", "Get In Touch"], ["/privacy", "Privac
       let release;
       const gate = new Promise(resolve => { release = resolve; });
       let intercepted = 0;
-      await page.route("**/_next/static/chunks/**", async entry => {
+      await routePage(page, "**/_next/static/chunks/**", async entry => {
         expect(new URL(entry.request().url()).origin).toBe(new URL(baseURL).origin);
         const response = await entry.fetch();
         const body = await response.text();
@@ -166,16 +167,17 @@ for (const [route, title] of [["/contact", "Get In Touch"], ["/privacy", "Privac
           await expect(page.getByRole("heading", { name: "We couldn’t load this page." })).toBeVisible();
           expect(await page.evaluate(() => window.__entryMarker)).toBe("same-document");
           await page.screenshot({ path: testInfo.outputPath("chunk-failure.png"), fullPage: true });
-          await page.unrouteAll({ behavior: "wait" });
+          await removePageRoutes(page);
           await page.getByRole("button", { name: "Reload page", exact: true }).click();
           await expect(page.locator("main h1").first()).toBeVisible();
           await expect(page.getByRole("heading", { name: "We couldn’t load this page." })).toHaveCount(0);
           expect(await page.evaluate(() => window.__entryMarker)).toBeUndefined();
         }
-        await page.unrouteAll({ behavior: "wait" });
+        await removePageRoutes(page);
         await attachJson(testInfo, "chunk-load", { route, state, chunks, intercepted, delayedContentRequests });
       } finally {
         release();
+        await removePageRoutes(page);
       }
     });
   }
@@ -188,7 +190,7 @@ for (const [route, title] of [["/contact", "Get In Touch"], ["/privacy", "Privac
     const gate = new Promise(resolve => { release = resolve; });
     let intercepted = 0;
     let aborted = false;
-    await page.route("**/_next/static/chunks/**", async entry => {
+    await routePage(page, "**/_next/static/chunks/**", async entry => {
       const response = await entry.fetch();
       const body = await response.text();
       if (!body.includes(marker) || intercepted++) return entry.fulfill({ response, body });
@@ -210,6 +212,7 @@ for (const [route, title] of [["/contact", "Get In Touch"], ["/privacy", "Privac
       await attachJson(testInfo, "cancelled-chunk", { route, intercepted, aborted });
     } finally {
       release();
+      await removePageRoutes(page);
     }
   });
 }
@@ -220,7 +223,7 @@ for (const result of ["success", "error"]) {
     await context.addInitScript(() => {
       Object.defineProperty(navigator, "clipboard", { value: { writeText: async value => { window.__copiedEmail = value; } } });
     });
-    await page.route("https://formspree.io/**", async route => {
+    await routePage(page, "https://formspree.io/**", async route => {
       if (route.request().method() === "OPTIONS") {
         return route.fulfill({ status: 204, headers: { "access-control-allow-origin": baseURL, "access-control-allow-headers": "*", "access-control-allow-methods": "POST" } });
       }
@@ -253,7 +256,7 @@ for (const result of ["success", "error"]) {
 }
 
 test("Privacy preserves rich-text links and lists, and Terms still loads", async ({ page }) => {
-  await page.route("**/api/content/privacy-policy", async route => {
+  await routePage(page, "**/api/content/privacy-policy", async route => {
     const response = await route.fetch();
     const body = await response.json();
     body.data.sections.push({ heading: "Synthetic rich text", content: [
@@ -280,7 +283,7 @@ test("Privacy refreshes content after a client-side revisit", async ({ page }) =
   await expect(page.getByRole("heading", { name: "Privacy Policy", exact: true })).toBeVisible();
   await page.goBack();
   await expect(page).toHaveURL(/\/about$/);
-  await page.route("**/api/content/privacy-policy", async route => {
+  await routePage(page, "**/api/content/privacy-policy", async route => {
     const response = await route.fetch();
     const body = await response.json();
     body.data.sections[0].heading = "Refreshed policy content";

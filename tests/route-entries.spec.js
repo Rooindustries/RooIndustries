@@ -1,3 +1,4 @@
+const { routePage, removePageRoutes } = require("./fixtures/held-routes.cjs");
 const { waitForRouteCommitted } = require("./fixtures/react-hydration.cjs");
 const { test, expect } = require("@playwright/test");
 const { fixturePort } = require("./fixtures/fixture-ports.cjs");
@@ -114,7 +115,7 @@ test("a delayed home chunk preserves the current page until navigation is ready"
   let release;
   const gate = new Promise(resolve => { release = resolve; });
   const delayed = [];
-  await page.route("**/_next/static/chunks/**", async route => {
+  await routePage(page, "**/_next/static/chunks/**", async route => {
     const response = await route.fetch();
     const body = await response.text();
     if (body.includes("deferred-section-content")) {
@@ -133,7 +134,7 @@ test("a delayed home chunk preserves the current page until navigation is ready"
     await attach(testInfo, "delayed-home-chunks", delayed);
   } finally {
     release();
-    await page.unrouteAll({ behavior: "wait" });
+    await removePageRoutes(page);
   }
 });
 
@@ -172,7 +173,7 @@ test("a failed home import cannot replace a newer tools navigation", async ({ pa
   const gate = new Promise(resolve => { release = resolve; });
   let intercepted = 0;
   let aborted = false;
-  await page.route("**/_next/static/chunks/**", async route => {
+  await routePage(page, "**/_next/static/chunks/**", async route => {
     const response = await route.fetch();
     const body = await response.text();
     if (body.includes("deferred-section-content")) {
@@ -198,7 +199,7 @@ test("a failed home import cannot replace a newer tools navigation", async ({ pa
     await attach(testInfo, "superseded-home-import", { intercepted, aborted });
   } finally {
     release();
-    await page.unrouteAll({ behavior: "wait" });
+    await removePageRoutes(page);
   }
 });
 

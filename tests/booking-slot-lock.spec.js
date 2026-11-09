@@ -1,3 +1,4 @@
+const { routePage, removePageRoutes } = require("./fixtures/held-routes.cjs");
 const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
 const { test, expect } = require("./fixtures/booking-flow.cjs");
 const fs = require("node:fs/promises");
@@ -41,7 +42,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         let respond;
         let completed;
         const response = new Promise(resolve => { respond = resolve; });
-        await page.route("**/api/holdSlot", async route => {
+        await routePage(page, "**/api/holdSlot", async route => {
           requests.push(route.request().postDataJSON());
           await response;
           if (status === 200) await route.fallback();
@@ -84,7 +85,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         } finally {
           respond();
           await completed;
-          await page.unrouteAll({ behavior: "wait" });
+          await removePageRoutes(page);
         }
       });
     }

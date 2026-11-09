@@ -1,3 +1,4 @@
+const { routePage, removePageRoutes } = require("./fixtures/held-routes.cjs");
 const { test, expect } = require("./fixtures/booking-flow.cjs");
 const { fixturePort } = require("./fixtures/fixture-ports.cjs");
 
@@ -124,7 +125,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
 
       test("missing CMS hero copy falls back to the $400 hero through navigation", async ({ page }, testInfo) => {
         for (const [name, hero] of [["missing", null]]) {
-          await page.route("**/api/content/hero", route => route.fulfill({ json: { ok: true, data: hero } }));
+          await routePage(page, "**/api/content/hero", route => route.fulfill({ json: { ok: true, data: hero } }));
           await page.goto("/packages");
           await page.evaluate(() => { window.__claimsDocument = true; });
           await page.locator('footer a[href="/"]').first().click();
@@ -141,13 +142,13 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
           await checkReviewLink(page);
           await page.goForward();
           await checkHero(page);
-          await page.unroute("**/api/content/hero");
+          await removePageRoutes(page, "**/api/content/hero");
         }
       });
 
       for (const amount of [49, 60]) {
         test(`$${amount} checkout does not promise an unavailable payment method`, async ({ page, flow }, testInfo) => {
-          await page.route("**/api/payment/quote", route => route.fulfill({ json: {
+          await routePage(page, "**/api/payment/quote", route => route.fulfill({ json: {
             ok: true, quoteFingerprint: "fixture-quote",
             quote: { grossAmount: amount, netAmount: amount, isFree: false },
           } }));

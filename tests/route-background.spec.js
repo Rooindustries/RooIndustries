@@ -1,3 +1,4 @@
+const { routePage, removePageRoutes } = require("./fixtures/held-routes.cjs");
 const { waitForRouteCommitted } = require("./fixtures/react-hydration.cjs");
 const { test, expect } = require("./fixtures/booking-flow.cjs");
 const fs = require("node:fs/promises");
@@ -18,7 +19,7 @@ const holdChunk = async (page, marker) => {
   let release;
   const gate = new Promise(resolve => { release = resolve; });
   const chunks = [];
-  await page.route("**/_next/static/chunks/**", async route => {
+  await routePage(page, "**/_next/static/chunks/**", async route => {
     const response = await route.fetch();
     const body = await response.text();
     if (body.includes(marker)) {
@@ -63,7 +64,7 @@ for (const [background, heading] of [["/reviews", "Community Reviews"], ["/bench
         expect(page.__routeErrors).toEqual([]);
       } finally {
         delayed.release();
-        await page.unrouteAll({ behavior: "wait" });
+        await removePageRoutes(page);
         await record(page, testInfo, { route, background, delayedChunks: delayed.chunks });
       }
     });
@@ -104,7 +105,7 @@ for (const origin of ["/packages", "/reviews"]) {
       expect(page.__routeErrors).toEqual([]);
     } finally {
       delayed.release();
-      await page.unrouteAll({ behavior: "wait" });
+      await removePageRoutes(page);
       await record(page, testInfo, { origin, background, delayedChunks: delayed.chunks });
     }
   });
@@ -144,7 +145,7 @@ test.describe("payment step", () => {
 
 
 test("a home section link in View My Plan closes booking and adds its section entry", async ({ page }) => {
-  await page.route("**/api/content/package*", async route => {
+  await routePage(page, "**/api/content/package*", async route => {
     const response = await route.fetch();
     const body = await response.json();
     const addUpgrade = pkg => ({ ...pkg, features: ["Future Upgrade Path"] });

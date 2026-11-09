@@ -1,3 +1,4 @@
+const { routePage, removePageRoutes } = require("./fixtures/held-routes.cjs");
 const { test, expect } = require("./fixtures/booking-flow.cjs");
 const fs = require("node:fs/promises");
 
@@ -19,7 +20,7 @@ const holdCheck = async (page, endpoint) => {
   const request = new Promise(resolve => { requested = resolve; });
   const response = page.waitForResponse(pattern);
   response.catch(() => {});
-  await page.route(pattern, async route => {
+  await routePage(page, pattern, async route => {
     calls.push(route.request().url());
     requested();
     await gate;
@@ -30,7 +31,7 @@ const holdCheck = async (page, endpoint) => {
     finish: async () => {
       release();
       if (calls.length) await response.then(result => result.finished()).catch(() => {});
-      await page.unrouteAll({ behavior: "wait" });
+      await removePageRoutes(page);
     },
   };
 };
@@ -165,7 +166,7 @@ const quoteProviders = {
   paypal: { enabled: false, mode: "test", clientId: "" },
 };
 
-const serverQuote = (page, quoteFor) => page.route("**/api/payment/quote", async route => {
+const serverQuote = (page, quoteFor) => routePage(page, "**/api/payment/quote", async route => {
   const quote = await quoteFor(route.request().postDataJSON() || {});
   await route.fulfill({ json: { ok: true, quoteFingerprint: "fixture-quoted-discounts", quote, providers: quoteProviders } });
 });

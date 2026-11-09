@@ -1,3 +1,4 @@
+const { routePage, removePageRoutes } = require("./fixtures/held-routes.cjs");
 const { test, expect } = require("./fixtures/booking-flow.cjs");
 
 test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata", reducedMotion: "reduce", actionTimeout: 10000 });
@@ -44,7 +45,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       expect(original.draft.packages[original.draft.lastTitle].form.email).toBe("visitor@example.invalid");
 
       for (const failure of [500, "network", 409, 429]) {
-        await page.route("**/api/releaseHold", route => failure === "network"
+        await routePage(page, "**/api/releaseHold", route => failure === "network"
           ? route.abort("failed")
           : route.fulfill({ status: failure, json: { ok: false, message: failure === 409 ? paymentMessage : "Failed to release hold" } }));
         await releaseButton(page).click();
@@ -55,7 +56,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await expectReadable(page, message);
         expect(await savedReservation(page)).toEqual(original);
         await page.screenshot({ path: info.outputPath(`reservation-release-${failure}.png`) });
-        await page.unroute("**/api/releaseHold");
+        await removePageRoutes(page, "**/api/releaseHold");
       }
     });
 
@@ -67,7 +68,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         let respond;
         const response = new Promise(resolve => { respond = resolve; });
         const calls = [];
-        await page.route("**/api/releaseHold", async route => {
+        await routePage(page, "**/api/releaseHold", async route => {
           calls.push(route.request().postDataJSON());
           await response;
           await route.fulfill({ status, json: { ok: status === 200 } });
@@ -84,7 +85,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
           await expect(page).toHaveURL(url => url.pathname === "/");
         } finally {
           respond();
-          await page.unroute("**/api/releaseHold");
+          await removePageRoutes(page, "**/api/releaseHold");
         }
       });
     }
@@ -96,7 +97,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       for (const status of [200, 409]) {
         let respond;
         const response = new Promise(resolve => { respond = resolve; });
-        await page.route("**/api/releaseHold", async route => {
+        await routePage(page, "**/api/releaseHold", async route => {
           await response;
           await route.fulfill({ status, json: { ok: status === 200, message: paymentMessage } });
         });
@@ -112,7 +113,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
           await expect(banner(page).getByRole("alert")).toHaveCount(0);
         } finally {
           respond();
-          await page.unroute("**/api/releaseHold");
+          await removePageRoutes(page, "**/api/releaseHold");
         }
       }
     });
@@ -153,7 +154,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       const original = await savedReservation(page);
       let respond;
       const response = new Promise(resolve => { respond = resolve; });
-      await page.route("**/api/releaseHold", async route => {
+      await routePage(page, "**/api/releaseHold", async route => {
         await response;
         await route.fulfill({ status: 200, json: { ok: true } });
       });
@@ -170,7 +171,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await expect(banner(page)).toHaveCount(0);
       } finally {
         respond();
-        await page.unrouteAll({ behavior: "wait" });
+        await removePageRoutes(page);
       }
     });
 
@@ -180,7 +181,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await closeBooking(page);
       let respond;
       const response = new Promise(resolve => { respond = resolve; });
-      await page.route("**/api/releaseHold", async route => {
+      await routePage(page, "**/api/releaseHold", async route => {
         await response;
         await route.fulfill({ status: 200, json: { ok: true } });
       });
@@ -204,7 +205,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         expect(draft.packages[draft.lastTitle].form.email).toBe("updated@example.invalid");
       } finally {
         respond();
-        await page.unrouteAll({ behavior: "wait" });
+        await removePageRoutes(page);
       }
     });
 
@@ -236,7 +237,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await flow.review();
       await flow.payment();
       const original = await savedReservation(page);
-      await page.route("**/api/releaseHold", route => route.fulfill({ status: 500, json: { ok: false, message: "Failed to release hold" } }));
+      await routePage(page, "**/api/releaseHold", route => route.fulfill({ status: 500, json: { ok: false, message: "Failed to release hold" } }));
       await releaseButton(page).click();
       await expectReadable(page, savedMessage);
       await page.waitForTimeout(5000);

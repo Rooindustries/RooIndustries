@@ -1,6 +1,7 @@
 const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
 const { test, expect } = require("@playwright/test");
 const { navLink } = require("./fixtures/nav-link.cjs");
+const { holdRoutes } = require("./fixtures/held-routes.cjs");
 const http = require("node:http");
 const zlib = require("node:zlib");
 
@@ -13,12 +14,7 @@ test.beforeEach(async ({ context, baseURL }) => {
 
 for (const route of ["/", "/benchmarks", "/reviews", "/tools", "/meet-the-team", "/terms", "/privacy"]) {
   test(`leaving ${route} while its content is loading reports no error`, async ({ page }) => {
-    const held = [];
-    let holding = true;
-    await page.route("**/api/content/**", async (request) => {
-      if (!holding) return request.fallback();
-      held.push(request);
-    });
+    const held = await holdRoutes(page, "**/api/content/**");
     const errors = [];
     page.on("console", (message) => {
       if (message.type() === "error") errors.push(`${message.text()} @ ${page.url()}`);
@@ -26,11 +22,10 @@ for (const route of ["/", "/benchmarks", "/reviews", "/tools", "/meet-the-team",
     page.on("pageerror", (error) => errors.push(`${error.message} @ ${page.url()}`));
 
     await page.goto(route);
-    await expect.poll(() => held.length).toBeGreaterThan(0);
+    await held.wait();
     await page.goto("/contact");
     await expect(page.locator("main h1").first()).toBeVisible();
-    holding = false;
-    await Promise.all(held.map((request) => request.fallback().catch(() => {})));
+    await held.release();
 
     expect(errors).toEqual([]);
   });
@@ -215,22 +210,9 @@ test("a corrupt compressed body is reported even when the visitor leaves right a
   }
 });
 
-const holdContent = async (page, resources) => {
-  const held = [];
-  let holding = true;
-  await page.route("**/api/content/**", async (request) => {
-    const resource = new URL(request.request().url()).pathname.split("/").pop();
-    if (!holding || !resources.includes(resource)) return request.fallback();
-    held.push(request);
-  });
-  return {
-    held,
-    release: async () => {
-      holding = false;
-      await Promise.all(held.map((request) => request.fallback().catch(() => {})));
-    },
-  };
-};
+const holdContent = (page, resources) => holdRoutes(page, "**/api/content/**", request =>
+  resources.includes(new URL(request.url()).pathname.split("/").pop())
+);
 
 const appReports = (errors) => errors.filter((text) => !text.startsWith("Failed to load resource"));
 const settle = (page) => evaluateBrowserTask(page, () => new Promise((resolve) => setTimeout(resolve, 500)));
@@ -241,7 +223,7 @@ test("leaving while the packages section loads its packages reports no error", a
   await page.goto("/contact");
   await page.locator(navLink("plans")).click();
   await expect(page.locator("#packages")).toBeAttached();
-  await expect.poll(() => content.held.some((route) => route.request().url().includes("/packages-list"))).toBe(true);
+  await expect.poll(() => content.requests.some(request => request.url().includes("/packages-list"))).toBe(true);
   await page.goto("/terms");
   await expect(page.locator("main h1").first()).toBeVisible();
   await content.release();
@@ -254,7 +236,7 @@ test("leaving the booking page while its package details load reports no error",
   const content = await holdContent(page, ["package"]);
   const errors = collectConsoleErrors(page);
   await page.goto("/booking");
-  await expect.poll(() => content.held.length).toBeGreaterThan(0);
+  await content.wait();
   await page.goto("/contact");
   await expect(page.locator("main h1").first()).toBeVisible();
   await content.release();
@@ -268,7 +250,7 @@ test("moving away in the app while an upgrade link loads reports no error", asyn
   const errors = collectConsoleErrors(page);
   await page.goto("/upgrade/max");
   await expect(page.getByText("Loading upgrade link...", { exact: true })).toBeVisible();
-  await expect.poll(() => content.held.length).toBe(1);
+  await expect.poll(() => content.requests.length).toBe(1);
   await page.getByRole("link", { name: "Roo Industries Precision Performance Engineering", exact: true }).click();
   await expect(page).toHaveURL(/\/$/);
   await settle(page);
@@ -294,18 +276,18 @@ const availabilityFailed = "Booking availability took too long to load.";
 const unavailable = { status: 503, json: { ok: false, error: "Booking availability unavailable." } };
 
 test("leaving the booking page during its last availability retry reports no error", async ({ page }) => {
-  const held = [];
+  const held = await holdRoutes(page, "**/api/bookingAvailability");
   let failures = 0;
   await page.route("**/api/bookingAvailability", (request) => {
     if (failures++ < 3) return request.fulfill(unavailable);
-    held.push(request);
+    return request.fallback();
   });
   const errors = collectConsoleErrors(page);
   await page.goto("/booking");
-  await expect.poll(() => held.length).toBe(1);
+  await expect.poll(() => held.requests.length).toBe(1);
   await page.goto("/contact");
   await expect(page.locator("main h1").first()).toBeVisible();
-  await Promise.all(held.map((request) => request.fallback().catch(() => {})));
+  await held.release();
   await settle(page);
 
   expect(appReports(errors)).toEqual([]);
@@ -377,16 +359,13 @@ for (const route of ["/upgrade/max", "/upgrade-xoc"]) {
   };
 
   test(`leaving ${route} while its eligibility check runs reports no error`, async ({ page }) => {
-    const held = [];
-    await page.route("**/api/ref/getUpgradeInfo", (request) => {
-      held.push(request);
-    });
+    const held = await holdRoutes(page, "**/api/ref/getUpgradeInfo");
     const errors = collectConsoleErrors(page);
     await checkOrder(page);
-    await expect.poll(() => held.length).toBe(1);
+    await expect.poll(() => held.requests.length).toBe(1);
     await page.goto("/contact");
     await expect(page.locator("main h1").first()).toBeVisible();
-    await Promise.all(held.map((request) => request.fallback().catch(() => {})));
+    await held.release();
     await settle(page);
 
     expect(appReports(errors)).toEqual([]);
