@@ -35,7 +35,8 @@ export const checkGroupReadScale = async ({sql, seed, commerce, fixture, reader}
   const extraIds = [];
   try {
     await insert(sql, documents);
-    if (["payment", "booking-email"].includes(reader)) await sql`select public.roo_project_operational_shadow()`;
+    if (reader === 'payment') await sql`select public.roo_project_operational_shadow()`;
+    if (reader === 'booking-email') await sql`select public.roo_refresh_operational_shadow()`;
     if (reader === 'booking-email') await sql`
       update commerce.email_dispatches dispatch set updated_at = '1900-01-01'
       from commerce.bookings booking
@@ -61,9 +62,14 @@ export const checkGroupReadScale = async ({sql, seed, commerce, fixture, reader}
     } else if (reader === 'booking-email') {
       const {reconcileBookingEmailDispatches} = await import('../../src/server/api/ref/bookingEmails.js');
       const result = await reconcileBookingEmailDispatches({client: commerce, limit: 20});
-      assert.ok(result.scanned >= 4);
+      const ledger = await sql`
+        select booking.legacy_sanity_id, dispatch.status, dispatch.dispatch_kind, dispatch.updated_at
+        from commerce.email_dispatches dispatch join commerce.bookings booking on booking.id = dispatch.booking_id
+        where booking.legacy_sanity_id = any(${documents.map(document => document._id)})
+      `;
       assert.ok(result.unavailable.some(item => item.id === documents[2]._id &&
-        item.code === 'COMMERCE_PAYLOAD_BUDGET_EXCEEDED'));
+        item.code === 'COMMERCE_PAYLOAD_BUDGET_EXCEEDED'), JSON.stringify({result, ledger}));
+      assert.ok(result.scanned >= 4, JSON.stringify({result, ledger}));
       for (const document of documents.filter((_, index) => index !== 2)) {
         const booking = await commerce.getDocument(document._id);
         assert.equal(booking.emailDispatchStatus, 'sent');
