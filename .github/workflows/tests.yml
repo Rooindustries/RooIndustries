@@ -302,7 +302,8 @@ jobs:
         env:
           PW_PORT: ${{ matrix.suite.port }}
           PW_SERVER_ID: ${{ matrix.suite.name }}
-        run: xvfb-run -a npm run ${{ matrix.suite.script }} -- --output=test-results/${{ matrix.suite.name }}
+          PW_SCRIPT: ${{ matrix.suite.script }}
+        run: xvfb-run -a npm run "$PW_SCRIPT" -- --output="test-results/$PW_SERVER_ID"
       - name: Run creator portal against an external fixture server
         if: ${{ !cancelled() && matrix.suite.name == 'creator-portal' }}
         run: npm run test:fixture-ports:browser
@@ -474,7 +475,8 @@ jobs:
         env:
           PW_PORT: ${{ matrix.suite.port }}
           PW_SERVER_ID: ${{ matrix.suite.name }}
-        run: xvfb-run -a npm run ${{ matrix.suite.script }} -- --output=test-results/${{ matrix.suite.name }}
+          PW_SCRIPT: ${{ matrix.suite.script }}
+        run: xvfb-run -a npm run "$PW_SCRIPT" -- --output="test-results/$PW_SERVER_ID"
       - uses: ./.github/actions/save-caches
         with:
           build-dirs: .next-e2e-${{ matrix.suite.name }}/cache/webpack

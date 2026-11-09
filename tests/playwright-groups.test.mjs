@@ -73,7 +73,7 @@ test("the same timings always give the same groups", () => {
 });
 
 test("the workflow gets group files, graceful deadlines and job limits from one measured plan", () => {
-  const jobs = yaml.safeLoad(fs.readFileSync(".github/workflows/tests.yml", "utf8")).jobs;
+  const jobs = yaml.load(fs.readFileSync(".github/workflows/tests.yml", "utf8")).jobs;
   const job = jobs.playwright;
   assert.ok(job.needs.includes("playwright-plan"));
   assert.equal(job.strategy.matrix, "${{ fromJSON(needs.playwright-plan.outputs.matrix) }}");
@@ -131,7 +131,7 @@ test("old file estimates never shorten or inflate the existing job budget", () =
 });
 
 test("every native browser run fits the combined job deadline", () => {
-  const jobs = yaml.safeLoad(fs.readFileSync(".github/workflows/tests.yml", "utf8")).jobs;
+  const jobs = yaml.load(fs.readFileSync(".github/workflows/tests.yml", "utf8")).jobs;
   const job = jobs.native;
   const plan = JSON.parse(execFileSync(process.execPath, ["scripts/playwright-groups.mjs", "native"], {
     encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
@@ -157,7 +157,7 @@ test("every native browser run fits the combined job deadline", () => {
 });
 
 test("every creator-portal run and its route audit fit the same job budget", () => {
-  const jobs = yaml.safeLoad(fs.readFileSync(".github/workflows/tests.yml", "utf8")).jobs;
+  const jobs = yaml.load(fs.readFileSync(".github/workflows/tests.yml", "utf8")).jobs;
   const job = jobs.routes;
   const suites = job.strategy.matrix.suite;
   assert.equal(job["timeout-minutes"], "${{ matrix.suite.timeoutMinutes }}");

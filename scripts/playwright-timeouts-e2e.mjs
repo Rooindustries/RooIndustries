@@ -18,7 +18,7 @@ const require = createRequire(import.meta.url);
 const root = path.resolve(import.meta.dirname, "..");
 const configFile = path.resolve(process.argv[2] || "playwright.config.js");
 const { writeFixturePorts, fixtureInstance } = require(path.join(path.dirname(configFile), "tests/fixtures/fixture-ports.cjs"));
-const workflow = yaml.safeLoad(await fs.readFile(".github/workflows/tests.yml", "utf8"));
+const workflow = yaml.load(await fs.readFile(".github/workflows/tests.yml", "utf8"));
 const output = path.join(root, "test-results");
 await fs.mkdir(output, { recursive: true });
 const artifact = await fs.mkdtemp(path.join(output, "playwright-timeouts-"));
