@@ -15,7 +15,7 @@ const testFile = process.argv.includes('--payment-window')
   : process.argv.includes('--upgrade-credit')
   ? 'tests/upgrade-credit.mjs'
   : 'tests/booking-contact.mjs';
-const result = spawnSync(process.execPath, ['--test', testFile], {
+const result = spawnSync(process.execPath, ['--test', testFile, ...(process.argv.includes('--payment-window') ? ['tests/payment-review-recovery.mjs'] : [])], {
   cwd: new URL('..', import.meta.url),
   env,
   stdio: 'inherit',

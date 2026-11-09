@@ -876,7 +876,7 @@ try{
     const proofPath=`${artifact}.batch-${mode}.json`;fs.writeFileSync(proofPath,JSON.stringify({calls,failures,persisted:await snapshot({receipts:true})},null,2));
     assert.equal(calls[0].result.status,503);assert.equal(calls[0].result.body.summary.failed,1);assert.equal(calls[0].other.status,'abandoned');assert.equal(calls[0].saved.recoveryAttemptCount,1);assert.ok(calls[0].saved.nextRecoveryAt);assert.ok(calls[0].saved.recoveryReason);
     if(mode==='revision-conflict'){assert.equal(calls[0].saved.fixtureConcurrent,'owner retained');assert.equal(failures,1);}
-    else{assert.equal(failures,12);assert.equal(calls[11].saved.reconciliationRecoveryTerminal,true);assert.equal(calls[11].saved.nextRecoveryAt,'9999-12-31T23:59:59.999Z');assert.equal(calls[12].result.status,200);assert.equal(calls[12].result.body.summary.scanned,0);assert.equal(calls[12].saved.recoveryAttemptCount,12);}
+    else{assert.equal(failures,13);assert.equal(calls[11].saved.reconciliationRecoveryTerminal,false);assert.equal(calls[11].saved.recoveryOwnerReviewRequired,true);assert.ok(new originalDate(calls[11].saved.nextRecoveryAt).getTime()<Date.UTC(9999,0,1));assert.equal(calls[12].result.status,503);assert.equal(calls[12].result.body.summary.scanned,1);assert.equal(calls[12].saved.recoveryAttemptCount,12);}
     return{proofPath,failures,independentRecordProcessed:true,nativeRevisionConflict:mode==='revision-conflict',syntheticStorageFault:mode!=='revision-conflict'};
   });
   await run('a1-batch-failure-checkpoint-ownership-transfer-preserved',async()=>{
@@ -1157,13 +1157,22 @@ try{
     const r=await seed('dodo',action==='reconcile'?'finalizing':'started',{record:{bookingId:'',emailDispatchRequired:false,createdAt:new Date(originalNow()-600000).toISOString(),finalizationLeaseExpiresAt:''}});dodoPayment.refund_status='full';const before=await snapshot({receipts:true});const beforeBooking=(await row(bookingId)).payload;const beforeClaims=await sql`select * from commerce.payment_proof_claims`;const result=await requestFlow(action,action==='reconcile'?{}:{paymentAccessToken:tokenFor(r),body:{}});if(action==='reconcile')assert.equal(result.status,200);const saved=await record();assert.notEqual(saved.verificationState,'server_verified');assert.notEqual(saved.status,'booked');assert.notEqual(saved.status,'email_partial');assert.deepEqual((await row(bookingId)).payload,beforeBooking);assert.deepEqual(await sql`select * from commerce.payment_proof_claims`,beforeClaims);const [typed]=await sql`select payment.status,payment.finalization_lease_id,payment.source_revision,source.payload->>'verificationState' as source_verification_state from commerce.payment_records payment join migration.source_documents source using(legacy_sanity_id) where payment.legacy_sanity_id=${recordId}`;assert.notEqual(typed.source_verification_state,'server_verified');const after=await snapshot({receipts:true});
     if(action==='finalize')assert.deepEqual(after,before);else{
       const omit=(value,fields)=>Object.fromEntries(Object.entries(value).filter(([key])=>!fields.includes(key)));
-      const allowedSource=['_rev','_updatedAt','updatedAt','status','finalizationLeaseId','finalizationLeaseExpiresAt','attemptCount','lastAttemptAt','source','events','recoveryReason','recoveryAttemptCount','recoveryFailureCount','reconciliationRecoveryTerminal','nextRecoveryAt'];
+      const allowedSource = [
+        '_rev', '_updatedAt', 'updatedAt', 'status', 'finalizationLeaseId', 'finalizationLeaseExpiresAt',
+        'attemptCount', 'lastAttemptAt', 'source', 'events', 'recoveryReason', 'recoveryAttemptCount',
+        'recoveryFailureCount', 'reconciliationRecoveryTerminal', 'nextRecoveryAt',
+        'providerPaymentState', 'providerStateCheckedAt',
+      ];
       const prior=before.source.find(s=>s.legacy_sanity_id===recordId),next=after.source.find(s=>s.legacy_sanity_id===recordId);assert.deepEqual(omit(next.payload,allowedSource),omit(prior.payload,allowedSource));assert.deepEqual(after.source.filter(s=>s.legacy_sanity_id!==recordId),before.source.filter(s=>s.legacy_sanity_id!==recordId));
       const allowedTyped=['status','quote_fingerprint','recovery_attempt_count','next_recovery_at','source_revision','source_hash','source_updated_at','updated_at','imported_at'];assert.deepEqual(omit(after.tables.payment_records[0].row,allowedTyped),omit(before.tables.payment_records[0].row,allowedTyped));assert.equal(before.tables.payment_records[0].row.quote_fingerprint,`legacy:${before.tables.payment_records[0].row.source_hash}`);assert.equal(after.tables.payment_records[0].row.quote_fingerprint,`legacy:${after.tables.payment_records[0].row.source_hash}`);
       for(const name of ['bookings','refunds','payment_start_claims','payment_proof_claims','payment_upgrade_locks','slot_holds','slot_claims','document_outbox','webhook_receipts'])assert.deepEqual(after.tables[name],before.tables[name]);
       for(const priorRow of before.tables.commerce_outbox)assert.deepEqual(after.tables.commerce_outbox.find(r=>r.row.id===priorRow.row.id),priorRow);
       const newOutbox=after.tables.commerce_outbox.filter(r=>!before.tables.commerce_outbox.some(p=>p.row.id===r.row.id));if(fullChain)assert.equal(newOutbox.length,0);else assert.ok(newOutbox.length);for(const {row:outbox} of newOutbox){assert.deepEqual(outbox.deleted_ids,[]);assert.equal(outbox.documents.length,1);assert.equal(outbox.documents[0]._id,recordId);assert.notEqual(outbox.documents[0].verificationState,'server_verified');}
       assert.equal(saved.recoveryFailureCount,1);assert.equal(saved.reconciliationRecoveryTerminal,false);
+      assert.equal(saved.providerPaymentState, 'unknown');
+      assert.ok(Number.isFinite(Date.parse(saved.providerStateCheckedAt)));
+      assert.ok(Date.parse(saved.providerStateCheckedAt) <= Date.parse(saved.updatedAt));
+      assert.equal(Object.hasOwn(saved,'recoveryOwnerReviewRequired'),false);
       assert.equal(saved.status,'needs_recovery');assert.equal(saved.recoveryReason,'dodo_refund_requires_reconciliation');assert.ok(saved.events.every(e=>!['provider_capture_verified','refund_full'].includes(e.reason)));
     }return{httpStatus:result.status,status:saved.status,typed,noBookingGrant:true,claimsUnchanged:true,fullPersistenceUnchanged:action==='finalize',allowedRecoveryDiagnosticsOnly:action!=='finalize',sourceAndTypedFinancialStateAndResourcesUnchanged:true,typedLegacyQuoteFingerprintFollowsSourceHash:true};
   });
@@ -1328,8 +1337,10 @@ try{
     assert.equal(first.httpStatus, 200);
     const saved = await record();
     assert.equal(saved.recoveryAttemptCount, 12);
-    assert.equal(saved.reconciliationRecoveryTerminal, true);
-    assert.equal(saved.nextRecoveryAt, '9999-12-31T23:59:59.999Z');
+    assert.equal(saved.reconciliationRecoveryTerminal, false);
+    assert.equal(saved.recoveryOwnerReviewRequired, true);
+    assert.ok(Date.parse(saved.nextRecoveryAt) > Date.now());
+    assert.ok(Date.parse(saved.nextRecoveryAt) <= Date.now() + 3600000);
     assert.deepEqual((await row(bookingId)).payload, beforeBooking);
     const before = await snapshot({ receipts: true });
     const next = await flow.reconcilePaymentSessions(args);
@@ -1471,12 +1482,12 @@ try{
         attempts.push((await record()).recoveryFailureCount);
       }
       const exhausted = await record();
-      assert.equal(exhausted.reconciliationRecoveryTerminal, true);
+      assert.equal(exhausted.reconciliationRecoveryTerminal, false);
       assert.deepEqual(attempts, Array.from({ length: 12 }, (_, index) => index + 1));
       await requestFlow('paypal', { req: refundEvent('duplicate-refund-event') });
       const duplicate = await record();
       assert.equal(duplicate.recoveryFailureCount, 12);
-      assert.equal(duplicate.reconciliationRecoveryTerminal, true);
+      assert.equal(duplicate.reconciliationRecoveryTerminal, false);
       assert.equal(duplicate.nextRecoveryAt, exhausted.nextRecoveryAt);
       assert.equal((await requestFlow('reconcile')).body.summary.scanned, 0);
       return { attempts, exhausted, duplicate, realPostgresFailure: true };

@@ -1,4 +1,17 @@
 import { buildBrowserCompletionBody } from "./bookingSummary.js";
+import {
+  buildCaptureVerificationState,
+  buildRecoveryFailureState,
+  buildRecoveryCompletionState,
+  buildOwnerReviewState,
+  logPaymentRecoveryReview,
+} from "./recoveryState.js";
+import {
+  buildPaymentReviewResultAccess,
+  canReadPaymentReviewResult,
+  isPaymentAwaitingReview,
+  isPaymentReviewResult,
+} from "./reviewAccess.js";
 import envValue from "../../supabase/envValue.cjs";
 import { calculateCreatorCommission, originalBookingCommission } from "../../referrals/commissionMoney.js";
 import { isTerminalDisputeStatus, resolveDisputeReferralAccounting } from "../../referrals/disputeAccounting.js";
@@ -117,36 +130,6 @@ const getDodoCaptureAmountUpdates = (record, { totalAmount, taxAmount }) => {
     updates[field] = amount;
   }
   return updates;
-};
-
-const buildRecoveryFailureState = (record) => {
-  const normalizeCount = (value) => {
-    const count = Number(value);
-    return Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
-  };
-  const recoveryAttemptCount = Math.min(12, normalizeCount(record.recoveryAttemptCount) + 1);
-  const recoveryFailureCount = Math.min(12, normalizeCount(record.recoveryFailureCount) + 1);
-  const stopped = recoveryFailureCount >= 12;
-  return {
-    recoveryAttemptCount,
-    recoveryFailureCount,
-    reconciliationRecoveryTerminal: stopped,
-    nextRecoveryAt: stopped ? "9999-12-31T23:59:59.999Z" : getNextPaymentRecoveryAt(recoveryFailureCount),
-  };
-};
-
-const buildRecoveryCompletionState = (record) => ({
-  recoveryFailureCount: 0,
-  reconciliationRecoveryTerminal: record.providerRefundDetailsMissing === true,
-});
-
-const logRecoveryExhaustion = (record, values) => {
-  if (values.reconciliationRecoveryTerminal === true &&
-      values.recoveryFailureCount === 12 && record.reconciliationRecoveryTerminal !== true) {
-    logSafeError(`Payment recovery requires owner review: ${record._id}`, Object.assign(new Error(), {
-      code: "payment_recovery_attempts_exhausted",
-    }));
-  }
 };
 
 const getFutureIso = (seconds) =>
@@ -484,7 +467,7 @@ const getPublicRecoveryMessage = (record = {}) => {
   if (isUpgradeCreditReview(record) && record.recoveryReason === "upgrade_credit_changed_after_quote") {
     return "Your payment was received. Roo Industries will contact you about your upgrade.";
   }
-  if (record.reconciliationRecoveryTerminal === true) {
+  if (record.recoveryOwnerReviewRequired === true || record.reconciliationRecoveryTerminal === true) {
     return "This payment requires manual review. Please contact Roo Industries.";
   }
   if (status === PAYMENT_STATUS_REFUNDED) {
@@ -564,7 +547,8 @@ const buildPublicStatusBody = (record = {}) => ({
   emailDispatch: buildPublicEmailDispatch(record.emailDispatch),
   emailDispatchToken: String(record.emailDispatchToken || "").trim(),
   analyticsReceipt: buildSalesReceipt(record),
-  ...(isUpgradeCreditReview(record) && record.recoveryReason === "upgrade_credit_changed_after_quote"
+  ...(isPaymentAwaitingReview(record) ||
+      (isUpgradeCreditReview(record) && record.recoveryReason === "upgrade_credit_changed_after_quote")
     ? { manualReviewRequired: true } : {}),
 });
 
@@ -910,6 +894,7 @@ const resolveRecordFromAccessToken = async ({
   paymentAccessToken = "",
   allowRecoveryExtension = false,
   allowStatusReadExtension = false,
+  allowReviewResultReadExtension = false,
 }) => {
   const tokenResult = verifyPaymentAccessToken({ token: paymentAccessToken });
   if (!tokenResult.ok && !tokenResult.expired) {
@@ -947,12 +932,19 @@ const resolveRecordFromAccessToken = async ({
     throw error;
   }
 
-  if (tokenResult.expired) {
+  const reviewResultExpired = record.reviewResultAccessUntil && !canReadPaymentReviewResult(record);
+  if (tokenResult.expired || reviewResultExpired) {
     const status = String(record.status || "").trim().toLowerCase();
-    const withinHardCap = isWithinPaymentAccessRecoveryWindow({ payload });
+    const awaitingReview = isPaymentAwaitingReview(record);
+    const withinRecoveryWindow = awaitingReview || (record.reviewResultAccessUntil
+      ? canReadPaymentReviewResult(record)
+      : isWithinPaymentAccessRecoveryWindow({ payload }) ||
+        (allowStatusReadExtension && canReadPaymentReviewResult(record)));
     const recoveryMutationAllowed =
-      allowRecoveryExtension && status === PAYMENT_STATUS_NEEDS_RECOVERY;
-    if (!withinHardCap || (!allowStatusReadExtension && !recoveryMutationAllowed)) {
+      allowRecoveryExtension && (status === PAYMENT_STATUS_NEEDS_RECOVERY || awaitingReview);
+    const reviewResultReadAllowed = allowReviewResultReadExtension &&
+      isPaymentReviewResult(record) && canReadPaymentReviewResult(record);
+    if (!withinRecoveryWindow || (!allowStatusReadExtension && !recoveryMutationAllowed && !reviewResultReadAllowed)) {
       const error = new Error("Payment session expired.");
       error.status = 401;
       error.code = tokenResult.reason || "payment_access_token_expired";
@@ -1188,6 +1180,7 @@ const completeRefundBookingSync = async ({ client, record, sync = null }) => {
         ...(record.providerRefundDetailsMissing !== true ? {
           recoveryAttemptCount: 0,
           recoveryFailureCount: 0,
+          ...buildOwnerReviewState(record, false),
           reconciliationRecoveryTerminal: false,
         } : {}),
         ...(sync ? { refundBookingSync: normalizeObject(sync) } : {}),
@@ -1211,13 +1204,15 @@ const patchPaymentRecord = async ({
     : existingEvents;
   const values = {
     ...set,
+    ...(set.providerPaymentState === "requires_merchant_action" ? { recoveryOwnerReviewRequired: true } : {}),
     ...unconfirmedProviderState(record, set),
+    ...buildPaymentReviewResultAccess(record, set),
     ...(event ? { events: mergedEvents } : {}),
     updatedAt: nowIso(),
   };
   const patch = guardPaymentRevision(client.patch(record._id), record).set(values);
   const committed = await patch.commit();
-  logRecoveryExhaustion(record, values);
+  logPaymentRecoveryReview(record, values);
 
   return {
     ...record,
@@ -1923,6 +1918,7 @@ const holdCapturedUpgradeForReview = async ({ client, record, source, error }) =
       recoveryHttpStatus: 409,
       providerRecoveryTerminal: true,
       providerRecoveryTerminalReason: error.code,
+      ...buildOwnerReviewState(current, true),
       reconciliationRecoveryTerminal: true,
       nextRecoveryAt: "",
       finalizationLeaseId: "",
@@ -2083,6 +2079,7 @@ const markTerminalFinalizeFailure = async ({
       resourceReleaseTargetStatus: "",
       resourceReleaseReason: "",
       recoveryFailureCount: 0,
+      ...buildOwnerReviewState(record, false),
       reconciliationRecoveryTerminal: false,
       finalizationLeaseId: "",
       finalizationLeaseExpiresAt: "",
@@ -2255,6 +2252,51 @@ const finalizePaymentRecordInternal = async ({
     });
   }
 
+  const captureStatus = resolveClientSourceStatus(normalizedSource);
+  const captureAmountUpdates = workingRecord.provider === "dodo"
+    ? getDodoCaptureAmountUpdates(workingRecord, verification) : {};
+  try {
+    workingRecord = await patchPaymentRecord({
+      client,
+      record: workingRecord,
+      set: {
+        status: PAYMENT_STATUS_FINALIZING,
+        providerPaymentId: String(
+          workingRecord.providerPaymentId || verification.providerPaymentId || ""
+        ).trim(),
+        providerSignature: String(
+          workingRecord.providerSignature || providerData.razorpaySignature || ""
+        ).trim(),
+        payerEmail: String(
+          verification.payerEmail || providerData.payerEmail || workingRecord.payerEmail || ""
+        ).trim(),
+        ...buildCaptureVerificationState(workingRecord),
+        ...(Object.keys(captureAmountUpdates).length ? {
+          providerPublicData: { ...workingRecord.providerPublicData, ...captureAmountUpdates },
+        } : {}),
+      },
+      event: buildPaymentRecordEvent({
+        status: captureStatus,
+        source: normalizedSource,
+        reason: "provider_capture_verified",
+        data: {
+          providerOrderId: workingRecord.providerOrderId || "",
+          providerPaymentId:
+            workingRecord.providerPaymentId || verification.providerPaymentId || "",
+        },
+      }),
+    });
+  } catch (error) {
+    if (!isConflictError(error)) throw error;
+    const current = await getPaymentRecordById(client, workingRecord._id);
+    return {
+      ok: false,
+      httpStatus: isPaymentTerminalStatus(current?.status) ? 200 : 202,
+      paymentRecord: current || workingRecord,
+      response: buildPublicStatusBody(current || workingRecord),
+    };
+  }
+
   if (["paypal", "razorpay"].includes(workingRecord.provider) && verification.refundStatus === "partial") {
     workingRecord = await recordVerifiedPartialRefunds({ client, record: workingRecord, verification, source: normalizedSource });
     const current = await currentPaymentOperation({ client, record: workingRecord });
@@ -2270,6 +2312,11 @@ const finalizePaymentRecordInternal = async ({
         verification.providerOrderId || workingRecord.providerOrderId || "",
       providerPaymentId:
         verification.providerPaymentId || workingRecord.providerPaymentId || "",
+    });
+    workingRecord = await patchPaymentRecord({
+      client,
+      record: workingRecord,
+      set: { paymentProofClaimId: String(proofClaim?._id || "").trim() },
     });
   } catch (error) {
     const duplicate = await normalizeMarkedDuplicatePaymentRecord({
@@ -2297,62 +2344,6 @@ const finalizePaymentRecordInternal = async ({
       reason: error?.code || "payment_proof_claim_failed",
       details: providerData,
     });
-  }
-
-  const captureStatus = resolveClientSourceStatus(normalizedSource);
-  const captureAmountUpdates = workingRecord.provider === "dodo"
-    ? getDodoCaptureAmountUpdates(workingRecord, verification) : {};
-  try {
-    workingRecord = await patchPaymentRecord({
-      client,
-      record: workingRecord,
-      set: {
-        status: PAYMENT_STATUS_FINALIZING,
-        providerPaymentId: String(
-          workingRecord.providerPaymentId || verification.providerPaymentId || ""
-        ).trim(),
-        providerSignature: String(
-          workingRecord.providerSignature || providerData.razorpaySignature || ""
-        ).trim(),
-        payerEmail: String(
-          verification.payerEmail || providerData.payerEmail || workingRecord.payerEmail || ""
-        ).trim(),
-        verificationState:
-          String(workingRecord.provider || "").trim().toLowerCase() === "free"
-            ? String(workingRecord.verificationState || "").trim()
-            : "server_verified",
-        verificationWarning: "",
-        ...(workingRecord.provider !== "free" && workingRecord.verificationState !== "server_verified" ? {
-          recoveryAttemptCount: 0,
-          recoveryFailureCount: 0,
-          reconciliationRecoveryTerminal: false,
-          nextRecoveryAt: "",
-        } : {}),
-        paymentProofClaimId: String(proofClaim?._id || "").trim(),
-        ...(Object.keys(captureAmountUpdates).length ? {
-          providerPublicData: { ...workingRecord.providerPublicData, ...captureAmountUpdates },
-        } : {}),
-      },
-      event: buildPaymentRecordEvent({
-        status: captureStatus,
-        source: normalizedSource,
-        reason: "provider_capture_verified",
-        data: {
-          providerOrderId: workingRecord.providerOrderId || "",
-          providerPaymentId:
-            workingRecord.providerPaymentId || verification.providerPaymentId || "",
-        },
-      }),
-    });
-  } catch (error) {
-    if (!isConflictError(error)) throw error;
-    const current = await getPaymentRecordById(client, workingRecord._id);
-    return {
-      ok: false,
-      httpStatus: isPaymentTerminalStatus(current?.status) ? 200 : 202,
-      paymentRecord: current || workingRecord,
-      response: buildPublicStatusBody(current || workingRecord),
-    };
   }
 
   if (lateCaptureFromAbandoned) {
@@ -2721,6 +2712,7 @@ const abandonStartedPaymentRecord = async ({
         resourceReleaseTargetStatus: "",
         resourceReleaseReason: "",
         recoveryFailureCount: 0,
+        ...buildOwnerReviewState(record, false),
         reconciliationRecoveryTerminal: false,
         lateCaptureWatchUntil: shouldWatchForLateCapture
           ? getFutureIso(LATE_CAPTURE_WATCH_HOURS * 60 * 60)
@@ -3459,6 +3451,7 @@ export const finalizePaymentSession = async ({
           ""
       ).trim(),
       allowRecoveryExtension: true,
+      allowReviewResultReadExtension: true,
     });
     client = resolved.client;
   } catch (error) {
@@ -3472,6 +3465,12 @@ export const finalizePaymentSession = async ({
   const record = resolved?.record;
   const binding = validateImmutableProviderBinding({ record, providerData: flatProviderData });
   if (!binding.ok) return { httpStatus: 409, body: { ok: false, code: binding.reason } };
+  if (isPaymentReviewResult(record) && canReadPaymentReviewResult(record)) {
+    return {
+      httpStatus: 200,
+      body: await buildBrowserCompletionBody({ client, record, body: buildPublicStatusBody(record) }),
+    };
+  }
   if (record.provider === "dodo") {
     const result = await refreshDodoPayment({ client, record, source: "reconcile" });
     return { ...result, body: await buildBrowserCompletionBody({ client, record, body: result.body }) };
@@ -3958,6 +3957,7 @@ const recoverCapturedPaymentAsReschedule = async ({
 
   const recoveredProviderOrderId = String(
     providerData.providerOrderId ||
+      providerData.dodoCheckoutSessionId ||
       providerData.paypalOrderId ||
       providerData.razorpayOrderId ||
       record.providerOrderId ||
@@ -3965,11 +3965,23 @@ const recoverCapturedPaymentAsReschedule = async ({
   ).trim();
   const recoveredProviderPaymentId = String(
     providerData.providerPaymentId ||
+      providerData.dodoPaymentId ||
       providerData.paypalPaymentId ||
       providerData.razorpayPaymentId ||
       record.providerPaymentId ||
       ""
   ).trim();
+  if (record.verificationState !== "server_verified") {
+    record = await patchPaymentRecord({
+      client,
+      record,
+      set: {
+        ...buildCaptureVerificationState(record),
+        providerOrderId: recoveredProviderOrderId,
+        providerPaymentId: recoveredProviderPaymentId,
+      },
+    });
+  }
   const recoveryRecord = {
     ...record,
     ...(upgradeFunding ? { bookingPayload: { ...record.bookingPayload, originalOrderId: upgradeFunding.rootOrderId } } : {}),
@@ -4038,6 +4050,7 @@ const recoverCapturedPaymentAsReschedule = async ({
   const recoveryAttemptCount = Number(record.recoveryAttemptCount || 0) + 1;
   const pendingSet = {
     status: PAYMENT_STATUS_EMAIL_PARTIAL,
+    ...buildPaymentReviewResultAccess(record, { status: PAYMENT_STATUS_EMAIL_PARTIAL }),
     providerPaymentId: recoveredProviderPaymentId,
     payerEmail: recoveryRecord.payerEmail,
     verificationState: "server_verified",
@@ -4449,8 +4462,11 @@ export const reconcilePaymentSessions = async ({
     normalizedEmailCompletions,
   };
 
-  for (const record of Array.isArray(records) ? records : []) {
+  for (const candidate of Array.isArray(records) ? records : []) {
+    let record = candidate;
     try {
+      record = await getPaymentRecordById(client, candidate._id);
+      if (!record) continue;
       if (record.providerRecoveryTerminal === true &&
           ["payment_currency_mismatch", "payment_currency_invalid"].includes(record.providerRecoveryTerminalReason)) continue;
       const localStatus = String(record.status || "").trim().toLowerCase();
@@ -4975,7 +4991,7 @@ export const reconcilePaymentSessions = async ({
             ...retry,
             recoveryReason: getSafeErrorCode(error, "payment_reconciliation_record_failed"),
           }, event: buildPaymentRecordEvent({ status: current.status, source: "reconcile",
-            reason: retry.reconciliationRecoveryTerminal ? "payment_reconciliation_owner_review_required" : "payment_reconciliation_record_failed" }) });
+            reason: retry.recoveryOwnerReviewRequired ? "payment_reconciliation_owner_review_required" : "payment_reconciliation_record_failed" }) });
           break;
         } catch (recoveryError) {
           if (isConflictError(recoveryError) && attempt < 4) continue;
@@ -5900,6 +5916,10 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
       httpStatus: 409,
       body: { ok: false, code: validation.reason, error: "The payment does not match this checkout." },
     };
+  }
+  if (payment.status === "requires_merchant_action") {
+    const change = observedProviderState(record, payment.status);
+    if (change.providerPaymentState) record = await patchPaymentRecord({ client, record, set: change });
   }
   requirePaymentRevision(record);
   const disputes = Array.isArray(payment.disputes) ? payment.disputes : [];

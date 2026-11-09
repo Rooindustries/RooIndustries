@@ -30,6 +30,7 @@ import {
   issueBookingEmailDispatchToken,
 } from "./bookingEmailDispatchToken.js";
 import providerConfig from "../payment/providerConfig.js";
+import { buildPaymentReviewResultAccess } from "../payment/reviewAccess.js";
 import {
   DEFAULT_PAYPAL_CURRENCY,
   DEFAULT_RAZORPAY_CURRENCY,
@@ -1685,6 +1686,7 @@ export default async function handler(req, res) {
             revision: paymentRecordForLease._rev,
             set: {
               status: PAYMENT_STATUS_BOOKED,
+              ...buildPaymentReviewResultAccess(paymentRecordForLease, { status: PAYMENT_STATUS_BOOKED }),
               bookingId: bookingDocument._id,
               finalizationLeaseId: "",
               finalizationLeaseExpiresAt: "",
