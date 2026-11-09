@@ -55,7 +55,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const allowEmpty = args.includes("--allow-empty");
   const [dir] = args.filter((arg) => arg !== "--allow-empty");
   if (!dir) {
-    throw new Error("Usage: node scripts/playwright-timings.mjs [--allow-empty] <directory of Playwright JSON reports>");
+    throw new Error(
+      "Usage: node scripts/playwright-timings.mjs [--allow-empty] <directory of Playwright JSON reports>",
+    );
   }
   const reports = reportFiles(dir).map((file) => JSON.parse(fs.readFileSync(file, "utf8")));
   const timings = mergeTimings(reports);
