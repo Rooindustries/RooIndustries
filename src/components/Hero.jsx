@@ -68,6 +68,7 @@ export default function Hero({ initialData = null, initialPackages = null, headi
         const packages = await getPublicContent("packages-list", {}, { signal: packageRequest.signal });
         retry = !getHeroTunePrice(packages);
         if (!cancelled) setFetchedPackages(packages);
+        if (retry && attempt === 2) throw new Error("Unable to find a valid Max package price.");
       } catch (error) {
         if (!cancelled && attempt === 2) reportRequestError(error);
       } finally {

@@ -508,9 +508,8 @@ for (const missing of ['empty list', 'missing Max', 'invalid Max price']) {
   });
 }
 
-for (const status of [200, 503]) {
-const outcome = status === 200 ? 'successful unusable' : 'failed';
-test(`${outcome} package reads keep a finite retry budget`, async ({ page, request }, testInfo) => {
+for (const scenario of ['empty list', 'missing Max', 'invalid Max price', 'failed']) {
+test(`${scenario} package reads report once after the retry budget`, async ({ page, request }, testInfo) => {
   await page.clock.install();
   await page.clock.pauseAt(new Date(Date.now() + 1000));
   expect((await refresh(request)).status()).toBe(200);
@@ -518,16 +517,19 @@ test(`${outcome} package reads keep a finite retry budget`, async ({ page, reque
   let prefetching = true;
   const reports = [];
   page.on('console', message => {
-    if (message.type() === 'error' && message.text().includes('Synthetic package source outage')) {
+    if (message.type() === 'error' && /Synthetic package source outage|Unable to find a valid Max package price/.test(message.text())) {
       reports.push(message.text());
     }
   });
   await page.route('**/api/content/packages-list', route => {
     reads++;
-    const failed = !prefetching && status === 503;
+    const failed = !prefetching && scenario === 'failed';
+    const data = prefetching || scenario === 'empty list' ? [] :
+      scenario === 'missing Max' ? [{ title: 'Other package', price: '$10' }] :
+        [{ title: 'Max', price: null }];
     return route.fulfill({
       status: failed ? 503 : 200,
-      json: failed ? { ok: false, error: 'Synthetic package source outage' } : { ok: true, data: [] },
+      json: failed ? { ok: false, error: 'Synthetic package source outage' } : { ok: true, data },
     });
   });
   await page.goto('/about');
@@ -544,11 +546,11 @@ test(`${outcome} package reads keep a finite retry budget`, async ({ page, reque
   expect(reports).toHaveLength(0);
   await page.clock.fastForward(2000);
   await expect.poll(() => reads).toBe(3);
-  await expect.poll(() => reports.length).toBe(status === 503 ? 1 : 0);
+  await expect.poll(() => reports.length).toBe(1);
   const exhaustedReads = reads;
   await page.clock.fastForward(10000);
   expect(reads).toBe(exhaustedReads);
-  expect(reports).toHaveLength(status === 503 ? 1 : 0);
+  expect(reports).toHaveLength(1);
   await expect(page.locator('#top h1')).toContainText('Why Pay $500 For RAM?');
   await expect(page.locator('#top h1')).toContainText('Tune Yours.');
   await testInfo.attach('finite-package-retries', { body: JSON.stringify({ exhaustedReads, finalReads: reads }), contentType: 'application/json' });
