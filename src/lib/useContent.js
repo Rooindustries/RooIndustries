@@ -1,6 +1,6 @@
 import { useCallback, useContext, useEffect, useSyncExternalStore } from "react";
 import { ContentRevisionContext, ContentVisibleContext } from "./ContentRevisionContext";
-import { loadContent, writeContent, subscribe, readContent, outranks } from "./contentCache";
+import { loadContent, writeContent, subscribe, readContent, outranks, restoreContent } from "./contentCache";
 
 const noEntry = () => undefined;
 
@@ -27,6 +27,7 @@ export function useContent(resource, initialData = null, { enabled = true } = {}
   const cached = useSyncExternalStore(subscribeToResource, readEntry, noEntry);
 
   useEffect(() => {
+    restoreContent(resource);
     if (initialData !== null) seedContent(resource, initialData, snapshotRevision, renderedAt);
   }, [resource, initialData, snapshotRevision, renderedAt]);
 

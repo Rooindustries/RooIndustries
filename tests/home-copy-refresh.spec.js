@@ -312,3 +312,24 @@ for (const exit of ["close", "back"]) {
     await expect(page.locator("#packages").getByText("Offer published during booking", { exact: true })).toBeVisible();
   });
 }
+
+test("a reload keeps the last offers when the content service is offline", async ({ page }) => {
+  const offers = page.locator("#packages");
+  await page.goto("/", { waitUntil: "networkidle" });
+  await hydrated(page);
+  const response = await page.request.get("/api/content/packages-list");
+  const body = await response.json();
+  body.data[0].tag = "Last published offer";
+  body.revision = 999;
+  await page.route("**/api/content/packages-list", route => route.fulfill({ json: body }));
+  await page.clock.install();
+  await returnHome(page);
+  await offers.scrollIntoViewIfNeeded();
+  await expect(offers.getByText("Last published offer", { exact: true })).toBeVisible();
+  await page.unroute("**/api/content/packages-list");
+  await page.route("**/api/content/packages-list", route => route.fulfill({ status: 503, json: { ok: false } }));
+  await page.reload();
+  await hydrated(page);
+  await offers.scrollIntoViewIfNeeded();
+  await expect(offers.getByText("Last published offer", { exact: true })).toBeVisible();
+});

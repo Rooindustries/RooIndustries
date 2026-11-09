@@ -1,17 +1,8 @@
 import { loadContent } from "./contentCache";
 import { contentEntries } from "./contentEntries";
 
-export const HOME_SECTION_DATA_KEYS = Object.freeze({
-  reviews: "reviews",
-  about: "about",
-  services: "services",
-  packagesList: "packages-list",
-  packagesSettings: "packages-settings",
-  howItWorks: "how-it-works",
-  supportedGames: "supported-games",
-  faqSettings: "faq-settings",
-  faqQuestions: "faq-questions",
-});
+export { HOME_SECTION_DATA_KEYS } from "./homeSectionKeys";
+import { HOME_SECTION_DATA_KEYS, homeSectionResources } from "./homeSectionKeys";
 
 export const HOME_SECTION_PREFETCH_BY_HASH = Object.freeze({
   "#services": [
@@ -68,8 +59,6 @@ export const HOME_SECTION_PREFETCH_BY_HASH = Object.freeze({
     HOME_SECTION_DATA_KEYS.faqQuestions,
   ],
 });
-
-const homeSectionResources = new Set(Object.values(HOME_SECTION_DATA_KEYS));
 
 export const readHomeSectionData = (key) => contentEntries.get(key)?.data ?? null;
 

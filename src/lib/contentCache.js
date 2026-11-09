@@ -2,8 +2,11 @@ import { normalizeContent } from "./normalizeContent";
 import { contentEntries as entries } from "./contentEntries";
 import { getPublicContentEntry } from "./publicContentClient";
 import { reportRequestError, requestDeadline } from "./clientRequest";
+import { homeSectionResources } from "./homeSectionKeys";
 
 const CONTENT_MAX_AGE_MS = 60 * 1000;
+const SESSION_MAX_AGE_MS = 5 * 60 * 1000;
+const SESSION_PREFIX = "roo-home-copy:";
 
 const inflight = new Map();
 const listeners = new Map();
@@ -31,10 +34,25 @@ export const writeContent = (resource, data, revision, requestSequence, received
   const next = { data, revision, receivedAt, sequence: requestSequence };
   if (!outranks(next, entries.get(resource))) return;
   entries.set(resource, next);
+  if (typeof window !== "undefined" && homeSectionResources.has(resource)) {
+    try { sessionStorage.setItem(SESSION_PREFIX + resource, JSON.stringify(next)); } catch {}
+  }
   notify(resource);
 };
 
+export const restoreContent = (resource) => {
+  if (typeof window === "undefined" || !homeSectionResources.has(resource) || entries.has(resource)) return;
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(SESSION_PREFIX + resource));
+    if (!saved || !Number.isFinite(saved.receivedAt) || Date.now() - saved.receivedAt > SESSION_MAX_AGE_MS ||
+        !matchesContentType(resource, saved.data)) return;
+    entries.set(resource, { ...saved, sequence: 0 });
+    notify(resource);
+  } catch {}
+};
+
 export const loadContent = (resource) => {
+  restoreContent(resource);
   const current = entries.get(resource);
   if (current && !isStale(current.receivedAt)) return Promise.resolve(current.data);
   const pending = inflight.get(resource);
