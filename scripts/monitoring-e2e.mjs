@@ -38,6 +38,13 @@ let onRequestError;
 let uncaughtUnchanged = false;
 let origin;
 const caughtCases = [
+  ...['package', 'booking', 'paymentRecord', 'referral'].map(documentType => ({
+    name: `document-${documentType}`, label: `Fixture document ${documentType}`,
+    build: () => Object.assign(new Error('private document'), {
+      documentType, id: documentType === 'package' ? 'package.fixture-catalog' : `private-${documentType}-id`,
+      bytes: 260000,
+    }),
+  })),
   { name: 'bare', label: 'Fixture bare continuation', build: () => new Error('request failed\n    at fixture-private-bare') },
   { name: 'frame', label: 'Fixture frame continuation', build: () => new Error('request failed\n    at fake (fixture-private-frame.invalid:42:7)') },
   { name: 'subclass', label: 'Fixture named error', build: () => { const error = new Error('fixture-private-subclass'); error.name = 'FixtureError'; return error; } },
@@ -311,6 +318,15 @@ try {
     const item = events().find(item => item.event.exception?.values?.[0]?.value === (fixture.prefix || fixture.label));
     check(`${fixture.name} has the expected safe report`, Boolean(item), true);
     if (item) {
+      if (fixture.name.startsWith('document-')) {
+        const type = fixture.name.slice('document-'.length);
+        const tags = item.event.tags;
+        check(`${type} keeps document diagnostics`,
+          [tags.document_type, tags.document_count, tags.document_bytes], [type, '1', '260000']);
+        check(`${type} exposes only catalog IDs`, tags.package_id ?? null,
+          type === 'package' ? 'package.fixture-catalog' : null);
+        if (type !== 'package') check(`${type} keeps its ID private`, item.raw.includes(`private-${type}-id`), false);
+      }
       const frames = item.event.exception?.values?.[0]?.stacktrace?.frames ?? [];
       check(`${fixture.name} retains only unambiguous genuine frames`, fixture.emptyFrames ? frames.length : frames.some(frame => frame.filename?.includes('monitoring-e2e.mjs')), fixture.emptyFrames ? 0 : true);
       check(`${fixture.name} has no private message or payment identifier in the envelope`, /fixture-private-|FIXTUREORDER123|FIXTUREPAY123/.test(item.raw), false);

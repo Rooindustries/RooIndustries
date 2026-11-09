@@ -10,7 +10,7 @@ jest.mock("../server/data/documentClient.js", () => ({
   createDataClient: () => ({
     fetch: (...args) => mockWriteFetch(...args),
     async *documentBatches() {
-      yield {documents: await mockReadPackages()};
+      for (const document of await mockReadPackages()) yield {status: "document", document};
     },
     patch: (...args) => mockPatch(...args),
     getDocument: (...args) => mockGetDocument(...args),

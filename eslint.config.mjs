@@ -11,10 +11,19 @@ const ruleSet = (names) => Object.fromEntries(names.map((name) => [`roo/${name}`
 
 export default [
   {
-    files: ["src/**/*.{js,mjs,cjs}"],
-    ignores: ["src/server/supabase/documentClient.js", "src/server/supabase/shadowStore.js", testFiles],
-    rules: {"no-restricted-imports": ["error", {patterns: [{group: ["**/shadowStore*"],
-      importNames: ["fetchShadowDocuments"], message: "Read document groups through SupabaseDocumentClient."}]}]},
+    files: ["src/**/*.{js,jsx,mjs,cjs}", "app/**/*.{js,jsx,mjs,cjs}", "middleware.js"],
+    ignores: ["src/server/supabase/documentClient.js", "src/server/supabase/readShadowDocuments.js", testFiles],
+    rules: {
+      "no-restricted-imports": ["error", {patterns: [{group: ["**/readShadowDocuments*"],
+        message: "Read document groups through SupabaseDocumentClient."}]}],
+      "no-restricted-syntax": ["error",
+        {selector: "ImportExpression[source.value=/readShadowDocuments/]", message: "Use SupabaseDocumentClient."},
+        {selector: "CallExpression[callee.name='require'] > Literal.arguments[value=/readShadowDocuments/]",
+          message: "Use SupabaseDocumentClient."},
+        {selector: "Literal[value=/^roo_fetch_shadow_documents(_targeted)?$/]",
+          message: "Use SupabaseDocumentClient."},
+      ],
+    },
   },
   {
     files: ["src/**/*.{js,jsx,mjs,cjs}", "app/**/*.{js,jsx,mjs,cjs}", "middleware.js"],

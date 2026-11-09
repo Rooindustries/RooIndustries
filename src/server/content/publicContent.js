@@ -60,6 +60,7 @@ const createPublicContentClient = ({ resource, revisions }) => {
     ? ["sanity.imageAsset", "sanity.fileAsset"]
     : [];
   return createSupabaseDocumentClient({
+    ...(resource === "packages-list" ? {batchReads: true} : {}),
     documentTypes: [
       ...(DOCUMENT_TYPES_BY_RESOURCE[resource] || []),
       ...assetDocumentTypes,
@@ -77,6 +78,7 @@ const PUBLIC_CONTENT_READ_ATTEMPTS = 3;
 const readPublicContent = async ({ resource, query, params }) => {
   for (let attempt = 1; attempt <= PUBLIC_CONTENT_READ_ATTEMPTS; attempt += 1) {
     const revisions = new Set();
+    if (resource === "packages-list") revisions.add(await readPublicContentRevision());
     const data = await createPublicContentClient({ resource, revisions }).fetch(query, params);
     if (revisions.size <= 1) {
       return { data: await enrichSupabaseContentAssets({ data }), revision: revisions.size ? [...revisions][0] : null };

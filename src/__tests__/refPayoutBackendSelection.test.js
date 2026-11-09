@@ -58,7 +58,7 @@ const createResponse = () => ({
 const createClients = () => {
   const readClient = {
     documentBatches: jest.fn(async function* () {
-      yield {documents: []};
+      return;
     }),
     fetch: jest.fn((query) =>
       Promise.resolve(String(query).includes('_type == "referral"') ? referral : [])
@@ -182,7 +182,7 @@ describe("referral payout backend selection", () => {
     });
     readClient.fetch.mockResolvedValue({ ...referral, xocPayments: payments });
     readClient.documentBatches.mockImplementation(async function* () {
-      yield {documents: await catalogPending};
+      for (const document of await catalogPending) yield {status: "document", document};
     });
     const response = createResponse();
 
@@ -227,7 +227,7 @@ describe("referral payout backend selection", () => {
         mockFetchReferralEarnings.mockRejectedValueOnce(failure);
       } else {
         readClient.documentBatches.mockImplementation(async function* () {
-          yield {documents: [], error: failure};
+          throw failure;
         });
       }
       const response = createResponse();

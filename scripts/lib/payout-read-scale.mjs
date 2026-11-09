@@ -87,7 +87,7 @@ export const checkPayoutCronScale = async ({sql, seed, documents, commerce, fixt
     select has_function_privilege('anon',
       'public.roo_fetch_shadow_document_sizes(text[],text,integer,text[],jsonb)', 'execute') as anon,
       has_function_privilege('authenticated',
-      'public.roo_fetch_shadow_document_sizes(text[],text,integer)', 'execute') as authenticated
+      'public.roo_fetch_shadow_document_sizes(text[],text,integer,text[],jsonb)', 'execute') as authenticated
   `;
   assert.deepEqual(access, {anon: false, authenticated: false});
   let grew = false;

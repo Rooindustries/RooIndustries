@@ -43,63 +43,62 @@ export const createCronSyncAll = ({now = Date.now, budgetMs = 45000} = {}) => as
     const results = [];
     const afterId = await readClient.referralSyncCursor();
     let complete = true;
-    batches: for await (const batch of readClient.documentBatches({documentTypes: ['referral'], afterId})) {
-      if (batch.error) {
-        logSafeError('Referral cron batch failed', batch.error);
-        for (const id of batch.ids) {
-          results.push({
-            id, updated: false, pending: true,
-            errorCode: String(batch.error.code || 'REFERRAL_SYNC_FAILED').slice(0, 128),
-          });
-        }
-        await writeClient.referralSyncCursor(batch.ids.at(-1));
+    for await (const outcome of readClient.documentBatches({documentTypes: ['referral'], afterId})) {
+      if (results.length && now() - started >= budgetMs) { complete = false; break; }
+      if (outcome.status !== 'document') {
+        logSafeError('Referral cron batch failed', outcome.error);
+        results.push({
+          id: outcome.id, updated: false, pending: true,
+          errorCode: String(outcome.error.code || 'REFERRAL_SYNC_FAILED').slice(0, 128),
+          ...(outcome.bytes && {bytes: outcome.bytes}),
+        });
+        await writeClient.referralSyncCursor(outcome.id);
+        continue;
       }
-      for (const referral of batch.documents) {
-        if (results.length && now() - started >= budgetMs) { complete = false; break batches; }
-        await writeClient.referralSyncCursor(referral._id);
-        try {
-          if (!referral._rev) {
-            throw Object.assign(new Error('Referral source revision is missing'), {status: 409});
-          }
-          const code = (referral.slug?.current || '').toLowerCase();
-          const earnings = await fetchReferralEarnings({
-            client: readClient,
-            referralId: referral._id,
-            referralCode: code,
-          });
-          const paidXoc = sumPayments(referral.xocPayments || []);
-          const paidVertex = sumPayments(referral.vertexPayments || []);
-          const {payments, owed} = buildBalance(earnings, paidXoc, paidVertex);
-          const changed =
-            referral.earnedTotal !== earnings.total ||
-            referral.paidTotal !== payments.total ||
-            referral.owedTotal !== owed.total;
-          if (changed) {
-            await writeClient
-              .patch(referral._id)
-              .ifRevisionId(referral._rev)
-              .set({
-                earnedXoc: earnings.xoc,
-                earnedVertex: earnings.vertex,
-                earnedTotal: earnings.total,
-                paidXoc,
-                paidVertex,
-                paidTotal: payments.total,
-                owedXoc: owed.xoc,
-                owedVertex: owed.vertex,
-                owedTotal: owed.total,
-              })
-              .commit();
-          }
-          results.push({id: referral._id, name: referral.name, updated: changed});
-        } catch (error) {
-          logSafeError('Referral cron item failed', error);
-          results.push({
-            id: referral._id, updated: false, pending: true,
-            errorCode: String(error?.code || 'REFERRAL_SYNC_FAILED').slice(0, 128),
-          });
+      const referral = outcome.document;
+      try {
+        if (!referral._rev) {
+          throw Object.assign(new Error('Referral source revision is missing'), {status: 409});
         }
+        const code = (referral.slug?.current || '').toLowerCase();
+        const earnings = await fetchReferralEarnings({
+          client: readClient,
+          referralId: referral._id,
+          referralCode: code,
+        });
+        const paidXoc = sumPayments(referral.xocPayments || []);
+        const paidVertex = sumPayments(referral.vertexPayments || []);
+        const {payments, owed} = buildBalance(earnings, paidXoc, paidVertex);
+        const changed =
+          referral.earnedTotal !== earnings.total ||
+          referral.paidTotal !== payments.total ||
+          referral.owedTotal !== owed.total;
+        if (changed) {
+          await writeClient
+            .patch(referral._id)
+            .ifRevisionId(referral._rev)
+            .set({
+              earnedXoc: earnings.xoc,
+              earnedVertex: earnings.vertex,
+              earnedTotal: earnings.total,
+              paidXoc,
+              paidVertex,
+              paidTotal: payments.total,
+              owedXoc: owed.xoc,
+              owedVertex: owed.vertex,
+              owedTotal: owed.total,
+            })
+            .commit();
+        }
+        results.push({id: referral._id, name: referral.name, updated: changed});
+      } catch (error) {
+        logSafeError('Referral cron item failed', error);
+        results.push({
+          id: referral._id, updated: false, pending: true,
+          errorCode: String(error?.code || 'REFERRAL_SYNC_FAILED').slice(0, 128),
+        });
       }
+      await writeClient.referralSyncCursor(referral._id);
     }
     if (complete) await writeClient.referralSyncCursor('');
     if (!results.length) {

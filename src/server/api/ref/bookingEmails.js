@@ -945,18 +945,17 @@ export const reconcileBookingEmailDispatches = async ({
   now = new Date().toISOString(),
   limit = 20,
 } = {}) => {
-  const ledgerBookingIds = await listEmailDispatchRecoveryBookingIds({
-    client,
-    dispatchKind: "booking_confirmation",
-    now,
-    limit: 100,
-  });
-  const bookings = Array.isArray(ledgerBookingIds)
-    ? await client.fetch(
-        `*[_type == "booking" && _id in $ids]{...}`,
-        { ids: ledgerBookingIds }
-      )
-    : await client.fetch(
+  const summary = { scanned: 0, sent: 0, pending: 0, unavailable: [] };
+  const eligible = [];
+  const excludedIds = [];
+  const desired = Math.max(1, Math.min(20, Number(limit) || 20));
+  let ledgerBookingIds;
+  do {
+    ledgerBookingIds = await listEmailDispatchRecoveryBookingIds({
+      client, dispatchKind: "booking_confirmation", now, limit: 100, excludedIds,
+    });
+    if (!Array.isArray(ledgerBookingIds)) {
+      const bookings = await client.fetch(
         `*[_type == "booking"
           && emailDispatchStatus in ["partial", "failed", "retry"]
           && (!defined(emailDispatchNextAttemptAt) || emailDispatchNextAttemptAt == "" || emailDispatchNextAttemptAt <= $now)
@@ -964,37 +963,34 @@ export const reconcileBookingEmailDispatches = async ({
         ] | order(emailDispatchNextAttemptAt asc, _updatedAt asc)[0...20]{...}`,
         { now }
       );
-  const summary = { scanned: 0, sent: 0, pending: 0 };
-  const byId = new Map(
-    (Array.isArray(bookings) ? bookings : []).map((booking) => [
-      booking?._id,
-      booking,
-    ])
-  );
-  const ordered = Array.isArray(ledgerBookingIds)
-    ? ledgerBookingIds.map((id) => byId.get(id)).filter(Boolean)
-    : Array.isArray(bookings)
-      ? bookings
-      : [];
-  const eligible = (await Promise.all(ordered.map(async booking => {
-    if (isBookingBlockingStatus(booking.status) || booking.emailDispatchLastError !== "booking_inactive") return booking;
-    if (!Array.isArray(ledgerBookingIds)) return null;
-    const recipientTypes = [["customer", "Client"], ["owner", "Owner"]]
-      .filter(([, name]) => !booking[`emailDispatch${name}SentAt`]).map(([type]) => type);
-    const ledger = await readTerminalBookingEmailDispatches({ client, bookingId: booking._id, recipientTypes });
-    return Object.values(ledger || {}).some(entry => entry?.sent) ? booking : null;
-  }))).filter(Boolean);
-  if (ledgerBookingIds?.length === 100 && eligible.length < Math.min(20, Number(limit) || 20)) {
-    const additional = await client.fetch(`*[_type == "booking"
-      && emailDispatchStatus in ["partial", "failed", "retry"]
-      && emailDispatchLastError != "booking_inactive"
-      && (!defined(emailDispatchNextAttemptAt) || emailDispatchNextAttemptAt == "" || emailDispatchNextAttemptAt <= $now)
-      && (!defined(emailDispatchClientSentAt) || !defined(emailDispatchOwnerSentAt))
-    ] | order(emailDispatchNextAttemptAt asc, _updatedAt asc)[0...20]{...}`, { now });
-    for (const booking of additional || []) {
-      if (!byId.has(booking._id)) eligible.push(booking);
+      eligible.push(...(bookings || []).filter(booking =>
+        isBookingBlockingStatus(booking.status) || booking.emailDispatchLastError !== "booking_inactive"));
+      break;
     }
-  }
+    if (!ledgerBookingIds.length) break;
+    excludedIds.push(...ledgerBookingIds);
+    const byId = new Map();
+    for await (const outcome of client.documentBatches({documentTypes: ["booking"], ids: ledgerBookingIds})) {
+      if (outcome.status === "document") byId.set(outcome.id, outcome.document);
+      else {
+        logSafeError("Booking email recovery document unavailable", outcome.error);
+        summary.pending += 1;
+        summary.unavailable.push({id: outcome.id, code: outcome.error.code, ...(outcome.bytes && {bytes: outcome.bytes})});
+      }
+    }
+    for (const id of ledgerBookingIds) {
+      const booking = byId.get(id);
+      if (!booking) continue;
+      if (isBookingBlockingStatus(booking.status) || booking.emailDispatchLastError !== "booking_inactive") {
+        eligible.push(booking);
+        continue;
+      }
+      const recipientTypes = [["customer", "Client"], ["owner", "Owner"]]
+        .filter(([, name]) => !booking[`emailDispatch${name}SentAt`]).map(([type]) => type);
+      const ledger = await readTerminalBookingEmailDispatches({ client, bookingId: booking._id, recipientTypes });
+      if (Object.values(ledger || {}).some(entry => entry?.sent)) eligible.push(booking);
+    }
+  } while (ledgerBookingIds.length === 100 && eligible.length < desired);
   const selected = eligible.slice(0, Math.max(1, Math.min(20, Number(limit) || 20)));
   for (const booking of selected) {
     summary.scanned += 1;

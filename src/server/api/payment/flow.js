@@ -4408,6 +4408,7 @@ export const reconcilePaymentSessions = async ({
   );
 
   let records = await fetchRecoveryRecords();
+  const unavailable = new Map((records?.unavailable || []).map(item => [item.id, item]));
   let normalizedEmailCompletions = 0;
   for (const record of Array.isArray(records) ? records : []) {
     if (!isEmailDispatchComplete(record.emailDispatch)) continue;
@@ -4435,7 +4436,10 @@ export const reconcilePaymentSessions = async ({
     }
   }
 
-  if (normalizedEmailCompletions > 0) records = await fetchRecoveryRecords();
+  if (normalizedEmailCompletions > 0) {
+    records = await fetchRecoveryRecords();
+    for (const item of records?.unavailable || []) unavailable.set(item.id, item);
+  }
 
   const summary = {
     scanned: 0,
@@ -4447,6 +4451,7 @@ export const reconcilePaymentSessions = async ({
     refundsSynced: 0,
     failed: 0,
     normalizedEmailCompletions,
+    unavailable: [...unavailable.values()],
   };
 
   for (const record of Array.isArray(records) ? records : []) {

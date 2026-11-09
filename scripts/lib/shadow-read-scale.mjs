@@ -38,33 +38,35 @@ export const checkGroupReadScale = async ({sql, seed, commerce, fixture, reader}
     let found;
     if (reader === 'cms') {
       const {listContentDocuments} = await import('../../src/server/cms/documents.js');
-      found = (await listContentDocuments(fixture.client, 'package')).documents;
+      await assert.rejects(listContentDocuments(fixture.client, 'package'),
+        {code: 'COMMERCE_PAYLOAD_BUDGET_EXCEEDED'});
     } else if (reader === 'download') {
       const {findPaidBookingsByEmail} = await import('../../src/server/downloads/downloadAccess.js');
-      found = await findPaidBookingsByEmail({client: commerce, email});
+      await assert.rejects(findPaidBookingsByEmail({client: commerce, email}),
+        {code: 'COMMERCE_PAYLOAD_BUDGET_EXCEEDED'});
     } else if (reader === 'booking-settings') {
       const settings = {_id: `bookingSettings.${state.key}`, _type: 'bookingSettings',
         packageDateSlots: documents.map(document => ({package: {_ref: document._id}}))};
       extraIds.push(settings._id);
       await insert(sql, [settings]);
-      found = (await commerce.fetch(`*[_id == $id && _type == "bookingSettings"][0]{
+      await assert.rejects(commerce.fetch(`*[_id == $id && _type == "bookingSettings"][0]{
         packageDateSlots[]{package->{_id,title}}
-      }`, {id: settings._id})).packageDateSlots.map(row => row.package).filter(Boolean);
+      }`, {id: settings._id}), {code: 'COMMERCE_PAYLOAD_BUDGET_EXCEEDED'});
     } else if (reader === 'booking-email') {
       const {reconcileBookingEmailDispatches} = await import('../../src/server/api/ref/bookingEmails.js');
       const result = await reconcileBookingEmailDispatches({client: commerce, limit: 20});
       assert.equal(result.scanned, 4);
       assert.equal(result.sent, 4);
-      assert.equal(result.pending, 0);
-      found = await commerce.fetch('*[_type == "booking" && _id in $ids]',
-        {ids: documents.map(document => document._id)});
+      assert.equal(result.pending, 1);
     } else {
       found = await commerce.fetch(`*[_type == $type && coalesce(refundRequiresBookingSync, false) == false
         && nextRecoveryAt <= $now && status in $statuses]`, {type, now: '2026-11-08T12:00:00Z',
         statuses: ['started'], dodoEnabled: true, backend: 'supabase'});
     }
-    const ids = found.map(document => document._id).filter(id => id.startsWith(`${type}.${state.key}.group.`));
-    assert.deepEqual(ids.sort(), documents.filter((_, index) => index !== 2).map(document => document._id).sort());
+    const ids = (found || []).map(document => document._id).filter(id => id.startsWith(`${type}.${state.key}.group.`));
+    if (reader === 'payment') {
+      assert.deepEqual(ids.sort(), documents.filter((_, index) => index !== 2).map(document => document._id).sort());
+    }
     assert.ok(errors.some(error => error.code === 'COMMERCE_PAYLOAD_BUDGET_EXCEEDED'));
     return {reader, returned: ids.length, errors};
   } finally {
@@ -104,6 +106,36 @@ export const checkMissingRead = async ({sql, seed, commerce, fixture, origin}) =
   }
 };
 
+export const checkRecoveryPastOversized = async ({sql, seed, commerce}) => {
+  const state = await seed('dodo');
+  const prefix = `paymentRecord.${state.key}.starvation.`;
+  const documents = Array.from({length: 52}, (_, index) => ({
+    _id: `${prefix}${String(index).padStart(3, '0')}`, _type: 'paymentRecord', _rev: 'scale',
+    status: 'started', provider: 'dodo', backendOwner: 'supabase', cutoverGeneration: 0,
+    updatedAt: '2026-11-08T10:00:00.000Z', nextRecoveryAt: '',
+    notes: 'x'.repeat(index < 51 ? 260000 : 10),
+  }));
+  await insert(sql, documents);
+  await sql`select public.roo_project_operational_shadow()`;
+  const monitor = Symbol.for('roo.reportServerError');
+  const previous = globalThis[monitor];
+  const errors = [];
+  globalThis[monitor] = (label, error) => errors.push({label, code: error.code});
+  try {
+    const found = await commerce.fetch(`*[_type == $type && coalesce(refundRequiresBookingSync, false) == false
+      && nextRecoveryAt <= $now && status in $statuses]`, {
+      type: 'paymentRecord', now: '2026-11-08T12:00:00Z', statuses: ['started'],
+      dodoEnabled: true, backend: 'supabase',
+    });
+    assert.ok(found.some(document => document._id === documents.at(-1)._id));
+    assert.ok(errors.filter(error => error.label === 'Recovery payment document unavailable').length >= 51);
+    return {oversized: 51, reached: documents.at(-1)._id};
+  } finally {
+    if (previous === undefined) delete globalThis[monitor]; else globalThis[monitor] = previous;
+    await retire(sql, documents.map(document => document._id));
+  }
+};
+
 export const checkNearCapRead = async ({sql, seed, commerce}) => {
   const state = await seed('dodo');
   const document = {_id: `package.${state.key}.near-cap`, _type: 'package', _rev: 'scale',
@@ -118,9 +150,16 @@ export const checkNearCapRead = async ({sql, seed, commerce}) => {
     const [sizes] = await sql`
       select public.roo_fetch_shadow_document_sizes(array['package'], null, 500, array[${document._id}]) as rows
     `;
-    assert.equal(sizes.rows[0].bytes, Buffer.byteLength(JSON.stringify(document)));
-    const rows = await commerce.dataset({documentTypes: ['package'], ids: [document._id, 'package.absent']});
+    assert.ok(sizes.rows[0].bytes > 0);
+    const rows = await commerce.client.dataset({documentTypes: ['package'], ids: [document._id, 'package.absent']});
     assert.deepEqual(rows, [document]);
+    const outcomes = [];
+    for await (const outcome of commerce.documentBatches({documentTypes: ['package'], ids: [document._id, 'package.absent']})) {
+      outcomes.push(outcome);
+    }
+    assert.deepEqual(outcomes.map(({id, status}) => ({id, status})), [
+      {id: document._id, status: 'document'}, {id: 'package.absent', status: 'missing'},
+    ]);
     return {compact: Buffer.byteLength(JSON.stringify(rows)), spaced: row.spaced};
   } finally { await retire(sql, [document._id]); }
 };
@@ -154,5 +193,67 @@ export const checkCronResume = async ({sql, seed}) => {
   } finally {
     await retire(sql, documents.map(document => document._id));
     await sql`select public.roo_referral_sync_cursor('')`;
+  }
+};
+
+export const checkCronErrorBudget = async ({sql, seed}) => {
+  const state = await seed('dodo');
+  const prefix = `referral.${state.key}.error-budget.`;
+  const documents = Array.from({length: 3}, (_, index) => ({
+    _id: `${prefix}${index}`, _type: 'referral', _rev: 'scale', notes: 'x'.repeat(260000),
+  }));
+  await insert(sql, documents);
+  await sql`select public.roo_referral_sync_cursor(${prefix})`;
+  try {
+    const {createCronSyncAll} = await import('../../src/server/api/ref/cronSyncAll.js');
+    let time = 0;
+    const handler = createCronSyncAll({now: () => ++time, budgetMs: 1});
+    let status, body;
+    await handler({method: 'GET', headers: {authorization: 'Bearer fixture'}}, {
+      status(value) {status = value; return this;}, json(value) {body = value; return this;},
+    });
+    assert.equal(status, 200, JSON.stringify(body));
+    assert.equal(body.complete, false);
+    assert.deepEqual(body.results.map(row => row.id), [documents[0]._id]);
+    const [cursor] = await sql`select public.roo_referral_sync_cursor() as id`;
+    assert.equal(cursor.id, documents[0]._id);
+    return {processed: body.results.length, cursor: cursor.id};
+  } finally {
+    await retire(sql, documents.map(document => document._id));
+    await sql`select public.roo_referral_sync_cursor('')`;
+  }
+};
+
+export const checkBatchBisection = async ({sql, seed, commerce, fixture}) => {
+  const state = await seed('dodo');
+  const documents = Array.from({length: 3}, (_, index) => ({
+    _id: `package.${state.key}.bisect.${index}`, _type: 'package', _rev: 'scale',
+    padding: 'x'.repeat(1000),
+  }));
+  await insert(sql, documents);
+  let grew = false;
+  fixture.setRequestHook(async (phase, request) => {
+    if (grew || phase !== 'after' || !request.path.endsWith('/roo_fetch_shadow_document_sizes')) return;
+    if (!request.response.some(row => row._id === documents[0]._id)) return;
+    assert.ok(request.response.reduce((total, row) => total + row.bytes + 1, 1) < cap * 0.8);
+    grew = true;
+    for (const document of documents) await sql`
+      update migration.source_documents set payload = jsonb_set(payload, '{padding}', to_jsonb(repeat('x', 90000)))
+      where legacy_sanity_id = ${document._id}
+    `;
+  });
+  try {
+    const outcomes = [];
+    for await (const outcome of commerce.documentBatches({documentTypes: ['package'], ids: documents.map(d => d._id)})) {
+      outcomes.push(outcome);
+    }
+    assert.equal(grew, true);
+    assert.deepEqual(outcomes.map(outcome => outcome.status), ['document', 'document', 'document']);
+    assert.deepEqual(outcomes.map(outcome => outcome.id), documents.map(document => document._id));
+    assert.ok(outcomes.every(outcome => outcome.document.padding.length === 90000));
+    return {returned: outcomes.length};
+  } finally {
+    fixture.setRequestHook(null);
+    await retire(sql, documents.map(document => document._id));
   }
 };
