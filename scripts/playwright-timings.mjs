@@ -10,6 +10,10 @@ const reportFiles = (dir) =>
   });
 
 const fileSeconds = (report) => {
+  if (
+    report && typeof report === "object" && !Array.isArray(report) &&
+    !("suites" in report) && Object.values(report).every((value) => typeof value === "number")
+  ) return report;
   const seconds = {};
   const walk = (suite, file) => {
     const owner = suite.file || file;
