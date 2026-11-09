@@ -35,7 +35,6 @@ import { getPublicContentPendingCount } from "./lib/publicContentClient";
 import { useBookingDialogPending } from "./lib/bookingDialogHold";
 import { setVisibleTimeout } from "./lib/visibleTimeout";
 import { ownsTripEntry, SectionNavigationProvider } from "./lib/sectionNavigator";
-import { loadContent } from "./lib/contentCache";
 import { useIsomorphicLayoutEffect } from "./lib/useIsomorphicLayoutEffect";
 
 const Home = lazy(() => import("./legacyPages/Home"));
@@ -43,13 +42,7 @@ const AboutPage = lazy(() => import("./legacyPages/About"));
 const Packages = lazy(() => import("./legacyPages/Packages"));
 const FaqPage = lazy(() => import("./legacyPages/Faq"));
 const Contact = lazy(() => import("./legacyPages/Contact"));
-const Privacy = lazy(async () => {
-  const [{ default: Page }, initialData] = await Promise.all([
-    import("./legacyPages/PrivacyPolicy"),
-    loadContent("privacy-policy").catch(() => null),
-  ]);
-  return { default: (props) => <Page {...props} initialData={props.initialData || initialData} /> };
-});
+const Privacy = lazy(() => import("./legacyPages/PrivacyPolicy"));
 const PerfDebugOverlay = lazy(() =>
   import("./components/PerfDebugOverlay").catch(() => ({ default: () => null }))
 );

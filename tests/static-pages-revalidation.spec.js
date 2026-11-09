@@ -99,7 +99,7 @@ test("/about, /contact, /privacy, /terms, /tools, /meet-the-team and /reviews ke
   }
 });
 
-test("static HTML retains its copy and stale policy pages reflect a deleted document", async ({ request, baseURL, browser }, testInfo) => {
+test("deleted policy documents disappear from the rebuilt HTML", async ({ request, baseURL, browser }, testInfo) => {
   test.setTimeout(180000);
   const control = contentControl(request, baseURL);
   const timeline = [];
@@ -123,10 +123,9 @@ test("static HTML retains its copy and stale policy pages reflect a deleted docu
       await expect.poll(async () => (await read(route, "waiting for the revalidation to settle")).cache, { timeout: 20000 }).toBe("HIT");
       const after = await read(route, "after the revalidation without a document");
       expect.soft(after.status, route).toBe(200);
-      expect.soft(after.body.includes(text), route).toBe(true);
+      expect.soft(after.body.includes(text), route).toBe(!["/privacy", "/terms"].includes(route));
       if (route === "/contact") expect.soft(after.body.includes("Ready to optimize your PC?"), route).toBe(false);
-      if (route === "/privacy") expect.soft(after.headings, route).toEqual(["Privacy Policy"]);
-      if (route === "/terms") expect.soft(after.headings, route).toEqual(["Terms of Service"]);
+      if (route === "/privacy" || route === "/terms") expect.soft(after.headings, route).toEqual([]);
     }
     const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
     const context = await browser.newContext({ javaScriptEnabled: true, serviceWorkers: "block" });
@@ -149,8 +148,7 @@ test("static HTML retains its copy and stale policy pages reflect a deleted docu
         try {
           await page.goto(route);
           await page.waitForFunction(() => window.history.state?.__rooLegacy === true);
-          await expect(page.locator("main"), route).toContainText(expected[route]);
-          await page.screenshot({ path: testInfo.outputPath(`${resource}-seed.png`), animations: "disabled" });
+          await expect(page.locator("main"), route).not.toContainText(expected[route]);
           release();
           await expect(page.locator("main").getByRole("heading", { name: heading, exact: true }), route).toHaveCount(0);
           await expect(page.locator("main"), route).not.toContainText(expected[route]);

@@ -6,7 +6,7 @@ import companyContent from "../lib/companyContent";
 const { CONTACT_GUIDANCE } = companyContent;
 
 export default function Contact({ initialData = null }) {
-  const { data: contactData, failed: contentFailed } = useContent("contact", initialData);
+  const { data: contactData, failed: contentFailed, loaded: contentLoaded } = useContent("contact", initialData);
   const [copyStatus, setCopyStatus] = useState("idle");
   const copyResetTimeoutRef = useRef(null);
 
@@ -107,7 +107,7 @@ export default function Contact({ initialData = null }) {
 
       {!configReady ? (
         <p className="mb-5 w-full max-w-xl text-sm text-ink-muted" role="status">
-          {contentFailed
+          {contentFailed || contentLoaded
             ? "The contact form is temporarily unavailable. Please email us directly using the address above."
             : "Loading the contact form..."}
         </p>

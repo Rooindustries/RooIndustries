@@ -223,3 +223,34 @@ test("the persistent Discord banner refreshes its CMS link on navigation", async
   await expect(page).toHaveURL(/\/about$/);
   await expect(page.locator(".ri-discord-guide-link")).toHaveAttribute("href", "https://discord.com/invite/published");
 });
+
+test("a deleted contact document shows the unavailable state", async ({ page }) => {
+  await page.clock.install();
+  await page.goto("/contact", { waitUntil: "networkidle" });
+  await hydrated(page);
+  await page.route("**/api/content/contact", route => route.fulfill({
+    json: { ok: true, data: null, revision: 999 },
+  }));
+  await footerLink(page, "/about").click();
+  await page.clock.fastForward("01:01");
+  await page.goBack();
+  await expect(page.getByText("The contact form is temporarily unavailable.", { exact: false })).toBeVisible();
+  await expect(page.getByText("Loading the contact form...")).toHaveCount(0);
+});
+
+test("a failed first privacy request is reported once", async ({ page }) => {
+  const errors = [];
+  page.on("console", message => {
+    if (message.type() === "error" && message.text().includes("Synthetic first privacy failure")) errors.push(message.text());
+  });
+  await page.goto("/about", { waitUntil: "networkidle" });
+  await hydrated(page);
+  await page.route("**/api/content/privacy-policy", route => route.fulfill({
+    status: 503, json: { ok: false, error: "Synthetic first privacy failure" },
+  }));
+  await footerLink(page, "/privacy").click();
+  await expect.poll(() => errors.length).toBe(1);
+  await expect(page).toHaveURL(/\/privacy$/);
+  await page.waitForLoadState("networkidle");
+  expect(errors).toHaveLength(1);
+});

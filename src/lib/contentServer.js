@@ -185,7 +185,7 @@ async function fetchStaticPageContent(resource, { requireContent = false } = {})
   try {
     const fetchContent = await createPublicContentFetcher();
     const content = await fetchContent(resource);
-    if (requireContent && content == null) {
+    if (requireContent && content == null && !["privacy-policy", "terms"].includes(resource)) {
       throw Object.assign(new Error(`No published ${resource} document.`), { code: "PAGE_CONTENT_MISSING" });
     }
     return resource === "tools" && Array.isArray(content) ? normalizeTools(content) : content;
