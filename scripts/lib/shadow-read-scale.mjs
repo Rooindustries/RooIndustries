@@ -17,7 +17,7 @@ export const checkGroupReadScale = async ({sql, seed, commerce, fixture, reader}
   const type = ['booking-settings', 'cms'].includes(reader) ? 'package' : reader === 'payment' ? 'paymentRecord' : 'booking';
   const email = `${state.key}@example.invalid`;
   const documents = Array.from({length: 5}, (_, index) => ({
-    _id: `${type}.${state.key}.group.${index}`, _type: type, _rev: 'scale',
+    _id: `${type}.${reader === 'booking-email' ? '000-' : ''}${state.key}.group.${index}`, _type: type, _rev: 'scale',
     notes: 'x'.repeat(index === 2 ? 260000 : 90000), email, payerEmail: email,
     status: reader === 'payment' ? 'started' : 'captured',
     provider: 'dodo', backendOwner: 'supabase', cutoverGeneration: 0,
@@ -36,6 +36,11 @@ export const checkGroupReadScale = async ({sql, seed, commerce, fixture, reader}
   try {
     await insert(sql, documents);
     if (["payment", "booking-email"].includes(reader)) await sql`select public.roo_project_operational_shadow()`;
+    if (reader === 'booking-email') await sql`
+      update commerce.email_dispatches dispatch set updated_at = '1900-01-01'
+      from commerce.bookings booking
+      where dispatch.booking_id = booking.id and booking.legacy_sanity_id = any(${documents.map(document => document._id)})
+    `;
     let found;
     if (reader === 'cms') {
       const {listContentDocuments} = await import('../../src/server/cms/documents.js');
@@ -56,9 +61,13 @@ export const checkGroupReadScale = async ({sql, seed, commerce, fixture, reader}
     } else if (reader === 'booking-email') {
       const {reconcileBookingEmailDispatches} = await import('../../src/server/api/ref/bookingEmails.js');
       const result = await reconcileBookingEmailDispatches({client: commerce, limit: 20});
-      assert.equal(result.scanned, 4);
-      assert.equal(result.sent, 4);
-      assert.equal(result.pending, 1);
+      assert.ok(result.scanned >= 4);
+      assert.ok(result.unavailable.some(item => item.id === documents[2]._id &&
+        item.code === 'COMMERCE_PAYLOAD_BUDGET_EXCEEDED'));
+      for (const document of documents.filter((_, index) => index !== 2)) {
+        const booking = await commerce.getDocument(document._id);
+        assert.equal(booking.emailDispatchStatus, 'sent');
+      }
     } else {
       found = await commerce.fetch(`*[_type == $type && coalesce(refundRequiresBookingSync, false) == false
         && nextRecoveryAt <= $now && status in $statuses]`, {type, now: '2026-11-08T12:00:00Z',
@@ -152,7 +161,7 @@ export const checkNearCapRead = async ({sql, seed, commerce}) => {
       select public.roo_fetch_shadow_document_sizes(array['package'], null, 500, array[${document._id}]) as rows
     `;
     assert.ok(sizes.rows[0].bytes > 0);
-    const rows = await commerce.client.dataset({documentTypes: ['package'], ids: [document._id, 'package.absent']});
+    const rows = await commerce.dataset({documentTypes: ['package'], ids: [document._id, 'package.absent']});
     assert.deepEqual(rows, [document]);
     const outcomes = [];
     for await (const outcome of commerce.documentBatches({documentTypes: ['package'], ids: [document._id, 'package.absent']})) {
