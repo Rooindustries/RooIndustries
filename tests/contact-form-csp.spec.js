@@ -5,8 +5,6 @@ test.use({
   javaScriptEnabled: true,
   viewport: { width: 1440, height: 900 },
   serviceWorkers: "block",
-  trace: "off",
-  video: "off",
 });
 
 test.beforeEach(async ({ context, baseURL }) => {

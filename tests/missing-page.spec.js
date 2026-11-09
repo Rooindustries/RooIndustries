@@ -6,7 +6,7 @@ const missingPath = "/does-not-exist-probe";
 const campaignPath = `${missingPath}?utm_source=x`;
 const address = (page) => page.evaluate(() => `${window.location.pathname}${window.location.search}${window.location.hash}`);
 
-test.use({ javaScriptEnabled: true, reducedMotion: "reduce", actionTimeout: 10000, navigationTimeout: 20000, trace: "off", video: "off" });
+test.use({ javaScriptEnabled: true, reducedMotion: "reduce", actionTimeout: 10000, navigationTimeout: 20000 });
 
 test.beforeEach(async ({ page, flow }) => {
   void flow;

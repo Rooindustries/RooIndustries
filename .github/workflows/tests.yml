@@ -129,25 +129,49 @@ jobs:
           java-version: "21"
       - run: npm run check:booking-model
 
-  playwright:
-    name: Playwright ${{ matrix.suite.name }}
+  playwright-plan:
+    name: Plan browser groups
     needs: tested-tree
     if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-24.04' || vars.TESTS_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 60
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      native: ${{ steps.plan.outputs.native }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          node-version: 22
+      - name: Restore the latest per-file test timings
+        uses: actions/cache/restore@v4
+        with:
+          path: .playwright-timings
+          key: playwright-timings-latest
+          restore-keys: playwright-timings-
+      - name: Pick browser groups and their job limits
+        id: plan
+        run: |
+          matrix="$(node scripts/playwright-groups.mjs matrix .playwright-timings/timings.json)"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          native="$(node scripts/playwright-groups.mjs native)"
+          echo "native=$native" >> "$GITHUB_OUTPUT"
+
+  playwright:
+    name: Playwright ${{ matrix.suite.name }}
+    needs: [tested-tree, playwright-plan]
+    if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' && needs.playwright-plan.result == 'success' }}
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-24.04' || vars.TESTS_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: ${{ matrix.suite.timeoutMinutes }}
     strategy:
       fail-fast: false
-      matrix:
-        suite:
-          - name: navigation
-            relocate: true
-          - name: booking
-          - name: rest-1
-          - name: rest-2
-          - name: rest-3
-          - name: rest-4
+      matrix: ${{ fromJSON(needs.playwright-plan.outputs.matrix) }}
     env:
       PW_SUITE: ${{ matrix.suite.name }}
+      PW_FILES: ${{ matrix.suite.pattern }}
+      PW_GROUP_TIMEOUT_MS: ${{ matrix.suite.timeoutMs }}
       ROO_TEST_HOST: 127.0.0.1
       BASE_URL: http://127.0.0.1:3211
       PW_PORT: "3211"
@@ -171,29 +195,20 @@ jobs:
           git worktree add --detach "$relocated" HEAD
           cp -a --reflink=auto node_modules "$relocated/"
           echo "SUITE_DIR=$relocated" >> "$GITHUB_ENV"
-      - name: Pick a fixed group's spec file
-        if: ${{ !startsWith(matrix.suite.name, 'rest-') }}
-        run: |
-          case "$PW_SUITE" in
-            navigation) echo 'PW_FILES=/section-nav\.spec\.js$' >> "$GITHUB_ENV" ;;
-            booking) echo 'PW_FILES=/booking-flow\.spec\.js$' >> "$GITHUB_ENV" ;;
-            *) echo "Unknown browser group $PW_SUITE" >&2; exit 1 ;;
-          esac
-      - name: Restore the latest per-file test timings
-        if: startsWith(matrix.suite.name, 'rest-')
-        uses: actions/cache/restore@v4
-        with:
-          path: .playwright-timings
-          key: playwright-timings-latest
-          restore-keys: playwright-timings-
-      - name: Pick this group's spec files
-        if: startsWith(matrix.suite.name, 'rest-')
-        run: |
-          files="$(node scripts/playwright-groups.mjs "$PW_SUITE" .playwright-timings/timings.json)"
-          echo "PW_FILES=$files" >> "$GITHUB_ENV"
       - uses: ./.github/actions/hold-ports
         with:
           playwright-ports: "3211"
+      - name: Check browser timeout reports
+        if: matrix.suite.name == 'rest-1'
+        run: xvfb-run -a npm run test:playwright-timeouts
+      - name: Save browser timeout reports before the next run
+        uses: actions/upload-artifact@v4
+        if: ${{ always() && matrix.suite.name == 'rest-1' }}
+        with:
+          name: playwright-timeout-proof
+          path: test-results/playwright-timeouts-*/
+          if-no-files-found: error
+          retention-days: 7
       - name: Run browser and agent-readiness tests
         run: |
           cd "${SUITE_DIR:-$GITHUB_WORKSPACE}"
@@ -220,7 +235,7 @@ jobs:
             npm run test:remote-browser-guard
             npm run test:smoke:production
           fi
-          xvfb-run -a npx playwright test --pass-with-no-tests --reporter=dot,json "$PW_FILES"
+          xvfb-run -a npx playwright test --pass-with-no-tests --reporter=line,json "$PW_FILES"
         env:
           PLAYWRIGHT_JSON_OUTPUT_NAME: test-timings/${{ matrix.suite.name }}.json
       - uses: ./.github/actions/save-caches
@@ -242,7 +257,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: always()
         with:
           name: test-results-${{ matrix.suite.name }}
           path: ${{ env.SUITE_DIR || github.workspace }}/test-results/
@@ -250,13 +265,27 @@ jobs:
           retention-days: 7
 
   routes:
-    name: Playwright creator portal and API routes
+    name: Playwright ${{ matrix.suite.name }}
     needs: tested-tree
     if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-24.04' || vars.TESTS_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 30
+    timeout-minutes: ${{ matrix.suite.timeoutMinutes }}
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - name: api-routes
+            script: test:api:routes
+            port: "3231"
+            timeoutMinutes: 30
+          - name: creator-portal
+            script: test:creator:portal
+            port: "3241"
+            extraMs: 900000
+            timeoutMinutes: 65
     env:
       ROO_TEST_HOST: 127.0.0.1
+      PW_GROUP_TIMEOUT_MS: "1200000"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -265,46 +294,36 @@ jobs:
         with:
           node-version: 22
           browsers: chromium
-          build-dirs: |
-            .next-e2e-routes-api/cache/webpack
-            .next-e2e-routes-portal/cache/webpack
+          build-dirs: .next-e2e-${{ matrix.suite.name }}/cache/webpack
       - uses: ./.github/actions/hold-ports
         with:
-          playwright-ports: "3231 3241"
-      - name: Run API route suite
-        id: api-routes
+          playwright-ports: ${{ matrix.suite.port }}
+      - name: Run browser suite
         env:
-          PW_PORT: "3231"
-          PW_SERVER_ID: routes-api
-        run: xvfb-run -a npm run test:api:routes -- --output=test-results/api-routes
-      - name: Run creator portal suite
-        if: ${{ !cancelled() && (success() || steps.api-routes.outcome == 'failure') }}
-        env:
-          PW_PORT: "3241"
-          PW_SERVER_ID: routes-portal
-        run: xvfb-run -a npm run test:creator:portal -- --output=test-results/creator-portal
+          PW_PORT: ${{ matrix.suite.port }}
+          PW_SERVER_ID: ${{ matrix.suite.name }}
+          PW_SCRIPT: ${{ matrix.suite.script }}
+        run: xvfb-run -a npm run "$PW_SCRIPT" -- --output="test-results/$PW_SERVER_ID"
       - name: Run creator portal against an external fixture server
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && matrix.suite.name == 'creator-portal' }}
         run: npm run test:fixture-ports:browser
       - uses: ./.github/actions/save-caches
         with:
-          build-dirs: |
-            .next-e2e-routes-api/cache/webpack
-            .next-e2e-routes-portal/cache/webpack
+          build-dirs: .next-e2e-${{ matrix.suite.name }}/cache/webpack
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: always()
         with:
-          name: test-results-routes
+          name: test-results-${{ matrix.suite.name }}
           path: test-results/
           if-no-files-found: ignore
           retention-days: 7
 
   native:
     name: Native PostgreSQL 17 suites
-    needs: tested-tree
-    if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
+    needs: [tested-tree, playwright-plan]
+    if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' && needs.playwright-plan.result == 'success' }}
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-24.04' || vars.TESTS_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 60
+    timeout-minutes: ${{ fromJSON(needs.playwright-plan.outputs.native).timeoutMinutes }}
     env:
       ROO_TEST_HOST: 127.0.0.1
       PW_PORT: "3211"
@@ -339,11 +358,14 @@ jobs:
         with:
           playwright-ports: "3211"
       - name: Run native admin CMS suite
+        env:
+          PW_GROUP_TIMEOUT_MS: ${{ fromJSON(needs.playwright-plan.outputs.native).adminTimeoutMs }}
         run: xvfb-run -a npx playwright test -c playwright.admin.config.js
       - name: Run all six native booking-hold browser cases
         env:
           NEXT_DIST_DIR: .next-e2e-native-booking
           PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/native-booking-hold.json
+          PW_GROUP_TIMEOUT_MS: ${{ fromJSON(needs.playwright-plan.outputs.native).bookingTimeoutMs }}
         run: |
           xvfb-run -a npx playwright test tests/booking-hold.spec.js --project=chromium --output=test-results/booking-hold-e2e --reporter=line,json
           node - <<'NODE'
@@ -419,13 +441,24 @@ jobs:
           retention-days: 7
 
   revalidation:
-    name: Playwright revalidation
+    name: Playwright ${{ matrix.suite.name }}
     needs: tested-tree
     if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-24.04' || vars.TESTS_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - name: benchmarks-revalidation
+            script: test:benchmarks:revalidation
+            port: "3251"
+          - name: static-revalidation
+            script: test:static:revalidation
+            port: "3261"
     env:
       ROO_TEST_HOST: 127.0.0.1
+      PW_GROUP_TIMEOUT_MS: "1200000"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -434,33 +467,23 @@ jobs:
         with:
           node-version: 22
           browsers: chromium
-          build-dirs: |
-            .next-e2e-revalidation-benchmarks/cache/webpack
-            .next-e2e-revalidation-static/cache/webpack
+          build-dirs: .next-e2e-${{ matrix.suite.name }}/cache/webpack
       - uses: ./.github/actions/hold-ports
         with:
-          playwright-ports: "3251 3261"
-      - name: Run benchmarks revalidation suite
-        id: benchmarks-revalidation
+          playwright-ports: ${{ matrix.suite.port }}
+      - name: Run browser suite
         env:
-          PW_PORT: "3251"
-          PW_SERVER_ID: revalidation-benchmarks
-        run: xvfb-run -a npm run test:benchmarks:revalidation -- --output=test-results/benchmarks-revalidation
-      - name: Run static pages revalidation suite
-        if: ${{ !cancelled() && (success() || steps.benchmarks-revalidation.outcome == 'failure') }}
-        env:
-          PW_PORT: "3261"
-          PW_SERVER_ID: revalidation-static
-        run: xvfb-run -a npm run test:static:revalidation -- --output=test-results/static-revalidation
+          PW_PORT: ${{ matrix.suite.port }}
+          PW_SERVER_ID: ${{ matrix.suite.name }}
+          PW_SCRIPT: ${{ matrix.suite.script }}
+        run: xvfb-run -a npm run "$PW_SCRIPT" -- --output="test-results/$PW_SERVER_ID"
       - uses: ./.github/actions/save-caches
         with:
-          build-dirs: |
-            .next-e2e-revalidation-benchmarks/cache/webpack
-            .next-e2e-revalidation-static/cache/webpack
+          build-dirs: .next-e2e-${{ matrix.suite.name }}/cache/webpack
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: always()
         with:
-          name: test-results-revalidation
+          name: test-results-${{ matrix.suite.name }}
           path: test-results/
           if-no-files-found: ignore
           retention-days: 7

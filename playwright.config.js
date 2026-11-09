@@ -31,12 +31,25 @@ if (target.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]", new URL(
 const shouldUseExternalServer = Boolean(process.env.BASE_URL);
 process.env.BASE_URL = baseURL;
 if (!shouldUseExternalServer && !internalDistDir.startsWith(".next-e2e-")) throw new Error("Isolated Playwright build directory required.");
+const groupTimeoutMs = process.env.CI && process.env.PW_GROUP_TIMEOUT_MS
+  ? Number(process.env.PW_GROUP_TIMEOUT_MS) : undefined;
+if (groupTimeoutMs !== undefined && (!Number.isInteger(groupTimeoutMs) || groupTimeoutMs <= 0)) {
+  throw new Error("Invalid CI browser group deadline.");
+}
 
 module.exports = defineConfig({
   testDir: "./tests",
   testMatch: "**/*.spec.js",
-  metadata: { toolingDistDir: internalDistDir, ownsToolingServer: !shouldUseExternalServer },
-  globalSetup: require.resolve("./tests/fixtures/fixture-ports-setup.cjs"),
+  metadata: {
+    toolingDistDir: internalDistDir,
+    ownsToolingServer: !shouldUseExternalServer,
+    groupTimeoutMs,
+    groupStartedAt: performance.now(),
+  },
+  globalSetup: require.resolve("./scripts/playwright-group-deadline.cjs"),
+  globalTimeout: groupTimeoutMs ? groupTimeoutMs + 120000 : 0,
+  reporter: process.env.CI ? [["line"], ["json", { outputFile: "test-results/playwright.json" }]] : "list",
+  failOnFlakyTests: Boolean(process.env.CI),
   timeout: 120000,
   expect: {
     timeout: 10000,
@@ -62,7 +75,7 @@ module.exports = defineConfig({
     baseURL,
     headless: false,
     javaScriptEnabled: false,
-    trace: "on-first-retry",
+    trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "on-first-retry",
     timezoneId: process.env.PW_TIMEZONE || "UTC",

@@ -9,8 +9,6 @@ test.use({
   reducedMotion: "reduce",
   actionTimeout: 10000,
   navigationTimeout: 30000,
-  trace: "off",
-  video: "off",
 });
 
 test.beforeEach(async ({ page }) => {

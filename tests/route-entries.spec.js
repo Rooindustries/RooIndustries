@@ -4,7 +4,7 @@ const { fixturePort } = require("./fixtures/fixture-ports.cjs");
 const fs = require("node:fs/promises");
 const { gzipSync } = require("node:zlib");
 
-test.use({ javaScriptEnabled: true, viewport: { width: 390, height: 844 }, serviceWorkers: "block", trace: "off", video: "off" });
+test.use({ javaScriptEnabled: true, viewport: { width: 390, height: 844 }, serviceWorkers: "block" });
 
 const attach = async (testInfo, name, value) => {
   const file = testInfo.outputPath(`${name}.json`);

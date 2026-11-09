@@ -144,7 +144,7 @@
     "audit:lighthouse:mobile": "lhci autorun --config=lighthouserc.mobile.json --collect.url=http://${ROO_TEST_HOST:-127.0.0.1}:3001/",
     "test:e2e:admin": "playwright test --config=playwright.admin.config.js",
     "test:sourcemaps": "node scripts/sourcemaps-e2e.mjs",
-    "lint": "node scripts/check-repository-files.mjs && eslint src app middleware.js scripts tests",
+    "lint": "node scripts/check-repository-files.mjs && eslint src app middleware.js scripts tests playwright*.config.js",
     "test:lint-rules": "node --test tests/lint-*.test.mjs tests/no-scripting-media.test.mjs",
     "test:playwright-groups": "node --test tests/playwright-groups.test.mjs",
     "test:tested-tree": "node --test tests/tested-tree.test.mjs",
@@ -155,7 +155,8 @@
     "test:build-lock": "node --test tests/build-lock.test.mjs",
     "check:repository-files": "node scripts/check-repository-files.mjs",
     "test:repository-files": "node --test tests/repository-files.test.mjs",
-    "test:runner-routing": "node --test tests/runner-routing.test.mjs"
+    "test:runner-routing": "node --test tests/runner-routing.test.mjs",
+    "test:playwright-timeouts": "node scripts/playwright-timeouts-e2e.mjs"
   },
   "eslintConfig": {
     "extends": [

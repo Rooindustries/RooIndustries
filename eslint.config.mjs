@@ -22,7 +22,8 @@ export default [
     },
     plugins: { roo, "react-hooks": reactHooks },
     rules: ruleSet(Object.keys(rules).filter((name) =>
-      !emailTextRules.has(name) && !scriptRules.has(name) && !navigationRules.has(name)
+      !emailTextRules.has(name) && !scriptRules.has(name) && !navigationRules.has(name) &&
+      name !== "no-playwright-recording-overrides"
     )),
   },
   {
@@ -30,7 +31,7 @@ export default [
     rules: { ...ruleSet([...navigationRules]), "react-hooks/refs": "error" },
   },
   {
-    files: ["scripts/**/*.{js,mjs,cjs}", "tests/**/*.{js,mjs,cjs}"],
+    files: ["scripts/**/*.{js,mjs,cjs}", "tests/**/*.{js,mjs,cjs}", "playwright*.config.js"],
     linterOptions: { reportUnusedDisableDirectives: "off" },
     languageOptions: { ecmaVersion: "latest", sourceType: "module", globals: { ...globals.node } },
     plugins: { roo },
@@ -46,6 +47,10 @@ export default [
       "scripts/monitoring-deployment-e2e.mjs",
     ],
     rules: ruleSet(["no-linux-only-test-tooling"]),
+  },
+  {
+    files: ["tests/**/*.{js,mjs,cjs}", "playwright.*.config.js"],
+    rules: ruleSet(["no-playwright-recording-overrides"]),
   },
   {
     files: ["scripts/lib/process-group.mjs"],

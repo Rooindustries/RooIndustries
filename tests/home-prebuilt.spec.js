@@ -6,7 +6,7 @@ const path = require("node:path");
 
 const REFERRAL = "friend";
 
-test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata", reducedMotion: "reduce", trace: "off", video: "off" });
+test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata", reducedMotion: "reduce" });
 
 const watchConsole = (page) => {
   const messages = [];

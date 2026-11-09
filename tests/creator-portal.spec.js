@@ -8,7 +8,7 @@ let restoreGuard;
 
 test.skip(process.env.TOOLING_CREATOR_PORTAL !== '1', 'Select the creator fixture with npm run test:creator:portal.');
 
-test.use({ javaScriptEnabled: true, trace: 'retain-on-failure', video: 'off' });
+test.use({ javaScriptEnabled: true });
 test.beforeAll(async ({ baseURL }) => {
   fixture = await import('./fixtures/api-routes.mjs');
   const { installNetworkGuard, refuseEnvFiles } = await import('../scripts/lib/test-target-safety.mjs');

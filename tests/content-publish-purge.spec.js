@@ -23,7 +23,7 @@ const expectCacheable = (response) => {
 };
 
 const expectPurges = (gate, count) =>
-  expect.poll(async () => (await gate.admin.purges()).map(({ trace, ...purge }) => purge), {
+  expect.poll(async () => (await gate.admin.purges()).map(({ requestId, ...purge }) => purge), {
     timeout: 20000,
     intervals: [250, 500, 1000],
   }).toEqual(Array(count).fill(CONTENT_PURGE));
@@ -298,7 +298,7 @@ for (const [action, answer, price] of [
       const attempt = await after.cms("/api/admin/content/publish", gate.replaceCommand(original, { price }));
       expect(attempt.status).toBe(503);
       expect((await gate.document(PACKAGE)).document.price).toBe(price);
-      await expect.poll(async () => (await after.purges()).map(({ trace, ...purge }) => purge), {
+      await expect.poll(async () => (await after.purges()).map(({ requestId, ...purge }) => purge), {
         timeout: 20000,
         intervals: [250, 500, 1000],
       }).toEqual([CONTENT_PURGE, CONTENT_PURGE]);

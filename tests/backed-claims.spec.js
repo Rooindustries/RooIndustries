@@ -18,7 +18,7 @@ const heroHeading = /^Why Pay \$400 For RAM\?\s*Tune Yours For \$99\.95\.$/;
 const phase = process.env.CLAIMS_PHASE || "after";
 const claim = expect.configure({ soft: true, timeout: phase === "before" ? 100 : 10000 });
 
-test.use({ headless: true, reducedMotion: "reduce", timezoneId: "Asia/Kolkata", video: "on" });
+test.use({ headless: true, reducedMotion: "reduce", timezoneId: "Asia/Kolkata" });
 test.fail(phase === "before", "The unchanged site fails the regression assertions.");
 
 const control = async (request, baseURL, data) => {

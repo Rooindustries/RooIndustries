@@ -8,8 +8,6 @@ test.use({
   reducedMotion: "reduce",
   actionTimeout: 10000,
   navigationTimeout: 20000,
-  trace: "off",
-  video: "off",
 });
 
 test.afterEach(async ({ page, flow }, testInfo) => {

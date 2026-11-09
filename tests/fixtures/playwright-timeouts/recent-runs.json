@@ -1,0 +1,12 @@
+{
+  "source": "https://github.com/Rooindustries/RooIndustries/actions/runs/42390352217",
+  "recordedAt": "2026-11-07",
+  "durationMs": {
+    "booking": 753059,
+    "navigation": 485385,
+    "rest-1": 813164,
+    "rest-2": 733061,
+    "rest-3": 829349,
+    "rest-4": 918429
+  }
+}

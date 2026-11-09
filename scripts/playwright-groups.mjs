@@ -8,6 +8,17 @@ import { pathToFileURL } from "node:url";
 export const FIXED_GROUPS = { navigation: ["section-nav.spec.js"], booking: ["booking-flow.spec.js"] };
 export const REST_GROUPS = ["rest-1", "rest-2", "rest-3", "rest-4"];
 export const REST_1_EXTRA_SECONDS = 250;
+export const JOB_RESERVE_MS = 10 * 60 * 1000;
+const BROWSER_JOB_MINUTES = 60;
+
+const planJob = (deadlines, extraMs) => ({
+  ...deadlines,
+  extraMs,
+  timeoutMinutes: Math.ceil((Object.values(deadlines).reduce((sum, ms) => sum + ms, 0) +
+    extraMs + JOB_RESERVE_MS) / 60000),
+});
+
+const nativePlan = planJob({ adminTimeoutMs: 35 * 60000, bookingTimeoutMs: 20 * 60000 }, 15 * 60000);
 
 const playwrightCli = createRequire(import.meta.url).resolve("@playwright/test/cli");
 
@@ -81,13 +92,32 @@ const readTimings = (candidates) => {
   throw new Error(`No Playwright timings file found in ${candidates.filter(Boolean).join(", ")}`);
 };
 
+const browserMatrix = (specFiles, timings) => {
+  const rest = assignRestGroups(specFiles, timings);
+  const suite = [...Object.keys(FIXED_GROUPS), ...REST_GROUPS].map((name) => {
+    const fixedFiles = FIXED_GROUPS[name];
+    const assigned = fixedFiles ? {
+      files: specFiles.filter(file => fixedFiles.includes(path.posix.basename(file))),
+      load: fixedFiles.reduce((total, file) => total + (timings[file] ?? median(Object.values(timings))), 0),
+    } : rest[name];
+    if (!assigned.files.length) throw new Error(`Browser group ${name} has no spec files`);
+    const extraMs = name === "rest-1" ? REST_1_EXTRA_SECONDS * 1000 : 0;
+    const timeoutMs = BROWSER_JOB_MINUTES * 60000 - JOB_RESERVE_MS - extraMs;
+    console.error(`${name}: ${assigned.files.length} files, about ${Math.round(assigned.load)}s`);
+    return {
+      name,
+      relocate: name === "navigation",
+      pattern: groupPattern(assigned.files),
+      ...planJob({ timeoutMs }, extraMs),
+    };
+  });
+  return { suite };
+};
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [group, timingsFile] = process.argv.slice(2);
-  if (!REST_GROUPS.includes(group)) throw new Error(`Unknown rest group "${group}"`);
-  const specFiles = listSpecFiles();
-  const timings = readTimings([timingsFile, path.join(".github", "playwright-timings.json")]);
-  const assigned = assignRestGroups(specFiles, timings)[group];
-  if (!assigned.files.length) throw new Error(`Rest group ${group} has no spec files`);
-  console.error(`${group}: ${assigned.files.length} files, about ${Math.round(assigned.load)}s`);
-  process.stdout.write(`${groupPattern(assigned.files)}\n`);
+  if (group !== "native" && group !== "matrix") throw new Error(`Unknown browser group "${group}"`);
+  const plan = group === "native" ? nativePlan : browserMatrix(listSpecFiles(),
+    readTimings([timingsFile, path.join(".github", "playwright-timings.json")]));
+  process.stdout.write(`${JSON.stringify(plan)}\n`);
 }
