@@ -1,3 +1,8 @@
+import { getPaymentRecordById } from "./paymentRecord.js";
+import { observedProviderState } from "./providerPaymentState.js";
+import { settledDodoPaymentState } from "./dodoProvider.js";
+import { logSafeError } from "../../safeErrorLog.js";
+
 export const exhaustedPayPalWatchQuery = `(provider == "paypal" && lower(status) == $abandonedStatus
   && reconciliationRecoveryTerminal == true && recoveryReason == "paypal_lookup_failed_404"
   && recoveryFailureCount == 12 && nextRecoveryAt == "9999-12-31T23:59:59.999Z"
@@ -49,9 +54,8 @@ export const webhookFinalizationResult = (finalized) => {
     ? { httpStatus: 503, body: { ...finalized.response, ok: false }, retryWebhook: true }
     : { httpStatus: finalized.httpStatus, body: finalized.response };
 };
-import { getPaymentRecordById } from "./paymentRecord.js";
-import { observedProviderState } from "./providerPaymentState.js";
-import { logSafeError } from "../../safeErrorLog.js";
+export const hasObservedCapture = (inspection) => inspection.state === "captured" &&
+  (!inspection.payment || settledDodoPaymentState(inspection.payment) === "succeeded");
 
 export const hasKnownCapture = (record) =>
   ["succeeded", "refunded", "disputed"].includes(record.providerPaymentState) ||

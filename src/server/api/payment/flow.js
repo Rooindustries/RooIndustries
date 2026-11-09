@@ -90,6 +90,7 @@ import {
   buildWatchFailureState,
   exhaustedPayPalWatchQuery,
   hasKnownCapture,
+  hasObservedCapture,
   holdCapturedReleaseForReview,
   isExhaustedPayPalWatch,
   isTransientVerificationFailure,
@@ -3605,7 +3606,7 @@ export const cancelPaymentSession = async ({
       record,
       source: "reconcile",
       providerData: inspection.providerData || {},
-      providerCaptureObserved: true,
+      providerCaptureObserved: hasObservedCapture(inspection),
     });
     return {
       httpStatus: finalized.httpStatus,
@@ -4645,7 +4646,7 @@ export const reconcilePaymentSessions = async ({
             record,
             source: "reconcile",
             providerData: inspection.providerData || {},
-            providerCaptureObserved: inspection.state === "captured",
+            providerCaptureObserved: hasObservedCapture(inspection),
           });
           const recoveredStatus = String(recovered?.paymentRecord?.status || "")
             .trim()
@@ -4840,7 +4841,7 @@ export const reconcilePaymentSessions = async ({
         const inspection = dodoInspection || await inspectProviderOrderForRecovery(record);
         if (["captured", "refunded"].includes(inspection.state)) {
           providerData = inspection.providerData || {};
-          providerCaptureObserved = inspection.state === "captured";
+          providerCaptureObserved = hasObservedCapture(inspection);
           if (inspection.state === "refunded") {
             const verification = await verifyProviderCapture({ record, source: "reconcile", providerData });
             const operation = await currentPaymentOperation({ client, record });
@@ -6214,7 +6215,8 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
   }
   if (payment.status === "succeeded") {
     if (deferFinalization) return { httpStatus: 200, body: buildPublicStatusBody(record) };
-    const finalized = await finalizePaymentRecordInternal({ client, record, source, providerCaptureObserved: true,
+    const finalized = await finalizePaymentRecordInternal({ client, record, source,
+      providerCaptureObserved: settledDodoPaymentState(payment) === "succeeded",
       providerData: { dodoCheckoutSessionId: payment.checkout_session_id,
         dodoPaymentId: payment.payment_id, verifiedDodoPayment: payment } });
     return { httpStatus: finalized.httpStatus, body: finalized.response };
