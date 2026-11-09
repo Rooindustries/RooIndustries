@@ -29,7 +29,12 @@ import {
 import { sanitizeBrowserSearch } from "./lib/browserSearch";
 import { prefetchHomeSectionData } from "./lib/homeSectionData";
 import { whenUserInteracts } from "./lib/firstInteraction";
-import { migrateCheckoutStorageToSession } from "./lib/checkoutStorage";
+import { migrateCheckoutStorageToSession, readStoredCheckoutBooking, HOLD_STORAGE_KEY,
+  PAYMENT_SESSION_STORAGE_KEY, CHECKOUT_BOOKING_STORAGE_KEY } from "./lib/checkoutStorage";
+import { readReservationStorage, removeReservationStorage } from "./lib/reservationStorage";
+import { reservationOperation } from "./lib/reservationOperation";
+import { RESERVATION_PAYMENT_EVENT, paymentSessionCurrent } from "./lib/reservationReleaseHandlers";
+import { createBookingConfirmation } from "./lib/confirmationReceipt";
 import { getPublicContent, getPublicContentPendingCount } from "./lib/publicContentClient";
 import { useBookingDialogPending } from "./lib/bookingDialogHold";
 import { setVisibleTimeout } from "./lib/visibleTimeout";
@@ -344,6 +349,34 @@ export function AppContent({
   const lastRouteKeyRef = useRef("");
   const pathName = location.pathname || "";
   const FLOW_BACKGROUND_KEY = "flow_background_location";
+
+  useEffect(() => {
+    const handlePayment = (event) => {
+      const { status, hold, token, checkout, data } = event.detail || {};
+      const ownsSession = paymentSessionCurrent(token);
+      const ownsReservation = Boolean(hold) && reservationOperation({ hold, paymentAccessToken: token })();
+      const ownsCheckout = checkout === readReservationStorage(CHECKOUT_BOOKING_STORAGE_KEY);
+      if (status === "confirming" && ownsSession && ownsCheckout && (!hold || ownsReservation) &&
+          location.pathname !== "/payment") {
+        navigate("/payment", { state: { bookingData: readStoredCheckoutBooking(),
+          ...(location.state?.backgroundLocation ? { backgroundLocation: location.state.backgroundLocation } : {}) } });
+      }
+      if (status !== "booked") return;
+      const bookingConfirmation = createBookingConfirmation(data);
+      if (ownsSession && (!hold || ownsReservation)) {
+        removeReservationStorage(PAYMENT_SESSION_STORAGE_KEY);
+        if (ownsCheckout) removeReservationStorage(CHECKOUT_BOOKING_STORAGE_KEY);
+        if (ownsReservation) {
+          removeReservationStorage(HOLD_STORAGE_KEY);
+          window.dispatchEvent(new CustomEvent("hold-state", { detail: null }));
+        }
+      }
+      navigate("/payment-success", { replace: true, state: { bookingConfirmation,
+        ...(location.state?.backgroundLocation ? { backgroundLocation: location.state.backgroundLocation } : {}) } });
+    };
+    window.addEventListener(RESERVATION_PAYMENT_EVENT, handlePayment);
+    return () => window.removeEventListener(RESERVATION_PAYMENT_EVENT, handlePayment);
+  }, [navigate, location.pathname, location.state]);
 
   const readStoredBackground = () => {
     try {

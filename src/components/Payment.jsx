@@ -1,5 +1,7 @@
 import { HOLD_STORAGE_KEY, PAYMENT_SESSION_STORAGE_KEY, CHECKOUT_BOOKING_STORAGE_KEY } from "../lib/checkoutStorage";
 import { readReservationStorage, writeReservationStorage, removeReservationStorage } from "../lib/reservationStorage";
+import { cancelReservationPayment, readPaymentConfirmation, readPaymentReleaseError, hasConfirmingReservation, RESERVATION_PAYMENT_EVENT } from "../lib/reservationReleaseHandlers";
+import { reconcileReservation } from "../lib/reservationOperation";
 import { clearBookingConfirmation, createBookingConfirmation } from "../lib/confirmationReceipt";
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useLocation, Link, useNavigate } from "react-router-dom";
@@ -455,6 +457,7 @@ export default function Payment({ hideFooter = false }) {
 
     let timeoutId;
     const scheduleExpiry = () => {
+      if (hasConfirmingReservation()) return;
       const remainingMs = expiresAtMs - Date.now();
       if (remainingMs <= 0) {
         triggerExpiry();
@@ -1017,6 +1020,28 @@ export default function Payment({ hideFooter = false }) {
     return true;
   };
 
+  useEffect(() => {
+    const token = paymentSession?.paymentAccessToken;
+    if (!token) return undefined;
+    const sync = () => {
+      const confirmation = readPaymentConfirmation(token);
+      if (!confirmation) {
+        const error = readPaymentReleaseError(token);
+        if (error) showBanner("error", error);
+        return;
+      }
+      setPaymentStatusBusy(true);
+      showBanner(confirmation.status === "error" ? "error" : "info",
+        confirmation.status === "error"
+          ? `Your payment was received and is being finalized. ${confirmation.message}`
+          : "Your payment was received and is being finalized.",
+        { persistent: true });
+    };
+    sync();
+    window.addEventListener(RESERVATION_PAYMENT_EVENT, sync);
+    return () => window.removeEventListener(RESERVATION_PAYMENT_EVENT, sync);
+  }, [paymentSession?.paymentAccessToken]);
+
   const handleChangePaymentMethod = async () => {
     const activeSession = readStoredPaymentSession() || paymentSession;
     const paymentAccessToken = String(activeSession?.paymentAccessToken || "").trim();
@@ -1024,52 +1049,22 @@ export default function Payment({ hideFooter = false }) {
     const operation = createPaymentOperation(paymentAccessToken);
     if (!operation.current()) return;
 
+    let hold = null;
+    if (!isUpgrade) {
+      try {
+        hold = JSON.parse(readReservationStorage(HOLD_STORAGE_KEY) || "null");
+      } catch {
+        hold = reconcileReservation(null).hold;
+      }
+    }
     setCancellingPayment(true);
-    try {
-      const { response, data } = await fetchJson("/api/payment/cancel", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${paymentAccessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: "{}",
-      });
-      if (!operation.current()) return;
-      if (data?.captured) {
-        if (["booked", "email_partial"].includes(String(data.status || "").toLowerCase())) {
-          await navigateToConfirmation("paid", data, operation);
-          return;
-        }
-        showBanner("info", "Your payment was received and is being finalized.");
-        return;
-      }
-      if (!response.ok || data?.cancelled !== true) {
-        throw new Error(data?.error || "The payment method could not be changed.");
-      }
-
-      const refreshedHold = data.refreshedHold || null;
-      if (refreshedHold?.slotHoldId && refreshedHold?.slotHoldToken) {
-        setSessionHold(refreshedHold);
-        const nextCheckout = {
-          ...bookingData,
-          slotHoldId: refreshedHold.slotHoldId,
-          slotHoldToken: refreshedHold.slotHoldToken,
-          slotHoldExpiresAt: refreshedHold.slotHoldExpiresAt,
-        };
-        writeStoredCheckout(nextCheckout);
-        const holdState = {
-          holdId: refreshedHold.slotHoldId,
-          holdToken: refreshedHold.slotHoldToken,
-          expiresAt: refreshedHold.slotHoldExpiresAt,
-          startTimeUTC: bookingData.startTimeUTC || "",
-          packageTitle,
-          packagePrice,
-          phase: "holding",
-        };
-        writeReservationStorage(HOLD_STORAGE_KEY, JSON.stringify(holdState));
-        window.dispatchEvent(new CustomEvent("hold-state", { detail: holdState }));
-      }
-      clearPaymentSession("", operation.token);
+    const result = await cancelReservationPayment(hold, paymentAccessToken, { isUpgrade, bookingData });
+    if (!paymentMountedRef.current || paymentViewRef.current !== paymentView) return;
+    if (result.error) showBanner("error", result.error);
+    if (!result.error && !result.stale && !result.captured) {
+      setPaymentSession(null);
+      paymentView.session = null;
+      if (!isUpgrade) setSessionHold(result.refreshed || null);
       operation.token = "";
       if (activeSession.provider === "dodo") {
         dodoReturnHandled.current = "";
@@ -1081,12 +1076,8 @@ export default function Payment({ hideFooter = false }) {
         });
       }
       showBanner("success", "Payment method released. Choose a payment method below.");
-    } catch (error) {
-      if (!operation.current()) return;
-      showBanner("error", error.message || "The payment method could not be changed.");
-    } finally {
-      if (operation.current()) setCancellingPayment(false);
     }
+    setCancellingPayment(false);
   };
 
   const buildFinalizeNavigation = (responseBody, operation) => {

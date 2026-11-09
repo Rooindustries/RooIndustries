@@ -10,6 +10,7 @@ import {
 import packagePricing from "../lib/packagePricing";
 import { classifyHoldResponse } from "../lib/holdResponse";
 import { CHECKOUT_CONFIRMATION_EVENT, isCheckoutConfirmationPending } from "../lib/checkoutConfirmation";
+import { hasConfirmingReservation } from "../lib/reservationReleaseHandlers";
 import { CLIENT_REQUEST_TIMEOUT_MS } from "../lib/clientRequest";
 import { scrollWindowTo } from "../lib/scrollWindowTo";
 
@@ -188,7 +189,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
     const tick = () => {
       const diff = expiresAtMs - Date.now();
       if (diff <= 0) {
-        if (isCheckoutConfirmationPending()) {
+        if (isCheckoutConfirmationPending() || hasConfirmingReservation()) {
           setCountdown(0);
           return false;
         }

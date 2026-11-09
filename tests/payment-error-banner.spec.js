@@ -101,3 +101,38 @@ test("payment success banner still clears itself", async ({ page, flow }) => {
   await expect.poll(() => settled(status)).toBe(true);
   await expect(status).toHaveCount(0, { timeout: 6000 });
 });
+
+test("a captured upgrade opens its receipt after closing during Change payment method", async ({ page, flow }) => {
+  await flow.upgrade();
+  await page.getByRole("button", { name: "Check eligibility", exact: true }).click();
+  await page.getByRole("button", { name: "Proceed to Payment", exact: true }).click();
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  await expect(page).toHaveURL(/checkout-handoff$/);
+  await page.goto("/payment");
+  let requested = false;
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  await page.route("**/api/payment/cancel", async route => {
+    requested = true;
+    await gate;
+    await route.fulfill({ status: 200, json: { captured: true, status: "booked", bookingId: "upgrade-confirmed" } });
+  });
+  try {
+    await page.getByRole("button", { name: "Change payment method", exact: true }).click();
+    await expect.poll(() => requested).toBe(true);
+    await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
+    const newer = { holdId: "new-hold", holdToken: "new-token", startTimeUTC: "2099-01-05T04:30:00.000Z",
+      expiresAt: "2099-01-05T04:45:00.000Z", phase: "active" };
+    const checkout = { slotHoldId: newer.holdId, slotHoldToken: newer.holdToken };
+    await page.evaluate(({ newer, checkout }) => {
+      sessionStorage.setItem("my_slot_hold", JSON.stringify(newer));
+      sessionStorage.setItem("checkout_booking_state", JSON.stringify(checkout));
+    }, { newer, checkout });
+    release();
+    await expect(page).toHaveURL(/\/payment-success$/);
+    expect(await page.evaluate(() => history.state.usr.bookingConfirmation.bookingId)).toBe("upgrade-confirmed");
+    await expect(page.getByRole("heading", { name: "Payment Successful", exact: true })).toBeVisible();
+    expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem("my_slot_hold")))).toEqual(newer);
+    expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem("checkout_booking_state")))).toEqual(checkout);
+  } finally { release(); }
+});
