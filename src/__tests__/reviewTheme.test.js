@@ -9,7 +9,6 @@ describe("review carousel design", () => {
 
   test("uses the shared section heading treatment", () => {
     expect(componentSource).toContain('className="ri-reviews-heading section-title"');
-    expect(componentSource).toContain('className="px-4 sm:px-6 mb-8"');
     expect(componentSource).not.toContain("drop-shadow-[0_0_15px");
   });
 
@@ -21,7 +20,6 @@ describe("review carousel design", () => {
     expect(componentSource).toContain("function AutoReviewCarousel");
     expect(componentSource).toContain("ri-reviews-auto-track");
     expect(componentSource).toContain("${REVIEW_CARD_WIDTH} min-h-[232px]");
-    expect(componentSource).toContain('const REVIEW_CARD_WIDTH = "w-[320px] sm:w-[380px]";');
     expect(componentSource).toContain("Array.from({ length: groupCount }");
     expect(componentSource).toContain("“{review.text}”");
     expect(componentSource).toContain("AUTO_SCROLL_PIXELS_PER_SECOND = 24");

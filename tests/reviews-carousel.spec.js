@@ -34,9 +34,11 @@ function installProbe() {
     const el = viewport();
     const x = el.getBoundingClientRect().left + 1;
     const gap = pitch() - firstCards()[0].offsetWidth;
-    for (const card of el.querySelectorAll("[data-review-id]")) {
+    const cards = [...el.querySelectorAll("[data-review-id]")];
+    for (const [index, card] of cards.entries()) {
       const rect = card.getBoundingClientRect();
-      if (rect.left <= x && x < rect.right + gap) return describe(card, x);
+      const next = cards[index + 1]?.getBoundingClientRect().left ?? rect.right + gap;
+      if (rect.left <= x && x < next) return describe(card, x);
     }
     return null;
   };
