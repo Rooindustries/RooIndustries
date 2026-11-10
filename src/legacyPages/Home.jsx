@@ -235,6 +235,7 @@ export default function Home({ initialData = null, heroHeadingTag = "h1" }) {
           >
             <Faq
               compact
+              onPaginationStart={() => setForceEagerSections(true)}
               initialFaqCopy={initialData?.faqSettings || null}
               initialQuestions={initialData?.faqQuestions || null}
             />
