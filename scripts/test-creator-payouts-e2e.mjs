@@ -3076,7 +3076,7 @@ try {
   });
 
   const {checkPayoutCronScale} = await import('./lib/payout-cron-scale.mjs');
-  for (const mode of ['volume', 'oversized', 'missing']) {
+  for (const mode of ['volume', 'oversized', 'missing', 'read-failure']) {
     await run(`payout-cron-scale-${mode}`, () =>
       checkPayoutCronScale({sql, seed, documents, fixture, origin, post, mode})
     );

@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
-
 export const checkPayoutCronScale = async ({sql, seed, documents, fixture, origin, post, mode}) => {
   const state = await seed('dodo');
-  const count = mode === 'volume' ? 40 : 3;
+  const count = ['volume', 'read-failure'].includes(mode) ? 40 : 3;
   const prefix = `referral.${state.key}.scale.`;
   const failedId = `${prefix}0002`;
   const monitor = Symbol.for('roo.reportServerError');
   const previousReporter = globalThis[monitor];
   const errors = [];
   let tombstoned = false;
+  let failedRead = false;
   try {
     await sql`
       insert into migration.source_documents (
@@ -19,7 +19,7 @@ export const checkPayoutCronScale = async ({sql, seed, documents, fixture, origi
           '_id', ${prefix} || lpad(index::text, 4, '0'), '_type', 'referral', '_rev', 'scale',
           'name', 'Fixture creator', 'slug', jsonb_build_object('current', ${state.key} || '-' || index),
           'notes', repeat('x', case when ${mode} = 'oversized' and index = 2 then 260000
-            when ${mode} = 'volume' then 12000 else 1 end)
+            when ${['volume', 'read-failure'].includes(mode)} then 12000 else 1 end)
         )
       from generate_series(1, ${count}) as creators(index)
     `;
@@ -29,6 +29,13 @@ export const checkPayoutCronScale = async ({sql, seed, documents, fixture, origi
       if (!request.response.some(row => row.id === failedId && !row.tombstoned)) return;
       tombstoned = true;
       await sql`update migration.source_documents set tombstoned = true where legacy_sanity_id = ${failedId}`;
+    });
+    if (mode === 'read-failure') fixture.setRequestHook((phase, request) => {
+      if (phase === 'before' && request.path.endsWith('/roo_fetch_shadow_documents_targeted') &&
+        request.body.p_ids.includes(`${prefix}0040`) && !request.body.p_ids.includes(`${prefix}0001`) && !failedRead) {
+        failedRead = true;
+        throw new Error('Synthetic referral read failure');
+      }
     });
     const cron = async (expectUpdates = true) => {
       const errorStart = errors.length;
@@ -42,9 +49,9 @@ export const checkPayoutCronScale = async ({sql, seed, documents, fixture, origi
       assert.equal(new Set(body.results.map(row => row.id)).size, body.total);
       const rows = body.results.filter(row => row.id.startsWith(prefix));
       assert.equal(rows.length, count);
-      if (mode === 'volume') {
+      if (['volume', 'read-failure'].includes(mode)) {
         assert.equal(body.complete, true);
-        assert.ok(rows.every(row => !row.pending && row.updated === expectUpdates));
+        assert.ok(rows.every(row => !row.pending && (mode === 'read-failure' || row.updated === expectUpdates)));
         assert.equal(errors.length, errorStart);
       } else {
         const failed = rows.find(row => row.id === failedId);
@@ -56,9 +63,34 @@ export const checkPayoutCronScale = async ({sql, seed, documents, fixture, origi
         assert.ok(rows.filter(row => row.id !== failedId).every(row => !row.pending && row.updated));
         assert.deepEqual(errors.slice(errorStart), [{label: 'Referral cron batch failed', code, referralId: failedId}]);
       }
-      return {total: body.total, synced: body.synced};
+      return {total: body.total, synced: body.synced, ...(mode === 'read-failure' ? {rows} : {})};
     };
-    const first = await cron();
+    let first;
+    if (mode === 'read-failure') {
+      const errorStart = errors.length;
+      const response = await fetch(`${origin}/api/ref/cronSyncAll`, {headers: {authorization: 'Bearer fixture'}});
+      const body = await response.json();
+      assert.deepEqual([failedRead, response.status, body.ok, body.complete], [true, 500, false, false]);
+      assert.equal(body.results.length, body.total);
+      assert.equal(new Set(body.results.map(row => row.id)).size, body.total);
+      const rows = body.results.filter(row => row.id.startsWith(prefix));
+      assert.equal(rows.length, count);
+      assert.equal(rows.find(row => row.id === `${prefix}0001`).updated, true);
+      const last = rows.find(row => row.id === `${prefix}0040`);
+      assert.deepEqual([last.pending, last.errorCode], [true, 'FIXTURE_PROXY_ERROR']);
+      assert.ok(rows.every(row => row.updated === true || (row.pending === true && row.errorCode === 'FIXTURE_PROXY_ERROR')));
+      assert.deepEqual(errors.slice(errorStart), [{label: 'Referral cron sync failed', code: 'FIXTURE_PROXY_ERROR', referralId: undefined}]);
+      fixture.setRequestHook(null);
+      const second = await cron();
+      for (const row of rows) {
+        assert.equal(second.rows.find(result => result.id === row.id).updated, Boolean(row.pending));
+        const creator = await documents.getDocument(row.id);
+        assert.deepEqual([creator.earnedTotal, creator.paidTotal, creator.owedTotal], [0, 0, 0]);
+      }
+      const [payouts] = await sql`select count(*)::int as count from migration.source_documents where document_type = 'creatorPayout' and payload->>'referralId' like ${`${prefix}%`}`;
+      assert.equal(payouts.count, 0);
+      first = {total: body.total, synced: body.synced};
+    } else first = await cron();
     if (mode === 'volume') {
       const body = {
         referralId: state.creator._id, packageType: 'vertex', amount: 2,
