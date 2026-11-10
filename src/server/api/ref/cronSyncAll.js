@@ -39,20 +39,22 @@ export default async function handler(req, res) {
   }
 
   try {
-    const referrals = await readClient.fetch(
-      `*[_type == "referral"]{
-        _id, _rev, name, slug, xocPayments, vertexPayments,
-        earnedTotal, paidTotal, owedTotal
-      }`
-    );
-
-    if (!referrals || referrals.length === 0) {
+    const ids = await readClient.listDocumentIds('referral');
+    if (ids.length === 0) {
       return res.status(200).json({ok: true, synced: 0, message: 'No referrals found'});
     }
 
     const results = [];
-
-    for (const referral of referrals) {
+    for await (const outcome of readClient.documentBatches({documentType: 'referral', ids})) {
+      if (outcome.status !== 'document') {
+        logSafeError('Referral cron batch failed', outcome.error);
+        results.push({
+          id: outcome.id, updated: false, pending: true, errorCode: outcome.error.code,
+          ...(outcome.bytes === undefined ? {} : {bytes: outcome.bytes}),
+        });
+        continue;
+      }
+      const referral = outcome.document;
       try {
       if (!referral._rev) throw Object.assign(new Error("Referral source revision is missing"), { status: 409 });
       const code = (referral?.slug?.current || '').toLowerCase();
@@ -100,7 +102,8 @@ export default async function handler(req, res) {
     const updatedCount = results.filter((r) => r.updated).length;
     return res.status(200).json({
       ok: true,
-      total: referrals.length,
+      total: ids.length,
+      complete: !results.some((row) => row.pending),
       synced: updatedCount,
       results,
     });

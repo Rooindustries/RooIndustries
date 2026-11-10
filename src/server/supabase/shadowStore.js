@@ -86,6 +86,22 @@ const requireRpcData = ({ data, error }, operation) => {
   return data;
 };
 
+export const fetchCommerceDocumentIds = async ({
+  client = createSupabaseAdminClient(), documentType,
+} = {}) => {
+  const rows = requireRpcData(
+    await client.rpc("roo_commerce_canonical_manifest_for_types", { p_document_types: [documentType] }),
+    "commerce canonical manifest"
+  );
+  if (!Array.isArray(rows) || rows.some((row) =>
+    !row || typeof row.id !== "string" || !row.id.trim() || typeof row.tombstoned !== "boolean")) {
+    throw Object.assign(new Error("Commerce manifest returned an invalid response."), {
+      code: "SUPABASE_DOCUMENT_RESPONSE_INVALID", status: 503, statusCode: 503,
+    });
+  }
+  return rows.filter((row) => !row.tombstoned).map((row) => row.id);
+};
+
 export const importShadowDocuments = async ({
   documents,
   client = createSupabaseAdminClient(),

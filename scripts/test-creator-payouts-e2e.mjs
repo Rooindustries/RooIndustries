@@ -14,6 +14,9 @@ const baseline = process.argv
   .find((value) => value.startsWith('--baseline='))
   ?.slice(11);
 const sources = [
+  'src/server/api/ref/cronSyncAll.js',
+  'src/server/supabase/documentClient.js',
+  'src/server/supabase/shadowStore.js',
   'src/server/api/ref/payoutUtils.js',
   'src/server/api/ref/bookingRefunds.js',
   'src/server/api/ref/bookingCommit.js',
@@ -3071,6 +3074,13 @@ try {
       historicalCorrectionDeferredTo: 'ROO-729',
     };
   });
+
+  const {checkPayoutCronScale} = await import('./lib/payout-cron-scale.mjs');
+  for (const mode of ['volume', 'oversized', 'missing']) {
+    await run(`payout-cron-scale-${mode}`, () =>
+      checkPayoutCronScale({sql, seed, documents, fixture, origin, post, mode})
+    );
+  }
 
   await run('all-payouts-projection-rebuilds', async () => {
     const snapshot = async () => ({
