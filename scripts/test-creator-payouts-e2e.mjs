@@ -7,6 +7,11 @@ import {once} from 'node:events';
 import {registerHooks} from 'node:module';
 import {fileURLToPath} from 'node:url';
 import {execFileSync} from 'node:child_process';
+import {
+  checkPayoutCronScale, checkPayoutPackageScale, checkPayoutReadScale, createLegacyPayoutClient,
+} from './lib/payout-read-scale.mjs';
+import {checkGroupReadScale, checkMissingRead, checkNearCapRead, checkCronResume,
+  checkRecoveryPastOversized, checkCronErrorBudget, checkBatchBisection} from './lib/shadow-read-scale.mjs';
 
 const host = process.env.ROO_TEST_HOST || '127.0.0.1';
 const originalFetch = globalThis.fetch;
@@ -14,6 +19,9 @@ const baseline = process.argv
   .find((value) => value.startsWith('--baseline='))
   ?.slice(11);
 const sources = [
+  'src/server/api/ref/bookingEmails.js',
+  'src/server/downloads/downloadAccess.js',
+  'src/server/cms/documents.js',
   'src/server/api/ref/payoutUtils.js',
   'src/server/api/ref/bookingRefunds.js',
   'src/server/api/ref/bookingCommit.js',
@@ -21,6 +29,12 @@ const sources = [
   'src/server/api/ref/pricing.js',
   'src/server/api/ref/createBooking.js',
   'src/server/api/ref/updatePayments.js',
+  'src/server/api/ref/cronSyncAll.js',
+  'src/server/api/ref/payouts.js',
+  'src/server/api/ref/syncPayouts.js',
+  'src/server/supabase/documentClient.js',
+  'src/server/supabase/shadowStore.js',
+  'src/server/commerce/store.js',
 ];
 for (const source of [
   'src/server/referrals/commissionMoney.js',
@@ -167,7 +181,7 @@ if (baselineMigration)
     .createHash('sha256')
     .update(baselineMigration)
     .digest('hex');
-let fixture, server, origin, commerce, documents, sql, earnings;
+let fixture, server, origin, commerce, documents, sql, earnings, legacyPayouts;
 let current,
   sequence = 0,
   eventSequence = 0;
@@ -271,15 +285,11 @@ const summary = async (creator, expected) => {
     client: commerce,
     ...args,
   });
+  assert.equal(native.total, expected, JSON.stringify({native, expected}));
   const fallback = await earnings.fetchReferralEarnings({
-    client: {fetch: commerce.fetch.bind(commerce)},
+    client: legacyPayouts,
     ...args,
   });
-  assert.equal(
-    native.total,
-    expected,
-    JSON.stringify({native, fallback, expected})
-  );
   assert.deepEqual(fallback, native);
   return {native, fallback};
 };
@@ -512,6 +522,7 @@ try {
       : [],
   });
   sql = fixture.sql;
+  legacyPayouts = createLegacyPayoutClient(sql);
   const applyCommissionMigration = async ({traceProjections = false} = {}) => {
     const connection = await sql.reserve();
     const definitions = [];
@@ -3004,7 +3015,7 @@ try {
       for (const result of [null, undefined]) {
         const fallback = await earnings.fetchReferralEarnings({
           client: {
-            fetch: commerce.fetch.bind(commerce),
+            ...legacyPayouts,
             referralEarnings: async () => result,
           },
           ...args,
@@ -3071,6 +3082,28 @@ try {
       historicalCorrectionDeferredTo: 'ROO-729',
     };
   });
+
+  for (const mode of ['volume', 'oversized', 'growing'])
+    await run(`payout-read-scale-cron-${mode}`, () =>
+      checkPayoutCronScale({sql, seed, documents, commerce, fixture, origin, post, mode})
+    );
+
+  await run('payout-read-scale-packages', () =>
+    checkPayoutPackageScale({sql, seed, origin, post})
+  );
+
+  for (const reader of ['payment', 'booking-email', 'booking-settings', 'download', 'cms'])
+    await run(`payout-read-scale-group-${reader}`, () => checkGroupReadScale({sql, seed, commerce, fixture, reader}));
+  await run('payout-read-scale-missing', () => checkMissingRead({sql, seed, commerce, fixture, origin}));
+  await run('payout-read-scale-recovery-starvation', () => checkRecoveryPastOversized({sql, seed, commerce}));
+  await run('payout-read-scale-bisection', () => checkBatchBisection({sql, seed, commerce, fixture}));
+  await run('payout-read-scale-near-cap', () => checkNearCapRead({sql, seed, commerce}));
+  await run('payout-read-scale-resume', () => checkCronResume({sql, seed}));
+  await run('payout-read-scale-error-budget', () => checkCronErrorBudget({sql, seed}));
+
+  await run('legacy-earnings-large-history', () =>
+    checkPayoutReadScale({sql, seed, summary})
+  );
 
   await run('all-payouts-projection-rebuilds', async () => {
     const snapshot = async () => ({

@@ -1,6 +1,6 @@
 import { CONTENT_TYPES } from "../../lib/cms/contentSchema.js";
 import { collectGlobalCmsAssetIds } from "../../lib/globalCmsContract.js";
-import { fetchShadowDocuments } from "../supabase/shadowStore.js";
+import { createSupabaseDocumentClient } from "../supabase/documentClient.js";
 import { cmsError, rpcData, validationError } from "./errors.js";
 
 export const contentType = type => {
@@ -13,7 +13,8 @@ export const documentId = id => {
   return id;
 };
 export const loadDocument = async (client, id, types = CONTENT_TYPES.map(type => type.name)) => {
-  const rows = await fetchShadowDocuments({ client, ids: [documentId(id)], documentTypes: types, limit: 1, allowLegacyFallback: false });
+  const rows = await createSupabaseDocumentClient({shadowClient: client, allowLegacyFallback: false})
+    .dataset({ids: [documentId(id)], documentTypes: types, limit: 1});
   return rows[0] || null;
 };
 export const validManifest = row => row?.migration_status === "verified" && /^[a-f0-9]{64}$/.test(row.sha256 || "") && ((row.legacy_sanity_asset_id?.startsWith("image-") && row.storage_bucket === "site-content-public" && /^images\/[A-Za-z0-9_.-]+$/.test(row.storage_path)) || (row.legacy_sanity_asset_id?.startsWith("file-") && row.storage_bucket === "optimization-builds-private" && /^builds\/[A-Za-z0-9_.-]+$/.test(row.storage_path)));
@@ -36,7 +37,8 @@ export const getContentDocument = async (client, id) => {
 const fieldValue = (document, field) => typeof field === "string" ? field.split(".").reduce((value, key) => value?.[key], document) : null;
 export const listContentDocuments = async (client, type) => {
   const schema = contentType(type);
-  const rows = await fetchShadowDocuments({ client, documentTypes: [type], limit: 1000, allowLegacyFallback: false });
+  const rows = await createSupabaseDocumentClient({shadowClient: client, allowLegacyFallback: false})
+    .dataset({documentTypes: [type], limit: 1000});
   const documents = [];
   const previewMedia = document => fieldValue(document, schema.preview.media) || document.image || document.icon || document.beforeImage || document.recordImage;
   const assets = await assetSidecar(client, rows.map(document => ({_id:document._id,media:previewMedia(document)})), 1000);

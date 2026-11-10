@@ -8,6 +8,7 @@ import {assertCommerceWriteAllowed} from '../../supabase/commerceControl.js';
 import {
   buildBalance,
   fetchReferralEarnings,
+  fetchPayoutPackages,
   sumPayments,
 } from './payoutUtils.js';
 
@@ -59,12 +60,7 @@ export default async function handler(req, res) {
         referralId,
         referralCode: code,
       }),
-      readClient.fetch(
-        `*[_type == "package"] | order(coalesce(order, 999) asc, title asc){
-          title,
-          order
-        }`
-      ),
+      fetchPayoutPackages({client: readClient}),
     ]);
 
     const earningsByPackage = earnings.byPackage || {};

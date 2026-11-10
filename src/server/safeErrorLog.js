@@ -5,11 +5,22 @@ const cleanLabel = (value, fallback) => {
   return normalized || fallback;
 };
 
-export const getSafeErrorMetadata = (error) => ({
-  name: cleanLabel(error?.name, "Error"),
-  code: cleanLabel(error?.code, "unknown"),
-  status: Number(error?.status || error?.statusCode || 0) || 0,
-});
+export const getSafeErrorMetadata = (error) => {
+  const metadata = {
+    name: cleanLabel(error?.name, "Error"),
+    code: cleanLabel(error?.code, "unknown"),
+    status: Number(error?.status || error?.statusCode || 0) || 0,
+  };
+  if (error?.documentType) {
+    metadata.documentType = ["package", "booking", "paymentRecord", "referral"].includes(error.documentType)
+      ? error.documentType : "other";
+    metadata.documentCount = 1;
+    if (Number.isSafeInteger(error.bytes) && error.bytes >= 0) metadata.documentBytes = error.bytes;
+    if (metadata.documentType === "package" && typeof error.id === "string" &&
+      /^[a-z0-9_.-]{1,128}$/i.test(error.id)) metadata.packageId = error.id;
+  }
+  return metadata;
+};
 
 export const getSafeErrorCode = (error, fallback = "server_error") => {
   const code = getSafeErrorMetadata(error).code;

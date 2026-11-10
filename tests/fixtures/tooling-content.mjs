@@ -272,7 +272,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
       } else if (req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_read_public_content_revision') {
         if (contentOutage === true) throw Object.assign(new Error('Synthetic content outage.'), { status: 503, code: 'FIXTURE_CONTENT_OUTAGE' });
         call.status = 200; json(res, 200, contentRevision);
-      } else if (req.method === 'POST' && ['/rest/v1/rpc/roo_fetch_shadow_documents_targeted', '/rest/v1/rpc/roo_fetch_public_content_documents'].includes(url.pathname)) {
+      } else if (req.method === 'POST' && ['/rest/v1/rpc/roo_fetch_shadow_documents_targeted', '/rest/v1/rpc/roo_fetch_public_content_documents', '/rest/v1/rpc/roo_fetch_shadow_document_sizes'].includes(url.pathname)) {
         if (contentOutage === true || (Array.isArray(contentOutage) && body.p_document_types?.some(type => contentOutage.includes(type)))) throw Object.assign(new Error('Synthetic content outage.'), { status: 503, code: 'FIXTURE_CONTENT_OUTAGE' });
         const scopedIds = apiRoutes && body.p_document_types === null && Array.isArray(body.p_ids) && body.p_ids.length > 0;
         if ((!scopedIds && (!Array.isArray(body.p_document_types) || !body.p_document_types.length)) || !Array.isArray(body.p_filters) || !Number.isInteger(body.p_limit) || body.p_limit < 1 || body.p_limit > 1000 || body.p_ids !== null && !Array.isArray(body.p_ids)) throw new Error('Invalid fixture read scope.');
@@ -295,7 +295,13 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
           if (!['eq', 'ieq', 'in'].includes(filter.op) || typeof filter.path !== 'string') throw new Error('Unsupported fixture filter.');
           rows = rows.filter(row => { const value = filter.path.split('.').reduce((item, key) => item?.[key], row); return filter.op === 'in' ? Array.isArray(filter.value) && filter.value.includes(value) : filter.op === 'ieq' ? String(value).toLowerCase() === String(filter.value).toLowerCase() : value === filter.value; });
         }
-        rows = rows.sort((a, b) => a._id < b._id ? -1 : a._id > b._id ? 1 : 0).slice(0, body.p_limit); call.status = 200; call.rows = rows.length; json(res, 200, url.pathname.endsWith('/roo_fetch_public_content_documents') ? { revision: contentRevision, documents: rows } : rows);
+        if (body.p_after_id) rows = rows.filter(row => row._id > body.p_after_id);
+        rows = rows.sort((a, b) => a._id < b._id ? -1 : a._id > b._id ? 1 : 0).slice(0, body.p_limit);
+        call.status = 200; call.rows = rows.length;
+        const result = url.pathname.endsWith('/roo_fetch_shadow_document_sizes')
+          ? rows.map(row => ({_id: row._id, bytes: Buffer.byteLength(JSON.stringify(row))}))
+          : url.pathname.endsWith('/roo_fetch_public_content_documents') ? {revision: contentRevision, documents: rows} : rows;
+        json(res, 200, result);
       } else if (req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_asset_manifest_for_refs') {
         const assets = images.filter(image => body.p_asset_ids?.includes(image.id)).map(image => ({
           legacy_sanity_asset_id: image.id,

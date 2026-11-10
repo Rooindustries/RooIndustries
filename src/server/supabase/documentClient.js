@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import {logSafeError} from "../safeErrorLog.js";
 import { evaluate, parse } from "groq-js";
 import { isBookingBlockingStatus } from "../booking/bookingStatus.js";
 import {
@@ -6,10 +7,12 @@ import {
   fetchCommerceAvailability,
   fetchCommerceDerivedCount,
   fetchReferralEarningsSummary,
-  fetchRecoveryPaymentDocuments,
-  fetchShadowDocuments,
+  fetchRecoveryPaymentIds,
+  referralSyncCursor,
+  fetchShadowDocumentSizes,
   fetchUpgradeBookingChain,
 } from "./shadowStore.js";
+import {fetchShadowDocuments} from "./readShadowDocuments.js";
 
 const clone = (value) =>
   value === undefined ? undefined : JSON.parse(JSON.stringify(value));
@@ -28,6 +31,12 @@ const readPath = (object, path) =>
   );
 
 const MAX_COMMERCE_PAYLOAD_BYTES = 250 * 1024;
+const BATCH_PLANNING_BYTES = MAX_COMMERCE_PAYLOAD_BYTES * 0.8;
+
+const payloadBudgetError = () => Object.assign(
+  new Error("Commerce query exceeded its database payload budget."),
+  {code: "COMMERCE_PAYLOAD_BUDGET_EXCEEDED", status: 503, statusCode: 503}
+);
 
 const uniqueStrings = (values = []) =>
   [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
@@ -108,7 +117,7 @@ export const inferShadowScope = ({ query, params = {}, configuredTypes = null })
   }
   return {
     documentTypes: documentTypes.length > 0 ? documentTypes : null,
-    ids: uniqueStrings(ids),
+    ids: ids.length ? uniqueStrings(ids) : null,
     filters,
     limit: capped ? 1000 : inferQueryLimit(source),
     capped,
@@ -304,9 +313,11 @@ export class SupabaseDocumentClient {
     allowLegacyFallback,
     cutoverGeneration = 0,
     readDocuments = fetchShadowDocuments,
+    batchReads = false,
   } = {}) {
     this.shadowClient = shadowClient;
     this.readDocuments = readDocuments;
+    this.batchReads = batchReads;
     this.backend = "supabase";
     this.commerceOnly = commerceOnly === true;
     this.allowLegacyFallback =
@@ -321,6 +332,7 @@ export class SupabaseDocumentClient {
   }
 
   async dataset(scope = {}) {
+    if (Array.isArray(scope.ids) && !scope.ids.length) return [];
     const hasTargetedScope =
       (Array.isArray(scope.documentTypes || this.documentTypes) &&
         (scope.documentTypes || this.documentTypes).length > 0) ||
@@ -333,39 +345,107 @@ export class SupabaseDocumentClient {
       error.statusCode = 503;
       throw error;
     }
-    let documents = await this.readDocuments({
-      client: this.shadowClient,
-      documentTypes: scope.documentTypes || this.documentTypes,
-      ids: scope.ids,
-      filters: scope.filters,
-      limit: scope.limit,
-      allowLegacyFallback: this.allowLegacyFallback,
-    });
+    const readScope = { ...scope, documentTypes: scope.documentTypes || this.documentTypes };
+    let documents;
+    if ((this.readDocuments !== fetchShadowDocuments && !this.batchReads) || scope.limit === 1) {
+      documents = await this.readDocuments({
+        ...readScope, client: this.shadowClient, allowLegacyFallback: this.allowLegacyFallback,
+      });
+      if (this.commerceOnly && Buffer.byteLength(JSON.stringify(documents)) > MAX_COMMERCE_PAYLOAD_BYTES) {
+        throw payloadBudgetError();
+      }
+    } else {
+      documents = [];
+      for await (const outcome of this.documentBatches(readScope)) {
+        if (outcome.status === "document") documents.push(outcome.document);
+        else if (outcome.status === "oversized" || outcome.listed || scope.requireAll) throw outcome.error;
+      }
+    }
     if (scope.capped && documents.length >= scope.limit) {
       console.error("Shadow document read hit its cap; results may be incomplete. Owner attention is required.", { code: "SHADOW_READ_CAPPED", documentTypes: scope.documentTypes, limit: scope.limit });
     }
     if (scope.capped && scope.pinnedIds.length) {
-      const pinned = await this.readDocuments({
-        client: this.shadowClient,
-        documentTypes: scope.documentTypes || this.documentTypes,
-        ids: scope.pinnedIds,
-        limit: scope.pinnedIds.length,
-        allowLegacyFallback: this.allowLegacyFallback,
-      });
+      const pinned = await this.dataset({documentTypes: readScope.documentTypes, ids: scope.pinnedIds});
       documents = [...new Map([...documents, ...pinned].map(document => [document._id, document])).values()];
     }
-    if (
-      this.commerceOnly &&
-      Buffer.byteLength(JSON.stringify(documents), "utf8") >
-        MAX_COMMERCE_PAYLOAD_BYTES
-    ) {
-      const error = new Error("Commerce query exceeded its database payload budget.");
-      error.code = "COMMERCE_PAYLOAD_BUDGET_EXCEEDED";
-      error.status = 503;
-      error.statusCode = 503;
-      throw error;
-    }
     return documents;
+  }
+
+  async *documentBatches({documentTypes = this.documentTypes, ids, filters = [], limit = Infinity,
+    afterId = null} = {}) {
+    if (this.commerceOnly && !documentTypes?.length && !ids?.length && !filters.length) {
+      throw Object.assign(new Error("Commerce queries require a targeted scope."),
+        {code: "COMMERCE_QUERY_SCOPE_REQUIRED", status: 503, statusCode: 503});
+    }
+    const requestedIds = Array.isArray(ids) ? uniqueStrings(ids) : null;
+    const documentType = documentTypes?.length === 1 ? documentTypes[0] : "other";
+    const seen = new Set();
+    const missingError = (id) => Object.assign(new Error("Shadow document is missing."),
+      {code: "SHADOW_DOCUMENTS_MISSING", status: 503, id, documentType});
+    const readBatch = async function* (rows, client) {
+      const requested = rows.map(row => row._id);
+      let documents;
+      try {
+        documents = await client.readDocuments({client: client.shadowClient, documentTypes,
+          ids: requested, limit: requested.length, allowLegacyFallback: client.allowLegacyFallback});
+        const bytes = Buffer.byteLength(JSON.stringify(documents));
+        if (bytes > MAX_COMMERCE_PAYLOAD_BYTES) throw Object.assign(payloadBudgetError(), {bytes});
+      } catch (error) {
+        if (error.code !== "COMMERCE_PAYLOAD_BUDGET_EXCEEDED") throw error;
+        if (rows.length > 1) {
+          const middle = Math.ceil(rows.length / 2);
+          yield* readBatch(rows.slice(0, middle), client);
+          yield* readBatch(rows.slice(middle), client);
+          return;
+        }
+        error.id = requested[0];
+        error.documentType = documentType;
+        logSafeError("Shadow document batch failed", error);
+        yield {id: requested[0], status: "oversized", bytes: error.bytes, error};
+        return;
+      }
+      const byId = new Map(documents.map(document => [document._id, document]));
+      for (const id of requested) {
+        const document = byId.get(id);
+        if (document) yield {id, status: "document", document};
+        else {
+          const error = missingError(id);
+          logSafeError("Shadow document batch failed", error);
+          yield {id, status: "missing", listed: true, error};
+        }
+      }
+    };
+    let remaining = limit;
+    while (remaining > 0) {
+      const rows = await fetchShadowDocumentSizes({client: this.shadowClient, documentTypes, ids: requestedIds, filters,
+        afterId, limit: Math.min(500, remaining)});
+      if (!rows.length) break;
+      let batch = [];
+      let bytes = 1;
+      for (const row of rows) {
+        seen.add(row._id);
+        if (batch.length && bytes + row.bytes + 1 > BATCH_PLANNING_BYTES) {
+          yield* readBatch(batch, this);
+          batch = [];
+          bytes = 1;
+        }
+        batch.push(row);
+        bytes += row.bytes + 1;
+      }
+      if (batch.length) yield* readBatch(batch, this);
+      remaining -= rows.length;
+      afterId = rows.at(-1)._id;
+    }
+    for (const id of requestedIds || []) {
+      if (seen.has(id)) continue;
+      const error = missingError(id);
+      logSafeError("Shadow document batch failed", error);
+      yield {id, status: "missing", error};
+    }
+  }
+
+  referralSyncCursor(afterId) {
+    return referralSyncCursor({client: this.shadowClient, afterId});
   }
 
   async fetchUpgradeLinkDataset(slug, selector, params) {
@@ -404,15 +484,38 @@ export class SupabaseDocumentClient {
         .filter((value) => typeof value === "string")
     );
     if (!targetIds.length) return [selected];
-    const targets = [];
-    for (let index = 0; index < targetIds.length; index += 1000) {
-      targets.push(...await this.dataset({
-        documentTypes: ["package"],
-        ids: targetIds.slice(index, index + 1000),
-        limit: 1000,
-      }));
-    }
+    const targets = await this.dataset({documentTypes: ["package"], ids: targetIds, requireAll: true});
     return [selected, ...targets];
+  }
+
+  async fetchRecoveryDataset(scope, params) {
+    const documents = [];
+    const excludedIds = [];
+    const unavailable = [];
+    while (documents.length < 50) {
+      const ids = await fetchRecoveryPaymentIds({
+        client: this.shadowClient,
+        backend: params.backend,
+        statuses: params.statuses,
+        refundedStatus: params.refundedStatus,
+        bookedStatus: params.bookedStatus,
+        abandonedStatus: params.abandonedStatus,
+        dodoEnabled: params.dodoEnabled,
+        now: params.now,
+        limit: 50 - documents.length,
+        excludedIds,
+      });
+      if (!ids.length) break;
+      excludedIds.push(...ids);
+      for await (const outcome of this.documentBatches({documentTypes: scope.documentTypes, ids})) {
+        if (outcome.status === "document") documents.push(outcome.document);
+        else {
+          logSafeError("Recovery payment document unavailable", outcome.error);
+          unavailable.push({id: outcome.id, code: outcome.error.code, ...(outcome.bytes && {bytes: outcome.bytes})});
+        }
+      }
+    }
+    return {documents, unavailable};
   }
 
   async fetch(query, params = {}) {
@@ -435,39 +538,21 @@ export class SupabaseDocumentClient {
     const bookingSettingsQuery = String(query || "").match(
       /^\s*\*\[\s*_id\s*==\s*\$([A-Za-z_][A-Za-z0-9_]*)\s*&&\s*_type\s*==\s*["']bookingSettings["']\s*\]\s*\[\s*0\s*\]\s*\{/
     );
+    const recovery = recoveryQuery ? await this.fetchRecoveryDataset(scope, params) : null;
     const dataset = bookingSettingsQuery
       ? await this.fetchBookingSettingsDataset(params[bookingSettingsQuery[1]], tree.base, params)
       : upgradeLinkQuery
       ? await this.fetchUpgradeLinkDataset(params[upgradeLinkQuery[1]], tree.base, params)
       : recoveryQuery
-      ? await fetchRecoveryPaymentDocuments({
-          client: this.shadowClient,
-          backend: params.backend,
-          statuses: params.statuses,
-          refundedStatus: params.refundedStatus,
-          bookedStatus: params.bookedStatus,
-          abandonedStatus: params.abandonedStatus,
-          dodoEnabled: params.dodoEnabled,
-          now: params.now,
-          limit: 50,
-        })
+      ? recovery.documents
       : await this.dataset(scope);
-    if (
-      this.commerceOnly &&
-      Buffer.byteLength(JSON.stringify(dataset), "utf8") >
-        MAX_COMMERCE_PAYLOAD_BYTES
-    ) {
-      const error = new Error("Commerce query exceeded its database payload budget.");
-      error.code = "COMMERCE_PAYLOAD_BUDGET_EXCEEDED";
-      error.status = 503;
-      error.statusCode = 503;
-      throw error;
-    }
     const value = await evaluate(tree, {
       dataset,
       params: params || {},
     });
-    return value.get();
+    const result = await value.get();
+    if (recovery && Array.isArray(result)) result.unavailable = recovery.unavailable;
+    return result;
   }
 
   async getDocument(id) {

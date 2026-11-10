@@ -62,7 +62,7 @@ export const normalizeShadowDocument = (document) => {
   };
 };
 
-const requireRpcData = ({ data, error }, operation) => {
+export const requireRpcData = ({ data, error }, operation) => {
   if (error) {
     const failure = new Error(`Supabase ${operation} failed.`);
     failure.code = error.code || "SUPABASE_RPC_FAILED";
@@ -204,48 +204,32 @@ export const projectReferralAccountShadow = async ({
     "referral account shadow projection"
   );
 
-export const fetchShadowDocuments = async ({
-  documentTypes = null,
+export const fetchShadowDocumentSizes = async ({
+  documentTypes,
+  afterId,
   ids = null,
   filters = [],
   limit = 500,
-  allowLegacyFallback = true,
   client = createSupabaseAdminClient(),
 } = {}) => {
-  const targeted = await client.rpc("roo_fetch_shadow_documents_targeted", {
-    p_document_types:
-      Array.isArray(documentTypes) && documentTypes.length > 0
-        ? documentTypes
-        : null,
-    p_ids: Array.isArray(ids) && ids.length > 0 ? ids : null,
-    p_filters: Array.isArray(filters) ? filters : [],
-    p_limit: Math.max(1, Math.min(1000, Number(limit) || 500)),
-  });
-  let data;
-  if (
-    targeted?.error &&
-    ["42883", "PGRST202"].includes(String(targeted.error.code || ""))
-  ) {
-    if (!allowLegacyFallback) {
-      const failure = new Error("Targeted commerce reads are unavailable.");
-      failure.code = "COMMERCE_TARGETED_READ_UNAVAILABLE";
-      failure.status = 503;
-      failure.statusCode = 503;
-      throw failure;
-    }
-    data = requireRpcData(
-      await client.rpc("roo_fetch_shadow_documents", {
-        p_document_types:
-          Array.isArray(documentTypes) && documentTypes.length > 0
-            ? documentTypes
-            : null,
-      }),
-      "shadow fetch"
-    );
-  } else {
-    data = requireRpcData(targeted, "targeted shadow fetch");
+  const rows = requireRpcData(
+    await client.rpc("roo_fetch_shadow_document_sizes", {
+      p_document_types: documentTypes,
+      p_after_id: afterId || null,
+      p_limit: limit,
+      p_ids: ids,
+      p_filters: filters,
+    }),
+    "shadow document sizes"
+  );
+  if (!Array.isArray(rows) || rows.some(row =>
+    typeof row?._id !== "string" || !row._id || !Number.isSafeInteger(row.bytes) || row.bytes < 0)) {
+    const error = new Error("Shadow document sizes returned an invalid response.");
+    error.code = "SUPABASE_DOCUMENT_RESPONSE_INVALID";
+    error.status = 503;
+    throw error;
   }
-  return requireShadowDocumentArray(data);
+  return rows;
 };
 
 const requirePublicContentRevision = (value) => {
@@ -290,7 +274,7 @@ export const readPublicContentRevision = async ({
     requireRpcData(await client.rpc("roo_read_public_content_revision"), "public content revision")
   );
 
-export const fetchRecoveryPaymentDocuments = async ({
+export const fetchRecoveryPaymentIds = async ({
   backend,
   statuses,
   refundedStatus,
@@ -299,10 +283,11 @@ export const fetchRecoveryPaymentDocuments = async ({
   dodoEnabled = true,
   now,
   limit = 50,
+  excludedIds = [],
   client = createSupabaseAdminClient(),
 } = {}) => {
   const data = requireRpcData(
-    await client.rpc("roo_fetch_recovery_payment_documents", {
+    await client.rpc("roo_fetch_recovery_payment_document_ids", {
       p_backend: resolveStoreBackend(backend),
       p_statuses: Array.isArray(statuses) ? statuses : [],
       p_refunded_status: String(refundedStatus || "refunded"),
@@ -311,6 +296,7 @@ export const fetchRecoveryPaymentDocuments = async ({
       p_dodo_enabled: dodoEnabled === true,
       p_now: String(now || new Date().toISOString()),
       p_limit: Math.max(1, Math.min(100, Number(limit) || 50)),
+      p_excluded_ids: excludedIds,
     }),
     "recovery payment fetch"
   );
@@ -453,3 +439,6 @@ export const fetchShadowSummary = async ({
   client = createSupabaseAdminClient(),
 } = {}) =>
   requireRpcData(await client.rpc("roo_shadow_summary"), "shadow summary");
+
+export const referralSyncCursor = async ({client = createSupabaseAdminClient(), afterId} = {}) =>
+  requireRpcData(await client.rpc("roo_referral_sync_cursor", {p_after_id: afterId ?? null}), "referral sync cursor");

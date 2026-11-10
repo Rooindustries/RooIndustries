@@ -29,7 +29,7 @@ const createClient = () => {
           error: null,
         };
       }
-      if (name === "roo_list_email_dispatch_recovery_bookings") {
+      if (name === "roo_list_email_dispatch_recovery_booking_ids") {
         return { data: ["booking.one"], error: null };
       }
       return { data: null, error: { code: "UNKNOWN_RPC" } };

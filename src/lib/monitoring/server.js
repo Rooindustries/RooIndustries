@@ -46,7 +46,12 @@ export function startServerMonitoring(value) {
         }
       } catch {}
       report.stack = [`${report.name}: ${message}`, ...frames].join("\n");
-      captureException(report, { tags: { error_code: metadata.code, error_status: String(metadata.status) } });
+      captureException(report, { tags: {
+        error_code: metadata.code, error_status: String(metadata.status),
+        ...(metadata.documentType && {document_type: metadata.documentType, document_count: String(metadata.documentCount)}),
+        ...(metadata.documentBytes !== undefined && {document_bytes: String(metadata.documentBytes)}),
+        ...(metadata.packageId && {package_id: metadata.packageId}),
+      } });
     } catch {}
   };
 }

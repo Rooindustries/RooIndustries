@@ -900,7 +900,7 @@ try{
     fs.writeFileSync(proofPath,JSON.stringify({status:response.status,body,requestLog:fixture.requestLog},null,2));
     assert.equal(failed,true);assert.equal(response.status,503,JSON.stringify(body));assert.equal(body.ok,false);
     for(const key of ['emailOnlyRecovery','credentialRecovery','rateLimitBucketsCleaned','commerceMetricsCleaned','typedGapSnapshot','reconciliationCheckpoint'])assert.ok(Object.hasOwn(body.summary,key)||Object.hasOwn(body.summary,`${key}Pending`),`Independent duty missing: ${key}`);
-    assert.ok(fixture.requestLog.some(r=>r.rpc==='roo_list_email_dispatch_recovery_bookings'));return{proofPath,primaryFailureStillReported:true,independentDutyResults:body.summary};
+    assert.ok(fixture.requestLog.some(r=>r.rpc==='roo_list_email_dispatch_recovery_booking_ids'));return{proofPath,primaryFailureStillReported:true,independentDutyResults:body.summary};
   });
   for(const kind of ['confirmation','reschedule','dodo-cron','reschedule-cron'])await run(`a1-terminal-email-${kind}-25h-three-calls-rebuild`,async()=>{
     const {sendBookingEmailsForBooking,dispatchRescheduleNotifications}=await import('../src/server/api/ref/bookingEmails.js');

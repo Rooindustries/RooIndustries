@@ -115,15 +115,17 @@ export const listEmailDispatchRecoveryBookingIds = async ({
   dispatchKind,
   now = new Date().toISOString(),
   limit = 20,
+  excludedIds = [],
 } = {}) => {
   if (!hasAuthoritativeEmailLedger(client)) return null;
   const data = await requireRpc({
     client: client.shadowClient,
-    name: "roo_list_email_dispatch_recovery_bookings",
+    name: "roo_list_email_dispatch_recovery_booking_ids",
     parameters: {
       p_dispatch_kind: String(dispatchKind || "").trim(),
       p_now: now,
       p_limit: Math.max(1, Math.min(100, Number(limit) || 20)),
+      p_excluded_ids: excludedIds,
     },
   });
   return Array.isArray(data) ? data.map(String).filter(Boolean) : [];
