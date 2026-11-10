@@ -172,6 +172,28 @@ async function dialogShownAfterMount(page) {
   return { shownAt, mountedAt, afterMountMs: shownAt - mountedAt };
 }
 
+const recordStepGaps = (page) => page.evaluate(() => {
+  const steps = /^(Review your booking|Complete Payment)$/;
+  window.__stepGaps = 0;
+  const sample = () => {
+    const dialog = document.querySelector('[role="dialog"].ri-booking');
+    const headings = dialog ? [...dialog.querySelectorAll("h2, h3")] : [];
+    if (!headings.some(node => steps.test(node.textContent.trim()) && node.checkVisibility())) window.__stepGaps += 1;
+    if (!window.__stopStepGaps) requestAnimationFrame(sample);
+  };
+  requestAnimationFrame(sample);
+});
+
+const stopStepGaps = (page) => page.evaluate(() => {
+  window.__stopStepGaps = true;
+  return window.__stepGaps;
+});
+
+const delayLaterChunks = (page) => page.route("**/_next/static/chunks/**", async route => {
+  await new Promise(resolve => setTimeout(resolve, 1500));
+  await route.fallback();
+});
+
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
   test.describe(`${viewport.width}px`, () => {
     test.use({ viewport });
@@ -404,6 +426,17 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       expect(errors).toEqual([]);
     });
 
+    test("a directly loaded booking keeps its review step until payment is ready", async ({ page, flow }) => {
+      const errors = watchErrors(page);
+      await flow.review();
+      await delayLaterChunks(page);
+      await recordStepGaps(page);
+      await page.getByRole("button", { name: "Continue to payment", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Complete Payment", exact: true })).toBeVisible();
+      expect(await stopStepGaps(page)).toBe(0);
+      expect(errors).toEqual([]);
+    });
+
     test("focus stays in the dialog when booking continues to payment", async ({ page, flow }) => {
       const errors = watchErrors(page);
       await flow.review();
@@ -434,3 +467,89 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     });
   });
 }
+
+const recordStageFrames = page => page.addInitScript(() => {
+  const frames = window.__stageFrames = [];
+  const visible = { checkOpacity: true, checkVisibilityCSS: true };
+  const sample = () => {
+    const stage = document.querySelector(".booking-dialog-stage");
+    if (stage) {
+      frames.push({
+        time: performance.now(),
+        overlay: Boolean(stage.querySelector(".booking-modal-overlay")?.checkVisibility(visible)),
+        dialog: Boolean(stage.querySelector('[role="dialog"]')?.checkVisibility(visible)),
+      });
+    }
+    requestAnimationFrame(sample);
+  };
+  requestAnimationFrame(sample);
+});
+
+const expectStageShownWithDialog = async (page, testInfo, name) => {
+  await expect(page.locator('[role="dialog"].ri-booking')).toBeVisible();
+  await page.waitForFunction(() => window.__stageFrames.at(-1)?.dialog);
+  const frames = await page.evaluate(() => window.__stageFrames);
+  await testInfo.attach(name, { body: JSON.stringify(frames), contentType: "application/json" });
+  expect(frames.length).toBeGreaterThan(0);
+  expect(frames.filter(frame => frame.overlay && !frame.dialog)).toEqual([]);
+  expect(frames.at(-1)).toMatchObject({ overlay: true, dialog: true });
+};
+
+const recordFormFades = page => page.addInitScript(() => {
+  window.__formFades = [];
+  let hidden = false;
+  new MutationObserver(() => {
+    const nowHidden = Boolean(document.querySelector(".ri-booking.transition-opacity.opacity-0"));
+    if (nowHidden && !hidden) window.__formFades.push(performance.now());
+    hidden = nowHidden;
+  }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] });
+});
+
+for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+  for (const route of ["/booking", "/payment", "/payment-success", "/thank-you"]) {
+    test(`direct load of ${route} never shows the overlay without its dialog at ${viewport.width}px`, async ({ page, flow }, testInfo) => {
+      const errors = watchErrors(page);
+      await page.setViewportSize(viewport);
+      await recordStageFrames(page);
+      await page.goto(route);
+      await expectStageShownWithDialog(page, testInfo, "stage-frames");
+      expect(errors).toEqual([]);
+    });
+  }
+}
+
+test("a second tab's direct load of /booking shows the stage with its dialog", async ({ page, context, flow }, testInfo) => {
+  await page.goto("/booking");
+  await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
+  const second = await context.newPage();
+  const errors = watchErrors(second);
+  await recordStageFrames(second);
+  await recordFormFades(second);
+  await second.goto("/booking");
+  await expect(second.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
+  await expectStageShownWithDialog(second, testInfo, "second-tab-stage-frames");
+  expect(await second.evaluate(() => window.__formFades)).toEqual([]);
+  expect(errors).toEqual([]);
+  await second.close();
+});
+
+test("the booking form skips its fade only on the direct load and fades on Back and Forward", async ({ page, flow }, testInfo) => {
+  const errors = watchErrors(page);
+  await recordFormFades(page);
+  await page.goto("/booking");
+  await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
+  await expect(page.locator(".ri-booking.transition-opacity.opacity-100")).toBeVisible();
+  const directLoad = await page.evaluate(() => window.__formFades.splice(0));
+  await page.evaluate(() => window.history.pushState({ ...window.history.state, __rooLegacy: true, usr: null }, "", "/booking"));
+  const rounds = {};
+  for (const [name, move] of [["back", () => page.goBack()], ["forward", () => page.goForward()], ["back again", () => page.goBack()]]) {
+    await move();
+    await expect(page).toHaveURL(/\/booking$/);
+    await expect.poll(() => page.evaluate(() => window.__formFades.length), { timeout: 3000 }).toBeGreaterThan(0);
+    await expect(page.locator(".ri-booking.transition-opacity.opacity-100")).toBeVisible();
+    rounds[name] = await page.evaluate(() => window.__formFades.splice(0).length);
+  }
+  await testInfo.attach("form-fades", { body: JSON.stringify({ directLoad, rounds }), contentType: "application/json" });
+  expect(directLoad).toEqual([]);
+  expect(errors).toEqual([]);
+});

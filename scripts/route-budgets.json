@@ -57,7 +57,7 @@
       "css": 25600
     },
     "/payment": {
-      "js": 241664,
+      "js": 244736,
       "css": 25600
     },
     "/payment-success": {
@@ -81,7 +81,7 @@
       "css": 25600
     },
     "/referrals/login": {
-      "js": 160768,
+      "js": 169984,
       "css": 25600
     },
     "/referrals/register": {
@@ -252,6 +252,10 @@
     },
     "src/next/NotFoundEntry.jsx -> ./LegacyRoutePage": {
       "js": 46080,
+      "css": 1024
+    },
+    "src/components/SupabaseSocialLogin.jsx -> ../lib/supabaseBrowser": {
+      "js": 68608,
       "css": 1024
     }
   }

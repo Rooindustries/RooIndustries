@@ -16,16 +16,61 @@ const routes = [
   "/referrals/register",
 ];
 
+const stylesheetsReady = async (page) => {
+  await page.waitForLoadState("load");
+  const stylesheets = await page.locator('link[rel="stylesheet"]').evaluateAll(links => links.map(link => ({
+    href: link.getAttribute("href"),
+    loaded: Boolean(link.sheet),
+    inHead: link.parentElement === document.head,
+    media: link.media || "all",
+    disabled: link.disabled,
+  })));
+  expect(stylesheets.length).toBeGreaterThan(0);
+  expect(stylesheets.filter(sheet => !sheet.loaded || !sheet.inHead || sheet.media !== "all" || sheet.disabled)).toEqual([]);
+};
+
 test.describe("Non-JS crawlability", () => {
-  test("/payment's own section doesn't start hidden on the server", async ({ page }) => {
-    await page.goto("/payment", { waitUntil: "domcontentloaded" });
-    const section = page.locator("section.booking-payment");
-    await expect(section).toHaveCount(1);
-    const opacities = await section.evaluate(element => [element, ...element.querySelectorAll("*")]
-      .map(node => getComputedStyle(node).opacity)
-      .filter(opacity => opacity === "0"));
-    expect(opacities).toEqual([]);
-  });
+  for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 }]) {
+    for (const [route, selector] of [
+      ["/payment", "section.booking-payment"],
+      ["/booking", '[role="dialog"] section.ri-booking'],
+      ["/payment-success", '[role="dialog"] h1'],
+      ["/thank-you", '[role="dialog"] h1'],
+    ]) {
+      test(`${route}'s dialog content doesn't start hidden on the server at ${viewport.width}px`, async ({ page }, testInfo) => {
+        await page.setViewportSize(viewport);
+        await page.goto(route, { waitUntil: "domcontentloaded" });
+        await stylesheetsReady(page);
+        const content = page.locator(selector);
+        await expect(content).toHaveCount(1);
+        await expect(page.locator('[hidden][id^="S:"]')).toHaveCount(0);
+        expect(await content.evaluate(element => Boolean(element.closest("[hidden]")))).toBe(false);
+        const hidden = await content.evaluate(element => {
+          const ancestors = [];
+          for (let node = element; node; node = node.parentElement) ancestors.push(node);
+          return [...ancestors, ...element.querySelectorAll("*")]
+            .filter(node => {
+              const style = getComputedStyle(node);
+              const parentHidden = node.parentElement && getComputedStyle(node.parentElement).visibility === "hidden";
+              return style.opacity === "0" || (style.visibility === "hidden" && !parentHidden);
+            })
+            .map(node => ({
+              node: `${node.tagName.toLowerCase()}.${String(node.className).trim().split(/\s+/).join(".")}`,
+              opacity: getComputedStyle(node).opacity,
+              visibility: getComputedStyle(node).visibility,
+            }));
+        });
+        await testInfo.attach("hidden-nodes", { body: JSON.stringify(hidden, null, 2), contentType: "application/json" });
+        expect(hidden).toEqual([]);
+        const box = await content.boundingBox();
+        expect(box.width).toBeGreaterThan(0);
+        expect(box.height).toBeGreaterThan(0);
+        expect(box.x).toBeGreaterThanOrEqual(0);
+        expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);
+        expect(box.y).toBeLessThan(viewport.height);
+      });
+    }
+  }
 
   test("/packages keeps its h1 inside main without JavaScript", async ({ page }, testInfo) => {
     await page.goto("/packages", { waitUntil: "domcontentloaded" });
@@ -197,6 +242,7 @@ test.describe("Non-JS crawlability", () => {
   for (const route of routes) {
     test(`renders meaningful HTML for ${route}`, async ({ page }) => {
       await page.goto(route, { waitUntil: "domcontentloaded" });
+      await expect(page.locator('[hidden][id^="S:"]')).toHaveCount(0);
 
       const heading = page.locator("h1, h2, h3");
       await expect(heading.first()).toBeVisible();
