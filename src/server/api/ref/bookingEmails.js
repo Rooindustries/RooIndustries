@@ -221,7 +221,7 @@ const formatMoney = (value, currency = "USD") => {
 
 export const formatRequestedTimeFields = (booking = {}) => {
   const appointment = formatAppointmentTime(
-    booking.originalRequestedStartTimeUTC,
+    booking.requestedStartTimeUTC || booking.originalRequestedStartTimeUTC,
     booking.localTimeZone
   );
   if (!appointment) {
@@ -1166,7 +1166,7 @@ export const dispatchRescheduleNotifications = async ({
     ...formatRequestedTimeFields(recoveryBooking),
   ];
   const hostAppointment = formatAppointmentTime(
-    recoveryBooking.originalRequestedStartTimeUTC,
+    recoveryBooking.requestedStartTimeUTC || recoveryBooking.originalRequestedStartTimeUTC,
     OWNER_TZ_NAME
   );
   const ownerScheduleLabel = hostAppointment

@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
+import { spawnSync } from 'node:child_process';
 import http from 'node:http';
 import https from 'node:https';
 import { once } from 'node:events';
@@ -51,6 +53,8 @@ const artifact=path.resolve(process.env.ROO_PAYMENT_PERSISTENCE_ARTIFACT||'test-
 fs.mkdirSync(path.dirname(artifact),{recursive:true});
 const evidence={checkedAt:new Date().toISOString(),productionRequests:0,scenarios:[],standIns:[{boundary:'Provider HTTP',scope:'Synthetic PayPal/Razorpay/Dodo response shapes and held requests/disconnects through actual provider clients and Dodo SDK; no live API.'},{boundary:'Coupon dependency failure',scope:'The release case throws through an injected callback; release-stored reruns the boundary through the real coupon release module against a missing revision in PostgreSQL.'},{boundary:'Clock',scope:'For takeover cases Date.now advances91000ms inside this isolated process; stored90s lease timestamps and actual native projection remain real. PostgreSQL clock is not changed.'},{boundary:'Auth HTTP',scope:'Synthetic signed user response; actual installed SSR/AuthSDK selects submitted cookies and actual account/domain SQL evaluates identity. Hosted GoTrue excluded.'},{boundary:'Local infrastructure/grants',scope:'Shared fixture bootstrap auth/storage tables and expanded service_role grants. Actual repository account/commerce/migration SQL; hosted RLS and migration ledger excluded.'}],limits:['No Sanity query engine, hosted GoTrue/RLS, provider services, UI/browser, production Next server or full build.']};
 let fixture,server,origin,commerce,documents,flow,access,sql,providers,a1Ui;
+let recoveryDefinitionBeforeMigration;
+const recoveryMigration = '20261109000000_resume_exhausted_late_capture_watches.sql';
 evidence.sourceEdition='current source';
 let razorpayRefunds=[];
 let dodoPayment,dodoRefund,paypalOrder,paypalCapture,razorpayPayment,verificationStatus,verificationDisconnect,providerHook;
@@ -215,8 +219,13 @@ try{
   }catch(error){if(!res.destroyed){res.writeHead(500,{'content-type':'application/json'});res.end(JSON.stringify({fixtureError:error.message}));}}});
   server.listen(0,host);await once(server,'listening');origin=`http://${host}:${server.address().port}`;
   const { createSweepPostgresFixture } = await import('./lib/sweep-postgres-fixture.mjs');
-  fixture = await createSweepPostgresFixture({ fullMigrationChain: fullChain });
+  fixture = await createSweepPostgresFixture({ fullMigrationChain: fullChain,
+    excludedMigrations: fullChain ? [recoveryMigration] : [] });
   sql = fixture.sql;
+  if (fullChain) {
+    recoveryDefinitionBeforeMigration = (await sql`select pg_get_functiondef('public.roo_fetch_recovery_payment_documents(text,text[],text,text,text,timestamptz,integer,boolean)'::regprocedure) as value`)[0].value;
+    await fixture.apply(recoveryMigration);
+  }
   if (!fullChain) await fixture.apply('20261005000500_project_booking_payment_currency_subunits.sql');
   if (!fullChain) await fixture.apply('20261013000000_skip_review_only_recovery_rows.sql');
   const providerOrigins=new Set(['https://api-m.sandbox.paypal.com','https://api.razorpay.com','https://test.dodopayments.com','https://api.resend.com']);
@@ -964,6 +973,952 @@ try{
     };
     const response=await requestFlow('reconcile'),current=await record();assert.equal(response.status,200,JSON.stringify(response));assert.equal(current.providerOrderId,'order-fixture');assert.equal(current.providerPublicData.currency,currency);assert.equal(current.pricingSnapshot.currency,currency);if(provider==='paypal')assert.equal(requestCurrency,currency);const [typed]=await sql`select currency,amount_subunits from commerce.payment_records where legacy_sanity_id=${recordId}`;assert.equal(typed.currency,currency);assert.equal(Number(typed.amount_subunits),expected);return{response,current,typed,currentConfiguredCurrency:'USD',frozenCurrency:currency,actualProviderRecovery:true};
   });
+  const checkLateCaptureWithoutSlot = async ({ source, holdState, abandoned = false }) => {
+    const checkout = await a1Start();
+    await commerce.patch(checkout.id).set(abandoned
+      ? { status: 'abandoned', nextRecoveryAt: '', lateCaptureWatchUntil: new Date(originalNow() + 3600000).toISOString() }
+      : { status: 'needs_recovery', nextRecoveryAt: '', ...(source === 'webhook' ? { reconciliationRecoveryTerminal: true } : {}) }).commit();
+    await commerce.patch('slotHold.fixture').set(holdState === 'released'
+      ? { phase: 'released' } : { phase: holdState === 'other-active' ? 'holding' : 'payment_pending', paymentRecordId: 'paymentRecord.other' }).commit();
+    const before = (await row('slotHold.fixture')).payload;
+    const claimsBefore = await sql`select to_jsonb(claim) as claim from commerce.slot_claims claim where start_time_utc = '2099-01-01T10:00:00Z' order by to_jsonb(claim)::text`;
+    const result = source === 'webhook' ? await a1Hook('paypal') : await requestFlow('reconcile');
+    const saved = (await row(checkout.id)).payload;
+    assert.equal(result.status, 200, JSON.stringify(result));
+    assert.ok(saved.bookingId);
+    const booking = (await row(saved.bookingId)).payload;
+    assert.equal(booking.requiresReschedule, true);
+    assert.deepEqual((await row('slotHold.fixture')).payload, before);
+    const [bookings] = await sql`select count(*)::int as count from commerce.bookings`;
+    const [locks] = await sql`select count(*)::int as count from commerce.booking_slots where booking_id = (select id from commerce.bookings where legacy_sanity_id = ${saved.bookingId}) and status = 'active'`;
+    assert.equal(bookings.count, 1);
+    assert.equal(locks.count, 0);
+    assert.equal(booking.requestedStartTimeUTC, '2099-01-01T10:00:00.000Z');
+    assert.equal(booking.originalRequestedStartTimeUTC, undefined);
+    const [projected] = await sql`select start_time_utc from commerce.bookings where legacy_sanity_id = ${saved.bookingId}`;
+    assert.equal(projected.start_time_utc, null);
+    const [slotCount] = await sql`select count(*)::int as count from commerce.booking_slots where start_time_utc = '2099-01-01T10:00:00Z' and status = 'active'`;
+    assert.equal(slotCount.count, 0);
+    const claimsAfter = await sql`select to_jsonb(claim) as claim from commerce.slot_claims claim where start_time_utc = '2099-01-01T10:00:00Z' order by to_jsonb(claim)::text`;
+    assert.deepEqual(claimsAfter, claimsBefore);
+    const [availability] = await sql`select public.roo_fetch_commerce_availability() as result`;
+    assert.equal(availability.result.bookings.some(item => item.startTimeUTC === '2099-01-01T10:00:00.000Z'), false);
+    if (abandoned) assert.equal(saved.events.at(-1).reason, 'captured_after_abandonment');
+    return { source, holdState, bookingId: saved.bookingId };
+  };
+  for (const source of ['reconcile', 'webhook']) for (const holdState of ['released', 'other-active', 'other-payment-pending']) await run(
+    `recovery-late-capture-after-hold-loss-${source}-${holdState}`,
+    () => checkLateCaptureWithoutSlot({ source, holdState })
+  );
+  for (const holdState of ['released', 'other-active', 'other-payment-pending']) await run(
+    `recovery-late-capture-after-abandon-${holdState}`,
+    () => checkLateCaptureWithoutSlot({ source: 'reconcile', holdState, abandoned: true })
+  );
+  for (const [provider, state] of [['paypal', 'CREATED'], ['paypal', 'APPROVED'], ['paypal', 'PENDING'], ['razorpay', 'created']]) await run(`recovery-${provider}-expired-watch-${state}`, async () => {
+    const until = new Date(originalNow() - 1000).toISOString();
+    await seed(provider, 'abandoned', { record: { bookingId: '', providerPaymentId: '', nextRecoveryAt: '', lateCaptureWatchUntil: until } });
+    if (provider === 'paypal') {
+      paypalOrder.status = state === 'PENDING' ? 'COMPLETED' : state;
+      paypalOrder.purchase_units[0].payments = { captures: state === 'PENDING' ? [{ id: 'capture-fixture', status: 'PENDING', amount: { value: '9.99', currency_code: 'USD' } }] : [] };
+    } else {
+      providerHook = async (request, req, res) => {
+        if (request.path === '/v1/orders/order-fixture/payments') { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ items: [] })); return true; }
+        if (request.path === '/v1/orders/order-fixture') { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ id: 'order-fixture', status: 'created', amount: 999, amount_paid: 0, currency: 'USD' })); return true; }
+        return false;
+      };
+    }
+    const before = (await row(bookingId)).payload;
+    assert.equal((await requestFlow('reconcile')).status, 200);
+    const saved = await record();
+    if (state === 'CREATED' || state === 'created') {
+      assert.equal(saved.providerRecoveryTerminal, true);
+      assert.equal(saved.providerRecoveryTerminalReason, 'provider_confirmed_unpaid_after_late_capture_watch');
+      assert.equal(saved.lateCaptureWatchUntil, '');
+    } else {
+      assert.equal(saved.reconciliationRecoveryTerminal, true);
+      assert.equal(saved.recoveryReason, 'late_capture_watch_unverified_owner_review');
+    }
+    const again = await requestFlow('reconcile');
+    assert.equal(again.body.summary.scanned, 0);
+    assert.deepEqual((await row(bookingId)).payload, before);
+    return { provider, state, saved };
+  });
+  await run('recovery-reabandon-keeps-watch-deadline', async () => {
+    const until = new Date(originalNow() - 1000).toISOString();
+    await seed('paypal', 'needs_recovery', { record: { bookingId: '', providerPaymentId: '', createdAt: new Date(originalNow() - 3600000).toISOString(), nextRecoveryAt: '', lateCaptureWatchUntil: until } });
+    paypalOrder.status = 'CREATED';
+    paypalOrder.purchase_units[0].payments = { captures: [] };
+    assert.equal((await requestFlow('reconcile')).status, 200);
+    assert.equal((await record()).lateCaptureWatchUntil, until);
+    return { until };
+  });
+  for (const provider of ['paypal', 'razorpay']) for (const failure of [404, 503, 'disconnect']) await run(`recovery-${provider}-started-unavailable-watch-${failure}`, async () => {
+    const checkout = await a1Start(provider);
+    const start = originalNow();
+    const old = new Date(start - 3600000).toISOString();
+    await commerce.patch(checkout.id).set({ createdAt: old, updatedAt: old, lastAttemptAt: old, nextRecoveryAt: '' }).commit();
+    const path = provider === 'paypal' ? '/v2/checkout/orders/order-fixture' : '/v1/orders/order-fixture/payments';
+    providerHook = async (request, req, res) => {
+      if (request.path !== path) return false;
+      if (failure === 'disconnect') { req.socket.destroy(); return true; }
+      res.writeHead(failure, { 'content-type': 'application/json' }); res.end(JSON.stringify({ name: 'RESOURCE_NOT_FOUND' })); return true;
+    };
+    let logicalNow = start;
+    for (let attempt = 0; attempt < 14; attempt++) {
+      globalThis.Date = class extends originalDate { constructor(...args) { super(...(args.length ? args : [logicalNow])); } static now() { return logicalNow; } };
+      assert.equal((await requestFlow('reconcile')).status, 200);
+      const saved = (await row(checkout.id)).payload;
+      assert.notEqual(saved.reconciliationRecoveryTerminal, true, `attempt ${attempt + 1}`);
+      assert.equal(saved.status, 'needs_recovery');
+      const hold = (await row('slotHold.fixture')).payload;
+      assert.equal(hold.phase, 'payment_pending');
+      assert.equal(hold.paymentRecordId, checkout.id);
+      assert.ok(new originalDate(saved.nextRecoveryAt).getTime() <= new originalDate(saved.lateCaptureWatchUntil).getTime());
+      logicalNow = new originalDate(saved.nextRecoveryAt).getTime() + 1000;
+    }
+    return { provider, failure, attempts: 14 };
+  });
+  for (const state of ['approved', 'pending-capture']) await run(`recovery-paypal-started-${state}-watch-deadline`, async () => {
+    const checkout = await a1Start('paypal');
+    let logicalNow = originalNow();
+    const old = new originalDate(logicalNow - 3600000).toISOString();
+    await commerce.patch(checkout.id).set({ createdAt: old, updatedAt: old, lastAttemptAt: old, nextRecoveryAt: '' }).commit();
+    globalThis.Date = class extends originalDate { constructor(...args) { super(...(args.length ? args : [logicalNow])); } static now() { return logicalNow; } };
+    providerHook = async (request, req, res) => {
+      if (request.path !== '/v2/checkout/orders/order-fixture') return false;
+      res.writeHead(503, { 'content-type': 'application/json' }); res.end('{}'); return true;
+    };
+    assert.equal((await requestFlow('reconcile')).status, 200);
+    let saved = (await row(checkout.id)).payload;
+    const until = saved.lateCaptureWatchUntil;
+    assert.ok(until);
+    providerHook = null;
+    paypalOrder.status = state === 'approved' ? 'APPROVED' : 'COMPLETED';
+    paypalOrder.purchase_units[0].payments = { captures: state === 'approved' ? [] : [{ id: 'capture-fixture', status: 'PENDING', amount: { value: '9.99', currency_code: 'USD' } }] };
+    logicalNow = new originalDate(until).getTime() - 120000;
+    assert.equal((await requestFlow('reconcile')).status, 200);
+    saved = (await row(checkout.id)).payload;
+    assert.notEqual(saved.reconciliationRecoveryTerminal, true);
+    assert.equal(saved.providerOrderLastSeenState, 'pending');
+    assert.ok(new originalDate(saved.nextRecoveryAt).getTime() <= new originalDate(until).getTime());
+    logicalNow = new originalDate(saved.nextRecoveryAt).getTime() + 1000;
+    assert.equal((await requestFlow('reconcile')).status, 200);
+    saved = (await row(checkout.id)).payload;
+    assert.equal(saved.reconciliationRecoveryTerminal, true);
+    assert.equal(saved.recoveryReason, 'late_capture_watch_unverified_owner_review');
+    assert.equal(saved.nextRecoveryAt, '9999-12-31T23:59:59.999Z');
+    const hold = (await row('slotHold.fixture')).payload;
+    assert.equal(hold.phase, 'payment_pending');
+    assert.equal(hold.paymentRecordId, checkout.id);
+    assert.ok(!saved.bookingId);
+    const [count] = await sql`select count(*)::int as count from commerce.bookings`;
+    assert.equal(count.count, 0);
+    assert.equal((await requestFlow('reconcile')).body.summary.scanned, 0);
+    return { state, until };
+  });
+  for (const fault of ['processing-error', 'release-failure']) await run(`recovery-watch-survives-${fault}-at-failure-cap`, async () => {
+    const checkout = await a1Start('paypal');
+    const capturedOrder = structuredClone(paypalOrder);
+    let logicalNow = originalNow();
+    const old = new originalDate(logicalNow - 3600000).toISOString();
+    await commerce.patch(checkout.id).set({ createdAt: old, updatedAt: old, lastAttemptAt: old, nextRecoveryAt: '' }).commit();
+    globalThis.Date = class extends originalDate { constructor(...args) { super(...(args.length ? args : [logicalNow])); } static now() { return logicalNow; } };
+    providerHook = async (request, req, res) => {
+      if (request.path !== '/v2/checkout/orders/order-fixture') return false;
+      res.writeHead(503, { 'content-type': 'application/json' }); res.end('{}'); return true;
+    };
+    let saved;
+    for (let attempt = 0; attempt < 13; attempt++) {
+      assert.equal((await requestFlow('reconcile')).status, 200);
+      saved = (await row(checkout.id)).payload;
+      logicalNow = new originalDate(saved.nextRecoveryAt).getTime() + 1000;
+    }
+    assert.equal(saved.recoveryFailureCount, 12);
+    assert.notEqual(saved.reconciliationRecoveryTerminal, true);
+    const until = saved.lateCaptureWatchUntil;
+    if (fault === 'release-failure') {
+      paypalOrder.status = 'CREATED';
+      paypalOrder.purchase_units[0].payments = { captures: [] };
+      providerHook = null;
+    }
+    let faulted = false;
+    fixture.setRequestHook(async (phase, request) => {
+      if (phase !== 'before' || faulted || !request.body?.p_mutations?.some(m => fault === 'processing-error'
+        ? m.document?._id === checkout.id && m.document.status === 'needs_recovery'
+        : m.document?._id === 'slotHold.fixture' && m.document.phase === 'released')) return;
+      faulted = true;
+      throw new Error('Synthetic recovery checkpoint failure');
+    });
+    assert.equal((await requestFlow('reconcile')).status, fault === 'processing-error' ? 503 : 200);
+    saved = (await row(checkout.id)).payload;
+    assert.equal(faulted, true);
+    assert.notEqual(saved.reconciliationRecoveryTerminal, true);
+    assert.notEqual(saved.nextRecoveryAt, '9999-12-31T23:59:59.999Z');
+    assert.ok(new originalDate(saved.nextRecoveryAt).getTime() <= new originalDate(until).getTime());
+    assert.equal(saved.lateCaptureWatchUntil, until);
+    fixture.setRequestHook(null);
+    logicalNow = new originalDate(saved.nextRecoveryAt).getTime() + 1000;
+    if (fault === 'processing-error') { providerHook = null; paypalOrder = capturedOrder; }
+    assert.equal((await requestFlow('reconcile')).status, 200);
+    saved = (await row(checkout.id)).payload;
+    const hold = (await row('slotHold.fixture')).payload;
+    if (fault === 'processing-error') {
+      assert.equal(saved.status, 'booked');
+      const [count] = await sql`select count(*)::int as count from commerce.bookings`;
+      assert.equal(count.count, 1);
+      assert.equal(hold.phase, 'consumed');
+    } else {
+      assert.equal(saved.status, 'abandoned');
+      assert.equal(saved.resourceReleasePending, false);
+      assert.equal(hold.phase, 'released');
+      assert.equal(saved.lateCaptureWatchUntil, until);
+      assert.notEqual(saved.reconciliationRecoveryTerminal, true);
+    }
+    return { fault, until };
+  });
+  const deadlineWriters = [
+    ['loop-catch', [3, 11]], ['terminal-release', [3, 11]], ['abandon-release', [3, 11]],
+    ['finalize-non-transient', [3, 11]], ['finalize-watch', [3, 11]],
+    ['provider-check-failed', [3, 11]], ['provider-check-pending', [3]], ['abandon', [3]],
+  ];
+  for (const [writer, counts] of deadlineWriters) for (const count of counts) await run(
+    `recovery-watch-deadline-${writer}-${count}`, async () => {
+      const checkout = await a1Start('paypal');
+      const capturedOrder = structuredClone(paypalOrder);
+      let logicalNow = originalNow();
+      const old = new originalDate(logicalNow - 3600000).toISOString();
+      const until = new originalDate(logicalNow + 600000).toISOString();
+      const abandoned = ['finalize-non-transient', 'provider-check-failed', 'provider-check-pending'].includes(writer);
+      await commerce.patch(checkout.id).set({
+        status: abandoned ? 'abandoned' : 'needs_recovery', createdAt: old, updatedAt: old, lastAttemptAt: old,
+        lateCaptureWatchUntil: until, recoveryFailureCount: count, recoveryAttemptCount: count, nextRecoveryAt: '',
+        ...(writer === 'finalize-non-transient' ? { verificationState: 'server_verified', providerPaymentId: 'capture-fixture' } : {}),
+        ...(writer === 'terminal-release' ? { resourceReleasePending: true, resourceReleaseTargetStatus: 'failed',
+          resourceReleaseReason: 'synthetic_terminal_failure' } : {}),
+      }).commit();
+      if (abandoned) await commerce.patch('slotHold.fixture').set({ phase: 'released' }).commit();
+      globalThis.Date = class extends originalDate {
+        constructor(...args) { super(...(args.length ? args : [logicalNow])); }
+        static now() { return logicalNow; }
+      };
+      if (['loop-catch', 'finalize-watch', 'provider-check-failed'].includes(writer)) {
+        providerHook = async (request, req, res) => {
+          if (request.path !== '/v2/checkout/orders/order-fixture') return false;
+          res.writeHead(503, { 'content-type': 'application/json' }); res.end('{}'); return true;
+        };
+      } else if (['abandon-release', 'abandon'].includes(writer)) {
+        paypalOrder.status = 'CREATED';
+        paypalOrder.purchase_units[0].payments = { captures: [] };
+      } else if (writer === 'provider-check-pending') {
+        paypalOrder.status = 'APPROVED';
+        paypalOrder.purchase_units[0].payments = { captures: [] };
+      }
+      let faulted = false;
+      if (['loop-catch', 'terminal-release', 'abandon-release', 'finalize-non-transient'].includes(writer)) {
+        fixture.setRequestHook(async (phase, request) => {
+          if (phase !== 'before' || faulted || !request.body?.p_mutations?.some(m =>
+            writer === 'loop-catch' ? m.document?._id === checkout.id && m.document.status === 'needs_recovery'
+              : writer === 'finalize-non-transient' ? m.document?._type === 'booking'
+                : m.document?._id === 'slotHold.fixture' && m.document.phase === 'released')) return;
+          faulted = true;
+          throw new Error('Synthetic recovery checkpoint failure');
+        });
+      }
+      const first = await requestFlow('reconcile');
+      assert.equal(first.status, writer === 'loop-catch' ? 503 : 200, JSON.stringify(first));
+      if (['loop-catch', 'terminal-release', 'abandon-release', 'finalize-non-transient'].includes(writer)) assert.equal(faulted, true);
+      let saved = (await row(checkout.id)).payload;
+      assert.notEqual(saved.reconciliationRecoveryTerminal, true);
+      assert.ok(saved.nextRecoveryAt);
+      assert.ok(new originalDate(saved.nextRecoveryAt).getTime() <= new originalDate(until).getTime());
+      assert.equal(saved.lateCaptureWatchUntil, until);
+      const firstSaved = saved;
+      fixture.setRequestHook(null);
+      providerHook = null;
+      paypalOrder = capturedOrder;
+      if (['loop-catch', 'finalize-watch', 'provider-check-pending'].includes(writer)) {
+        paypalOrder.status = 'APPROVED';
+        paypalOrder.purchase_units[0].payments = { captures: [] };
+      } else if (['abandon-release', 'provider-check-failed', 'abandon'].includes(writer)) {
+        paypalOrder.status = 'CREATED';
+        paypalOrder.purchase_units[0].payments = { captures: [] };
+      }
+      logicalNow = new originalDate(until).getTime() + 1000;
+      assert.equal((await requestFlow('reconcile')).status, 200);
+      saved = (await row(checkout.id)).payload;
+      if (writer === 'abandon-release') {
+        assert.equal(saved.status, 'abandoned');
+        assert.equal(saved.resourceReleasePending, false);
+        assert.equal((await row('slotHold.fixture')).payload.phase, 'released');
+        assert.equal(saved.nextRecoveryAt, '');
+        assert.equal((await requestFlow('reconcile')).status, 200);
+        saved = (await row(checkout.id)).payload;
+      }
+      if (['loop-catch', 'finalize-watch', 'provider-check-pending'].includes(writer)) {
+        assert.equal(saved.reconciliationRecoveryTerminal, true);
+        assert.equal(saved.recoveryReason, 'late_capture_watch_unverified_owner_review');
+        assert.equal(saved.nextRecoveryAt, '9999-12-31T23:59:59.999Z');
+        assert.equal((await requestFlow('reconcile')).body.summary.scanned, 0);
+      } else if (['abandon-release', 'provider-check-failed', 'abandon'].includes(writer)) {
+        assert.equal(saved.providerRecoveryTerminal, true);
+        assert.equal(saved.providerRecoveryTerminalReason, 'provider_confirmed_unpaid_after_late_capture_watch');
+        assert.equal(saved.lateCaptureWatchUntil, '');
+        assert.equal((await requestFlow('reconcile')).body.summary.scanned, 0);
+      } else if (writer === 'terminal-release') {
+        assert.equal(saved.status, 'failed');
+        assert.equal(saved.resourceReleasePending, false);
+        assert.equal((await row('slotHold.fixture')).payload.phase, 'released');
+      } else {
+        assert.ok(saved.bookingId);
+        assert.equal((await row(saved.bookingId)).payload.requiresReschedule, true);
+        const [bookings] = await sql`select count(*)::int as count from commerce.bookings`;
+        assert.equal(bookings.count, 1);
+      }
+      return { writer, count, until, firstSaved };
+    }
+  );
+  for (const status of ['started', 'abandoned']) for (const state of ['unpaid', 'pending']) await run(`recovery-paypal-observed-${state}-${status}`, async () => {
+    const old = new Date(originalNow() - 3600000).toISOString();
+    await seed('paypal', status, { record: { bookingId: '', providerPaymentId: '', createdAt: old, nextRecoveryAt: '',
+      lateCaptureWatchUntil: status === 'abandoned' ? new Date(originalNow() + 3600000).toISOString() : '' } });
+    paypalOrder.status = state === 'unpaid' ? 'CREATED' : 'APPROVED';
+    paypalOrder.purchase_units[0].payments = { captures: [] };
+    assert.equal((await requestFlow('reconcile')).status, 200);
+    assert.equal((await record()).providerOrderLastSeenState, state);
+    return { status, state };
+  });
+  for (const seen of ['unpaid', 'pending', 'absent']) await run(`recovery-paypal-expired-404-after-${seen}`, async () => {
+    await seed('paypal', 'abandoned', { record: { bookingId: '', providerPaymentId: '', nextRecoveryAt: '',
+      lateCaptureWatchUntil: new Date(originalNow() - 1000).toISOString(), ...(seen === 'absent' ? {} : { providerOrderLastSeenState: seen }) } });
+    providerHook = async (request, req, res) => {
+      if (request.path !== '/v2/checkout/orders/order-fixture') return false;
+      res.writeHead(404, { 'content-type': 'application/json' }); res.end(JSON.stringify({ name: 'RESOURCE_NOT_FOUND' })); return true;
+    };
+    assert.equal((await requestFlow('reconcile')).status, 200);
+    const saved = await record();
+    if (seen === 'unpaid') {
+      assert.equal(saved.providerRecoveryTerminal, true);
+      assert.equal(saved.providerRecoveryTerminalReason, 'provider_confirmed_unpaid_after_late_capture_watch');
+    } else {
+      assert.equal(saved.reconciliationRecoveryTerminal, true);
+      assert.equal(saved.recoveryReason, 'late_capture_watch_unverified_owner_review');
+    }
+    return { seen, saved };
+  });
+  for (const failure of [404, 403, 503, 'disconnect']) await run(
+    failure === 404 ? 'recovery-paypal-unavailable-watch' : `recovery-paypal-unavailable-watch-${failure}`, async () => {
+    const start = originalNow();
+    await seed('paypal', 'abandoned', { record: {
+      bookingId: '', providerPaymentId: '', recoveryAttemptCount: 4, recoveryFailureCount: 0,
+      lateCaptureWatchUntil: new Date(start + 24 * 3600000).toISOString(), nextRecoveryAt: '',
+    } });
+    providerHook = async (request, req, res) => {
+      if (request.path !== '/v2/checkout/orders/order-fixture') return false;
+      if (failure === 'disconnect') { req.socket.destroy(); return true; }
+      res.writeHead(failure, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ name: 'RESOURCE_NOT_FOUND', details: [{ issue: 'INVALID_RESOURCE_ID' }] }));
+      return true;
+    };
+    let logicalNow = start;
+    for (let attempt = 0; attempt < 12; attempt++) {
+      globalThis.Date = class extends originalDate {
+        constructor(...args) { super(...(args.length ? args : [logicalNow])); }
+        static now() { return logicalNow; }
+      };
+      const result = await requestFlow('reconcile');
+      const saved = await record();
+      assert.equal(result.status, 200, JSON.stringify(result));
+      assert.equal(saved.status, 'abandoned');
+      assert.notEqual(saved.reconciliationRecoveryTerminal, true);
+      assert.ok(new originalDate(saved.nextRecoveryAt).getTime() <= start + 24 * 3600000);
+      logicalNow = new originalDate(saved.nextRecoveryAt).getTime() + 1000;
+    }
+    return { watchKept: true, requests: providerRequests.length };
+  });
+  for (const provider of ['paypal', 'razorpay', 'dodo']) await run(`recovery-${provider}-404-keeps-hold`, async () => {
+    const old = new Date(originalNow() - 3600000).toISOString();
+    const checkout = await a1Start(provider);
+    await commerce.patch(checkout.id).set({ createdAt: old, updatedAt: old, lastAttemptAt: old,
+      nextRecoveryAt: '' }).commit();
+    const path = provider === 'paypal' ? '/v2/checkout/orders/order-fixture'
+      : provider === 'razorpay' ? '/v1/orders/order-fixture/payments' : '/checkouts/order-fixture';
+    providerHook = async (request, req, res) => {
+      if (request.path !== path) return false;
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ name: 'RESOURCE_NOT_FOUND' }));
+      return true;
+    };
+    const before = (await row('slotHold.fixture')).payload;
+    const result = await requestFlow('reconcile');
+    const saved = (await row(checkout.id)).payload;
+    assert.equal(result.status, 200, JSON.stringify(result));
+    assert.equal(saved.status, 'needs_recovery');
+    assert.equal(saved.recoveryReason, `${provider}_lookup_failed_404`);
+    assert.deepEqual((await row('slotHold.fixture')).payload, before);
+    const [count] = await sql`select count(*)::int as count from commerce.bookings`;
+    assert.equal(count.count, 0);
+    return { provider, status: saved.status, holdPreserved: true, bookingCreated: false };
+  });
+  for (const expired of [false, true]) await run(`recovery-paypal-exhausted-watch-${expired ? 'expired' : 'active'}`, async () => {
+    const until = new Date(originalNow() + (expired ? -1000 : 3600000)).toISOString();
+    await seed('paypal', 'abandoned', { record: { bookingId: '', providerPaymentId: '',
+      recoveryReason: 'paypal_lookup_failed_404', reconciliationRecoveryTerminal: true,
+      recoveryAttemptCount: 12, recoveryFailureCount: 12,
+      nextRecoveryAt: '9999-12-31T23:59:59.999Z', lateCaptureWatchUntil: until } });
+    providerHook = async (request, req, res) => {
+      if (request.path !== '/v2/checkout/orders/order-fixture') return false;
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ name: 'RESOURCE_NOT_FOUND' }));
+      return true;
+    };
+    const before = (await row(bookingId)).payload;
+    const result = await requestFlow('reconcile');
+    const saved = await record();
+    assert.equal(result.status, 200, JSON.stringify(result));
+    assert.equal(result.body.summary.scanned, 1);
+    assert.equal(saved.status, 'abandoned');
+    assert.equal(saved.reconciliationRecoveryTerminal, expired);
+    assert.equal(saved.lateCaptureWatchUntil, until);
+    if (expired) assert.equal(saved.recoveryReason, 'late_capture_watch_unverified_owner_review');
+    else assert.ok(new Date(saved.nextRecoveryAt).getTime() <= new Date(until).getTime());
+    assert.deepEqual((await row(bookingId)).payload, before);
+    return { expired, saved, bookingUnchanged: true };
+  });
+  for (const failure of ['503', 'paypal_lookup_exception']) await run(`recovery-paypal-exhausted-watch-expired-${failure}`, async () => {
+    let logicalNow = originalNow();
+    const until = new Date(logicalNow - 1000).toISOString();
+    await seed('paypal', 'abandoned', { record: { bookingId: '', providerPaymentId: '',
+      recoveryReason: 'paypal_lookup_failed_503', reconciliationRecoveryTerminal: true,
+      recoveryAttemptCount: 12, recoveryFailureCount: 12,
+      nextRecoveryAt: '9999-12-31T23:59:59.999Z', lateCaptureWatchUntil: until } });
+    providerHook = async (request, req, res) => {
+      if (request.path !== '/v2/checkout/orders/order-fixture') return false;
+      if (failure === 'paypal_lookup_exception') { req.socket.destroy(); return true; }
+      res.writeHead(503, { 'content-type': 'application/json' });
+      res.end('{}');
+      return true;
+    };
+    const before = (await row(bookingId)).payload;
+    globalThis.Date = class extends originalDate {
+      constructor(...args) { super(...(args.length ? args : [logicalNow])); }
+      static now() { return logicalNow; }
+    };
+    let saved;
+    for (let attempt = 0; attempt < 13; attempt++) {
+      if (attempt) await commerce.patch(recordId).set({ nextRecoveryAt: '' }).commit();
+      const result = await requestFlow('reconcile');
+      assert.equal(result.status, 200, JSON.stringify(result));
+      saved = await record();
+      if (saved.reconciliationRecoveryTerminal) {
+        assert.equal(attempt, 11);
+        break;
+      }
+      assert.equal(saved.recoveryFailureCount, attempt + 1);
+      logicalNow += 61 * 60000;
+    }
+    assert.equal(saved.reconciliationRecoveryTerminal, true);
+    assert.equal(saved.recoveryReason, 'late_capture_watch_unverified_owner_review');
+    assert.equal(saved.lateCaptureWatchUntil, until);
+    assert.equal(saved.events.filter(event => event.reason === 'late_capture_watch_resumed').length, 1);
+    logicalNow += 2 * 3600000;
+    const later = await requestFlow('reconcile');
+    assert.equal(later.status, 200, JSON.stringify(later));
+    assert.equal(later.body.summary.scanned, 0);
+    assert.deepEqual((await row(bookingId)).payload, before);
+    return { failure, ownerReview: true, bookingUnchanged: true };
+  });
+  for (const step of ['resume', 'owner-review']) await run(`recovery-paypal-exhausted-watch-expired-conflict-${step}`, async () => {
+    const until = new Date(originalNow() - 1000).toISOString();
+    await seed('paypal', 'abandoned', { record: { bookingId: '', providerPaymentId: '',
+      recoveryReason: 'paypal_lookup_failed_404', reconciliationRecoveryTerminal: true,
+      recoveryAttemptCount: 12, recoveryFailureCount: 12,
+      nextRecoveryAt: '9999-12-31T23:59:59.999Z', lateCaptureWatchUntil: until } });
+    providerHook = async (request, req, res) => {
+      if (request.path !== '/v2/checkout/orders/order-fixture') return false;
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ name: 'RESOURCE_NOT_FOUND' }));
+      return true;
+    };
+    const before = (await row(bookingId)).payload;
+    fixture.setRequestHook(async (phase, request) => {
+      const mutation = request.body?.p_mutations?.find(({ document }) => document?._id === recordId &&
+        (step === 'resume' ? document.reconciliationRecoveryTerminal === false && document.recoveryFailureCount === 0
+          : document.recoveryReason === 'late_capture_watch_unverified_owner_review'));
+      if (phase !== 'before' || !mutation) return;
+      fixture.setRequestHook(null);
+      const current = await record();
+      await commerce.patch(recordId).ifRevisionId(current._rev).set({ fixtureConcurrent: 'retained' }).commit();
+    });
+    const first = await requestFlow('reconcile');
+    let saved = await record();
+    assert.equal(first.status, 200, JSON.stringify(first));
+    assert.equal(first.body.summary.failed, 0);
+    assert.equal(saved.fixtureConcurrent, 'retained');
+    if (step === 'resume') {
+      assert.equal(saved.reconciliationRecoveryTerminal, true);
+      assert.equal(saved.recoveryFailureCount, 12);
+      assert.equal(saved.recoveryReason, 'paypal_lookup_failed_404');
+    } else {
+      assert.equal(saved.reconciliationRecoveryTerminal, false);
+      assert.ok(!saved.events.some(event => event.reason === 'late_capture_watch_unverified_owner_review'));
+    }
+    const second = await requestFlow('reconcile');
+    saved = await record();
+    assert.equal(second.status, 200, JSON.stringify(second));
+    assert.equal(saved.recoveryReason, 'late_capture_watch_unverified_owner_review');
+    assert.equal(saved.reconciliationRecoveryTerminal, true);
+    assert.equal(saved.fixtureConcurrent, 'retained');
+    assert.equal(saved.lateCaptureWatchUntil, until);
+    assert.equal(saved.events.filter(event => event.reason === 'late_capture_watch_resumed').length, 1);
+    const third = await requestFlow('reconcile');
+    assert.equal(third.body.summary.scanned, 0);
+    assert.deepEqual((await row(bookingId)).payload, before);
+    return { step, saved, bookingUnchanged: true };
+  });
+  for (const provider of ['razorpay', 'dodo']) await run(`recovery-${provider}-expired-watch-404`, async () => {
+    const until = new Date(originalNow() - 1000).toISOString();
+    await seed(provider, 'abandoned', { record: { bookingId: '', providerPaymentId: '',
+      nextRecoveryAt: '', lateCaptureWatchUntil: until } });
+    const path = provider === 'razorpay' ? '/v1/orders/order-fixture/payments' : '/checkouts/order-fixture';
+    providerHook = async (request, req, res) => {
+      if (request.path !== path) return false;
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ name: 'RESOURCE_NOT_FOUND' }));
+      return true;
+    };
+    const before = (await row(bookingId)).payload;
+    const result = await requestFlow('reconcile');
+    const saved = await record();
+    assert.equal(result.status, 200, JSON.stringify(result));
+    assert.equal(saved.status, 'abandoned');
+    assert.equal(saved.recoveryReason, 'late_capture_watch_unverified_owner_review');
+    assert.equal(saved.reconciliationRecoveryTerminal, true);
+    assert.equal(saved.lateCaptureWatchUntil, until);
+    assert.deepEqual((await row(bookingId)).payload, before);
+    return { provider, ownerReview: true, bookingUnchanged: true };
+  });
+  for (const expired of [false, true]) await run(`recovery-abandoned-capture-conflict-${expired}`, async () => {
+    const until = new Date(originalNow() + (expired ? -1000 : 3600000)).toISOString();
+    await seed('paypal', 'abandoned', { record: { bookingId: '', providerPaymentId: '',
+      providerPaymentState: 'succeeded', nextRecoveryAt: '', lateCaptureWatchUntil: until } });
+    paypalOrder.status = 'CREATED';
+    paypalOrder.purchase_units[0].payments = { captures: [] };
+    const before = (await row(bookingId)).payload;
+    assert.equal((await requestFlow('reconcile')).status, 200);
+    const saved = await record();
+    assert.equal(saved.status, 'abandoned');
+    assert.equal(saved.providerPaymentState, 'succeeded');
+    assert.equal(saved.reconciliationRecoveryTerminal, expired);
+    assert.equal(saved.recoveryReason, expired ? 'late_capture_watch_unverified_owner_review'
+      : 'provider_unpaid_after_capture_observed');
+    assert.equal(saved.lateCaptureWatchUntil, until);
+    assert.deepEqual((await row(bookingId)).payload, before);
+    return { expired, conflictingCaptureRetained: true, bookingUnchanged: true };
+  });
+  for (const state of ['refunded', 'disputed']) await run(`recovery-${state}-capture-conflict`, async () => {
+    await seed('paypal', 'abandoned', { record: { bookingId: '', providerPaymentId: '',
+      providerPaymentState: state, nextRecoveryAt: '',
+      lateCaptureWatchUntil: new Date(originalNow() + 3600000).toISOString() } });
+    const before = (await row(bookingId)).payload;
+    assert.equal((await requestFlow('reconcile')).status, 200);
+    const saved = await record();
+    assert.equal(saved.status, 'abandoned');
+    assert.equal(saved.providerPaymentState, state);
+    assert.equal(saved.recoveryReason, 'provider_capture_conflicts_with_settled_state');
+    assert.notEqual(saved.reconciliationRecoveryTerminal, true);
+    assert.deepEqual((await row(bookingId)).payload, before);
+    return { state, conflictRetained: true, bookingUnchanged: true };
+  });
+  for (const flag of ['providerRecoveryTerminal', 'recoveryOwnerReviewRequired', 'providerRefundDetailsMissing',
+    'refundRequiresBookingSync', 'resourceReleasePending']) await run(`recovery-paypal-review-${flag}-unchanged`, async () => {
+    await seed('paypal', 'abandoned', { record: { bookingId: '', providerPaymentId: '',
+      recoveryReason: 'paypal_lookup_failed_404', reconciliationRecoveryTerminal: true,
+      recoveryAttemptCount: 12, recoveryFailureCount: 12, [flag]: true,
+      nextRecoveryAt: '9999-12-31T23:59:59.999Z',
+      lateCaptureWatchUntil: new Date(originalNow() + 3600000).toISOString() } });
+    const before = await snapshot();
+    const result = await requestFlow('reconcile');
+    assert.equal(result.status, 200, JSON.stringify(result));
+    assert.equal(result.body.summary.scanned, 0);
+    assert.deepEqual(await snapshot(), before);
+    return { flag, unchanged: true };
+  });
+  if (fullChain) {
+    const definition = async () => (await sql`select pg_get_functiondef('public.roo_fetch_recovery_payment_documents(text,text[],text,text,text,timestamptz,integer,boolean)'::regprocedure) as value`)[0].value;
+    const helper = async () => (await sql`select to_regprocedure('commerce.exhausted_late_capture_watch_needs_resume(jsonb)') as helper`)[0].helper;
+    const candidates = async () => {
+      const { data, error } = await fixture.client.rpc('roo_fetch_recovery_payment_documents', {
+        p_backend: 'supabase', p_statuses: ['started', 'captured_client', 'captured_webhook', 'finalizing', 'email_partial', 'needs_recovery'],
+        p_refunded_status: 'refunded', p_booked_status: 'booked', p_abandoned_status: 'abandoned', p_dodo_enabled: true,
+        p_now: new Date().toISOString(), p_limit: 50,
+      });
+      assert.equal(error, null);
+      return data.map(item => item._id);
+    };
+    await run('recovery-paypal-watch-migration-rollback', async () => {
+      const name = recoveryMigration;
+      const migrationSql = fs.readFileSync(path.join(process.cwd(), 'supabase/migrations', name), 'utf8');
+      const rollbackSql = fs.readFileSync(path.join(process.cwd(), 'supabase/rollbacks', name), 'utf8');
+      const baselineHash = crypto.createHash('sha256').update(recoveryDefinitionBeforeMigration).digest('hex');
+      await seed('paypal', 'abandoned', { record: { bookingId: '', providerPaymentId: '',
+        recoveryReason: 'paypal_lookup_failed_404', reconciliationRecoveryTerminal: true,
+        recoveryAttemptCount: 12, recoveryFailureCount: 12,
+        nextRecoveryAt: '9999-12-31T23:59:59.999Z',
+        lateCaptureWatchUntil: new Date(originalNow() + 3600000).toISOString() } });
+      for (let i = 0; i < 50; i++) await commerce.create({ _id: `paymentRecord.due-${i}`, _type: 'paymentRecord', provider: 'paypal', status: 'needs_recovery', backendOwner: 'supabase', cutoverGeneration: 0, providerOrderId: `due-order-${i}`, nextRecoveryAt: '' });
+      const full = await candidates();
+      assert.equal(full.length, 50);
+      assert.ok(!full.includes(recordId));
+      await commerce.delete('paymentRecord.due-49');
+      const spare = await candidates();
+      assert.equal(spare.length, 50);
+      assert.equal(spare.at(-1), recordId);
+      for (let i = 0; i < 49; i++) await commerce.delete(`paymentRecord.due-${i}`);
+      providerHook = async (request, req, res) => {
+        if (request.path !== '/v2/checkout/orders/order-fixture') return false;
+        res.writeHead(404, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ name: 'RESOURCE_NOT_FOUND' }));
+        return true;
+      };
+      const migratedDefinition = await definition();
+      await fixture.apply(name, migrationSql);
+      assert.equal(await definition(), migratedDefinition);
+      const { RESUMABLE_WATCH_REASONS, isExhaustedWatch } = await import('../src/server/api/payment/lateCaptureRecovery.js');
+      const base = await record();
+      for (const reason of RESUMABLE_WATCH_REASONS) {
+        const payload = { ...base, provider: reason.split('_')[0], recoveryReason: reason };
+        const [result] = await sql`select commerce.exhausted_late_capture_watch_needs_resume(${sql.json(payload)}) as value`;
+        assert.equal(result.value, true, reason);
+        assert.equal(isExhaustedWatch(payload), true, reason);
+      }
+      for (const change of [{ recoveryReason: 'paypal_status_VOIDED' }, { recoveryFailureCount: '12' }, { reconciliationRecoveryTerminal: 'true' }, { provider: 'free' }]) {
+        const payload = { ...base, ...change };
+        const [result] = await sql`select commerce.exhausted_late_capture_watch_needs_resume(${sql.json(payload)}) as value`;
+        assert.equal(result.value, false, JSON.stringify(change));
+        assert.equal(isExhaustedWatch(payload), false, JSON.stringify(change));
+      }
+      await fixture.apply(name, rollbackSql);
+      assert.equal(crypto.createHash('sha256').update(await definition()).digest('hex'), baselineHash);
+      assert.equal(await helper(), null);
+      await fixture.apply(name, migrationSql);
+      assert.equal(await definition(), migratedDefinition);
+      await fixture.apply(name, rollbackSql);
+      assert.equal(crypto.createHash('sha256').update(await definition()).digest('hex'), baselineHash);
+      try {
+        const before = await snapshot();
+        const rolledBack = await requestFlow('reconcile');
+        assert.equal(rolledBack.body.summary.scanned, 0);
+        assert.deepEqual(await snapshot(), before);
+      } finally {
+        await fixture.apply(name, fs.readFileSync(path.join(process.cwd(), 'supabase/migrations', name), 'utf8'));
+      }
+      const restored = await requestFlow('reconcile');
+      assert.equal(restored.body.summary.scanned, 1);
+      assert.equal((await record()).reconciliationRecoveryTerminal, false);
+      return { rollbackIgnoredExhaustedRecord: true, migrationResumedWatch: true };
+    });
+    await run('recovery-paypal-watch-sql-autocommit-runner', async () => {
+      const migration = path.join(process.cwd(), 'supabase/migrations', recoveryMigration);
+      const rollback = path.join(process.cwd(), 'supabase/rollbacks', recoveryMigration);
+      const migrationSql = fs.readFileSync(migration, 'utf8');
+      const rollbackSql = fs.readFileSync(rollback, 'utf8');
+      const psqlFile = file => spawnSync(path.join(fixture.pgBin, 'psql'), ['-X', '-q', '-v', 'ON_ERROR_STOP=0', '-h', fixture.host, '-p', String(fixture.pgPort), '-U', os.userInfo().username, '-d', 'postgres', '-f', file], { encoding: 'utf8' });
+      const baselineHash = crypto.createHash('sha256').update(recoveryDefinitionBeforeMigration).digest('hex');
+      const migratedDefinition = await definition();
+      try {
+        const driftedMigration = migratedDefinition.replace('updated_at, legacy_sanity_id)', 'updated_at, legacy_sanity_id asc)');
+        assert.notEqual(driftedMigration, migratedDefinition);
+        await sql.unsafe(driftedMigration);
+        const rejectedRollback = psqlFile(rollback);
+        assert.match(rejectedRollback.stderr, /unexpected payment recovery candidate filter/);
+        assert.equal(await definition(), driftedMigration);
+        assert.notEqual(await helper(), null);
+        await candidates();
+        await sql.unsafe(migratedDefinition);
+        await fixture.apply(recoveryMigration, rollbackSql);
+        assert.equal(crypto.createHash('sha256').update(await definition()).digest('hex'), baselineHash);
+        const driftedBaseline = recoveryDefinitionBeforeMigration.replace('updated_at, legacy_sanity_id)', 'updated_at, legacy_sanity_id asc)');
+        assert.notEqual(driftedBaseline, recoveryDefinitionBeforeMigration);
+        await sql.unsafe(driftedBaseline);
+        const rejectedMigration = psqlFile(migration);
+        assert.match(rejectedMigration.stderr, /unexpected payment recovery candidate filter/);
+        assert.equal(await definition(), driftedBaseline);
+        assert.equal(await helper(), null);
+        await sql.unsafe(recoveryDefinitionBeforeMigration);
+        const applied = psqlFile(migration);
+        assert.doesNotMatch(applied.stderr, /ERROR/);
+        assert.equal(await definition(), migratedDefinition);
+        assert.notEqual(await helper(), null);
+        const reverted = psqlFile(rollback);
+        assert.doesNotMatch(reverted.stderr, /ERROR/);
+        assert.equal(crypto.createHash('sha256').update(await definition()).digest('hex'), baselineHash);
+        assert.equal(await helper(), null);
+      } finally {
+        await sql.unsafe(recoveryDefinitionBeforeMigration);
+        if (await helper()) await sql.unsafe('drop function commerce.exhausted_late_capture_watch_needs_resume(jsonb)');
+        await fixture.apply(recoveryMigration, migrationSql);
+      }
+      return { atomicOnError: true };
+    });
+  }
+  for (const source of ['reconcile', 'webhook']) await run(`recovery-paypal-late-${source}-after-404`, async () => {
+    const checkout = await a1Start();
+    const capturedOrder = structuredClone(paypalOrder);
+    paypalOrder.status = 'CREATED';
+    paypalOrder.purchase_units[0].payments = { captures: [] };
+    providerHook = null;
+    let logicalNow = originalNow() + 31 * 60000;
+    globalThis.Date = class extends originalDate {
+      constructor(...args) { super(...(args.length ? args : [logicalNow])); }
+      static now() { return logicalNow; }
+    };
+    const abandoned = await requestFlow('reconcile');
+    let saved = (await row(checkout.id)).payload;
+    assert.equal(abandoned.status, 200, JSON.stringify(abandoned));
+    assert.equal(saved.status, 'abandoned');
+    assert.equal(saved.recoveryReason, 'provider_confirmed_unpaid');
+    const until = saved.lateCaptureWatchUntil;
+    assert.ok(until);
+    providerHook = async (request, req, res) => {
+      if (request.path !== '/v2/checkout/orders/order-fixture') return false;
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ name: 'RESOURCE_NOT_FOUND', details: [{ issue: 'INVALID_RESOURCE_ID' }] }));
+      return true;
+    };
+    for (let attempt = 0; attempt < 12; attempt++) {
+      logicalNow = new originalDate(saved.nextRecoveryAt).getTime() + 1000;
+      assert.equal((await requestFlow('reconcile')).status, 200);
+      saved = (await row(checkout.id)).payload;
+      assert.notEqual(saved.reconciliationRecoveryTerminal, true);
+      assert.equal(saved.lateCaptureWatchUntil, until);
+    }
+    providerHook = null;
+    paypalOrder = structuredClone(capturedOrder);
+    logicalNow = new originalDate(saved.nextRecoveryAt).getTime() + 1000;
+    const result = source === 'webhook' ? await a1Hook('paypal') : await requestFlow('reconcile');
+    saved = (await row(checkout.id)).payload;
+    assert.equal(result.status, 200, JSON.stringify(result));
+    assert.equal(saved.verificationState, 'server_verified');
+    assert.ok(saved.bookingId);
+    assert.equal(saved.requiresReschedule, true);
+    assert.equal((await row(saved.bookingId)).payload.requiresReschedule, true);
+    const [count] = await sql`select count(*)::int as count from commerce.bookings`;
+    assert.equal(count.count, 1);
+    return { source, watchUntil: until, bookingRecorded: true, requiresReschedule: true };
+  });
+  await run('recovery-paypal-webhook-after-expired-watch-404', async () => {
+    const checkout = await a1Start();
+    const capturedOrder = structuredClone(paypalOrder);
+    paypalOrder.status = 'CREATED';
+    paypalOrder.purchase_units[0].payments = { captures: [] };
+    providerHook = null;
+    let logicalNow = originalNow() + 31 * 60000;
+    globalThis.Date = class extends originalDate {
+      constructor(...args) { super(...(args.length ? args : [logicalNow])); }
+      static now() { return logicalNow; }
+    };
+    assert.equal((await requestFlow('reconcile')).status, 200);
+    let saved = (await row(checkout.id)).payload;
+    assert.equal(saved.status, 'abandoned');
+    const until = saved.lateCaptureWatchUntil;
+    await commerce.patch(checkout.id).set({ providerOrderLastSeenState: '' }).commit();
+    providerHook = async (request, req, res) => {
+      if (request.path !== '/v2/checkout/orders/order-fixture') return false;
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ name: 'RESOURCE_NOT_FOUND' }));
+      return true;
+    };
+    for (let attempt = 0; attempt < 12; attempt++) {
+      logicalNow = new originalDate(saved.nextRecoveryAt).getTime() + 1000;
+      assert.equal((await requestFlow('reconcile')).status, 200);
+      saved = (await row(checkout.id)).payload;
+      assert.notEqual(saved.reconciliationRecoveryTerminal, true);
+    }
+    logicalNow = new originalDate(until).getTime() + 1000;
+    assert.equal((await requestFlow('reconcile')).status, 200);
+    saved = (await row(checkout.id)).payload;
+    assert.equal(saved.reconciliationRecoveryTerminal, true);
+    assert.equal(saved.recoveryReason, 'late_capture_watch_unverified_owner_review');
+    const unavailableWebhook = await a1Hook('paypal');
+    saved = (await row(checkout.id)).payload;
+    assert.equal(unavailableWebhook.status, 503, JSON.stringify(unavailableWebhook));
+    assert.equal(saved.reconciliationRecoveryTerminal, true);
+    assert.ok(!saved.bookingId);
+    providerHook = null;
+    paypalOrder = capturedOrder;
+    const webhook = await a1Hook('paypal');
+    saved = (await row(checkout.id)).payload;
+    assert.equal(webhook.status, 200, JSON.stringify(webhook));
+    assert.equal(saved.verificationState, 'server_verified');
+    assert.equal(saved.reconciliationRecoveryTerminal, false);
+    assert.ok(saved.bookingId);
+    assert.equal(saved.requiresReschedule, true);
+    return { ownerReviewRetainedUnknown: true, lateWebhookRecorded: true, requiresReschedule: true };
+  });
+  for (const failure of [403, 404]) await run(`recovery-razorpay-webhook-retry-${failure}`, async () => {
+    const checkout = await a1Start('razorpay');
+    await commerce.patch(checkout.id).set({ status: 'needs_recovery', reconciliationRecoveryTerminal: true,
+      recoveryAttemptCount: 12, recoveryFailureCount: 12, nextRecoveryAt: '9999-12-31T23:59:59.999Z' }).commit();
+    providerHook = async (request, req, res) => {
+      if (request.path !== '/v1/payments/payment-fixture') return false;
+      res.writeHead(failure, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: { code: 'BAD_REQUEST_ERROR' } }));
+      return true;
+    };
+    const req = razorReq('payment.captured', { payment: { entity: razorpayPayment } });
+    const unavailable = await requestFlow('razorpay', { req });
+    let saved = (await row(checkout.id)).payload;
+    assert.equal(unavailable.status, 503, JSON.stringify(unavailable));
+    assert.equal(saved.reconciliationRecoveryTerminal, true);
+    assert.ok(!saved.bookingId);
+    providerHook = null;
+    const replay = await requestFlow('razorpay', { req });
+    saved = (await row(checkout.id)).payload;
+    assert.equal(replay.status, 200, JSON.stringify(replay));
+    assert.equal(saved.verificationState, 'server_verified');
+    assert.ok(saved.bookingId);
+    return { failure, webhookRetried: true, bookingRecorded: true };
+  });
+  await run('recovery-paypal-capture-verification-404', async () => {
+    const checkout = await a1Start();
+    const capturedOrder = structuredClone(paypalOrder);
+    paypalOrder.status = 'CREATED';
+    paypalOrder.purchase_units[0].payments = { captures: [] };
+    providerHook = null;
+    let logicalNow = originalNow() + 31 * 60000;
+    globalThis.Date = class extends originalDate {
+      constructor(...args) { super(...(args.length ? args : [logicalNow])); }
+      static now() { return logicalNow; }
+    };
+    assert.equal((await requestFlow('reconcile')).status, 200);
+    let saved = (await row(checkout.id)).payload;
+    assert.equal(saved.status, 'abandoned');
+    paypalOrder = structuredClone(capturedOrder);
+    let reads = 0;
+    providerHook = async (request, req, res) => {
+      if (request.path !== '/v2/checkout/orders/order-fixture' || ++reads === 1) return false;
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ name: 'RESOURCE_NOT_FOUND' }));
+      return true;
+    };
+    logicalNow = new originalDate(saved.nextRecoveryAt).getTime() + 1000;
+    assert.equal((await requestFlow('reconcile')).status, 200);
+    saved = (await row(checkout.id)).payload;
+    assert.equal(saved.status, 'needs_recovery');
+    assert.equal(saved.recoveryReason, 'paypal_lookup_failed_404');
+    assert.equal(saved.providerPaymentState, 'succeeded');
+    assert.ok(!saved.bookingId);
+    for (let attempt = 0; attempt < 12; attempt++) {
+      logicalNow = new originalDate(saved.nextRecoveryAt).getTime() + 1000;
+      assert.equal((await requestFlow('reconcile')).status, 200);
+      saved = (await row(checkout.id)).payload;
+      assert.notEqual(saved.reconciliationRecoveryTerminal, true);
+      assert.ok(!saved.bookingId);
+    }
+    providerHook = null;
+    paypalOrder.status = 'CREATED';
+    paypalOrder.purchase_units[0].payments = { captures: [] };
+    logicalNow = new originalDate(saved.nextRecoveryAt).getTime() + 1000;
+    assert.equal((await requestFlow('reconcile')).status, 200);
+    saved = (await row(checkout.id)).payload;
+    assert.equal(saved.status, 'needs_recovery');
+    assert.equal(saved.recoveryReason, 'provider_unpaid_after_capture_observed');
+    assert.equal(saved.providerPaymentState, 'succeeded');
+    assert.ok(!saved.bookingId);
+    paypalOrder = capturedOrder;
+    logicalNow = new originalDate(saved.nextRecoveryAt).getTime() + 1000;
+    assert.equal((await requestFlow('reconcile')).status, 200);
+    saved = (await row(checkout.id)).payload;
+    assert.equal(saved.verificationState, 'server_verified');
+    assert.ok(saved.bookingId);
+    assert.equal(saved.requiresReschedule, true);
+    return { verifiedAfterRecovery: true, bookingRecorded: true, requiresReschedule: true };
+  });
+  for (const target of ['abandoned', 'failed']) await run(`recovery-observed-capture-keeps-hold-${target}`, async () => {
+    const checkout = await a1Start();
+    const old = new Date(originalNow() - 3600000).toISOString();
+    paypalOrder.status = 'CREATED';
+    paypalOrder.purchase_units[0].payments = { captures: [] };
+    providerHook = null;
+    await commerce.patch(checkout.id).set({ providerPaymentState: 'succeeded', createdAt: old,
+      updatedAt: old, lastAttemptAt: old, nextRecoveryAt: '' }).commit();
+    const hold = (await row('slotHold.fixture')).payload;
+    const cancelled = await requestFlow('cancel', { paymentAccessToken: checkout.started.body.paymentAccessToken });
+    assert.equal(cancelled.status, 409, JSON.stringify(cancelled));
+    assert.deepEqual((await row('slotHold.fixture')).payload, hold);
+    assert.equal((await requestFlow('reconcile')).status, 200);
+    let saved = (await row(checkout.id)).payload;
+    assert.equal(saved.status, 'needs_recovery');
+    assert.equal(saved.recoveryReason, 'provider_unpaid_after_capture_observed');
+    assert.deepEqual((await row('slotHold.fixture')).payload, hold);
+    await commerce.patch(checkout.id).set({ resourceReleasePending: true,
+      resourceReleaseTargetStatus: target, resourceReleaseReason: 'provider_confirmed_unpaid',
+      nextRecoveryAt: '' }).commit();
+    assert.equal((await requestFlow('reconcile')).status, 200);
+    saved = (await row(checkout.id)).payload;
+    assert.equal(saved.reconciliationRecoveryTerminal, true);
+    assert.equal(saved.recoveryReason, 'captured_payment_release_requires_review');
+    assert.deepEqual((await row('slotHold.fixture')).payload, hold);
+    return { target, cancellationBlocked: true, conflictingUnpaidRetained: true, releaseRequiresReview: true };
+  });
+  for (const state of ['failed', 'cancelled']) await run(`recovery-dodo-${state}-after-capture`, async () => {
+    const checkout = await a1Start('dodo');
+    await commerce.patch(checkout.id).set({ providerPaymentState: 'succeeded' }).commit();
+    const hold = (await row('slotHold.fixture')).payload;
+    dodoPayment.status = state;
+    const result = await requestFlow('dodo', { req: dodoReq(dodoPayment, `payment.${state}`) });
+    const saved = (await row(checkout.id)).payload;
+    assert.equal(result.status, 503, JSON.stringify(result));
+    assert.equal(saved.providerPaymentState, 'succeeded');
+    assert.equal(saved.reconciliationRecoveryTerminal, true);
+    assert.equal(saved.recoveryReason, 'captured_payment_release_requires_review');
+    assert.deepEqual((await row('slotHold.fixture')).payload, hold);
+    return { state, capturedStateRetained: true, holdPreserved: true, ownerReview: true };
+  });
+  await run('recovery-capture-verification-404-keeps-hold', async () => {
+    const checkout = await a1Start();
+    const old = new Date(originalNow() - 3600000).toISOString();
+    await commerce.patch(checkout.id).set({ createdAt: old, updatedAt: old, lastAttemptAt: old,
+      nextRecoveryAt: '' }).commit();
+    const hold = (await row('slotHold.fixture')).payload;
+    let reads = 0;
+    providerHook = async (request, req, res) => {
+      if (request.path !== '/v2/checkout/orders/order-fixture' || ++reads === 1) return false;
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ name: 'RESOURCE_NOT_FOUND' }));
+      return true;
+    };
+    assert.equal((await requestFlow('reconcile')).status, 200);
+    const saved = (await row(checkout.id)).payload;
+    assert.equal(saved.status, 'needs_recovery');
+    assert.equal(saved.providerPaymentState, 'succeeded');
+    assert.equal(saved.recoveryReason, 'paypal_lookup_failed_404');
+    assert.ok(!saved.bookingId);
+    assert.deepEqual((await row('slotHold.fixture')).payload, hold);
+    return { captureObserved: true, holdPreserved: true, noUnverifiedBooking: true };
+  });
+  await run('recovery-cancel-capture-verification-404-keeps-hold', async () => {
+    const checkout = await a1Start();
+    const hold = (await row('slotHold.fixture')).payload;
+    let reads = 0;
+    providerHook = async (request, req, res) => {
+      if (request.path !== '/v2/checkout/orders/order-fixture' || ++reads === 1) return false;
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ name: 'RESOURCE_NOT_FOUND' }));
+      return true;
+    };
+    const result = await requestFlow('cancel', { paymentAccessToken: checkout.started.body.paymentAccessToken });
+    const saved = (await row(checkout.id)).payload;
+    assert.equal(result.status, 202, JSON.stringify(result));
+    assert.equal(saved.status, 'needs_recovery');
+    assert.equal(saved.providerPaymentState, 'succeeded');
+    assert.ok(!saved.bookingId);
+    assert.deepEqual((await row('slotHold.fixture')).payload, hold);
+    const retry = await requestFlow('cancel', { paymentAccessToken: checkout.started.body.paymentAccessToken });
+    assert.equal(retry.status, 409, JSON.stringify(retry));
+    assert.deepEqual((await row('slotHold.fixture')).payload, hold);
+    return { captureObserved: true, holdPreserved: true, cancelRetryBlocked: true };
+  });
   for(const pathName of ['failure','schedule'])for(const label of ['preflight','current-owner','captured-b'])await run(`recovery-hold-authority-${pathName}-${label}`,async()=>{
     const capturedB=label==='captured-b',boundary=capturedB?'preflight':label;
     const input=await startInput();paypalOrder.status=pathName==='schedule'?'APPROVED':'CREATED';paypalOrder.purchase_units[0].payments={captures:[]};
@@ -1281,7 +2236,8 @@ try{
     const old = new Date(originalNow() - 3600000).toISOString();
     await seed('paypal', kind === 'refund' ? 'refunded' : kind.startsWith('release') ? 'abandoned' : 'started', {
       record: {
-        createdAt: old, updatedAt: old, lastAttemptAt: old, nextRecoveryAt: '',
+        createdAt: kind === 'provider' ? new Date(originalNow() - 5 * 60000).toISOString() : old,
+        updatedAt: old, lastAttemptAt: old, nextRecoveryAt: '',
         recoveryAttemptCount: 11, recoveryFailureCount: 11, emailDispatchRequired: false,
         ...(kind === 'refund' ? {
           bookingId: 'booking.missing', refundState: 'full', refundRequiresBookingSync: true,

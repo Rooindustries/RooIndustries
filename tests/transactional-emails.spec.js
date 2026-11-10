@@ -75,7 +75,7 @@ for (const [name, viewport] of [["desktop", { width: 1440, height: 900 }], ["mob
         check(item.text, caseName).not.toContain("stale");
       }
     }
-    for (const item of [...messages("requested-original-only"), ...messages("requested-different-instant")]) {
+    for (const item of [...messages("requested-only"), ...messages("requested-original-only"), ...messages("requested-different-instant")]) {
       check(item.fields["Requested Time"], item.case).toBe("1:30 AM");
     }
     for (const item of capture.captured.map((item, index) => ({ ...item, ...rendered[index] }))) {

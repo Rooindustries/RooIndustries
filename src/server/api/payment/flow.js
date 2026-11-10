@@ -86,6 +86,20 @@ import {
 } from "./paymentRecord.js";
 import { selectPaymentAuthority, resolveWebhookBackend, createPaymentBackendClient } from "./backend.js";
 import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
+import {
+  buildWatchFailureState,
+  boundToWatchDeadline,
+  exhaustedWatchQuery,
+  hasKnownCapture,
+  hasObservedCapture,
+  holdLostToPayment,
+  holdCapturedReleaseForReview,
+  isExhaustedWatch,
+  isTransientVerificationFailure,
+  recordCapturedProviderState,
+  RESUMABLE_WATCH_REASONS,
+  webhookFinalizationResult,
+} from "./lateCaptureRecovery.js";
 
 import { getBookingForEmailDispatch, isBookingEmailSuppressed, isEmailDeliveryUnknown } from "../ref/bookingEmails.js";
 
@@ -127,6 +141,9 @@ const buildRecoveryFailureState = (record) => {
   const recoveryAttemptCount = Math.min(12, normalizeCount(record.recoveryAttemptCount) + 1);
   const recoveryFailureCount = Math.min(12, normalizeCount(record.recoveryFailureCount) + 1);
   const stopped = recoveryFailureCount >= 12;
+  if (stopped && isFutureIso(record.lateCaptureWatchUntil)) {
+    return buildWatchFailureState({ recoveryAttemptCount, recoveryFailureCount });
+  }
   return {
     recoveryAttemptCount,
     recoveryFailureCount,
@@ -159,12 +176,6 @@ const isFutureIso = (value) => {
   const timestamp = new Date(value || "").getTime();
   return Number.isFinite(timestamp) && timestamp > Date.now();
 };
-
-const isDefinitiveMissingProviderOrder = (inspection = {}) =>
-  inspection.state === "unavailable" &&
-  /^(paypal|razorpay|dodo)_lookup_failed_404$/.test(
-    String(inspection.reason || "").trim().toLowerCase()
-  );
 
 const fromSubunits = (value, currency = "USD") => {
   const factor = toSubunits(1, currency);
@@ -605,16 +616,6 @@ const issuePaymentAccessTokenForRecord = (record = {}) =>
     cutoverGeneration: Number(record.cutoverGeneration || 0),
     expirySeconds: resolvePaymentAccessTtlSeconds(),
   });
-
-const isTransientVerificationFailure = (reason = "") => {
-  const normalized = String(reason || "").trim().toLowerCase();
-  return (
-    normalized === "razorpay_lookup_exception" ||
-    normalized === "paypal_lookup_exception" ||
-    normalized.startsWith("razorpay_lookup_failed_5") ||
-    normalized.startsWith("paypal_lookup_failed_5")
-  );
-};
 
 const isTrustedRecoverySource = (source = "") =>
   source === "client" || source === "webhook" || source === "reconcile";
@@ -1209,12 +1210,12 @@ const patchPaymentRecord = async ({
   const mergedEvents = event
     ? mergePaymentRecordEvents(existingEvents, event)
     : existingEvents;
-  const values = {
+  const values = boundToWatchDeadline(record, {
     ...set,
     ...unconfirmedProviderState(record, set),
     ...(event ? { events: mergedEvents } : {}),
     updatedAt: nowIso(),
-  };
+  });
   const patch = guardPaymentRevision(client.patch(record._id), record).set(values);
   const committed = await patch.commit();
   logRecoveryExhaustion(record, values);
@@ -1848,6 +1849,9 @@ const markRetryableFinalizeFailure = async ({
   source,
   reason,
   details = {},
+  keepWatch = false,
+  watchUntil = "",
+  lastSeenState = "",
 }) => {
   const operation = await currentPaymentOperation({ client, record });
   const current = operation.record;
@@ -1866,6 +1870,7 @@ const markRetryableFinalizeFailure = async ({
     };
   }
   await requirePaymentResourceRevisions({ client, record: current });
+  const watch = current.lateCaptureWatchUntil || watchUntil;
   let nextRecord;
   try {
     nextRecord = await patchPaymentRecord({
@@ -1874,7 +1879,10 @@ const markRetryableFinalizeFailure = async ({
       set: {
         status: PAYMENT_STATUS_NEEDS_RECOVERY,
         recoveryReason: reason,
-        ...buildRecoveryFailureState(current),
+        ...(watchUntil && !current.lateCaptureWatchUntil ? { lateCaptureWatchUntil: watchUntil } : {}),
+        ...(lastSeenState ? { providerOrderLastSeenState: lastSeenState } : {}),
+        ...(isFutureIso(watch) && (keepWatch || isTransientVerificationFailure(reason))
+          ? buildWatchFailureState(buildRecoveryFailureState(current)) : buildRecoveryFailureState(current)),
         finalizationLeaseId: "",
         finalizationLeaseExpiresAt: "",
         source,
@@ -2016,6 +2024,11 @@ const markTerminalFinalizeFailure = async ({
 }) => {
   const operation = await currentPaymentOperation({ client, record });
   if (!operation.owned) return currentPaymentOperationResult(operation.record);
+  if (hasKnownCapture(operation.record)) {
+    const retained = await holdCapturedReleaseForReview({ client, record: operation.record,
+      patchRecord: patchPaymentRecord });
+    return { ok: false, httpStatus: 202, paymentRecord: retained, response: buildPublicStatusBody(retained) };
+  }
   await requirePaymentResourceRevisions({ client, record: operation.record });
   let stagedRecord = operation.record;
   if (stagedRecord.status !== PAYMENT_STATUS_FAILED || stagedRecord.resourceReleasePending !== true) {
@@ -2118,6 +2131,7 @@ const finalizePaymentRecordInternal = async ({
   record,
   source = "client",
   providerData = {},
+  providerCaptureObserved = false,
 }) => {
   const normalizedSource = String(source || "client").trim().toLowerCase();
 
@@ -2187,6 +2201,22 @@ const finalizePaymentRecordInternal = async ({
     };
   }
 
+  if (providerCaptureObserved && ["refunded", "disputed"].includes(record.providerPaymentState)) {
+    const reason = "provider_capture_conflicts_with_settled_state";
+    if (String(record.status || "").trim().toLowerCase() === PAYMENT_STATUS_ABANDONED) {
+      const retained = await scheduleProviderRecoveryCheck({ client, record, failed: true, reason });
+      return { ok: false, httpStatus: 202, paymentRecord: retained, response: buildPublicStatusBody(retained) };
+    }
+    return markRetryableFinalizeFailure({ client, record, source: normalizedSource, reason, keepWatch: true });
+  }
+
+  if (providerCaptureObserved) {
+    const result = await recordCapturedProviderState({ client, record,
+      currentOperation: currentPaymentOperation, patchRecord: patchPaymentRecord });
+    if (!result.owned) return currentPaymentOperationResult(result.record);
+    record = result.record;
+  }
+
   const lease = await acquireFinalizationLease({
     client,
     record,
@@ -2241,6 +2271,7 @@ const finalizePaymentRecordInternal = async ({
         source: normalizedSource,
         reason: verification.reason,
         details: providerData,
+        keepWatch: verification.retryable === true || verification.captured === true,
       });
     }
 
@@ -2355,12 +2386,14 @@ const finalizePaymentRecordInternal = async ({
     };
   }
 
-  if (lateCaptureFromAbandoned) {
+  const holdId = workingRecord.holdSnapshot?.slotHoldId || workingRecord.bookingPayload?.slotHoldId;
+  const hold = await getHoldById(client, holdId);
+  if (lateCaptureFromAbandoned || holdLostToPayment(hold, workingRecord)) {
     try {
       const recovered = await recoverCapturedPaymentAsReschedule({
         client,
         record: workingRecord,
-        reason: "captured_after_abandonment",
+        reason: lateCaptureFromAbandoned ? "captured_after_abandonment" : "captured_after_hold_released",
         providerData: {
           ...providerData,
           providerOrderId:
@@ -2610,9 +2643,14 @@ const abandonStartedPaymentRecord = async ({
   record,
   reason,
   releaseCouponReservation = null,
+  lastSeenState = "",
 }) => {
   const current = (await getPaymentRecordById(client, record._id)) || record;
   const currentStatus = String(current.status || "").trim().toLowerCase();
+  if (hasKnownCapture(current)) {
+    const retained = await holdCapturedReleaseForReview({ client, record: current, patchRecord: patchPaymentRecord });
+    return { ok: false, httpStatus: 202, paymentRecord: retained, response: buildPublicStatusBody(retained) };
+  }
   const canStageAbandonment =
     currentStatus === PAYMENT_STATUS_STARTED ||
     currentStatus === PAYMENT_STATUS_NEEDS_RECOVERY ||
@@ -2709,6 +2747,8 @@ const abandonStartedPaymentRecord = async ({
   const shouldWatchForLateCapture = !!String(
     stagedRecord.providerOrderId || ""
   ).trim();
+  const watchUntil = shouldWatchForLateCapture
+    ? current.lateCaptureWatchUntil || getFutureIso(LATE_CAPTURE_WATCH_HOURS * 60 * 60) : "";
   let nextRecord;
   try {
     nextRecord = await patchPaymentRecord({
@@ -2722,10 +2762,9 @@ const abandonStartedPaymentRecord = async ({
         resourceReleaseReason: "",
         recoveryFailureCount: 0,
         reconciliationRecoveryTerminal: false,
-        lateCaptureWatchUntil: shouldWatchForLateCapture
-          ? getFutureIso(LATE_CAPTURE_WATCH_HOURS * 60 * 60)
-          : "",
-        nextRecoveryAt: shouldWatchForLateCapture ? getFutureIso(60 * 60) : "",
+        ...(lastSeenState ? { providerOrderLastSeenState: lastSeenState } : {}),
+        lateCaptureWatchUntil: watchUntil,
+        nextRecoveryAt: isFutureIso(watchUntil) ? getFutureIso(60 * 60) : "",
       },
       event: buildPaymentRecordEvent({
         status: PAYMENT_STATUS_ABANDONED,
@@ -3568,6 +3607,13 @@ export const cancelPaymentSession = async ({
     };
   }
 
+  if (hasKnownCapture(record)) {
+    return {
+      httpStatus: 409,
+      body: { ok: false, error: "Payment state changed before it could be released." },
+    };
+  }
+
   const inspection = await inspectProviderOrderForRecovery(record);
   if (inspection.state === "captured") {
     const finalized = await finalizePaymentRecordInternal({
@@ -3575,6 +3621,7 @@ export const cancelPaymentSession = async ({
       record,
       source: "reconcile",
       providerData: inspection.providerData || {},
+      providerCaptureObserved: hasObservedCapture(inspection),
     });
     return {
       httpStatus: finalized.httpStatus,
@@ -3821,6 +3868,10 @@ const getPaymentCreatedAgeMinutes = (record = {}) => {
   return diffMs / (60 * 1000);
 };
 
+const getNewLateCaptureWatchUntil = (record, createdAgeMinutes) =>
+  createdAgeMinutes >= PAYMENT_HOLD_MINUTES && record.providerOrderId && !record.lateCaptureWatchUntil
+    ? getFutureIso(LATE_CAPTURE_WATCH_HOURS * 60 * 60) : "";
+
 const isRecoveryAttemptDue = (record = {}) => {
   const next = new Date(record.nextRecoveryAt || "").getTime();
   return !Number.isFinite(next) || next <= Date.now();
@@ -3831,6 +3882,7 @@ const scheduleProviderRecoveryCheck = async ({
   record,
   reason,
   failed = false,
+  lastSeenState = "",
 }) => {
   const operation = await currentPaymentOperation({ client, record });
   if (!operation.owned) return operation.record;
@@ -3842,10 +3894,12 @@ const scheduleProviderRecoveryCheck = async ({
       record,
       set: {
         recoveryReason: String(reason || "provider_status_pending").trim(),
+        ...(lastSeenState ? { providerOrderLastSeenState: lastSeenState } : {}),
         recoveryAttemptCount,
         lastAttemptAt: nowIso(),
         nextRecoveryAt: getNextPaymentRecoveryAt(recoveryAttemptCount),
-        ...(failed ? buildRecoveryFailureState(record) : {
+        ...(failed && isFutureIso(record.lateCaptureWatchUntil)
+          ? buildWatchFailureState(buildRecoveryFailureState(record)) : failed ? buildRecoveryFailureState(record) : {
           recoveryFailureCount: 0,
           reconciliationRecoveryTerminal: false,
         }),
@@ -3863,8 +3917,31 @@ const scheduleProviderRecoveryCheck = async ({
   }
 };
 
+const sendExpiredWatchToOwnerReview = async ({ client, record, providerReason }) => {
+  const operation = await currentPaymentOperation({ client, record });
+  if (!operation.owned) return operation.owned;
+  try {
+    await patchPaymentRecord({ client, record, set: {
+      recoveryReason: "late_capture_watch_unverified_owner_review",
+      reconciliationRecoveryTerminal: true,
+      nextRecoveryAt: "9999-12-31T23:59:59.999Z",
+    }, event: buildPaymentRecordEvent({
+      status: String(record.status || "").trim().toLowerCase(), source: "reconcile",
+      reason: "late_capture_watch_unverified_owner_review",
+      data: { providerReason },
+    }) });
+  } catch (error) {
+    if (!isConflictError(error)) throw error;
+    return false;
+  }
+  logSafeError("Late payment status requires owner review", Object.assign(new Error(), {
+    code: "late_capture_watch_unverified_owner_review",
+  }));
+  return operation.owned;
+};
+
 const closeExpiredLateCaptureWatch = async ({ client, record }) => {
-  const reason = "provider_order_not_found_after_late_capture_watch";
+  const reason = "provider_confirmed_unpaid_after_late_capture_watch";
   try {
     return await patchPaymentRecord({
       client,
@@ -4025,7 +4102,7 @@ const recoverCapturedPaymentAsReschedule = async ({
     ? { coupon, redemption: couponRedemption, idempotent: false }
     : null;
   const paymentHold =
-    candidateHold?._id &&
+    candidateHold?._id && ["payment_pending", "consumed"].includes(candidateHold.phase) &&
     String(candidateHold.paymentRecordId || "").trim() === String(record._id)
       ? candidateHold
       : null;
@@ -4206,7 +4283,7 @@ const recoverCapturedPaymentAsReschedule = async ({
           ? PAYMENT_STATUS_BOOKED
           : PAYMENT_STATUS_EMAIL_PARTIAL,
         source: "reconcile",
-        reason: "captured_payment_requires_reschedule",
+        reason: normalizedReason,
         data: {
           bookingId,
           recoveryCaseId: String(recovery?.recoveryCaseId || "").trim(),
@@ -4357,7 +4434,7 @@ export const reconcilePaymentSessions = async ({
   const dodoEnabled = resolvePaymentProviders()?.dodo?.enabled === true;
   const fetchRecoveryRecords = () => client.fetch(
     `*[_type == $type
-      && coalesce(reconciliationRecoveryTerminal, false) == false
+      && (coalesce(reconciliationRecoveryTerminal, false) == false || ${exhaustedWatchQuery})
       && !(coalesce(providerRecoveryTerminal, false) == true
         && providerRecoveryTerminalReason in $terminalCurrencyReasons)
       && (
@@ -4382,11 +4459,13 @@ export const reconcilePaymentSessions = async ({
         !defined(nextRecoveryAt)
         || nextRecoveryAt == ""
         || nextRecoveryAt <= $now
+        || ${exhaustedWatchQuery}
       )
     ] | order(updatedAt asc)[0...50]`,
     {
       type: PAYMENT_RECORD_TYPE,
       terminalCurrencyReasons: ["payment_currency_mismatch", "payment_currency_invalid"],
+      resumableWatchReasons: RESUMABLE_WATCH_REASONS,
       backend: resolveStoreBackend(backend),
       dodoEnabled,
       primaryBackend,
@@ -4470,6 +4549,24 @@ export const reconcilePaymentSessions = async ({
         (localStatus === PAYMENT_STATUS_EMAIL_PARTIAL && record.requiresReschedule === true) ||
         inactiveConfirmation || shouldRetryEmailPartialDispatch({ record, source: "reconcile", booking: confirmationBooking });
       if (record.provider === "dodo" && !localRecovery && (!dodoEnabled || record.providerRecoveryTerminal === true)) continue;
+      if (isExhaustedWatch(record)) {
+        const operation = await currentPaymentOperation({ client, record });
+        if (!operation.owned) continue;
+        let resumed;
+        try {
+          resumed = await patchPaymentRecord({ client, record, set: {
+            reconciliationRecoveryTerminal: false,
+            recoveryAttemptCount: 0,
+            recoveryFailureCount: 0,
+            nextRecoveryAt: "",
+          }, event: buildPaymentRecordEvent({ status: PAYMENT_STATUS_ABANDONED, source: "reconcile",
+            reason: "late_capture_watch_resumed", data: { previousReason: record.recoveryReason } }) });
+        } catch (error) {
+          if (!isConflictError(error)) throw error;
+          continue;
+        }
+        Object.assign(record, resumed);
+      }
       summary.scanned += 1;
       const ageMinutes = getPaymentAgeMinutes(record);
       let dodoInspection = null;
@@ -4594,12 +4691,14 @@ export const reconcilePaymentSessions = async ({
 
       if (status === PAYMENT_STATUS_ABANDONED) {
         const inspection = dodoInspection || await inspectProviderOrderForRecovery(record);
+        const conflictingCapture = inspection.state === "unpaid" && hasKnownCapture(record);
         if (["captured", "refunded"].includes(inspection.state)) {
           const recovered = await finalizePaymentRecordInternal({
             client,
             record,
             source: "reconcile",
             providerData: inspection.providerData || {},
+            providerCaptureObserved: hasObservedCapture(inspection),
           });
           const recoveredStatus = String(recovered?.paymentRecord?.status || "")
             .trim()
@@ -4613,18 +4712,38 @@ export const reconcilePaymentSessions = async ({
           } else {
             summary.recovery += 1;
           }
+        } else if (conflictingCapture && isFutureIso(record.lateCaptureWatchUntil)) {
+          await scheduleProviderRecoveryCheck({ client, record, failed: true, lastSeenState: "unpaid",
+            reason: "provider_unpaid_after_capture_observed" });
+          summary.recovery += 1;
+        } else if ((conflictingCapture || inspection.state === "pending" || (inspection.state === "unavailable" &&
+            /^(paypal|razorpay|dodo)_lookup_failed_404$/.test(inspection.reason || "") &&
+            !(record.provider === "paypal" && record.providerOrderLastSeenState === "unpaid" && !hasKnownCapture(record)))) &&
+            !isFutureIso(record.lateCaptureWatchUntil)) {
+          const owned = await sendExpiredWatchToOwnerReview({ client, record,
+            providerReason: conflictingCapture ? "provider_unpaid_after_capture_observed"
+              : inspection.reason || "provider_status_unavailable" });
+          if (!owned) continue;
+          summary.recovery += 1;
         } else if (
-          (isDefinitiveMissingProviderOrder(inspection) ||
-            (record.provider === "dodo" && inspection.state === "unpaid")) &&
-          !isFutureIso(record.lateCaptureWatchUntil)
+          !isFutureIso(record.lateCaptureWatchUntil) && !hasKnownCapture(record) &&
+          (inspection.state === "unpaid" || (record.provider === "paypal" &&
+            inspection.reason === "paypal_lookup_failed_404" && record.providerOrderLastSeenState === "unpaid"))
         ) {
           await closeExpiredLateCaptureWatch({ client, record });
           summary.abandoned += 1;
+        } else if (inspection.state === "unavailable" && !isFutureIso(record.lateCaptureWatchUntil) &&
+            buildRecoveryFailureState(record).reconciliationRecoveryTerminal) {
+          const owned = await sendExpiredWatchToOwnerReview({ client, record,
+            providerReason: inspection.reason || "abandoned_provider_status_unavailable" });
+          if (!owned) continue;
+          summary.recovery += 1;
         } else {
           await scheduleProviderRecoveryCheck({
             client,
             record,
             failed: inspection.state === "unavailable",
+            lastSeenState: ["unpaid", "pending"].includes(inspection.state) ? inspection.state : "",
             reason:
               inspection.state === "unavailable"
                 ? inspection.reason || "abandoned_provider_status_unavailable"
@@ -4720,6 +4839,7 @@ export const reconcilePaymentSessions = async ({
       }
 
       let providerData = dodoInspection?.providerData || {};
+      let providerCaptureObserved = false;
       if (
         String(record.provider || "").trim().toLowerCase() !== "free" &&
         (status === PAYMENT_STATUS_STARTED ||
@@ -4771,6 +4891,7 @@ export const reconcilePaymentSessions = async ({
         const inspection = dodoInspection || await inspectProviderOrderForRecovery(record);
         if (["captured", "refunded"].includes(inspection.state)) {
           providerData = inspection.providerData || {};
+          providerCaptureObserved = hasObservedCapture(inspection);
           if (inspection.state === "refunded") {
             const verification = await verifyProviderCapture({ record, source: "reconcile", providerData });
             const operation = await currentPaymentOperation({ client, record });
@@ -4834,11 +4955,19 @@ export const reconcilePaymentSessions = async ({
             continue;
           }
         } else if (inspection.state === "unpaid") {
+          if (hasKnownCapture(record)) {
+            await markRetryableFinalizeFailure({ client, record, source: "reconcile",
+              reason: "provider_unpaid_after_capture_observed", keepWatch: true, lastSeenState: "unpaid",
+              watchUntil: getNewLateCaptureWatchUntil(record, createdAgeMinutes) });
+            summary.recovery += 1;
+            continue;
+          }
           if (createdAgeMinutes >= PAYMENT_HOLD_MINUTES) {
             const abandoned = await abandonStartedPaymentRecord({
               client,
               record,
               reason: "provider_confirmed_unpaid",
+              lastSeenState: "unpaid",
               releaseCouponReservation,
             });
             if (
@@ -4855,47 +4984,34 @@ export const reconcilePaymentSessions = async ({
               client,
               record,
               reason: "provider_confirmed_unpaid_before_expiry",
+              lastSeenState: "unpaid",
             });
             summary.pending += 1;
           }
           continue;
         } else if (inspection.state === "pending") {
+          if (record.lateCaptureWatchUntil && !isFutureIso(record.lateCaptureWatchUntil)) {
+            const owned = await sendExpiredWatchToOwnerReview({ client, record,
+              providerReason: inspection.reason || "provider_payment_pending" });
+            if (owned) summary.recovery += 1;
+            continue;
+          }
           await scheduleProviderRecoveryCheck({
             client,
             record,
             reason: "provider_payment_pending",
+            lastSeenState: "pending",
           });
           summary.pending += 1;
           continue;
         } else {
-          if (
-            isDefinitiveMissingProviderOrder(inspection) &&
-            createdAgeMinutes >= PAYMENT_HOLD_MINUTES &&
-            !String(record.providerPaymentId || "").trim()
-          ) {
-            const abandoned = await abandonStartedPaymentRecord({
-              client,
-              record,
-              reason: "provider_order_not_found_after_expiry",
-              releaseCouponReservation,
-            });
-            if (
-              String(abandoned?.paymentRecord?.status || "")
-                .trim()
-                .toLowerCase() === PAYMENT_STATUS_ABANDONED &&
-              abandoned?.paymentRecord?.resourceReleasePending !== true
-            ) {
-              summary.abandoned += 1;
-            } else {
-              summary.recovery += 1;
-            }
-            continue;
-          }
           await markRetryableFinalizeFailure({
             client,
             record,
             source: "reconcile",
             reason: inspection.reason || "provider_status_unavailable",
+            keepWatch: true,
+            watchUntil: getNewLateCaptureWatchUntil(record, createdAgeMinutes),
           });
           summary.providerUnavailable += 1;
           summary.recovery += 1;
@@ -4908,6 +5024,7 @@ export const reconcilePaymentSessions = async ({
         record,
         source: "reconcile",
         providerData,
+        providerCaptureObserved,
       });
       const nextStatus = String(result?.response?.status || "").trim().toLowerCase();
       if (nextStatus === PAYMENT_STATUS_BOOKED || nextStatus === PAYMENT_STATUS_EMAIL_PARTIAL) {
@@ -5731,7 +5848,7 @@ export const handleRazorpayWebhook = async ({
         payerEmail: String(payment.email || "").trim(),
       },
     });
-    result = { httpStatus: finalized.httpStatus, body: finalized.response };
+    result = webhookFinalizationResult(finalized);
   }
 
   if (result?.retryWebhook === true) {
@@ -5856,7 +5973,7 @@ export const handlePayPalWebhook = async ({
         payerEmail,
       },
     });
-    result = { httpStatus: finalized.httpStatus, body: finalized.response };
+    result = webhookFinalizationResult(finalized);
   }
 
   if (result?.retryWebhook === true) {
@@ -6001,7 +6118,7 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
       }
       transaction.patch(record._id, (patch) => {
         const guarded = guardPaymentRevision(patch, record);
-        return guarded.set({
+        return guarded.set(boundToWatchDeadline(record, {
           dodoDisputeActive: disputed,
           dodoDisputes,
           ...(record.dodoDisputeActive === true && !disputed ? {
@@ -6019,7 +6136,7 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
           events: terminalDispute ? mergePaymentRecordEvents(record.events,
             buildPaymentRecordEvent({ status: PAYMENT_STATUS_NEEDS_RECOVERY, source, reason: terminalReason, data: terminalDispute })) : record.events || [],
           updatedAt: nowIso(),
-        });
+        }));
       });
       await transaction.commit();
       record = await getPaymentRecordById(client, record._id);
@@ -6128,6 +6245,10 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
   }
   if (["failed", "cancelled"].includes(payment.status)) {
     const reason = `dodo_payment_${payment.status}`;
+    if (hasKnownCapture(record)) {
+      const retained = await holdCapturedReleaseForReview({ client, record, patchRecord: patchPaymentRecord });
+      return { httpStatus: 202, body: buildPublicStatusBody(retained) };
+    }
     const result = record.dodoDisputeActive === true || [PAYMENT_STATUS_BOOKED, PAYMENT_STATUS_EMAIL_PARTIAL, PAYMENT_STATUS_REFUNDED].includes(record.status)
       ? { paymentRecord: record, httpStatus: 200 }
       : payment.status === "failed"
@@ -6156,6 +6277,7 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
   if (payment.status === "succeeded") {
     if (deferFinalization) return { httpStatus: 200, body: buildPublicStatusBody(record) };
     const finalized = await finalizePaymentRecordInternal({ client, record, source,
+      providerCaptureObserved: settledDodoPaymentState(payment) === "succeeded",
       providerData: { dodoCheckoutSessionId: payment.checkout_session_id,
         dodoPaymentId: payment.payment_id, verifiedDodoPayment: payment } });
     return { httpStatus: finalized.httpStatus, body: finalized.response };
