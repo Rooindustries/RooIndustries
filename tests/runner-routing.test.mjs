@@ -111,11 +111,13 @@ test("the routing check rejects routes a fork or an untrusted event could reach"
   }
 });
 
-test("test jobs default to GitHub-hosted runners", () => {
+test("test jobs default to GitHub-hosted runners and Jest has a runner of its own", () => {
   const tests = jobs.filter(({ file }) => file === "tests.yml");
-  assert.ok(tests.length > 0);
+  assert.ok(tests.some(({ id }) => id === "jest"));
+  assert.ok(tests.some(({ id }) => id !== "jest"));
   for (const job of tests) {
-    assert.deepEqual(runner(job), { forkLabel: "ubuntu-24.04", variable: "TESTS_RUNNER", label: "ubuntu-24.04" }, job.id);
+    const variable = job.id === "jest" ? "JEST_RUNNER" : "TESTS_RUNNER";
+    assert.deepEqual(runner(job), { forkLabel: "ubuntu-24.04", variable, label: "ubuntu-24.04" }, job.id);
   }
 });
 
