@@ -578,9 +578,26 @@ setInterval(() => {}, 1000);`], { stdio: ["ignore", "pipe", "inherit"] });
   }
 });
 
+const takePid = [
+  "use POSIX ();",
+  "my ($nr, $pid) = @ARGV;",
+  "my $want = pack('i', $pid);",
+  "my $args = pack('Q11', 0, 0, 0, 0, 17, 0, 0, 0, unpack('Q', pack('p', $want)), 1, 0);",
+  "my $got = syscall($nr + 0, $args, length $args);",
+  "die \"clone3: $!\\n\" if $got < 0;",
+  "if ($got == 0) {",
+  "  POSIX::setsid();",
+  "  open STDIN, '<', '/dev/null'; open STDOUT, '>', '/dev/null'; open STDERR, '>', '/dev/null';",
+  "  exec 'sleep', '300'; POSIX::_exit(127);",
+  "}",
+  "print \"$got\\n\";",
+].join("\n");
+
 test("a fixture whose exit callback stops another that exited with it never signals the reused PID", async () => {
+  const clone3 = { x64: 435, arm64: 435 }[process.arch];
+  assert.ok(clone3, `no clone3 syscall number for ${process.arch}`);
   const program = `import fs from "node:fs";
-import { spawn } from "node:child_process";
+import { spawnSync } from "node:child_process";
 const { startChildOnPorts, stopChild } = await import(${library("start-on-port.mjs")});
 const wait = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 const zombie = (pid) => { try { return fs.readFileSync("/proc/" + pid + "/stat", "utf8").split(") ")[1][0] === "Z"; } catch { return false; } };
@@ -592,8 +609,9 @@ const stopOther = (other) => () => {
     target = other.child.pid;
     const grouped = () => fs.readdirSync("/proc").some((entry) => { try { return /^\\d+$/.test(entry) && Number(fs.readFileSync("/proc/" + entry + "/stat", "utf8").split(") ")[1].split(" ")[2]) === target; } catch { return false; } });
     for (let tries = 0; tries < 500 && grouped(); tries += 1) wait(10);
-    fs.writeFileSync("/proc/sys/kernel/ns_last_pid", String(target - 1));
-    victim = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore", detached: true });
+    const taken = spawnSync("perl", ["-e", ${JSON.stringify(takePid)}, "${clone3}", String(target)], { encoding: "utf8" });
+    victim = Number(taken.stdout.trim()) || null;
+    if (!victim) console.error(taken.stderr);
   }
   stopChild(other.child);
 };
@@ -602,8 +620,8 @@ fixtures[1].child.once("exit", stopOther(fixtures[0]));
 for (const { child } of fixtures) process.kill(-child.pid, "SIGKILL");
 for (let tries = 0; tries < 500 && !fixtures.every(({ child }) => zombie(child.pid)); tries += 1) wait(10);
 await new Promise((resolve) => setTimeout(resolve, 500));
-console.log(JSON.stringify({ reused: Boolean(victim) && victim.pid === target, victimAlive: victim ? victim.exitCode === null && victim.signalCode === null : null }));
-victim?.kill("SIGKILL");
+console.log(JSON.stringify({ reused: Boolean(victim) && victim === target, victimAlive: victim ? fs.existsSync("/proc/" + victim) && !zombie(victim) : null }));
+if (victim && fs.existsSync("/proc/" + victim)) process.kill(victim, "SIGKILL");
 process.exit(0);`;
   const run = spawnSync("unshare", ["--user", "--map-root-user", "--pid", "--fork", "--mount-proc", "--", "/bin/sh", "-c", "\"$@\"; exit $?", "sh", process.execPath, "--input-type=module", "-e", program], { encoding: "utf8", timeout: 60000 });
   assert.equal(run.status, 0, run.stderr);
