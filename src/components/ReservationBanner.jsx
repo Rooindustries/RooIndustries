@@ -1,20 +1,20 @@
+import { readReservationStorage, writeReservationStorage, removeReservationStorage } from "../lib/reservationStorage";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { removeBrowserStorage, writeBrowserStorage } from "../lib/browserStorage";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
+  HOLD_STORAGE_KEY,
   persistBookingPackageSelection,
   readStoredCheckoutBooking,
 } from "../lib/checkoutStorage";
 import packagePricing from "../lib/packagePricing";
 import { classifyHoldResponse } from "../lib/holdResponse";
 import { CHECKOUT_CONFIRMATION_EVENT, isCheckoutConfirmationPending } from "../lib/checkoutConfirmation";
+import { hasConfirmingReservation } from "../lib/reservationReleaseHandlers";
 import { CLIENT_REQUEST_TIMEOUT_MS } from "../lib/clientRequest";
 import { scrollWindowTo } from "../lib/scrollWindowTo";
 
 const { getPublicPackageTitle } = packagePricing;
-
-const HOLD_STORAGE_KEY = "my_slot_hold";
 const BOOKING_DRAFT_KEY = "booking_draft";
 const MOBILE_MAX_WIDTH = 780;
 
@@ -99,7 +99,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
 
   useEffect(() => {
     try {
-      const stored = sessionStorage.getItem(HOLD_STORAGE_KEY);
+      const stored = readReservationStorage(HOLD_STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
         if (new Date(parsed.expiresAt) > new Date()) {
@@ -116,16 +116,16 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
           };
           const utcDate = getUtcDateFromHold(normalizedHold);
           if (!utcDate) {
-            sessionStorage.removeItem(HOLD_STORAGE_KEY);
+            removeReservationStorage(HOLD_STORAGE_KEY);
             return;
           }
           normalizedHold.startTimeUTC = utcDate.toISOString();
-          sessionStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(normalizedHold));
+          writeReservationStorage(HOLD_STORAGE_KEY, JSON.stringify(normalizedHold));
           currentHoldRef.current = normalizedHold;
           setHold(normalizedHold);
           broadcastHold(normalizedHold);
         } else {
-          sessionStorage.removeItem(HOLD_STORAGE_KEY);
+          removeReservationStorage(HOLD_STORAGE_KEY);
         }
       }
     } catch {
@@ -150,18 +150,18 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
         };
         const utcDate = getUtcDateFromHold(normalizedHold);
         if (!utcDate) {
-          removeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY);
+          removeReservationStorage(HOLD_STORAGE_KEY);
           currentHoldRef.current = null;
           setHold(null);
           return;
         }
         normalizedHold.startTimeUTC = utcDate.toISOString();
-        writeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY, JSON.stringify(normalizedHold));
+        writeReservationStorage(HOLD_STORAGE_KEY, JSON.stringify(normalizedHold));
         currentHoldRef.current = normalizedHold;
         setHold(normalizedHold);
         return;
       }
-      removeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY);
+      removeReservationStorage(HOLD_STORAGE_KEY);
       currentHoldRef.current = null;
       setHold(null);
     };
@@ -189,7 +189,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
     const tick = () => {
       const diff = expiresAtMs - Date.now();
       if (diff <= 0) {
-        if (isCheckoutConfirmationPending()) {
+        if (isCheckoutConfirmationPending() || hasConfirmingReservation()) {
           setCountdown(0);
           return false;
         }
@@ -222,7 +222,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
 
   const readDraft = () => {
     try {
-      return sessionStorage.getItem(BOOKING_DRAFT_KEY);
+      return readReservationStorage(BOOKING_DRAFT_KEY);
     } catch {
       return null;
     }
@@ -231,8 +231,8 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
   const clearReservation = (redirect, { keepDraft = false } = {}) => {
     currentHoldRef.current = null;
     setHold(null);
-    removeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY);
-    if (!keepDraft) removeBrowserStorage("sessionStorage", BOOKING_DRAFT_KEY);
+    removeReservationStorage(HOLD_STORAGE_KEY);
+    if (!keepDraft) removeReservationStorage(BOOKING_DRAFT_KEY);
     broadcastHold(null);
     if (redirect) {
       nav("/", { replace: false });
@@ -348,7 +348,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
       backgroundLocation: location.state?.backgroundLocation || location,
     };
     try {
-      const draftRaw = sessionStorage.getItem(BOOKING_DRAFT_KEY);
+      const draftRaw = readReservationStorage(BOOKING_DRAFT_KEY);
       let draftPkg = null;
       if (draftRaw) {
         const draft = JSON.parse(draftRaw);

@@ -1,4 +1,16 @@
-import { clearBookingConfirmation, createBookingConfirmation } from "../lib/confirmationReceipt";
+import { cancelReservationPayment } from "../lib/reservationReleaseHandlers";
+import { readReservationStorage, writeReservationStorage, removeReservationStorage } from "../lib/reservationStorage";
+import {
+  reservationOperation,
+  reserveSlot,
+  releaseSlot,
+  reconcileReservation,
+  reportReservationError,
+  readReservationReleaseError,
+  saveReservationReleaseError,
+  RESERVATION_ERROR_EVENT,
+} from "../lib/reservationOperation";
+import { clearBookingConfirmation } from "../lib/confirmationReceipt";
 import React, {
   useCallback,
   useEffect,
@@ -9,7 +21,6 @@ import React, {
 import { createPortal } from "react-dom";
 import { useDialogFocus } from "../lib/useDialogFocus";
 import { useBookingDialogPending } from "../lib/bookingDialogHold";
-import { removeBrowserStorage, writeBrowserStorage } from "../lib/browserStorage";
 import { CLIENT_REQUEST_TIMEOUT_MS, reportRequestError, requestTimeoutError, watchPageLeave } from "../lib/clientRequest";
 import { getPublicContent } from "../lib/publicContentClient";
 import { useLocation, useNavigate, Link } from "react-router-dom";
@@ -22,9 +33,10 @@ import { getWarrantyCallout } from "../lib/packageWarranty";
 import {
   BOOKING_DRAFT_STORAGE_KEY,
   CHECKOUT_BOOKING_STORAGE_KEY,
+  HOLD_STORAGE_KEY,
+  PAYMENT_SESSION_STORAGE_KEY,
   persistBookingPackageSelection,
   readStoredCheckoutBooking,
-  updateStoredCheckoutHold,
 } from "../lib/checkoutStorage";
 import {
   calculateCheckoutDiscounts,
@@ -38,7 +50,6 @@ import {
 import { trackEvent } from "../lib/analytics";
 import { captureSalesAttribution } from "../lib/salesAttribution";
 import { isValidEmail } from "../lib/emailValidation";
-import { classifyHoldResponse } from "../lib/holdResponse";
 
 const { applyPackageContentOverrides, getPackageFeatureItems } = packageContent;
 const {
@@ -59,9 +70,7 @@ const DEFAULT_VERTEX_PACKAGE = preparePackage({
 
 const IST_OFFSET_MINUTES = 330;
 const FORM_PREFILL_KEY = "booking_form_prefill";
-const HOLD_STORAGE_KEY = "my_slot_hold";
 const BOOKING_DRAFT_KEY = BOOKING_DRAFT_STORAGE_KEY;
-const PAYMENT_SESSION_STORAGE_KEY = "payment_session_state";
 const SESSION_STATE_KEY = "booking_modal_state";
 const REFERRAL_STORAGE_KEY = "referral_session";
 const INVALID_CHECKOUT_CODE_MESSAGE = "Invalid referral or coupon code.";
@@ -580,7 +589,18 @@ export default function BookingForm() {
   const [myHold, setMyHold] = useState(null);
   const currentHoldRef = useRef(myHold);
   currentHoldRef.current = myHold;
-  const releaseInFlightRef = useRef(false);
+  const currentReservation = (hold = currentHoldRef.current, paymentAccessToken) => reservationOperation({
+    hold, paymentAccessToken,
+  });
+  useEffect(() => {
+    const syncHold = () => {
+      const hold = JSON.parse(readReservationStorage(HOLD_STORAGE_KEY) || "null");
+      currentHoldRef.current = hold;
+      setMyHold(hold);
+    };
+    window.addEventListener("hold-state", syncHold);
+    return () => window.removeEventListener("hold-state", syncHold);
+  }, []);
   const isPaymentPendingHold =
     String(myHold?.phase || "").trim().toLowerCase() === "payment_pending";
   const checkoutBooking = readStoredCheckoutBooking();
@@ -592,6 +612,18 @@ export default function BookingForm() {
   const [holdCountdownMs, setHoldCountdownMs] = useState(null);
   const [releasingPayment, setReleasingPayment] = useState(false);
   const [paymentReleaseStatus, setPaymentReleaseStatus] = useState("");
+  useEffect(() => {
+    const restoreReleaseError = () => {
+      const message = readReservationReleaseError(currentHoldRef.current);
+      if (message) {
+        setErrorStep1(message);
+        setErrorStep2(message);
+      }
+    };
+    restoreReleaseError();
+    window.addEventListener(RESERVATION_ERROR_EVENT, restoreReleaseError);
+    return () => window.removeEventListener(RESERVATION_ERROR_EVENT, restoreReleaseError);
+  }, [myHold]);
   const clearedNoHoldRef = useRef(false);
   const [restoredSessionPackageTitle, setRestoredSessionPackageTitle] =
     useState("");
@@ -670,7 +702,7 @@ export default function BookingForm() {
   useEffect(() => {
     if (!selectedPackage.title) return;
     try {
-      const raw = sessionStorage.getItem(SESSION_STATE_KEY);
+      const raw = readReservationStorage(SESSION_STATE_KEY);
       if (raw) {
         const saved = JSON.parse(raw);
         if (saved.packageTitle === selectedPackage.title) {
@@ -728,7 +760,7 @@ export default function BookingForm() {
             }
           : null,
       };
-      sessionStorage.setItem(SESSION_STATE_KEY, JSON.stringify(payload));
+      writeReservationStorage(SESSION_STATE_KEY, JSON.stringify(payload));
     } catch {
       console.error("Failed to persist session state");
     }
@@ -757,7 +789,7 @@ export default function BookingForm() {
     setStep(1);
     clearedNoHoldRef.current = true;
     try {
-      sessionStorage.removeItem(SESSION_STATE_KEY);
+      removeReservationStorage(SESSION_STATE_KEY);
     } catch {
       console.error("Failed to clear session state");
     }
@@ -765,7 +797,7 @@ export default function BookingForm() {
 
   useEffect(() => {
     try {
-      const stored = sessionStorage.getItem(HOLD_STORAGE_KEY);
+      const stored = readReservationStorage(HOLD_STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
         if (new Date(parsed.expiresAt) > new Date()) {
@@ -782,15 +814,16 @@ export default function BookingForm() {
           };
           const utcDate = getUtcDateFromHold(normalizedHold);
           if (!utcDate) {
-            sessionStorage.removeItem(HOLD_STORAGE_KEY);
+            removeReservationStorage(HOLD_STORAGE_KEY);
             return;
           }
           normalizedHold.startTimeUTC = utcDate.toISOString();
-          sessionStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(normalizedHold));
+          writeReservationStorage(HOLD_STORAGE_KEY, JSON.stringify(normalizedHold));
+          currentHoldRef.current = normalizedHold;
           setMyHold(normalizedHold);
           broadcastHold(normalizedHold);
         } else {
-          sessionStorage.removeItem(HOLD_STORAGE_KEY);
+          removeReservationStorage(HOLD_STORAGE_KEY);
         }
       }
     } catch {
@@ -1217,7 +1250,7 @@ export default function BookingForm() {
       setCodeInput("");
       setCodeError("");
       setRestoredCodeCandidates(null);
-      const storedDraft = sessionStorage.getItem(BOOKING_DRAFT_KEY);
+      const storedDraft = readReservationStorage(BOOKING_DRAFT_KEY);
       if (storedDraft) {
         const parsed = JSON.parse(storedDraft);
         setDrafts(parsed.packages || {});
@@ -1263,7 +1296,7 @@ export default function BookingForm() {
 
   const persistDraft = (payload) => {
     try {
-      const current = sessionStorage.getItem(BOOKING_DRAFT_KEY);
+      const current = readReservationStorage(BOOKING_DRAFT_KEY);
       let parsed = { packages: {}, lastTitle: null };
       if (current) {
         parsed = { lastTitle: null, packages: {}, ...JSON.parse(current) };
@@ -1275,7 +1308,7 @@ export default function BookingForm() {
       };
       parsed.lastTitle = key;
       setDrafts(parsed.packages);
-      sessionStorage.setItem(BOOKING_DRAFT_KEY, JSON.stringify(parsed));
+      writeReservationStorage(BOOKING_DRAFT_KEY, JSON.stringify(parsed));
     } catch {
       console.error("Failed to persist booking draft");
     }
@@ -1297,7 +1330,7 @@ export default function BookingForm() {
 
   const clearDraftForPackage = (pkgKey) => {
     try {
-      const current = sessionStorage.getItem(BOOKING_DRAFT_KEY);
+      const current = readReservationStorage(BOOKING_DRAFT_KEY);
       if (!current) return;
       const parsed = { lastTitle: null, packages: {}, ...JSON.parse(current) };
       if (parsed.packages && parsed.packages[pkgKey]) {
@@ -1310,7 +1343,7 @@ export default function BookingForm() {
           if (parsed.lastTitle === pkgKey) parsed.lastTitle = null;
         }
         setDrafts(parsed.packages);
-        sessionStorage.setItem(BOOKING_DRAFT_KEY, JSON.stringify(parsed));
+        writeReservationStorage(BOOKING_DRAFT_KEY, JSON.stringify(parsed));
       }
     } catch {
       console.error("Failed to clear booking draft");
@@ -1620,6 +1653,7 @@ export default function BookingForm() {
   useEffect(() => {
     setReviewQuote(null);
     if (step !== 3 || !selectedPackage.title || !reviewStartTime) return undefined;
+    const isCurrent = currentReservation();
     const controller = new AbortController();
     const timeout = setTimeout(
       () => controller.abort(requestTimeoutError()),
@@ -1638,7 +1672,7 @@ export default function BookingForm() {
       { signal: controller.signal }
     )
       .then((data) => {
-        if (!controller.signal.aborted) setReviewQuote(data.quote || null);
+        if (mountedRef.current && !controller.signal.aborted && isCurrent()) setReviewQuote(data.quote || null);
       })
       .catch(() => {})
       .finally(() => clearTimeout(timeout));
@@ -1728,7 +1762,7 @@ export default function BookingForm() {
       return;
     }
 
-    const validationHold = currentHoldRef.current;
+    const isCurrent = currentReservation();
     const attempt = ++manualCodeAttemptRef.current;
     setValidatingCode(true);
     setCodeError("");
@@ -1737,8 +1771,7 @@ export default function BookingForm() {
       const result = await resolveCheckoutCode(code, selectedPackage.title);
       if (!mountedRef.current || manualCodeAttemptRef.current !== attempt ||
         !hasActiveHoldRef.current || isPaymentPendingHold) return;
-      if (currentHoldRef.current?.holdId !== validationHold?.holdId ||
-        currentHoldRef.current?.holdToken !== validationHold?.holdToken) return;
+      if (!isCurrent()) return;
       if (!result.ok) {
         setCodeError(result.error || INVALID_CHECKOUT_CODE_MESSAGE);
         return;
@@ -1750,7 +1783,7 @@ export default function BookingForm() {
       }
       applyResolvedCoupon(result.value);
     } finally {
-      if (manualCodeAttemptRef.current === attempt) setValidatingCode(false);
+      if (mountedRef.current && manualCodeAttemptRef.current === attempt) setValidatingCode(false);
     }
   };
 
@@ -1793,6 +1826,7 @@ export default function BookingForm() {
     setValidatingCode(true);
     setCodeError("");
 
+    const isCurrent = currentReservation();
     const restoreValidatedCodes = async () => {
       let nextReferral = null;
       let nextCoupon = null;
@@ -1847,7 +1881,7 @@ export default function BookingForm() {
           referralCode,
           selectedPackage.title
         );
-        if (!active || !hasActiveHoldRef.current) return;
+        if (!active || !hasActiveHoldRef.current || !isCurrent()) return;
         applyResult(result, "referral", referralCode);
       }
 
@@ -1857,11 +1891,11 @@ export default function BookingForm() {
           couponCode,
           selectedPackage.title
         );
-        if (!active || !hasActiveHoldRef.current) return;
+        if (!active || !hasActiveHoldRef.current || !isCurrent()) return;
         applyResult(result, "coupon", couponCode);
       }
 
-      if (!active || !hasActiveHoldRef.current) return;
+      if (!active || !hasActiveHoldRef.current || !isCurrent()) return;
       setAppliedReferral(nextReferral);
       setAppliedCoupon(nextCoupon);
       setDismissedReferralCode(nextDismissedCode);
@@ -1928,9 +1962,10 @@ export default function BookingForm() {
     let settled = false;
     setValidatingCode(true);
 
+    const isCurrent = currentReservation();
     resolveCheckoutCode(autoCode, selectedPackage.title)
       .then((result) => {
-        if (!active || !hasActiveHoldRef.current) return;
+        if (!active || !hasActiveHoldRef.current || !isCurrent()) return;
         if (!result?.ok) {
           const nextCoupon = sanitizeCouponForCheckout(appliedCoupon);
           if (!result?.unavailable) {
@@ -2001,19 +2036,18 @@ export default function BookingForm() {
   ]);
 
   const clearHoldState = (resetStep = true, clearStorage = true) => {
-    setEmailError("");
     hasActiveHoldRef.current = false;
     currentHoldRef.current = null;
+    if (clearStorage) removeReservationStorage(HOLD_STORAGE_KEY);
+    broadcastHold(null);
+    if (!mountedRef.current) return;
+    setEmailError("");
     manualCodeAttemptRef.current += 1;
     setValidatingCode(false);
     setMyHold(null);
-    if (clearStorage) {
-      removeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY);
-    }
     setSelectedSlot(null);
     setHoldCountdownMs(null);
     if (resetStep) setStep(1);
-    broadcastHold(null);
   };
 
   const getPaymentNavigationState = () => {
@@ -2029,162 +2063,56 @@ export default function BookingForm() {
     navigate("/payment", { state: getPaymentNavigationState() });
   };
 
-  const showCapturedPaymentResult = (data = {}) => {
-    const status = String(data.status || "").trim().toLowerCase();
-    const bookingId = String(data.bookingId || "").trim();
-    if (
-      !["booked", "email_partial"].includes(status) ||
-      !bookingId
-    ) {
-      returnToPayment();
-      return;
-    }
-
-    const bookingConfirmation = createBookingConfirmation(data);
-    try {
-      sessionStorage.removeItem(PAYMENT_SESSION_STORAGE_KEY);
-      sessionStorage.removeItem(CHECKOUT_BOOKING_STORAGE_KEY);
-    } catch {
-      console.error("Failed to persist booking confirmation");
-    }
-    clearHoldState(true);
-    const backgroundLocation = location.state?.backgroundLocation || null;
-    navigate("/payment-success", {
-      replace: true,
-      state: {
-        bookingConfirmation,
-        ...(backgroundLocation ? { backgroundLocation } : {}),
-      },
-    });
-  };
-
   const releaseHold = async (resetStep = true, { suppressError = false } = {}) => {
     if (!myHold) return true;
     if (isPaymentPendingHold) {
-      setErrorStep2(
-        "Your payment session is already in progress. Return to payment to finish it."
-      );
+      setErrorStep2("Your payment session is already in progress. Return to payment to finish it.");
       return false;
     }
-
-    const holdIdToDelete = myHold.holdId;
-    const holdTokenToDelete = myHold.holdToken;
-    const hasExpired = () => new Date(myHold.expiresAt).getTime() <= Date.now();
-    const isCurrentHold = () =>
-      currentHoldRef.current?.holdId === holdIdToDelete &&
-      currentHoldRef.current?.holdToken === holdTokenToDelete;
-    if (classifyHoldResponse({ endpoint: "release", expired: hasExpired() }) === "clear") {
-      clearHoldState(resetStep);
-    }
-    if (releaseInFlightRef.current) return hasExpired();
-    releaseInFlightRef.current = true;
-
-    let outcome;
-    let serverMessage = "";
-    try {
-      const response = await fetch("/api/releaseHold", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          holdId: holdIdToDelete,
-          holdToken: holdTokenToDelete,
-        }),
-        signal: AbortSignal.timeout(BOOKING_FETCH_TIMEOUT_MS),
-      });
-      const data = await response.json();
-      const message = data?.message || data?.error;
-      if (response.status === 409 && typeof message === "string") serverMessage = message;
-      outcome = classifyHoldResponse({
-        endpoint: "release",
-        status: response.status,
-        ok: response.ok && data?.ok === true,
-        expired: hasExpired(),
-      });
-    } catch {
-      console.error("Failed to release hold on server");
-      outcome = classifyHoldResponse({ endpoint: "release", networkError: true, expired: hasExpired() });
-    } finally {
-      releaseInFlightRef.current = false;
-    }
-    if (outcome !== "keep") {
-      if (isCurrentHold()) clearHoldState(resetStep);
+    const released = await releaseSlot(myHold, { suppressError });
+    if (released && mountedRef.current) {
+      setEmailError("");
+      manualCodeAttemptRef.current += 1;
+      setValidatingCode(false);
+      setSelectedSlot(null);
+      setHoldCountdownMs(null);
       setErrorStep1("");
       setErrorStep2("");
-      return true;
+      if (resetStep) setStep(1);
     }
-    if (isCurrentHold() && !suppressError) {
-      const message = serverMessage || "Could not release your slot. Your reservation and details are saved. Please try again.";
-      setErrorStep1(message);
-      setErrorStep2(message);
-    }
-    return false;
+    return released;
   };
 
   const releasePaymentSession = async () => {
     if (!isPaymentPendingHold || releasingPayment) return;
+    const hold = myHold;
+    let stored;
+    try {
+      stored = JSON.parse(readReservationStorage(PAYMENT_SESSION_STORAGE_KEY) || "null");
+    } catch (error) {
+      reportReservationError("Failed to release payment session", error);
+    }
+    const token = String(stored?.paymentAccessToken || "").trim();
+    if (!token) {
+      saveReservationReleaseError(hold, "Return to payment once so the active session can be checked.");
+      return;
+    }
     setReleasingPayment(true);
     setErrorStep2("");
     setPaymentReleaseStatus("");
-    try {
-      const stored = JSON.parse(
-        sessionStorage.getItem(PAYMENT_SESSION_STORAGE_KEY) || "null"
-      );
-      const paymentAccessToken = String(stored?.paymentAccessToken || "").trim();
-      if (!paymentAccessToken) {
-        throw new Error("Return to payment once so the active session can be checked.");
-      }
-      const response = await fetch("/api/payment/cancel", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${paymentAccessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: "{}",
-        signal: AbortSignal.timeout(BOOKING_FETCH_TIMEOUT_MS),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (data?.captured) {
-        showCapturedPaymentResult(data);
-        return;
-      }
-      if (!response.ok || data?.cancelled !== true) {
-        throw new Error(data?.error || "The payment session could not be released.");
-      }
-      const refreshed = data.refreshedHold;
-      if (!refreshed?.slotHoldId || !refreshed?.slotHoldToken) {
-        clearHoldState(true);
-        setErrorStep1("The reservation expired. Please choose the slot again.");
-        return;
-      }
-      const nextHold = {
-        ...myHold,
-        holdId: refreshed.slotHoldId,
-        holdToken: refreshed.slotHoldToken,
-        expiresAt: refreshed.slotHoldExpiresAt,
-        phase: "holding",
-      };
-      setMyHold(nextHold);
-      writeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY, JSON.stringify(nextHold));
-      const checkoutUpdated = updateStoredCheckoutHold(refreshed);
-      removeBrowserStorage("sessionStorage", PAYMENT_SESSION_STORAGE_KEY);
-      broadcastHold(nextHold);
-      setPaymentReleaseStatus(
-        checkoutUpdated
-          ? "Payment method released. You can choose another payment method."
-          : "Payment method released. Review your booking details and submit again."
-      );
-    } catch (error) {
-      setPaymentReleaseStatus("");
-      const timedOut =
-        error?.name === "AbortError" || error?.name === "TimeoutError";
-      setErrorStep2(
-        timedOut
-          ? "The payment session could not be released. Please try again."
-          : error.message || "The payment session could not be released."
-      );
-    } finally {
-      setReleasingPayment(false);
+    saveReservationReleaseError(hold, "");
+    const result = await cancelReservationPayment(hold, token);
+    if (!mountedRef.current) return;
+    setReleasingPayment(false);
+    if (result.stale || result.captured || result.error) return;
+    if (!result.nextHold) {
+      setErrorStep1("The reservation expired. Please choose the slot again.");
+      setStep(1);
+      return;
     }
+    setPaymentReleaseStatus(result.checkoutUpdated
+      ? "Payment method released. You can choose another payment method."
+      : "Payment method released. Review your booking details and submit again.");
   };
 
   const handleLockAndGoNext = async (recheckOtherTab = false) => {
@@ -2217,6 +2145,17 @@ export default function BookingForm() {
 
     if (lockingSlot) return;
 
+    const reconciled = reconcileReservation(currentHoldRef.current);
+    if (reconciled.changed) {
+      currentHoldRef.current = reconciled.hold;
+      setMyHold(reconciled.hold);
+      broadcastHold(reconciled.hold);
+      const message = "Your reservation changed. Please review it before continuing.";
+      setErrorStep1(message);
+      setErrorStep2(message);
+      return;
+    }
+
     setErrorStep1("");
     if (recheckingPayment) setErrorStep2("");
     setLockingSlot(true);
@@ -2236,37 +2175,18 @@ export default function BookingForm() {
         previousHoldToken,
       };
 
-      let res;
-      let data;
-      let networkError = false;
-      try {
-        res = await fetch("/api/holdSlot", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(body),
-          signal: AbortSignal.timeout(BOOKING_FETCH_TIMEOUT_MS),
-        });
-        data = await res.json();
-      } catch {
-        console.error("Failed to reserve slot");
-        networkError = true;
-      }
-      const outcome = classifyHoldResponse({
-        endpoint: "hold",
-        status: res?.status,
-        ok: res?.ok && data?.ok === true,
-        code: data?.code,
-        networkError,
-      });
+      const reservationAtStart = currentHoldRef.current;
+      saveReservationReleaseError(reservationAtStart, "");
+      const result = await reserveSlot({ body, hold: reservationAtStart,
+        packageDetails: selectedPackage, isSameAsExisting });
+      if (result.stale) return;
+      const { response: res, data, outcome } = result;
 
       if (outcome !== "replace") {
+        if (outcome !== "clear" && !reservationOperation({ hold: result.pendingHold || reservationAtStart })()) return;
+        if (outcome === "clear" && !reservationOperation({ hold: isSameAsExisting ? null : reservationAtStart })()) return;
         if (res?.status === 409 && data?.code === "hold_payment_in_progress" && isSameAsExisting) {
-          const pendingHold = { ...myHold, phase: "payment_pending", paymentStartedElsewhere: true };
-          setMyHold(pendingHold);
-          writeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY, JSON.stringify(pendingHold));
-          broadcastHold(pendingHold);
+          if (!mountedRef.current || !reservationOperation({ hold: result.pendingHold })()) return;
           setErrorStep1("");
           setErrorStep2(hasMatchingCheckoutBooking
             ? "Your payment session is already in progress. Return to payment to finish it."
@@ -2275,9 +2195,17 @@ export default function BookingForm() {
           return;
         }
         if (outcome === "clear") {
-          if (isSameAsExisting) clearHoldState(recheckingPayment);
-          setSelectedSlot(null);
+          if (isSameAsExisting && mountedRef.current && currentReservation(null)()) {
+            hasActiveHoldRef.current = false;
+            setEmailError("");
+            manualCodeAttemptRef.current += 1;
+            setValidatingCode(false);
+            setHoldCountdownMs(null);
+            if (recheckingPayment) setStep(1);
+          }
+          if (mountedRef.current) setSelectedSlot(null);
         }
+        if (!mountedRef.current) return;
         const setHoldError = recheckingPayment && outcome !== "clear" ? setErrorStep2 : setErrorStep1;
         setHoldError(
           outcome === "clear"
@@ -2287,20 +2215,15 @@ export default function BookingForm() {
         return;
       }
 
-      const newHold = {
-        holdId: data.holdId,
-        holdToken: data.holdToken,
-        expiresAt: data.expiresAt,
-        startTimeUTC: selectedSlotId,
-        packageTitle: selectedPackage.title,
-        packagePrice: selectedPackage.price,
-        packageTag: selectedPackage.tag,
-        phase: "active",
-      };
-
-      setMyHold(newHold);
-      writeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY, JSON.stringify(newHold));
-      broadcastHold(newHold);
+      const newHold = result.nextHold;
+      if (!reservationOperation({ hold: newHold })()) return;
+      trackEvent("booking_slot_reserved", {
+        package: selectedPackage.title,
+        lead_time_hours: Number(
+          Math.max(0, (new Date(selectedSlotId).getTime() - Date.now()) / 3_600_000).toFixed(1)
+        ),
+      });
+      if (!mountedRef.current) return;
       setErrorStep1("");
       setErrorStep2("");
 
@@ -2309,15 +2232,9 @@ export default function BookingForm() {
       if (Number.isFinite(expiresIn)) {
         setHoldCountdownMs(Math.max(0, expiresIn));
       }
-      trackEvent("booking_slot_reserved", {
-        package: selectedPackage.title,
-        lead_time_hours: Number(
-          Math.max(0, (new Date(selectedSlotId).getTime() - Date.now()) / 3_600_000).toFixed(1)
-        ),
-      });
       setStep(2);
     } finally {
-      setLockingSlot(false);
+      if (mountedRef.current) setLockingSlot(false);
     }
   };
 
@@ -2406,7 +2323,7 @@ export default function BookingForm() {
     const backgroundLocation =
       location.state?.backgroundLocation || location.state || null;
     try {
-      sessionStorage.setItem(
+      writeReservationStorage(
         CHECKOUT_BOOKING_STORAGE_KEY,
         JSON.stringify(payload)
       );

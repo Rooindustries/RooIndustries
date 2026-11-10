@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { reportRequestError } from "../lib/clientRequest";
 import useUpgradeEligibility, { fetchUpgradeInfo } from "../lib/useUpgradeEligibility";
 import { useNavigate } from "react-router-dom";
+import { writeStoredCheckoutBooking } from "../lib/checkoutStorage";
 
 const formatLocalDate = (utcDate, timeZone) => {
   try {
@@ -135,12 +136,7 @@ export default function UpgradeXoc() {
       upgradeIntentToken: String(upgradeInfo.upgradeIntentToken || "").trim(),
     };
 
-    try {
-      sessionStorage.setItem(
-        "checkout_booking_state",
-        JSON.stringify(bookingData)
-      );
-    } catch {}
+    writeStoredCheckoutBooking(bookingData);
     navigate("/payment", { state: { bookingData } });
   }
 

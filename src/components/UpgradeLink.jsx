@@ -5,6 +5,7 @@ import { CLIENT_REQUEST_TIMEOUT_MS, reportRequestError, requestTimeoutError } fr
 import { getPublicContent } from "../lib/publicContentClient";
 import packageContent from "../lib/packageContent";
 import packagePricing from "../lib/packagePricing";
+import { writeStoredCheckoutBooking } from "../lib/checkoutStorage";
 
 const { normalizePackageText } = packageContent;
 const { applyPackagePricing } = packagePricing;
@@ -230,12 +231,7 @@ export default function UpgradeLink() {
       upgradeIntentToken: String(upgradeInfo.upgradeIntentToken || "").trim(),
     };
 
-    try {
-      sessionStorage.setItem(
-        "checkout_booking_state",
-        JSON.stringify(bookingData)
-      );
-    } catch {}
+    writeStoredCheckoutBooking(bookingData);
     navigate("/payment", { state: { bookingData } });
   }
 

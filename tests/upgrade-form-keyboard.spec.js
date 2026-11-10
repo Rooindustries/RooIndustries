@@ -4,6 +4,27 @@ test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata", viewport: { widt
 
 for (const route of ["/upgrade/max", "/upgrade-xoc"]) {
   test.describe(route, () => {
+    test("checkout keeps the upgrade when browser storage is blocked", async ({ page, flow }) => {
+      await flow.upgrade(route);
+      await page.getByRole("textbox", { name: "Enter your Order ID", exact: true }).press("Enter");
+      await expect(page.getByRole("heading", { name: "Upgrade Summary", exact: true })).toBeVisible();
+      await page.evaluate(() => {
+        Object.defineProperty(window, "sessionStorage", {
+          configurable: true, get() { throw new DOMException("Blocked", "SecurityError"); },
+        });
+      });
+      await page.getByRole("button", { name: "Proceed to Payment", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Complete Upgrade Payment", exact: true })).toBeVisible();
+      expect(await page.evaluate(() => history.state.usr.bookingData.originalOrderId)).toBe("fixture-order");
+      await page.goBack();
+      await expect(page).toHaveURL(new RegExp(`${route}$`));
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await page.goForward();
+      await expect(page).toHaveURL(/\/payment$/);
+      await expect(page.getByRole("heading", { name: "Complete Upgrade Payment", exact: true })).toBeVisible();
+      expect(await page.evaluate(() => history.state.usr.bookingData.originalOrderId)).toBe("fixture-order");
+    });
+
     test("Enter in the Order ID field checks eligibility", async ({ page, flow }) => {
       await flow.upgrade(route);
       await page.getByRole("textbox", { name: "Enter your Order ID", exact: true }).press("Enter");
