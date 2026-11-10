@@ -43,9 +43,6 @@ const getQuestionId = (question = "", answer = "") => {
   return slugify(question);
 };
 
-const isFaqIntentHash = (hash = "") =>
-  hash === "faq" || hash === UPGRADE_HASH || hash === TRUST_HASH;
-
 function useElementSize() {
   const ref = useRef(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -223,10 +220,6 @@ export default function FaqSection({
     if (!flatQuestions.length) return;
     const hash = activeHash;
     if (!hash) return;
-    if (!isFaqIntentHash(hash) && !flatQuestions.some((q) => q.id === hash)) {
-      return;
-    }
-
     if (hash === "faq") {
       return;
     }
