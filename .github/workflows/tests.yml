@@ -416,7 +416,7 @@ jobs:
       - name: Run the payout and recovery suites
         uses: ./.github/actions/npm-suites
         with:
-          suites: creator-payouts:postgres17 booking-payment-window payment-recovery:postgres17
+          suites: creator-payouts:postgres17 booking-payment-window hosted-alignment:postgres17 payment-recovery:postgres17
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

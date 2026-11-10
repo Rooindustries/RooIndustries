@@ -64,6 +64,7 @@
     "test:booking-hold:e2e": "playwright test tests/booking-hold.spec.js --project=chromium",
     "test:booking-contact": "node scripts/test-booking-contact.mjs",
     "test:booking-payment-window": "node scripts/test-booking-contact.mjs --payment-window",
+    "test:hosted-alignment:postgres17": "node --test tests/hosted-alignment-postgres.mjs",
     "test:upgrade-credit": "node scripts/test-booking-contact.mjs --upgrade-credit",
     "test:upgrade-credit:ownership": "node scripts/test-booking-contact.mjs --upgrade-credit-ownership",
     "test:emails": "playwright test tests/transactional-emails.spec.js --project=chromium",

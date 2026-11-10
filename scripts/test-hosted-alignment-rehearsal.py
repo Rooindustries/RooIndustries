@@ -45,7 +45,10 @@ def cmd(args,check=True):
  return r
 
 def sql(db,body,check=True):
- r=subprocess.run([str(BIN/'psql'),'-X','-q','-A','-t','-v','ON_ERROR_STOP=1','-h',str(RUN),'-p',PORT,'-U','postgres','-d',db],input=body,env=ENV,capture_output=True,text=True)
+ r=subprocess.run([
+  str(BIN/'psql'),'-X','-q','-A','-t','-v','ON_ERROR_STOP=1',
+  '-h',str(SOCKETS),'-p',PORT,'-U','postgres','-d',db,
+ ],input=body,env=ENV,capture_output=True,text=True)
  if check and r.returncode: raise RuntimeError(db+' SQL failed:\n'+r.stderr[-6000:])
  return r
 
@@ -833,14 +836,25 @@ def currency_checks(db):
 
 
 started=False
+SOCKETS=None
 try:
  save('input-hashes.json',INPUTS)
  proof_inputs={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in [Path(__file__),W/'hosted-full-catalog.raw.json',W/'ledger-statements.raw.json',W/'stub.sql',W/'hosted-full-catalog.sql',impact_file('alignment-seed.sql'),impact_file('impact-alignment.sql'),impact_file('impact-currency.sql'),impact_file('platform-event-functions.sql'),W/'missing-capture-read-only.sql']+([EXTRA_PATH] if EXTRA_PATH.exists() else [])+([TOURNEY_PATH] if TOURNEY_PATH.exists() else [])}
  save('rehearsal-input-hashes.json',proof_inputs)
  version=cmd([BIN/'postgres','--version']).stdout
  if not re.search(r'PostgreSQL\) 17\.',version):raise RuntimeError('PostgreSQL17 binaries required: '+version)
- cmd([BIN/'initdb','-D',DATA,'-U','postgres','-A','trust']);started=True;cmd([BIN/'pg_ctl','-D',DATA,'-o',"-k "+str(RUN)+" -c listen_addresses='' -p "+PORT,'-l',RUN/'postgres.log','-w','start']);started=True
- save('postgres-version.json',{'server_version':sql('postgres',"select current_setting('server_version')").stdout.strip(),'binaries':str(BIN),'unix_socket':str(RUN),'listen_addresses':sql('postgres',"select current_setting('listen_addresses')").stdout.strip()})
+ cmd([BIN/'initdb','-D',DATA,'-U','postgres','-A','trust'])
+ started=True
+ SOCKETS=Path(tempfile.mkdtemp(prefix='roo-pg-',dir='/tmp'))
+ cmd([
+  BIN/'pg_ctl','-D',DATA,'-o',"-k "+str(SOCKETS)+" -c listen_addresses='' -p "+PORT,
+  '-l',RUN/'postgres.log','-w','start',
+ ])
+ save('postgres-version.json',{
+  'server_version':sql('postgres',"select current_setting('server_version')").stdout.strip(),
+  'binaries':str(BIN),'unix_socket':str(SOCKETS),
+  'listen_addresses':sql('postgres',"select current_setting('listen_addresses')").stdout.strip(),
+ })
  print('local run',RUN,flush=True)
  replica=build('replica',True);save('replica-before-overrides.json',replica);replica=replica_overrides('replica');save('replica-before.json',replica);save('replica-functions-before.json',definitions('replica'))
  dif=differences(norm(HOST,True),norm(replica));save('replica-fidelity-differences.json',dif)
@@ -937,3 +951,4 @@ finally:
   stopped=cmd([BIN/'pg_ctl','-D',DATA,'-m','fast','-w','stop'],False)
   if stopped.returncode==0 or not (DATA/'postmaster.pid').exists():shutil.rmtree(DATA)
   else:save('cleanup-blocked.txt','Owned PostgreSQL stop failed; data retained at '+str(DATA))
+ if SOCKETS is not None and not (DATA/'postmaster.pid').exists():shutil.rmtree(SOCKETS)
