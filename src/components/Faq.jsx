@@ -135,17 +135,7 @@ export default function FaqSection({
       return undefined;
     }
 
-    const syncHashFromWindow = () => {
-      pendingPageScrollRef.current = null;
-      const nextHash = (
-        window.location.hash ||
-        location.hash ||
-        ""
-      ).replace(/^#/, "");
-      setActiveHash((prev) => (prev === nextHash ? prev : nextHash));
-    };
-
-    const syncHashFromIntent = (event) => {
+    const syncHash = (event) => {
       pendingPageScrollRef.current = null;
       const nextHash = String(
         event?.detail?.hash || window.location.hash || location.hash || ""
@@ -153,16 +143,13 @@ export default function FaqSection({
       setActiveHash((prev) => (prev === nextHash ? prev : nextHash));
     };
 
-    syncHashFromWindow();
-    window.addEventListener("hashchange", syncHashFromWindow);
-    window.addEventListener("roo:pending-section-target", syncHashFromIntent);
+    syncHash();
+    window.addEventListener("hashchange", syncHash);
+    window.addEventListener("roo:pending-section-target", syncHash);
 
     return () => {
-      window.removeEventListener("hashchange", syncHashFromWindow);
-      window.removeEventListener(
-        "roo:pending-section-target",
-        syncHashFromIntent
-      );
+      window.removeEventListener("hashchange", syncHash);
+      window.removeEventListener("roo:pending-section-target", syncHash);
     };
   }, [location.hash]);
   
