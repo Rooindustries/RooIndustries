@@ -33,14 +33,19 @@ export const holdLostToPayment = (hold, record) =>
   !record.bookingPayload?.originalOrderId &&
   !(hold.paymentRecordId === record._id && ["payment_pending", "consumed"].includes(hold.phase));
 
-export const buildWatchFailureState = (record, failureState) => ({
+export const buildWatchFailureState = (failureState) => ({
   ...failureState,
   reconciliationRecoveryTerminal: false,
-  nextRecoveryAt: new Date(Math.min(
-    Date.now() + 60 * 60 * 1000,
-    new Date(record.lateCaptureWatchUntil).getTime()
-  )).toISOString(),
+  nextRecoveryAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
 });
+
+export const boundToWatchDeadline = (record, values) => {
+  const merged = { ...record, ...values };
+  const deadline = new Date(merged.lateCaptureWatchUntil || "").getTime();
+  return merged.reconciliationRecoveryTerminal !== true && deadline > Date.now() &&
+    new Date(values.nextRecoveryAt || "").getTime() > deadline
+    ? { ...values, nextRecoveryAt: merged.lateCaptureWatchUntil } : values;
+};
 
 export const isTransientVerificationFailure = (reason = "") => {
   const normalized = String(reason || "").trim().toLowerCase();

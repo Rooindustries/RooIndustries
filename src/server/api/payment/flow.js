@@ -88,6 +88,7 @@ import { selectPaymentAuthority, resolveWebhookBackend, createPaymentBackendClie
 import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
 import {
   buildWatchFailureState,
+  boundToWatchDeadline,
   exhaustedWatchQuery,
   hasKnownCapture,
   hasObservedCapture,
@@ -141,7 +142,7 @@ const buildRecoveryFailureState = (record) => {
   const recoveryFailureCount = Math.min(12, normalizeCount(record.recoveryFailureCount) + 1);
   const stopped = recoveryFailureCount >= 12;
   if (stopped && isFutureIso(record.lateCaptureWatchUntil)) {
-    return buildWatchFailureState(record, { recoveryAttemptCount, recoveryFailureCount });
+    return buildWatchFailureState({ recoveryAttemptCount, recoveryFailureCount });
   }
   return {
     recoveryAttemptCount,
@@ -1209,12 +1210,12 @@ const patchPaymentRecord = async ({
   const mergedEvents = event
     ? mergePaymentRecordEvents(existingEvents, event)
     : existingEvents;
-  const values = {
+  const values = boundToWatchDeadline(record, {
     ...set,
     ...unconfirmedProviderState(record, set),
     ...(event ? { events: mergedEvents } : {}),
     updatedAt: nowIso(),
-  };
+  });
   const patch = guardPaymentRevision(client.patch(record._id), record).set(values);
   const committed = await patch.commit();
   logRecoveryExhaustion(record, values);
@@ -1881,7 +1882,7 @@ const markRetryableFinalizeFailure = async ({
         ...(watchUntil && !current.lateCaptureWatchUntil ? { lateCaptureWatchUntil: watchUntil } : {}),
         ...(lastSeenState ? { providerOrderLastSeenState: lastSeenState } : {}),
         ...(isFutureIso(watch) && (keepWatch || isTransientVerificationFailure(reason))
-          ? buildWatchFailureState({ ...current, lateCaptureWatchUntil: watch }, buildRecoveryFailureState(current)) : buildRecoveryFailureState(current)),
+          ? buildWatchFailureState(buildRecoveryFailureState(current)) : buildRecoveryFailureState(current)),
         finalizationLeaseId: "",
         finalizationLeaseExpiresAt: "",
         source,
@@ -2746,6 +2747,8 @@ const abandonStartedPaymentRecord = async ({
   const shouldWatchForLateCapture = !!String(
     stagedRecord.providerOrderId || ""
   ).trim();
+  const watchUntil = shouldWatchForLateCapture
+    ? current.lateCaptureWatchUntil || getFutureIso(LATE_CAPTURE_WATCH_HOURS * 60 * 60) : "";
   let nextRecord;
   try {
     nextRecord = await patchPaymentRecord({
@@ -2760,10 +2763,8 @@ const abandonStartedPaymentRecord = async ({
         recoveryFailureCount: 0,
         reconciliationRecoveryTerminal: false,
         ...(lastSeenState ? { providerOrderLastSeenState: lastSeenState } : {}),
-        lateCaptureWatchUntil: shouldWatchForLateCapture
-          ? current.lateCaptureWatchUntil || getFutureIso(LATE_CAPTURE_WATCH_HOURS * 60 * 60)
-          : "",
-        nextRecoveryAt: shouldWatchForLateCapture ? getFutureIso(60 * 60) : "",
+        lateCaptureWatchUntil: watchUntil,
+        nextRecoveryAt: isFutureIso(watchUntil) ? getFutureIso(60 * 60) : "",
       },
       event: buildPaymentRecordEvent({
         status: PAYMENT_STATUS_ABANDONED,
@@ -3892,12 +3893,9 @@ const scheduleProviderRecoveryCheck = async ({
         ...(lastSeenState ? { providerOrderLastSeenState: lastSeenState } : {}),
         recoveryAttemptCount,
         lastAttemptAt: nowIso(),
-        nextRecoveryAt: isFutureIso(record.lateCaptureWatchUntil)
-          ? new Date(Math.min(new Date(getNextPaymentRecoveryAt(recoveryAttemptCount)).getTime(),
-              new Date(record.lateCaptureWatchUntil).getTime())).toISOString()
-          : getNextPaymentRecoveryAt(recoveryAttemptCount),
+        nextRecoveryAt: getNextPaymentRecoveryAt(recoveryAttemptCount),
         ...(failed && isFutureIso(record.lateCaptureWatchUntil)
-          ? buildWatchFailureState(record, buildRecoveryFailureState(record)) : failed ? buildRecoveryFailureState(record) : {
+          ? buildWatchFailureState(buildRecoveryFailureState(record)) : failed ? buildRecoveryFailureState(record) : {
           recoveryFailureCount: 0,
           reconciliationRecoveryTerminal: false,
         }),
@@ -6101,7 +6099,7 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
       }
       transaction.patch(record._id, (patch) => {
         const guarded = guardPaymentRevision(patch, record);
-        return guarded.set({
+        return guarded.set(boundToWatchDeadline(record, {
           dodoDisputeActive: disputed,
           dodoDisputes,
           ...(record.dodoDisputeActive === true && !disputed ? {
@@ -6119,7 +6117,7 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
           events: terminalDispute ? mergePaymentRecordEvents(record.events,
             buildPaymentRecordEvent({ status: PAYMENT_STATUS_NEEDS_RECOVERY, source, reason: terminalReason, data: terminalDispute })) : record.events || [],
           updatedAt: nowIso(),
-        });
+        }));
       });
       await transaction.commit();
       record = await getPaymentRecordById(client, record._id);

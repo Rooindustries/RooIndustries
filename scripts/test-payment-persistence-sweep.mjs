@@ -1176,6 +1176,107 @@ try{
     }
     return { fault, until };
   });
+  const deadlineWriters = [
+    ['loop-catch', [3, 11]], ['terminal-release', [3, 11]], ['abandon-release', [3, 11]],
+    ['finalize-non-transient', [3, 11]], ['finalize-watch', [3, 11]],
+    ['provider-check-failed', [3, 11]], ['provider-check-pending', [3]], ['abandon', [3]],
+  ];
+  for (const [writer, counts] of deadlineWriters) for (const count of counts) await run(
+    `recovery-watch-deadline-${writer}-${count}`, async () => {
+      const checkout = await a1Start('paypal');
+      const capturedOrder = structuredClone(paypalOrder);
+      let logicalNow = originalNow();
+      const old = new originalDate(logicalNow - 3600000).toISOString();
+      const until = new originalDate(logicalNow + 600000).toISOString();
+      const abandoned = ['finalize-non-transient', 'provider-check-failed', 'provider-check-pending'].includes(writer);
+      await commerce.patch(checkout.id).set({
+        status: abandoned ? 'abandoned' : 'needs_recovery', createdAt: old, updatedAt: old, lastAttemptAt: old,
+        lateCaptureWatchUntil: until, recoveryFailureCount: count, recoveryAttemptCount: count, nextRecoveryAt: '',
+        ...(writer === 'finalize-non-transient' ? { verificationState: 'server_verified', providerPaymentId: 'capture-fixture' } : {}),
+        ...(writer === 'terminal-release' ? { resourceReleasePending: true, resourceReleaseTargetStatus: 'failed',
+          resourceReleaseReason: 'synthetic_terminal_failure' } : {}),
+      }).commit();
+      if (abandoned) await commerce.patch('slotHold.fixture').set({ phase: 'released' }).commit();
+      globalThis.Date = class extends originalDate {
+        constructor(...args) { super(...(args.length ? args : [logicalNow])); }
+        static now() { return logicalNow; }
+      };
+      if (['loop-catch', 'finalize-watch', 'provider-check-failed'].includes(writer)) {
+        providerHook = async (request, req, res) => {
+          if (request.path !== '/v2/checkout/orders/order-fixture') return false;
+          res.writeHead(503, { 'content-type': 'application/json' }); res.end('{}'); return true;
+        };
+      } else if (['abandon-release', 'abandon'].includes(writer)) {
+        paypalOrder.status = 'CREATED';
+        paypalOrder.purchase_units[0].payments = { captures: [] };
+      } else if (writer === 'provider-check-pending') {
+        paypalOrder.status = 'APPROVED';
+        paypalOrder.purchase_units[0].payments = { captures: [] };
+      }
+      let faulted = false;
+      if (['loop-catch', 'terminal-release', 'abandon-release', 'finalize-non-transient'].includes(writer)) {
+        fixture.setRequestHook(async (phase, request) => {
+          if (phase !== 'before' || faulted || !request.body?.p_mutations?.some(m =>
+            writer === 'loop-catch' ? m.document?._id === checkout.id && m.document.status === 'needs_recovery'
+              : writer === 'finalize-non-transient' ? m.document?._type === 'booking'
+                : m.document?._id === 'slotHold.fixture' && m.document.phase === 'released')) return;
+          faulted = true;
+          throw new Error('Synthetic recovery checkpoint failure');
+        });
+      }
+      const first = await requestFlow('reconcile');
+      assert.equal(first.status, writer === 'loop-catch' ? 503 : 200, JSON.stringify(first));
+      if (['loop-catch', 'terminal-release', 'abandon-release', 'finalize-non-transient'].includes(writer)) assert.equal(faulted, true);
+      let saved = (await row(checkout.id)).payload;
+      assert.notEqual(saved.reconciliationRecoveryTerminal, true);
+      assert.ok(saved.nextRecoveryAt);
+      assert.ok(new originalDate(saved.nextRecoveryAt).getTime() <= new originalDate(until).getTime());
+      assert.equal(saved.lateCaptureWatchUntil, until);
+      const firstSaved = saved;
+      fixture.setRequestHook(null);
+      providerHook = null;
+      paypalOrder = capturedOrder;
+      if (['loop-catch', 'finalize-watch', 'provider-check-pending'].includes(writer)) {
+        paypalOrder.status = 'APPROVED';
+        paypalOrder.purchase_units[0].payments = { captures: [] };
+      } else if (['abandon-release', 'provider-check-failed', 'abandon'].includes(writer)) {
+        paypalOrder.status = 'CREATED';
+        paypalOrder.purchase_units[0].payments = { captures: [] };
+      }
+      logicalNow = new originalDate(until).getTime() + 1000;
+      assert.equal((await requestFlow('reconcile')).status, 200);
+      saved = (await row(checkout.id)).payload;
+      if (writer === 'abandon-release') {
+        assert.equal(saved.status, 'abandoned');
+        assert.equal(saved.resourceReleasePending, false);
+        assert.equal((await row('slotHold.fixture')).payload.phase, 'released');
+        assert.equal(saved.nextRecoveryAt, '');
+        assert.equal((await requestFlow('reconcile')).status, 200);
+        saved = (await row(checkout.id)).payload;
+      }
+      if (['loop-catch', 'finalize-watch', 'provider-check-pending'].includes(writer)) {
+        assert.equal(saved.reconciliationRecoveryTerminal, true);
+        assert.equal(saved.recoveryReason, 'late_capture_watch_unverified_owner_review');
+        assert.equal(saved.nextRecoveryAt, '9999-12-31T23:59:59.999Z');
+        assert.equal((await requestFlow('reconcile')).body.summary.scanned, 0);
+      } else if (['abandon-release', 'provider-check-failed', 'abandon'].includes(writer)) {
+        assert.equal(saved.providerRecoveryTerminal, true);
+        assert.equal(saved.providerRecoveryTerminalReason, 'provider_confirmed_unpaid_after_late_capture_watch');
+        assert.equal(saved.lateCaptureWatchUntil, '');
+        assert.equal((await requestFlow('reconcile')).body.summary.scanned, 0);
+      } else if (writer === 'terminal-release') {
+        assert.equal(saved.status, 'failed');
+        assert.equal(saved.resourceReleasePending, false);
+        assert.equal((await row('slotHold.fixture')).payload.phase, 'released');
+      } else {
+        assert.ok(saved.bookingId);
+        assert.equal((await row(saved.bookingId)).payload.requiresReschedule, true);
+        const [bookings] = await sql`select count(*)::int as count from commerce.bookings`;
+        assert.equal(bookings.count, 1);
+      }
+      return { writer, count, until, firstSaved };
+    }
+  );
   for (const status of ['started', 'abandoned']) for (const state of ['unpaid', 'pending']) await run(`recovery-paypal-observed-${state}-${status}`, async () => {
     const old = new Date(originalNow() - 3600000).toISOString();
     await seed('paypal', status, { record: { bookingId: '', providerPaymentId: '', createdAt: old, nextRecoveryAt: '',
