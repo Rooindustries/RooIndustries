@@ -442,6 +442,113 @@ test("desktop navbar stays on a single visual row", async ({ page }) => {
   expect(maxDelta).toBeLessThanOrEqual(2);
 });
 
+test("an abandoned section request does not carry into a later homepage visit", async ({ page }) => {
+  await page.setViewportSize(VIEWPORTS[0].viewport);
+  await page.goto("/reviews", { waitUntil: "domcontentloaded" });
+  const sectionLink = navLink("faq");
+  await waitForHydrated(page, sectionLink);
+  const request = await page.evaluate((selector) => {
+    document.querySelector(selector).click();
+    const request = sessionStorage.getItem("roo_pending_section");
+    window.location.assign("/tools");
+    return request;
+  }, sectionLink);
+  expect(request).not.toBeNull();
+  await page.waitForURL(`${BASE_URL}/tools`);
+  await waitForHydrated(page, sectionLink);
+
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await waitForHydrated(page, sectionLink);
+  await expect.poll(() => page.evaluate(() => ({
+    hash: window.location.hash,
+    top: window.scrollY <= 140,
+    section: document.querySelector('[data-nav-target][aria-current="location"]')?.dataset.navTarget || "",
+  }))).toEqual({ hash: "", top: true, section: "" });
+});
+
+for (const route of ["/tourney", "/admin/content", "/BIOSGuide"]) {
+  test(`a section trip interrupted by ${route} leaves a later Home visit at the top`, async ({ page }, testInfo) => {
+    await page.setViewportSize(VIEWPORTS[0].viewport);
+    await page.goto("/reviews", { waitUntil: "domcontentloaded" });
+    const selector = navLink("faq");
+    await waitForHydrated(page, selector);
+    const request = await page.evaluate(({ selector, route }) => {
+      document.querySelector(selector).click();
+      const saved = sessionStorage.getItem("roo_pending_section");
+      window.location.assign(route);
+      return saved;
+    }, { selector, route });
+    expect(request).not.toBeNull();
+    await page.waitForURL(`${BASE_URL}${route}`);
+    if (route === "/tourney") {
+      await page.locator("a.tourney-brand").click();
+    } else {
+      await page.goto("/", { waitUntil: "domcontentloaded" });
+    }
+    await waitForHydrated(page, selector);
+    await expect.poll(() => page.evaluate(() => ({
+      hash: window.location.hash,
+      top: window.scrollY <= 140,
+      pending: sessionStorage.getItem("roo_pending_section"),
+    }))).toEqual({ hash: "", top: true, pending: null });
+    await page.screenshot({ path: testInfo.outputPath("home-after-interrupted-section-trip.png") });
+  });
+}
+
+for (const [label, request] of [
+  ["legacy", "#faq"],
+  ["bound", JSON.stringify({ hash: "#faq", path: "/" })],
+]) {
+  test(`a saved ${label} section request expires on arrival at another page`, async ({ page }, testInfo) => {
+    await page.setViewportSize(VIEWPORTS[0].viewport);
+    await page.goto("/reviews", { waitUntil: "domcontentloaded" });
+    const sectionLink = navLink("faq");
+    await waitForHydrated(page, sectionLink);
+    await page.evaluate(request => sessionStorage.setItem("roo_pending_section", request), request);
+    await page.goto("/tools", { waitUntil: "domcontentloaded" });
+    await waitForHydrated(page, sectionLink);
+    await expect.poll(() => page.evaluate(() => sessionStorage.getItem("roo_pending_section"))).toBeNull();
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await waitForHydrated(page, sectionLink);
+    await expect.poll(() => page.evaluate(() => ({
+      hash: window.location.hash,
+      top: window.scrollY <= 140,
+    }))).toEqual({ hash: "", top: true });
+    await page.screenshot({ path: testInfo.outputPath("home-after-expired-request.png") });
+  });
+}
+
+for (const [label, request, hash] of [
+  ["matching history entry", { hash: "faq", path: "/", entry: "saved-trip" }, "#faq"],
+  ["different history entry", { hash: "#faq", path: "/", entry: "other-trip" }, ""],
+  ["missing history entry", { hash: "#faq", path: "/" }, ""],
+  ["different destination", { hash: "#faq", path: "/tools" }, ""],
+  ["missing destination", { hash: "#faq" }, ""],
+  ["malformed request", null, ""],
+]) {
+  test(`a saved section request handles its ${label}`, async ({ page }) => {
+    await page.addInitScript((request) => {
+      window.history.replaceState({
+        ...window.history.state,
+        __rooSectionTrip: { key: "saved-trip" },
+      }, "", window.location.href);
+      sessionStorage.setItem("roo_pending_section", JSON.stringify(request));
+    }, request);
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await waitForHydrated(page, navLink("faq"));
+    await expect.poll(() => page.evaluate(() => ({
+      hash: window.location.hash,
+      pending: sessionStorage.getItem("roo_pending_section"),
+    }))).toEqual({ hash, pending: null });
+    if (hash) {
+      const settled = await waitForTargetSettle(page, hash, 2600);
+      expect(settled.ok).toBe(true);
+    } else {
+      expect(await page.evaluate(() => window.scrollY)).toBeLessThanOrEqual(140);
+    }
+  });
+}
+
 test.afterAll(async () => {
   ensureAuditDir();
 
