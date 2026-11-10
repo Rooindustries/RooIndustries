@@ -9,6 +9,9 @@ export const getSafeErrorMetadata = (error) => ({
   name: cleanLabel(error?.name, "Error"),
   code: cleanLabel(error?.code, "unknown"),
   status: Number(error?.status || error?.statusCode || 0) || 0,
+  ...(error?.documentType === "referral" && error?.id
+    ? { referralId: cleanLabel(error.id, "unknown") }
+    : {}),
 });
 
 export const getSafeErrorCode = (error, fallback = "server_error") => {

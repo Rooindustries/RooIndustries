@@ -5,6 +5,7 @@ import {
   applyShadowMutations,
   fetchCommerceAvailability,
   fetchCommerceDerivedCount,
+  fetchCommerceDocumentIds,
   fetchReferralEarningsSummary,
   fetchRecoveryPaymentDocuments,
   fetchShadowDocuments,
@@ -28,6 +29,11 @@ const readPath = (object, path) =>
   );
 
 const MAX_COMMERCE_PAYLOAD_BYTES = 250 * 1024;
+
+const payloadBudgetError = () => Object.assign(
+  new Error("Commerce query exceeded its database payload budget."),
+  { code: "COMMERCE_PAYLOAD_BUDGET_EXCEEDED", status: 503, statusCode: 503 }
+);
 
 const uniqueStrings = (values = []) =>
   [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
@@ -320,6 +326,50 @@ export class SupabaseDocumentClient {
         : null;
   }
 
+  async listDocumentIds(documentType) {
+    return fetchCommerceDocumentIds({ client: this.shadowClient, documentType });
+  }
+
+  async *documentBatches({ documentType, ids }) {
+    let batchSize = 25;
+    const readBatch = async function* (batch, client) {
+      const documents = await client.readDocuments({
+        client: client.shadowClient, documentTypes: [documentType], ids: batch,
+        limit: batch.length, allowLegacyFallback: client.allowLegacyFallback,
+      });
+      const bytes = Buffer.byteLength(JSON.stringify(documents), "utf8");
+      batchSize = Math.min(100, Math.max(1, Math.floor(0.8 * MAX_COMMERCE_PAYLOAD_BYTES * batch.length / bytes)));
+      if (bytes > MAX_COMMERCE_PAYLOAD_BYTES) {
+        if (batch.length > 1) {
+          const middle = Math.ceil(batch.length / 2);
+          yield* readBatch(batch.slice(0, middle), client);
+          yield* readBatch(batch.slice(middle), client);
+        } else {
+          const id = batch[0];
+          const error = Object.assign(payloadBudgetError(), { id, documentType, bytes });
+          yield { id, status: "oversized", bytes, error };
+        }
+        return;
+      }
+      const byId = new Map(documents.map((document) => [document._id, document]));
+      for (const id of batch) {
+        const document = byId.get(id);
+        if (document) yield { id, status: "document", document };
+        else {
+          const error = Object.assign(new Error("Shadow document is missing."), {
+            code: "SHADOW_DOCUMENT_MISSING", status: 503, statusCode: 503, id, documentType,
+          });
+          yield { id, status: "missing", error };
+        }
+      }
+    };
+    for (let offset = 0; offset < ids.length;) {
+      const batch = ids.slice(offset, offset + batchSize);
+      yield* readBatch(batch, this);
+      offset += batch.length;
+    }
+  }
+
   async dataset(scope = {}) {
     const hasTargetedScope =
       (Array.isArray(scope.documentTypes || this.documentTypes) &&
@@ -359,11 +409,7 @@ export class SupabaseDocumentClient {
       Buffer.byteLength(JSON.stringify(documents), "utf8") >
         MAX_COMMERCE_PAYLOAD_BYTES
     ) {
-      const error = new Error("Commerce query exceeded its database payload budget.");
-      error.code = "COMMERCE_PAYLOAD_BUDGET_EXCEEDED";
-      error.status = 503;
-      error.statusCode = 503;
-      throw error;
+      throw payloadBudgetError();
     }
     return documents;
   }
@@ -457,11 +503,7 @@ export class SupabaseDocumentClient {
       Buffer.byteLength(JSON.stringify(dataset), "utf8") >
         MAX_COMMERCE_PAYLOAD_BYTES
     ) {
-      const error = new Error("Commerce query exceeded its database payload budget.");
-      error.code = "COMMERCE_PAYLOAD_BUDGET_EXCEEDED";
-      error.status = 503;
-      error.statusCode = 503;
-      throw error;
+      throw payloadBudgetError();
     }
     const value = await evaluate(tree, {
       dataset,
