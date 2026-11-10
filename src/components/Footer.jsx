@@ -1,30 +1,10 @@
-import React, { useEffect, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import React from "react";
+import { Link } from "react-router-dom";
 import { FaDiscord } from "react-icons/fa";
-import packagePricing from "../lib/packagePricing";
-import { readBookingPackageSelection } from "../lib/checkoutStorage";
 import PaymentMethods from "./PaymentMethods";
 import { scrollWindowTo } from "../lib/scrollWindowTo";
 
-const { isTopPackageTitle } = packagePricing;
-
 export default function Footer() {
-  const location = useLocation();
-
-  const [storedPackage, setStoredPackage] = useState(null);
-  useEffect(() => {
-    setStoredPackage(readBookingPackageSelection());
-  }, [location.key, location.pathname, location.state]);
-  const navigationPackage =
-    location.state?.bookingPackage || location.state?.bookingData || null;
-  const isXocBookingForm =
-    location.pathname === "/booking" &&
-    isTopPackageTitle(
-      navigationPackage?.title ||
-        navigationPackage?.packageTitle ||
-        storedPackage?.title
-    );
-
   const scrollToTop = () => {
     scrollWindowTo(0);
   };
@@ -138,15 +118,6 @@ export default function Footer() {
             </span>
           </button>
         </div>
-
-        {isXocBookingForm && (
-          <p className="mt-2 text-center text-[13px] text-ink-secondary">
-            Refunds will not be issued in case you proceed with
-            unsupported/custom parts. Please join the Discord and open a ticket
-            or DM <span className="font-semibold">serviroo</span> to check for
-            eligibility or switch to one of our other specialized plans.
-          </p>
-        )}
         </div>
       </div>
     </footer>

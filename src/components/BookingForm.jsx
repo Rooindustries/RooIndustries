@@ -19,6 +19,7 @@ import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 import packageContent from "../lib/packageContent";
 import packagePricing from "../lib/packagePricing";
 import PriceDisplay from "./PriceDisplay";
+import PackageSupportWarning from "./PackageSupportWarning";
 import { getWarrantyCallout } from "../lib/packageWarranty";
 import {
   BOOKING_DRAFT_STORAGE_KEY,
@@ -2540,6 +2541,10 @@ export default function BookingForm() {
                 </h3>
                 <PriceDisplay pkg={selectedPackage} size="summary" className="mt-3" />
               </div>
+            )}
+
+            {isXoc && (
+              <PackageSupportWarning widthClass={step === 2 ? "max-w-4xl" : "max-w-3xl"} />
             )}
 
             <AnimatePresence mode="wait" initial={!hydrating}>
