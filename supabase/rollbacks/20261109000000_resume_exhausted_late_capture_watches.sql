@@ -18,7 +18,6 @@ begin
     raise exception 'unexpected payment recovery candidate filter';
   end if;
   execute replace(replace(replace(definition, new_terminal, old_terminal), new_due, old_due), new_aggregation, old_aggregation);
+  drop function commerce.exhausted_late_capture_watch_needs_resume(jsonb);
 end;
 $rollback$;
-
-drop function commerce.exhausted_late_capture_watch_needs_resume(jsonb);

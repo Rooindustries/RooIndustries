@@ -140,6 +140,9 @@ const buildRecoveryFailureState = (record) => {
   const recoveryAttemptCount = Math.min(12, normalizeCount(record.recoveryAttemptCount) + 1);
   const recoveryFailureCount = Math.min(12, normalizeCount(record.recoveryFailureCount) + 1);
   const stopped = recoveryFailureCount >= 12;
+  if (stopped && isFutureIso(record.lateCaptureWatchUntil)) {
+    return buildWatchFailureState(record, { recoveryAttemptCount, recoveryFailureCount });
+  }
   return {
     recoveryAttemptCount,
     recoveryFailureCount,
@@ -3889,7 +3892,10 @@ const scheduleProviderRecoveryCheck = async ({
         ...(lastSeenState ? { providerOrderLastSeenState: lastSeenState } : {}),
         recoveryAttemptCount,
         lastAttemptAt: nowIso(),
-        nextRecoveryAt: getNextPaymentRecoveryAt(recoveryAttemptCount),
+        nextRecoveryAt: isFutureIso(record.lateCaptureWatchUntil)
+          ? new Date(Math.min(new Date(getNextPaymentRecoveryAt(recoveryAttemptCount)).getTime(),
+              new Date(record.lateCaptureWatchUntil).getTime())).toISOString()
+          : getNextPaymentRecoveryAt(recoveryAttemptCount),
         ...(failed && isFutureIso(record.lateCaptureWatchUntil)
           ? buildWatchFailureState(record, buildRecoveryFailureState(record)) : failed ? buildRecoveryFailureState(record) : {
           recoveryFailureCount: 0,
@@ -3907,6 +3913,24 @@ const scheduleProviderRecoveryCheck = async ({
     if (!isConflictError(error)) throw error;
     return (await currentPaymentOperation({ client, record })).record;
   }
+};
+
+const sendExpiredWatchToOwnerReview = async ({ client, record, providerReason }) => {
+  const operation = await currentPaymentOperation({ client, record });
+  if (!operation.owned) return operation.owned;
+  await patchPaymentRecord({ client, record, set: {
+    recoveryReason: "late_capture_watch_unverified_owner_review",
+    reconciliationRecoveryTerminal: true,
+    nextRecoveryAt: "9999-12-31T23:59:59.999Z",
+  }, event: buildPaymentRecordEvent({
+    status: String(record.status || "").trim().toLowerCase(), source: "reconcile",
+    reason: "late_capture_watch_unverified_owner_review",
+    data: { providerReason },
+  }) });
+  logSafeError("Late payment status requires owner review", Object.assign(new Error(), {
+    code: "late_capture_watch_unverified_owner_review",
+  }));
+  return operation.owned;
 };
 
 const closeExpiredLateCaptureWatch = async ({ client, record }) => {
@@ -4683,21 +4707,10 @@ export const reconcilePaymentSessions = async ({
             /^(paypal|razorpay|dodo)_lookup_failed_404$/.test(inspection.reason || "") &&
             !(record.provider === "paypal" && record.providerOrderLastSeenState === "unpaid" && !hasKnownCapture(record)))) &&
             !isFutureIso(record.lateCaptureWatchUntil)) {
-          const operation = await currentPaymentOperation({ client, record });
-          if (!operation.owned) continue;
-          await patchPaymentRecord({ client, record, set: {
-            recoveryReason: "late_capture_watch_unverified_owner_review",
-            reconciliationRecoveryTerminal: true,
-            nextRecoveryAt: "9999-12-31T23:59:59.999Z",
-          }, event: buildPaymentRecordEvent({
-            status: PAYMENT_STATUS_ABANDONED, source: "reconcile",
-            reason: "late_capture_watch_unverified_owner_review",
-            data: { providerReason: conflictingCapture ? "provider_unpaid_after_capture_observed"
-              : inspection.reason || "provider_status_unavailable" },
-          }) });
-          logSafeError("Late payment status requires owner review", Object.assign(new Error(), {
-            code: "late_capture_watch_unverified_owner_review",
-          }));
+          const owned = await sendExpiredWatchToOwnerReview({ client, record,
+            providerReason: conflictingCapture ? "provider_unpaid_after_capture_observed"
+              : inspection.reason || "provider_status_unavailable" });
+          if (!owned) continue;
           summary.recovery += 1;
         } else if (
           !isFutureIso(record.lateCaptureWatchUntil) && !hasKnownCapture(record) &&
@@ -4959,6 +4972,12 @@ export const reconcilePaymentSessions = async ({
           }
           continue;
         } else if (inspection.state === "pending") {
+          if (record.lateCaptureWatchUntil && !isFutureIso(record.lateCaptureWatchUntil)) {
+            const owned = await sendExpiredWatchToOwnerReview({ client, record,
+              providerReason: inspection.reason || "provider_payment_pending" });
+            if (owned) summary.recovery += 1;
+            continue;
+          }
           await scheduleProviderRecoveryCheck({
             client,
             record,

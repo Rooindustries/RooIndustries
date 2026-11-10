@@ -240,6 +240,6 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
     const payload=Buffer.from(JSON.stringify({role:'service_role',iat:Math.floor(Date.now()/1000),exp:Math.floor(Date.now()/1000)+3600})).toString('base64url');
     const token=`${header}.${payload}.${crypto.createHmac('sha256',jwtSecret).update(`${header}.${payload}`).digest('base64url')}`;
     const client=createClient(origin,token,{auth:{autoRefreshToken:false,persistSession:false,detectSessionInUrl:false}});
-    return {sql,client,origin,token,scratch,manifest,requestLog,postgresVersion,postgrestVersion,postgrestUrl:`http://${host}:${restPort}`,pgPort,restPort,postgresPid:postgresProcess.pid,postgrestPid:restProcess.pid,stop,apply,setRequestHook(fn){requestHook=fn;},setAuthHandler(fn){authHandler=fn;},setProviderHandler(fn){providerHandler=fn;}};
+    return {sql,client,origin,token,scratch,manifest,requestLog,pgBin,host,postgresVersion,postgrestVersion,postgrestUrl:`http://${host}:${restPort}`,pgPort,restPort,postgresPid:postgresProcess.pid,postgrestPid:restProcess.pid,stop,apply,setRequestHook(fn){requestHook=fn;},setAuthHandler(fn){authHandler=fn;},setProviderHandler(fn){providerHandler=fn;}};
   } catch(error) {await stop();throw Object.assign(error,{scratch,manifest});}
 };
