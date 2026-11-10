@@ -189,6 +189,7 @@ await captureBooking("missing-instant", { startTimeUTC: "", originalRequestedSta
 await captureBooking("requested-missing-instant", { startTimeUTC: "", originalRequestedStartTimeUTC: "", requiresReschedule: true, displayDate: "stale", displayTime: "stale" }, true);
 await captureBooking("invalid-instant", { startTimeUTC: "not-an-instant", displayDate: "stale", displayTime: "stale" });
 await captureBooking("requested-invalid-instant", { originalRequestedStartTimeUTC: "not-an-instant", requiresReschedule: true, displayDate: "stale", displayTime: "stale" }, true);
+await captureBooking("requested-only", { startTimeUTC: "", requestedStartTimeUTC: "2026-03-08T06:30:00Z", originalRequestedStartTimeUTC: "", requiresReschedule: true, displayDate: "stale", displayTime: "stale" }, true);
 await captureBooking("requested-original-only", { startTimeUTC: "", originalRequestedStartTimeUTC: "2026-03-08T06:30:00Z", requiresReschedule: true, displayDate: "stale", displayTime: "stale" }, true);
 await captureBooking("requested-different-instant", { startTimeUTC: "2026-11-01T05:30:00Z", originalRequestedStartTimeUTC: "2026-03-08T06:30:00Z", requiresReschedule: true }, true);
 const conflictError = { name: "invalid_idempotent_request", statusCode: 409, message: "This idempotency key has already been used on a different payload." };

@@ -3,8 +3,15 @@ import { observedProviderState } from "./providerPaymentState.js";
 import { settledDodoPaymentState } from "./dodoProvider.js";
 import { logSafeError } from "../../safeErrorLog.js";
 
-export const exhaustedPayPalWatchQuery = `(provider == "paypal" && lower(status) == $abandonedStatus
-  && reconciliationRecoveryTerminal == true && recoveryReason == "paypal_lookup_failed_404"
+export const RESUMABLE_WATCH_REASONS = [
+  ...["paypal", "razorpay", "dodo"].flatMap((provider) =>
+    [401, 403, 404, 429, 500, 502, 503, 504].map((status) => `${provider}_lookup_failed_${status}`)),
+  "paypal_lookup_exception",
+  "razorpay_lookup_exception",
+];
+
+export const exhaustedWatchQuery = `(provider in ["paypal", "razorpay", "dodo"] && lower(status) == $abandonedStatus
+  && reconciliationRecoveryTerminal == true && recoveryReason in $resumableWatchReasons
   && recoveryFailureCount == 12 && nextRecoveryAt == "9999-12-31T23:59:59.999Z"
   && defined(lateCaptureWatchUntil) && lateCaptureWatchUntil != ""
   && coalesce(providerRecoveryTerminal, false) == false
@@ -13,13 +20,18 @@ export const exhaustedPayPalWatchQuery = `(provider == "paypal" && lower(status)
   && coalesce(refundRequiresBookingSync, false) == false
   && coalesce(providerRefundDetailsMissing, false) == false)`;
 
-export const isExhaustedPayPalWatch = (record) =>
-  record.provider === "paypal" && String(record.status || "").toLowerCase() === "abandoned" &&
-  record.reconciliationRecoveryTerminal === true && record.recoveryReason === "paypal_lookup_failed_404" &&
+export const isExhaustedWatch = (record) =>
+  ["paypal", "razorpay", "dodo"].includes(record.provider) && String(record.status || "").toLowerCase() === "abandoned" &&
+  record.reconciliationRecoveryTerminal === true && RESUMABLE_WATCH_REASONS.includes(record.recoveryReason) &&
   record.recoveryFailureCount === 12 && record.nextRecoveryAt === "9999-12-31T23:59:59.999Z" &&
   !!record.lateCaptureWatchUntil && record.providerRecoveryTerminal !== true &&
   record.recoveryOwnerReviewRequired !== true && record.resourceReleasePending !== true &&
   record.refundRequiresBookingSync !== true && record.providerRefundDetailsMissing !== true;
+
+export const holdLostToPayment = (hold, record) =>
+  ["paypal", "razorpay", "dodo"].includes(record.provider) && !!hold &&
+  !record.bookingPayload?.originalOrderId &&
+  !(hold.paymentRecordId === record._id && ["payment_pending", "consumed"].includes(hold.phase));
 
 export const buildWatchFailureState = (record, failureState) => ({
   ...failureState,

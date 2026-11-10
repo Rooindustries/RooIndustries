@@ -42,7 +42,7 @@ const recordFor = started =>
   });
 const bookingsAt = startTimeUTC =>
   fixture.commerce.fetch(
-    '*[_type == "booking" && (startTimeUTC == $start || originalRequestedStartTimeUTC == $start)]',
+    '*[_type == "booking" && (startTimeUTC == $start || requestedStartTimeUTC == $start || originalRequestedStartTimeUTC == $start)]',
     { start: startTimeUTC },
   );
 const secondVisitor = payload =>
@@ -196,14 +196,24 @@ test('a payment that fails after the hold runs out frees the slot', async () => 
 });
 
 const cronUntilRecoveryStops = async checkout => {
-  for (let run = 0; run < 15; run += 1) {
+  for (let run = 0; run < 14; run += 1) {
     const record = await fixture.commerce.getDocument(checkout.record._id);
-    if (record.reconciliationRecoveryTerminal === true || record.providerRecoveryTerminal === true) return record;
+    assert.notEqual(record.reconciliationRecoveryTerminal, true);
+    assert.notEqual(record.providerRecoveryTerminal, true);
     await fixture.commerce.patch(record._id).set({ nextRecoveryAt: '' }).commit();
     clockShiftMs += 2 * 60_000;
     assert.ok([200, 503].includes((await cron()).status));
   }
-  assert.fail('Recovery never stopped');
+  const watched = await fixture.commerce.getDocument(checkout.record._id);
+  assert.ok(watched.lateCaptureWatchUntil);
+  clockShiftMs = new RealDate(watched.lateCaptureWatchUntil).getTime() - RealDate.now() + 1000;
+  for (let run = 0; run < 13; run += 1) {
+    const record = await fixture.commerce.getDocument(checkout.record._id);
+    if (record.reconciliationRecoveryTerminal === true || record.providerRecoveryTerminal === true) return record;
+    await fixture.commerce.patch(record._id).set({ nextRecoveryAt: '' }).commit();
+    assert.ok([200, 503].includes((await cron()).status));
+  }
+  assert.fail('Recovery never stopped after the watch expired');
 };
 
 test('an unpaid checkout in a provider outage keeps its slot after recovery gives up, freed a day later', async () => {

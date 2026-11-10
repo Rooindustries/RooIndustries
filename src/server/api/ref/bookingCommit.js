@@ -41,10 +41,10 @@ export const assertBookingReplayMatches = ({ booking, requested, partial = false
       normalize(booking.referral?._ref) !== normalize(requested.referral?._ref)) {
     throw bookingConflict("Booking referral changed for this request key.", "booking_request_changed");
   }
-  const requestedTime = requested.startTimeUTC || requested.originalRequestedStartTimeUTC;
-  if ((!partial || Object.hasOwn(requested, "startTimeUTC") || Object.hasOwn(requested, "originalRequestedStartTimeUTC")) &&
+  const requestedTime = requested.startTimeUTC || requested.requestedStartTimeUTC || requested.originalRequestedStartTimeUTC;
+  if ((!partial || Object.hasOwn(requested, "startTimeUTC") || Object.hasOwn(requested, "requestedStartTimeUTC") || Object.hasOwn(requested, "originalRequestedStartTimeUTC")) &&
       normalizeStartTimeUTC(requestedTime) !== normalizeStartTimeUTC(
-    booking.startTimeUTC || booking.originalRequestedStartTimeUTC
+    booking.startTimeUTC || booking.requestedStartTimeUTC || booking.originalRequestedStartTimeUTC
   )) {
     throw bookingConflict("Booking time changed for this request key.", "booking_request_changed");
   }
@@ -379,7 +379,7 @@ export const createRequiresRescheduleBooking = async ({
       recoveryReason: normalize(reason),
       recoveryCreatedAt: new Date().toISOString(),
       recoveryNotificationStatus: "pending",
-      originalRequestedStartTimeUTC: payload.startTimeUTC || "",
+      requestedStartTimeUTC: payload.startTimeUTC || "",
       localTimeZone: payload.localTimeZone || "",
       displayDate: payload.displayDate || "",
       displayTime: payload.displayTime || "",
