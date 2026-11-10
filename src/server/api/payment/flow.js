@@ -3868,6 +3868,10 @@ const getPaymentCreatedAgeMinutes = (record = {}) => {
   return diffMs / (60 * 1000);
 };
 
+const getNewLateCaptureWatchUntil = (record, createdAgeMinutes) =>
+  createdAgeMinutes >= PAYMENT_HOLD_MINUTES && record.providerOrderId && !record.lateCaptureWatchUntil
+    ? getFutureIso(LATE_CAPTURE_WATCH_HOURS * 60 * 60) : "";
+
 const isRecoveryAttemptDue = (record = {}) => {
   const next = new Date(record.nextRecoveryAt || "").getTime();
   return !Number.isFinite(next) || next <= Date.now();
@@ -4717,6 +4721,12 @@ export const reconcilePaymentSessions = async ({
         ) {
           await closeExpiredLateCaptureWatch({ client, record });
           summary.abandoned += 1;
+        } else if (inspection.state === "unavailable" && !isFutureIso(record.lateCaptureWatchUntil) &&
+            buildRecoveryFailureState(record).reconciliationRecoveryTerminal) {
+          const owned = await sendExpiredWatchToOwnerReview({ client, record,
+            providerReason: inspection.reason || "abandoned_provider_status_unavailable" });
+          if (!owned) continue;
+          summary.recovery += 1;
         } else {
           await scheduleProviderRecoveryCheck({
             client,
@@ -4937,8 +4947,7 @@ export const reconcilePaymentSessions = async ({
           if (hasKnownCapture(record)) {
             await markRetryableFinalizeFailure({ client, record, source: "reconcile",
               reason: "provider_unpaid_after_capture_observed", keepWatch: true, lastSeenState: "unpaid",
-              watchUntil: createdAgeMinutes >= PAYMENT_HOLD_MINUTES && record.providerOrderId && !record.lateCaptureWatchUntil
-                ? getFutureIso(LATE_CAPTURE_WATCH_HOURS * 60 * 60) : "" });
+              watchUntil: getNewLateCaptureWatchUntil(record, createdAgeMinutes) });
             summary.recovery += 1;
             continue;
           }
@@ -4991,8 +5000,7 @@ export const reconcilePaymentSessions = async ({
             source: "reconcile",
             reason: inspection.reason || "provider_status_unavailable",
             keepWatch: true,
-            watchUntil: createdAgeMinutes >= PAYMENT_HOLD_MINUTES && record.providerOrderId && !record.lateCaptureWatchUntil
-              ? getFutureIso(LATE_CAPTURE_WATCH_HOURS * 60 * 60) : "",
+            watchUntil: getNewLateCaptureWatchUntil(record, createdAgeMinutes),
           });
           summary.providerUnavailable += 1;
           summary.recovery += 1;
