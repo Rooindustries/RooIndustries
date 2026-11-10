@@ -115,6 +115,7 @@ test("test jobs default to GitHub-hosted runners and Jest has a runner of its ow
   const tests = jobs.filter(({ file }) => file === "tests.yml");
   assert.ok(tests.some(({ id }) => id === "jest"));
   assert.ok(tests.some(({ id }) => id !== "jest"));
+  assert.deepEqual(events({ file: "tests.yml", on: tests[0].workflow.on }).sort(), ["merge_group", "pull_request", "push"]);
   for (const job of tests) {
     const variable = job.id === "jest" ? "JEST_RUNNER" : "TESTS_RUNNER";
     assert.deepEqual(runner(job), { forkLabel: "ubuntu-24.04", variable, label: "ubuntu-24.04" }, job.id);
