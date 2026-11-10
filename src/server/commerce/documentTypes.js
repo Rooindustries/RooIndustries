@@ -57,6 +57,11 @@ export const REFERRAL_COMMERCE_FIELDS = Object.freeze([
   "owedXoc",
   "owedVertex",
   "owedTotal",
+  "underReviewTotal",
+  "emptyCodeReviewXoc",
+  "emptyCodeReviewVertex",
+  "emptyCodeProtectedPaidXoc",
+  "emptyCodeProtectedPaidVertex",
   "notes",
 ]);
 

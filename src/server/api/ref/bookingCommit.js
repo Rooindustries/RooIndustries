@@ -9,8 +9,24 @@ import { normalizeBookingStatus } from "../../booking/bookingStatus.js";
 import { sanitizeSalesAttribution } from "../../../lib/salesAttribution.ts";
 import { appendCouponConsumption } from "./couponReservations.js";
 import { dispatchRescheduleNotifications } from "./bookingEmails.js";
-import { getSafeErrorCode } from "../../safeErrorLog.js";
+import { getSafeErrorCode, logSafeError } from "../../safeErrorLog.js";
 import { calculateCreatorCommission } from "../../referrals/commissionMoney.js";
+import { historicalReferralAccounting } from "../../referrals/historicalAccounting.js";
+import { freezeBookingCommission } from "../../referrals/bookingCommission.js";
+
+const referralCommitFields = (referralId, referral, bookingId) => {
+  if (!referralId) return {};
+  if (referral?._id) return {referralAccountingApplied: true};
+  logSafeError(`Referral review required: bookingId=${bookingId} referralId=${referralId}`, {
+    code: "creator_missing_at_commit",
+  });
+  return {
+    referralAccountingApplied: false, commissionPercent: 0, commissionAmount: 0,
+    originalCommissionAmount: 0, dodoOriginalCommissionAmount: 0,
+    referralReviewRequired: true, referralReviewReason: "creator_missing_at_commit",
+    ownerAlertRequired: true,
+  };
+};
 
 const normalize = (value) => String(value || "").trim();
 
@@ -125,6 +141,8 @@ export const prepareDeterministicBooking = ({ booking = {}, idempotencyKey = "" 
 export const commitBookingTransaction = async ({
   client,
   booking,
+  pricing = booking,
+  paymentRecord = {},
   idempotencyKey = "",
   slot = null,
   hold = null,
@@ -135,6 +153,7 @@ export const commitBookingTransaction = async ({
   creditSources = [],
   upgradeLockToCreate = null,
   allowMissingHold = false,
+  allowReleasedCouponRecovery = false,
 }) => {
   if (!client) throw new Error("Booking transaction requires a document client.");
   const doc = prepareDeterministicBooking({ booking, idempotencyKey });
@@ -174,14 +193,19 @@ export const commitBookingTransaction = async ({
     throw bookingConflict("Coupon reservation belongs to another checkout.", "coupon_reservation_conflict");
   }
 
+  const referral = normalize(referralId)
+    ? await client.fetch('*[_type == "referral" && _id == $id][0]{_id}', {id: normalize(referralId)})
+    : null;
+  const frozen = await freezeBookingCommission({client, pricing, booking: doc, paymentRecord});
   const now = new Date().toISOString();
   const bookingDocument = {
     ...doc,
+    ...frozen.bookingFields,
     ...(slotLockId ? { slotLockId } : {}),
     ...(couponReservation?.redemption?._id
       ? { couponRedemptionId: couponReservation.redemption._id }
       : {}),
-    ...(normalize(referralId) ? { referralAccountingApplied: true } : {}),
+    ...referralCommitFields(normalize(referralId), referral, doc._id),
     createdAt: doc.createdAt || now,
     updatedAt: now,
   };
@@ -224,10 +248,11 @@ export const commitBookingTransaction = async ({
       redemption: couponReservation.redemption,
       bookingId: doc._id,
       consumedAt: now,
+      allowReleasedRecovery: allowReleasedCouponRecovery,
     });
   }
 
-  if (normalize(referralId)) {
+  if (referral?._id) {
     transaction.patch(normalize(referralId), (patch) =>
       patch.setIfMissing({ successfulReferrals: 0 }).inc({ successfulReferrals: 1 })
     );
@@ -255,6 +280,9 @@ export const commitBookingTransaction = async ({
       { _id: paymentRecordMutation.id, _rev: paymentRecordMutation.revision },
       (patch) => patch.set({
         ...paymentRecordMutation.set,
+        referralAccountingApplied: bookingDocument.referralAccountingApplied === true,
+        pricingSnapshot: frozen.pricingSnapshot,
+        payerEmail: frozen.bookingFields.payerEmail,
         ...(upgradeLockToCreate ? { startClaimId: upgradeLockToCreate._id } : {}),
         bookingId: doc._id,
         updatedAt: now,
@@ -303,15 +331,23 @@ export const createRequiresRescheduleBooking = async ({
     throw new Error("A payment record is required to create a reschedule booking.");
   }
   const payload = paymentRecord.bookingPayload || {};
-  const pricing = paymentRecord.pricingSnapshot || {};
+  const frozen = await freezeBookingCommission({
+    client,
+    pricing: paymentRecord.pricingSnapshot || {},
+    booking: {email: payload.email}, paymentRecord,
+  });
+  const pricing = frozen.pricing;
   const commission = calculateCreatorCommission(pricing);
   const originalCommissionAmount = commission.originalAmount;
   const dodoTotalAmount = Number(paymentRecord.providerPublicData?.totalAmount || Number(pricing.netAmount) * 100) / 100;
-  const resolvedReferralId = preserveHistoricalAccounting
-    ? ""
-    : normalize(referralId || pricing.effectiveReferralId || "");
+  const resolvedReferralId = normalize(referralId || pricing.effectiveReferralId || "");
+  const referral = resolvedReferralId
+    ? await client.fetch('*[_type == "referral" && _id == $id][0]{_id}', {id: resolvedReferralId})
+    : null;
+  const bookingId = buildDeterministicBookingId({paymentRecordId: paymentRecord._id});
   const booking = prepareDeterministicBooking({
     booking: {
+      _id: bookingId,
       paymentRecordId: paymentRecord._id,
       ...(payload.originalOrderId ? { originalOrderId: payload.originalOrderId } : {}),
       cutoverGeneration: Math.max(0, Number(paymentRecord.cutoverGeneration) || 0),
@@ -322,6 +358,7 @@ export const createRequiresRescheduleBooking = async ({
       commissionPercent: Number(pricing.commissionPercent || 0),
       commissionBaseAmount: commission.baseAmount,
       commissionCalculationVersion: 2,
+      referralAttributionVersion: 2,
       commissionAmount: originalCommissionAmount,
       ...(paymentRecord.provider === "dodo" ? {
         dodoCheckoutSessionId: paymentRecord.providerOrderId,
@@ -358,7 +395,10 @@ export const createRequiresRescheduleBooking = async ({
       ...(resolvedReferralId
         ? {
             referral: { _type: "reference", _ref: resolvedReferralId },
-            referralAccountingApplied: true,
+            ...referralCommitFields(resolvedReferralId, referral, bookingId),
+            ...(preserveHistoricalAccounting ? {
+              referralAccountingApplied: await historicalReferralAccounting(paymentRecord, resolvedReferralId),
+            } : {}),
           }
         : {}),
       ...(couponReservation?.redemption?._id
@@ -383,6 +423,7 @@ export const createRequiresRescheduleBooking = async ({
       localTimeZone: payload.localTimeZone || "",
       displayDate: payload.displayDate || "",
       displayTime: payload.displayTime || "",
+      ...frozen.bookingFields,
     },
   });
   const recoveryCase = {
@@ -437,7 +478,7 @@ export const createRequiresRescheduleBooking = async ({
       });
     }
 
-    if (resolvedReferralId) {
+    if (referral?._id && !preserveHistoricalAccounting) {
       transaction.patch(resolvedReferralId, (patch) =>
         patch
           .setIfMissing({ successfulReferrals: 0 })
@@ -463,6 +504,9 @@ export const createRequiresRescheduleBooking = async ({
         { _id: paymentRecordMutation.id, _rev: paymentRecordMutation.revision },
         (patch) => patch.set({
           ...paymentRecordMutation.set,
+          referralAccountingApplied: booking.referralAccountingApplied === true,
+          pricingSnapshot: frozen.pricingSnapshot,
+          payerEmail: frozen.bookingFields.payerEmail,
           ...(upgradeLockToCreate ? { startClaimId: upgradeLockToCreate._id } : {}),
           bookingId: booking._id,
           updatedAt: now,

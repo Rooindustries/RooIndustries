@@ -18,6 +18,23 @@ let getBookingAvailability;
 const CLIENT_EMAIL = "vihaann2.0@gmail.com";
 const OWNER_EMAIL = "serviroo@rooindustries.com";
 const OWNER_TZ = "Asia/Kolkata";
+const verifyPayPalPayerFixture = ({orderId, amount}) => {
+  process.env.PAYPAL_ENV = "sandbox";
+  process.env.PAYPAL_CLIENT_ID = "fixture-client";
+  process.env.PAYPAL_CLIENT_SECRET = "fixture-secret";
+  global.fetch = jest.fn(async url => ({
+    ok: true,
+    json: async () => String(url).includes("/v1/oauth2/token")
+      ? {access_token: "fixture-token", expires_in: 3600}
+      : {
+        id: orderId, status: "COMPLETED", payer: {email_address: CLIENT_EMAIL},
+        purchase_units: [{payments: {captures: [{
+          id: `capture_${orderId}`, status: "COMPLETED",
+          amount: {value: Number(amount).toFixed(2), currency_code: "USD"},
+        }]}}],
+      },
+  }));
+};
 const previousDataPrimary = process.env.DATA_PRIMARY_BACKEND;
 const previousCommercePrimary = process.env.COMMERCE_PRIMARY_BACKEND;
 const previousFreeSessionStoreMode =
@@ -989,6 +1006,7 @@ describe("booking reservation API", () => {
   });
 
   test("direct paid bookings backfill a terminal payment record when no record exists yet", async () => {
+    verifyPayPalPayerFixture({orderId: "paypal_order_1", amount: 84.99});
     const startTimeUTC = "2099-01-15T08:18:00.000Z";
     const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
 
@@ -1021,6 +1039,7 @@ describe("booking reservation API", () => {
   });
 
   test("clubbed coupons reduce the referral base before referral discount and commission", async () => {
+    verifyPayPalPayerFixture({orderId: "paypal_coupon_referral", amount: 42.70});
     store.referrals.push({
       _id: "ref_creator",
       _type: "referral",
@@ -2898,6 +2917,7 @@ describe("booking reservation API", () => {
       effectiveReferralId: withReferral ? "ref_frozen" : "",
       effectiveReferralCode: withReferral ? "frozen-code" : "",
     };
+    verifyPayPalPayerFixture({orderId: "internal_order", amount: pricingSnapshot.netAmount});
     if (withReferral) store.referrals.push({ _id: "ref_frozen", _type: "referral", successfulReferrals: 0 });
     const pricingFingerprint = buildPricingFingerprint({
       provider: "paypal", packageTitle: "Performance Vertex Overhaul",

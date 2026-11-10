@@ -10,6 +10,7 @@ import { appendCouponRefund } from "./couponReservations.js";
 import { toSubunits } from "../payment/providerClients.js";
 import { calculateCreatorCommission, originalBookingCommission } from "../../referrals/commissionMoney.js";
 import { resolveDisputeReferralAccounting } from "../../referrals/disputeAccounting.js";
+import { reviewBookingCommission } from "../../referrals/bookingCommission.js";
 import { holdOwnsSlot } from "../../booking/holdOwnership.js";
 
 export const resolvePaymentCurrency = (paymentRecord = {}, { booking = {}, refund = {}, fallback = "USD" } = {}) => {
@@ -194,8 +195,8 @@ export const applyBookingRefund = async ({ client, paymentRecord, refund = {} })
       };
     }
     const totalAmount = Number(paymentRecord.pricingSnapshot?.netAmount ?? booking.netAmount ?? booking.grossAmount);
-    const originalCommissionAmount = calculateCreatorCommission(paymentRecord.pricingSnapshot || booking, {
-      originalAmount: booking.originalCommissionAmount ?? paymentRecord.pricingSnapshot?.commissionAmount ?? originalBookingCommission(booking),
+    const originalCommissionAmount = calculateCreatorCommission(booking, {
+      originalAmount: booking.originalCommissionAmount ?? originalBookingCommission(booking),
     }).originalAmount;
     const commission = calculateCreatorCommission(booking, {
       originalAmount: originalCommissionAmount, paidAmount: totalAmount,
@@ -365,6 +366,7 @@ export const applyBookingStatusTransition = async ({
   bookingId,
   status,
   payerEmail,
+  referralReview,
   source = "admin",
 }) => {
   const canonicalStatus = normalizeBookingStatus(status);
@@ -401,6 +403,9 @@ export const applyBookingStatusTransition = async ({
     );
   }
 
+  const reviewFields = referralReview === undefined ? {} : await reviewBookingCommission({
+    client, booking, decision: referralReview, payerEmail,
+  });
   const now = new Date().toISOString();
   const slotLockId =
     booking.slotLockId ||
@@ -443,6 +448,7 @@ export const applyBookingStatusTransition = async ({
   const transaction = client.transaction();
   patchRevision(transaction, booking, (patch) =>
     patch.set({
+      ...reviewFields,
       status: canonicalStatus,
       ...(payerEmail !== undefined ? { payerEmail: String(payerEmail || "").trim() } : {}),
       statusUpdatedAt: now,

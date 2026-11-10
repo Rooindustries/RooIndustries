@@ -8,6 +8,7 @@ import { createPaymentBackendClient } from "./backend.js";
 import { createSupabaseAdminClient } from "../../supabase/adminClient.js";
 import { reconcileBookingEmailDispatches } from "../ref/bookingEmails.js";
 import { reconcileReferralEmailDispatches } from "../ref/referralEmailDispatches.js";
+import { dispatchCouponAlerts } from "../ref/couponAlerts.js";
 
 import { reconcileCredentialOperations } from "../../supabase/credentialRecovery.js";
 
@@ -70,6 +71,7 @@ export default async function handler(req, res) {
   });
   if(paymentResult?.body?.summary)Object.assign(summary,paymentResult.body.summary);
   await Promise.all([
+    duty("couponAlertRecovery",() => dispatchCouponAlerts({client:client || createPaymentBackendClient("supabase")})),
     duty("expiredSupabaseHoldCleanup",() => cleanupExpiredSupabaseHolds({generation:policy.commerceFailoverGeneration})),
     duty("referralEmailRecovery",() => reconcileReferralEmailDispatches({limit:10})),
     duty("credentialRecovery",() => reconcileCredentialOperations({limit:10})),

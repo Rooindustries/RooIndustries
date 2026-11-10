@@ -482,6 +482,7 @@ export const verifyRazorpayPayment = async ({
       }
     }
     return { ok: true, refundStatus: amountRefundedInSubunits > 0 ? "partial" : refundStatus,
+      payerEmail: String(payment.email || "").trim(),
       amountRefundedInSubunits, refunds: [...refunds.values()] };
   } catch (error) {
     logSafeError("Razorpay payment verification failed", error);

@@ -92,7 +92,7 @@ export default async function handler(req, res) {
 
     // Public checkout projection. Creator details stay behind authenticated routes.
     const ref = await readClient.fetch(
-      `*[_type == "referral" && registrationStatus != "pending_email" && slug.current == $code][0]{
+      `*[_type == "referral" && slug.current == $code][0]{
         "code": slug.current,
         currentDiscountPercent
       }`,

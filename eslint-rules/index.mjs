@@ -16,6 +16,7 @@ import noNestedComponents from "./no-nested-components.mjs";
 import noParentIpcDisconnect from "./no-parent-ipc-disconnect.mjs";
 import noPendingSectionStorageBypass from "./no-pending-section-storage-bypass.mjs";
 import noScriptingMediaQuery from "./no-scripting-media-query.mjs";
+import noScatteredSelfReferral from "./no-scattered-self-referral.mjs";
 import noSecureContextNavigationKeys from "./no-secure-context-navigation-keys.mjs";
 import noUncheckedGroupSignal from "./no-unchecked-group-signal.mjs";
 import noUnfilteredRequestError from "./no-unfiltered-request-error.mjs";
@@ -42,6 +43,7 @@ export const rules = {
   "no-parent-ipc-disconnect": noParentIpcDisconnect,
   "no-pending-section-storage-bypass": noPendingSectionStorageBypass,
   "no-scripting-media-query": noScriptingMediaQuery,
+  "no-scattered-self-referral": noScatteredSelfReferral,
   "no-secure-context-navigation-keys": noSecureContextNavigationKeys,
   "no-unchecked-group-signal": noUncheckedGroupSignal,
   "no-unfiltered-request-error": noUnfilteredRequestError,

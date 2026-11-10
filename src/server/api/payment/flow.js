@@ -456,6 +456,7 @@ const buildPricingSnapshot = (quote = {}, currency = "USD") => ({
   canCombineWithReferral: quote.canCombineWithReferral === true,
   effectiveReferralCode: String(quote.effectiveReferralCode || "").trim(),
   effectiveReferralId: String(quote.effectiveReferralId || "").trim(),
+  referralCreatorEmail: String(quote.referralCreatorEmail || "").trim(),
 });
 
 const buildRecordPricingFingerprint = ({
@@ -861,7 +862,7 @@ const mirrorLegacyBookingToPaymentRecord = async ({
     providerPaymentId: String(
       providerPaymentId || booking.razorpayPaymentId || ""
     ).trim(),
-    payerEmail: String(payerEmail || booking.payerEmail || booking.email || "").trim(),
+    payerEmail: String(booking.payerEmail ?? payerEmail ?? "").trim(),
     verificationState: String(booking.paymentVerificationState || "").trim(),
     verificationWarning: String(booking.paymentVerificationWarning || "").trim(),
     bookingId: String(booking._id || "").trim(),
@@ -1071,7 +1072,7 @@ const verifyProviderCapture = async ({
       ...verification,
       ok: true,
       trustedCapture: true,
-      payerEmail: "",
+      payerEmail: String(verification.payerEmail || "").trim(),
       providerOrderId: orderId,
       providerPaymentId: paymentId,
     };
@@ -1808,7 +1809,7 @@ const buildLegacyBookingPayload = ({
     paypalOrderId:
       record.provider === "dodo" ? "" : String(record.providerOrderId || providerData.paypalOrderId || "").trim(),
     payerEmail:
-      String(providerData.payerEmail || record.payerEmail || "").trim(),
+      String(record.payerEmail || providerData.payerEmail || "").trim(),
     razorpayOrderId:
       record.provider === "dodo" ? "" : String(record.providerOrderId || providerData.razorpayOrderId || "").trim(),
     razorpayPaymentId:
@@ -4143,9 +4144,7 @@ const recoverCapturedPaymentAsReschedule = async ({
       : {}),
     couponAccountingRecoveredAfterRelease:
       couponRedemption?.status === "released",
-    referralAccountingApplied: preserveHistoricalAccounting
-      ? record.referralAccountingApplied === true
-      : !!referralId,
+    ...(!preserveHistoricalAccounting ? {referralAccountingApplied: !!referralId} : {}),
     ...(record.historicalBookingReconstruction === true
       ? {
           historicalBookingReconstruction: false,

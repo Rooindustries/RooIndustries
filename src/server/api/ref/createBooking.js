@@ -565,7 +565,7 @@ export default async function handler(req, res) {
       ).trim();
       const providerPaymentId = String(
         bookingDoc.paymentRefundVerification?.providerPaymentId ||
-          bookingDoc.razorpayPaymentId || razorpayPaymentId || ""
+          bookingDoc.razorpayPaymentId || razorpayPaymentId || existingRecord?.providerPaymentId || ""
       ).trim();
       const resolvedGrossAmount = Number(
         bookingDoc.grossAmount || toMoney(bookingDoc.packagePrice || packagePrice)
@@ -701,9 +701,7 @@ export default async function handler(req, res) {
         holdSnapshot: existingRecord?.holdSnapshot || {},
         providerOrderId,
         providerPaymentId,
-        payerEmail: String(
-          bookingDoc.payerEmail || payerEmail || resolvedEmail || ""
-        ).trim(),
+        payerEmail: String(bookingDoc.payerEmail || "").trim(),
         verificationState: String(
           bookingDoc.paymentVerificationState || existingRecord?.verificationState || ""
         ).trim(),
@@ -1292,8 +1290,9 @@ export default async function handler(req, res) {
         error: "Frozen payment pricing is unavailable.",
       });
     }
-    const resolvedPricing = isInternalPaymentFinalization
+    const pricing = isInternalPaymentFinalization
       ? {
+          ...frozenPricing,
           couponDiscountAmount: Number(frozenPricing.couponDiscountAmount || 0),
           couponDiscountPercent: Number(frozenPricing.couponDiscountPercent || 0),
           couponDiscountType: String(frozenPricing.couponDiscountType || "").trim(),
@@ -1319,23 +1318,19 @@ export default async function handler(req, res) {
       couponDiscountType,
       couponDiscountValue,
       couponDoc,
-      effectiveCommissionPercent,
       effectiveDiscountAmount,
       effectiveDiscountPercent,
       effectiveGrossAmount,
       effectiveNetAmount,
       effectiveReferralCode,
       effectiveReferralId,
-      commissionAmount,
-    } = resolvedPricing;
+    } = pricing;
     if (paymentProvider === "free" && effectiveNetAmount > 0) {
       return res.status(400).json({
         error: "The server quote still requires payment.",
       });
     }
     const resolvedPackagePrice = `$${effectiveGrossAmount.toFixed(2)}`;
-
-    let verifiedPayerEmail = payerEmail;
 
     if (paymentProvider === "razorpay") {
       const canUseServerVerifiedCapture =
@@ -1441,11 +1436,10 @@ export default async function handler(req, res) {
             refundDetailsMissing: paypalVerification.refundDetailsMissing === true,
             refunds: paypalVerification.refunds };
         }
-        if (paypalVerification.payerEmail) {
-          verifiedPayerEmail = paypalVerification.payerEmail;
-        }
       }
     }
+
+    const {effectiveCommissionPercent, commissionAmount} = pricing;
 
     if (!isUpgrade) {
       const signedHoldToken = verifyHoldToken({
@@ -1566,7 +1560,8 @@ export default async function handler(req, res) {
           `*[_type == "couponRedemption" && _id == $id][0]{...}`,
           { id: existingCouponReservationId }
         );
-        if (!redemption?._id || redemption.status !== "reserved") {
+        if (!redemption?._id || (redemption.status !== "reserved" &&
+            !(isInternalPaymentFinalization && redemption.status === "released"))) {
           return res.status(409).json({
             error: "Coupon reservation is no longer available.",
           });
@@ -1613,7 +1608,6 @@ export default async function handler(req, res) {
       dodoCheckoutSessionId,
       dodoPaymentId,
       paypalOrderId,
-      payerEmail: verifiedPayerEmail,
       razorpayOrderId,
       razorpayPaymentId,
       referralCode: effectiveReferralCode,
@@ -1622,14 +1616,15 @@ export default async function handler(req, res) {
       grossAmount: effectiveGrossAmount,
       netAmount: effectiveNetAmount,
       commissionPercent: effectiveCommissionPercent,
-      commissionBaseAmount: calculateCreatorCommission(resolvedPricing).baseAmount,
+      commissionBaseAmount: calculateCreatorCommission(pricing).baseAmount,
       commissionCalculationVersion: 2,
+      referralAttributionVersion: 2,
       commissionAmount,
       ...(paymentProvider === "dodo" && internalPaymentRecord.refundState === "partial" ? {
         dodoOriginalCommissionAmount: commissionAmount,
         refundedAmount: Number(internalPaymentRecord.refundProcessedAmountInSubunits || 0) / 100,
         refundStatus: "partial",
-        commissionAmount: calculateCreatorCommission(resolvedPricing, {
+        commissionAmount: calculateCreatorCommission(pricing, {
           paidAmount: dodoTotalAmount,
           refundedAmount: Number(internalPaymentRecord.refundProcessedAmountInSubunits || 0) / 100,
         }).amount,
@@ -1670,10 +1665,13 @@ export default async function handler(req, res) {
     const committed = await commitBookingTransaction({
       client: writeClient,
       booking: bookingDocument,
+      pricing,
+      paymentRecord: internalPaymentRecord || {},
       idempotencyKey: bookingRequestId,
       slot: isUpgrade ? null : { startTimeUTC: normalizedStartTimeUTC },
       hold: holdDoc,
       couponReservation,
+      allowReleasedCouponRecovery: isInternalPaymentFinalization && normalizedStatus === "captured",
       referralId:
         normalizedStatus === "captured" && !preserveHistoricalAccounting
           ? effectiveReferralId || ""
