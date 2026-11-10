@@ -3920,15 +3920,20 @@ const scheduleProviderRecoveryCheck = async ({
 const sendExpiredWatchToOwnerReview = async ({ client, record, providerReason }) => {
   const operation = await currentPaymentOperation({ client, record });
   if (!operation.owned) return operation.owned;
-  await patchPaymentRecord({ client, record, set: {
-    recoveryReason: "late_capture_watch_unverified_owner_review",
-    reconciliationRecoveryTerminal: true,
-    nextRecoveryAt: "9999-12-31T23:59:59.999Z",
-  }, event: buildPaymentRecordEvent({
-    status: String(record.status || "").trim().toLowerCase(), source: "reconcile",
-    reason: "late_capture_watch_unverified_owner_review",
-    data: { providerReason },
-  }) });
+  try {
+    await patchPaymentRecord({ client, record, set: {
+      recoveryReason: "late_capture_watch_unverified_owner_review",
+      reconciliationRecoveryTerminal: true,
+      nextRecoveryAt: "9999-12-31T23:59:59.999Z",
+    }, event: buildPaymentRecordEvent({
+      status: String(record.status || "").trim().toLowerCase(), source: "reconcile",
+      reason: "late_capture_watch_unverified_owner_review",
+      data: { providerReason },
+    }) });
+  } catch (error) {
+    if (!isConflictError(error)) throw error;
+    return false;
+  }
   logSafeError("Late payment status requires owner review", Object.assign(new Error(), {
     code: "late_capture_watch_unverified_owner_review",
   }));
@@ -4547,13 +4552,19 @@ export const reconcilePaymentSessions = async ({
       if (isExhaustedWatch(record)) {
         const operation = await currentPaymentOperation({ client, record });
         if (!operation.owned) continue;
-        const resumed = await patchPaymentRecord({ client, record, set: {
-          reconciliationRecoveryTerminal: false,
-          recoveryAttemptCount: 0,
-          recoveryFailureCount: 0,
-          nextRecoveryAt: "",
-        }, event: buildPaymentRecordEvent({ status: PAYMENT_STATUS_ABANDONED, source: "reconcile",
-          reason: "late_capture_watch_resumed", data: { previousReason: record.recoveryReason } }) });
+        let resumed;
+        try {
+          resumed = await patchPaymentRecord({ client, record, set: {
+            reconciliationRecoveryTerminal: false,
+            recoveryAttemptCount: 0,
+            recoveryFailureCount: 0,
+            nextRecoveryAt: "",
+          }, event: buildPaymentRecordEvent({ status: PAYMENT_STATUS_ABANDONED, source: "reconcile",
+            reason: "late_capture_watch_resumed", data: { previousReason: record.recoveryReason } }) });
+        } catch (error) {
+          if (!isConflictError(error)) throw error;
+          continue;
+        }
         Object.assign(record, resumed);
       }
       summary.scanned += 1;

@@ -1427,6 +1427,54 @@ try{
     assert.deepEqual((await row(bookingId)).payload, before);
     return { failure, ownerReview: true, bookingUnchanged: true };
   });
+  for (const step of ['resume', 'owner-review']) await run(`recovery-paypal-exhausted-watch-expired-conflict-${step}`, async () => {
+    const until = new Date(originalNow() - 1000).toISOString();
+    await seed('paypal', 'abandoned', { record: { bookingId: '', providerPaymentId: '',
+      recoveryReason: 'paypal_lookup_failed_404', reconciliationRecoveryTerminal: true,
+      recoveryAttemptCount: 12, recoveryFailureCount: 12,
+      nextRecoveryAt: '9999-12-31T23:59:59.999Z', lateCaptureWatchUntil: until } });
+    providerHook = async (request, req, res) => {
+      if (request.path !== '/v2/checkout/orders/order-fixture') return false;
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ name: 'RESOURCE_NOT_FOUND' }));
+      return true;
+    };
+    const before = (await row(bookingId)).payload;
+    fixture.setRequestHook(async (phase, request) => {
+      const mutation = request.body?.p_mutations?.find(({ document }) => document?._id === recordId &&
+        (step === 'resume' ? document.reconciliationRecoveryTerminal === false && document.recoveryFailureCount === 0
+          : document.recoveryReason === 'late_capture_watch_unverified_owner_review'));
+      if (phase !== 'before' || !mutation) return;
+      fixture.setRequestHook(null);
+      const current = await record();
+      await commerce.patch(recordId).ifRevisionId(current._rev).set({ fixtureConcurrent: 'retained' }).commit();
+    });
+    const first = await requestFlow('reconcile');
+    let saved = await record();
+    assert.equal(first.status, 200, JSON.stringify(first));
+    assert.equal(first.body.summary.failed, 0);
+    assert.equal(saved.fixtureConcurrent, 'retained');
+    if (step === 'resume') {
+      assert.equal(saved.reconciliationRecoveryTerminal, true);
+      assert.equal(saved.recoveryFailureCount, 12);
+      assert.equal(saved.recoveryReason, 'paypal_lookup_failed_404');
+    } else {
+      assert.equal(saved.reconciliationRecoveryTerminal, false);
+      assert.ok(!saved.events.some(event => event.reason === 'late_capture_watch_unverified_owner_review'));
+    }
+    const second = await requestFlow('reconcile');
+    saved = await record();
+    assert.equal(second.status, 200, JSON.stringify(second));
+    assert.equal(saved.recoveryReason, 'late_capture_watch_unverified_owner_review');
+    assert.equal(saved.reconciliationRecoveryTerminal, true);
+    assert.equal(saved.fixtureConcurrent, 'retained');
+    assert.equal(saved.lateCaptureWatchUntil, until);
+    assert.equal(saved.events.filter(event => event.reason === 'late_capture_watch_resumed').length, 1);
+    const third = await requestFlow('reconcile');
+    assert.equal(third.body.summary.scanned, 0);
+    assert.deepEqual((await row(bookingId)).payload, before);
+    return { step, saved, bookingUnchanged: true };
+  });
   for (const provider of ['razorpay', 'dodo']) await run(`recovery-${provider}-expired-watch-404`, async () => {
     const until = new Date(originalNow() - 1000).toISOString();
     await seed(provider, 'abandoned', { record: { bookingId: '', providerPaymentId: '',
