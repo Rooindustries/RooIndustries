@@ -9,6 +9,7 @@ import React, {
 import { createPortal } from "react-dom";
 import { useDialogFocus } from "../lib/useDialogFocus";
 import { useBookingDialogPending } from "../lib/bookingDialogHold";
+import { useHydrating } from "../lib/useHydrating";
 import { removeBrowserStorage, writeBrowserStorage } from "../lib/browserStorage";
 import { CLIENT_REQUEST_TIMEOUT_MS, reportRequestError, requestTimeoutError, watchPageLeave } from "../lib/clientRequest";
 import { getPublicContent } from "../lib/publicContentClient";
@@ -18,6 +19,7 @@ import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 import packageContent from "../lib/packageContent";
 import packagePricing from "../lib/packagePricing";
 import PriceDisplay from "./PriceDisplay";
+import PackageSupportWarning from "./PackageSupportWarning";
 import { getWarrantyCallout } from "../lib/packageWarranty";
 import {
   BOOKING_DRAFT_STORAGE_KEY,
@@ -550,7 +552,9 @@ export default function BookingForm() {
   const [planPackage, setPlanPackage] = useState(null);
   const [modalPackage, setModalPackage] = useState(null);
   const [modalMode, setModalMode] = useState("switch");
-  const [pageFadeIn, setPageFadeIn] = useState(false);
+  const hydrating = useHydrating();
+  const [pageFadeIn, setPageFadeIn] = useState(hydrating);
+  const hydratedLocationKeyRef = useRef(hydrating ? location.key : null);
   const scrollLockRef = useRef(null);
   const [persistedPackage, setPersistedPackage] = useState(null);
   const [preventHoldAutoload, setPreventHoldAutoload] = useState(false);
@@ -1185,6 +1189,8 @@ export default function BookingForm() {
   }, [step, reloadAvailability]);
 
   useEffect(() => {
+    if (location.key === hydratedLocationKeyRef.current) return undefined;
+    hydratedLocationKeyRef.current = null;
     setPageFadeIn(false);
     const t = setTimeout(() => setPageFadeIn(true), 50);
     return () => clearTimeout(t);
@@ -2537,7 +2543,11 @@ export default function BookingForm() {
               </div>
             )}
 
-            <AnimatePresence mode="wait">
+            {isXoc && (
+              <PackageSupportWarning widthClass={step === 2 ? "max-w-4xl" : "max-w-3xl"} />
+            )}
+
+            <AnimatePresence mode="wait" initial={!hydrating}>
               {step === 1 && (
                 <motion.div
                   key="step1"

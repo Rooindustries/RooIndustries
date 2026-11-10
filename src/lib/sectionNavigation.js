@@ -11,7 +11,7 @@ export const SECTION_IDS = Object.freeze(
   Object.values(SECTION_HASHES).map((hash) => hash.slice(1))
 );
 
-export const PENDING_SECTION_KEY = "roo_pending_section";
+const PENDING_SECTION_KEY = "roo_pending_section";
 export const ROUTE_TRANSITION_KEY = "roo_route_transition";
 export const SECTION_TRIP_ENTRY = "__rooSectionTrip";
 
@@ -57,33 +57,38 @@ export const announceSectionTarget = (hash = "") => {
   );
 };
 
-export const writePendingSectionTarget = (hash = "") => {
+export const writePendingSectionTarget = (hash = "", path, entry) => {
   const normalized = normalizeSectionHash(hash);
   if (!normalized) return;
   try {
-    sessionStorage.setItem(PENDING_SECTION_KEY, normalized);
+    sessionStorage.setItem(PENDING_SECTION_KEY, JSON.stringify({ hash: normalized, path, entry }));
   } catch {}
   announceSectionTarget(normalized);
 };
 
-export const readPendingSectionTarget = () => {
+export const readPendingSectionTarget = (path = typeof window === "undefined" ? "" : window.location.pathname) => {
   try {
-    return normalizeSectionHash(sessionStorage.getItem(PENDING_SECTION_KEY) || "");
+    const raw = sessionStorage.getItem(PENDING_SECTION_KEY);
+    if (!raw) return "";
+    const pending = JSON.parse(raw);
+    const hash = typeof pending?.hash === "string" ? normalizeSectionHash(pending.hash) : "";
+    const trip = window.history.state?.[SECTION_TRIP_ENTRY];
+    const entry = trip?.superseded ? null : trip?.key || window.history.state?.usr?.sectionTrip;
+    if (!hash || pending.path !== path || typeof pending.entry !== "string" || pending.entry !== entry) {
+      clearPendingSectionTarget();
+      return "";
+    }
+    return hash;
   } catch {
+    clearPendingSectionTarget();
     return "";
   }
 };
 
-export const consumePendingSectionTarget = () => {
-  try {
-    const value = normalizeSectionHash(
-      sessionStorage.getItem(PENDING_SECTION_KEY) || ""
-    );
-    sessionStorage.removeItem(PENDING_SECTION_KEY);
-    return value;
-  } catch {
-    return "";
-  }
+export const consumePendingSectionTarget = (path) => {
+  const hash = readPendingSectionTarget(path);
+  clearPendingSectionTarget();
+  return hash;
 };
 
 export const clearPendingSectionTarget = () => {

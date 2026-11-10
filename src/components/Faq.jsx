@@ -43,9 +43,6 @@ const getQuestionId = (question = "", answer = "") => {
   return slugify(question);
 };
 
-const isFaqIntentHash = (hash = "") =>
-  hash === "faq" || hash === UPGRADE_HASH || hash === TRUST_HASH;
-
 function useElementSize() {
   const ref = useRef(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -98,6 +95,7 @@ export default function FaqSection({
   headingTag = "h2",
   initialFaqCopy = null,
   initialQuestions = null,
+  onPaginationStart,
 }) {
   const Heading = headingTag;
   const location = useLocation();
@@ -134,44 +132,28 @@ export default function FaqSection({
       return undefined;
     }
 
-    const syncHashFromWindow = () => {
-      const nextHash = (
-        window.location.hash ||
-        location.hash ||
-        ""
-      ).replace(/^#/, "");
-      setActiveHash((prev) => (prev === nextHash ? prev : nextHash));
-    };
-
-    const syncHashFromIntent = (event) => {
+    const syncHash = (event) => {
+      pendingPageScrollRef.current = null;
       const nextHash = String(
         event?.detail?.hash || window.location.hash || location.hash || ""
       ).replace(/^#/, "");
       setActiveHash((prev) => (prev === nextHash ? prev : nextHash));
     };
 
-    syncHashFromWindow();
-    window.addEventListener("hashchange", syncHashFromWindow);
-    window.addEventListener("roo:pending-section-target", syncHashFromIntent);
+    syncHash();
+    window.addEventListener("hashchange", syncHash);
+    window.addEventListener("roo:pending-section-target", syncHash);
 
     return () => {
-      window.removeEventListener("hashchange", syncHashFromWindow);
-      window.removeEventListener(
-        "roo:pending-section-target",
-        syncHashFromIntent
-      );
+      window.removeEventListener("hashchange", syncHash);
+      window.removeEventListener("roo:pending-section-target", syncHash);
     };
   }, [location.hash]);
   
   const [[page, direction], setPage] = useState([0, 0]);
+  const pendingPageScrollRef = useRef(null);
 
   const [containerRef, { height }] = useElementSize();
-
-  const scrollWithOffset = (id) => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    scrollWindowTo(el.getBoundingClientRect().top + window.scrollY - 96);
-  };
 
   const toggleQuestion = (questionId) => {
     setOpenQuestions((prev) => ({
@@ -219,9 +201,17 @@ export default function FaqSection({
   const paginate = (newDirection) => {
     const newPage = safePage + newDirection;
     if (newPage >= 0 && newPage < totalPages) {
+      onPaginationStart?.();
+      pendingPageScrollRef.current = newPage;
       setPage([newPage, newDirection]);
-      setTimeout(() => scrollWithOffset("faq"), 250);
     }
+  };
+
+  const finishPageChange = (animation) => {
+    if (animation !== "center" || pendingPageScrollRef.current !== safePage) return;
+    pendingPageScrollRef.current = null;
+    const faq = document.getElementById("faq");
+    if (faq) scrollWindowTo(faq.getBoundingClientRect().top + window.scrollY - 96);
   };
 
   const isLoading = questions === null;
@@ -230,10 +220,6 @@ export default function FaqSection({
     if (!flatQuestions.length) return;
     const hash = activeHash;
     if (!hash) return;
-    if (!isFaqIntentHash(hash) && !flatQuestions.some((q) => q.id === hash)) {
-      return;
-    }
-
     if (hash === "faq") {
       return;
     }
@@ -243,6 +229,7 @@ export default function FaqSection({
       const targetPage = Math.floor(questionIndex / questionsPerPage);
       if (targetPage !== safePage) {
         const dir = targetPage > safePage ? 1 : -1;
+        pendingPageScrollRef.current = null;
         setPage([targetPage, dir]);
       }
       setOpenQuestions((prev) => ({ ...prev, [hash]: true }));
@@ -308,6 +295,7 @@ export default function FaqSection({
                   initial="enter"
                   animate="center"
                   exit="exit"
+                  onAnimationComplete={finishPageChange}
                   transition={{
                     x: { type: "spring", stiffness: 300, damping: 30 },
                     opacity: { duration: 0.2 },

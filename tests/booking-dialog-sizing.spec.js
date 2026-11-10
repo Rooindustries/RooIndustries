@@ -417,7 +417,7 @@ const sampleFrames = () => {
   window.__resizeFrames = [];
   const measure = () => {
     const frame = document.querySelector('[role="dialog"].ri-booking');
-    if (!frame || frame.classList.contains("invisible")) return null;
+    if (!frame || getComputedStyle(frame).visibility === "hidden") return null;
     const stage = frame.closest(".booking-dialog-stage").getBoundingClientRect();
     const box = frame.getBoundingClientRect();
     const content = frame.querySelector("[data-booking-scaler] > div").getBoundingClientRect();

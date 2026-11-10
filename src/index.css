@@ -2122,8 +2122,11 @@ html.low-performance-mode #how-it-works .deferred-section-content {
   content-visibility: visible;
 }
 
-html.low-performance-mode *:not(.glow-line):not(.ri-engineer-status-pulse):not(.ri-reveal) {
+html.low-performance-mode *:not(.glow-line):not(.ri-engineer-status-pulse):not(.ri-reveal):not(.site-dialog-overlay):not(.site-dialog-panel) {
   animation: none !important;
+}
+
+html.low-performance-mode *:not(.glow-line):not(.ri-engineer-status-pulse):not(.ri-reveal) {
   filter: none !important;
   -webkit-filter: none !important;
   transition-property: opacity, transform !important;
@@ -2372,6 +2375,19 @@ html[data-theme="dark"] .ri-booking .glow-button .glow-line {
   container-name: booking-frame;
 }
 
+html:not(.js) .booking-dialog-stage [role="dialog"] {
+  width: 100%;
+}
+
+html:not(.js) .booking-dialog-stage [data-booking-scaler] {
+  position: relative;
+}
+
+html:not(.js) .booking-dialog-stage .booking-dialog-content {
+  max-width: 100%;
+  margin-inline: auto;
+}
+
 .booking-dialog-content :is(button, a[href], input, textarea, select):focus-visible,
 .booking-plan-dialog :is(button, a[href], input, textarea, select):focus-visible {
   outline: 2px solid var(--color-focus-ring);
@@ -2475,6 +2491,64 @@ html[data-theme="dark"] .ri-booking .glow-button .glow-line {
   .booking-dialog-content .booking-actions-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+
+@keyframes siteDialogOverlayIn {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes siteDialogOverlayOut {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes siteDialogPanelIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@keyframes siteDialogPanelOut {
+  to {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.site-dialog-overlay {
+  animation: siteDialogOverlayIn 0.3s ease-out backwards;
+}
+
+.site-dialog-panel {
+  animation: siteDialogPanelIn 0.5s cubic-bezier(0.4, 0, 0.2, 1) 0.16s backwards;
+}
+
+.site-dialog-overlay[data-closing] {
+  animation: siteDialogOverlayOut 0.2s ease-in forwards;
+}
+
+.site-dialog-overlay[data-closing] .site-dialog-panel {
+  animation: siteDialogPanelOut 0.12s ease-in forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .site-dialog-overlay,
+  .site-dialog-overlay[data-closing],
+  .site-dialog-panel,
+  .site-dialog-overlay[data-closing] .site-dialog-panel {
+    animation: none;
+  }
+}
+
+html.perf-reduced-motion-mode .site-dialog-overlay,
+html.perf-reduced-motion-mode .site-dialog-overlay[data-closing],
+html.perf-reduced-motion-mode .site-dialog-panel,
+html.perf-reduced-motion-mode .site-dialog-overlay[data-closing] .site-dialog-panel {
+  animation: none;
 }
 
 @keyframes riReveal {
