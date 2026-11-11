@@ -62,9 +62,7 @@ begin
   select count(*) into v_holds from commerce.slot_holds where phase = 'payment';
   select count(*) into v_sources from migration.source_documents
   where document_type = 'slotHold' and not tombstoned
-    and lower(coalesce(payload->>'phase', 'active')) in ('payment', 'payment_pending')
-    and migration.try_timestamptz(payload->>'startTimeUTC') is not null
-    and migration.try_timestamptz(payload->>'expiresAt') is not null;
+    and lower(coalesce(payload->>'phase', 'active')) in ('payment', 'payment_pending');
   if v_holds > 0 or v_sources > 0 then
     raise exception 'payment holds are present (slot holds: %, source documents: %); fix forward', v_holds, v_sources;
   end if;

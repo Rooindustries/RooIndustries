@@ -146,8 +146,7 @@ test('payment hold rollback restores and reapplies both migrations', async () =>
     await fixture.content.create({ _id: 'package.fixture.rollback', _type: 'package', title: 'Rollback' });
     assert.equal((await fixture.content.getDocument('package.fixture.rollback')).title, 'Rollback');
   } finally {
-    await fixture.database.apply(holdMigration, migrationText(holdMigration));
-    await fixture.database.apply(shadowMigration, migrationText(shadowMigration));
+    await fixture.database.apply(shadowMigration, `${migrationText(holdMigration)}\n${migrationText(shadowMigration)}`);
   }
   assert.deepEqual(await definitionHashes(), before);
   assert.equal(await expiryFunctions(), null);
@@ -157,8 +156,30 @@ test('payment hold rollback refuses an in-progress payment without changing defi
   const checkout = await startCheckoutBeforeExpiry();
   assert.equal((await holdFor(checkout.payload)).phase, 'payment_pending');
   const before = await definitionHashes();
-  await assert.rejects(fixture.database.apply(shadowMigration, rollbackText()), /payment holds are present.*fix forward/i);
-  assert.deepEqual(await definitionHashes(), before);
+  const refused = async (holds, documents) => {
+    await assert.rejects(fixture.database.apply(shadowMigration, rollbackText()),
+      new RegExp(`payment holds are present \\(slot holds: ${holds}, source documents: ${documents}\\); fix forward`, 'i'));
+    assert.deepEqual(await definitionHashes(), before);
+  };
+  const id = checkout.payload.slotHoldId;
+  const [source] = await fixture.database.sql`select payload from migration.source_documents where legacy_sanity_id = ${id}`;
+  const setState = async (document, phase) => fixture.database.sql.begin(async sql => {
+    await sql`set local session_replication_role = replica`;
+    await sql`update migration.source_documents set payload = ${sql.json(document)} where legacy_sanity_id = ${id}`;
+    await sql`update commerce.slot_holds set phase = ${phase} where legacy_sanity_id = ${id}`;
+  });
+  await refused(1, 1);
+  try {
+    await setState({ ...source.payload, phase: 'active' }, 'payment');
+    await refused(1, 0);
+    await setState(source.payload, 'active');
+    await refused(0, 1);
+    const { expiresAt: _, ...withoutExpiry } = source.payload;
+    await setState(withoutExpiry, 'active');
+    await refused(0, 1);
+  } finally {
+    await setState(source.payload, 'payment');
+  }
   const paid = await fixture.dodoWebhook(
     `payment_${checkout.record.providerOrderId}`, 'payment.succeeded', `rollback_${checkout.record._id}`,
   );
