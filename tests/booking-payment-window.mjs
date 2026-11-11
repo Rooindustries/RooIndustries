@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { after, before, beforeEach, test } from 'node:test';
 import { createBookingContactFixture } from './fixtures/booking-contact.mjs';
 
@@ -95,6 +97,74 @@ const assertBookedOnHeldSlot = async ({ payload, record }) => {
   assert.equal(hold.bookingId, booking._id);
   return booking;
 };
+
+const holdMigration = '20261102000000_keep_payment_holds_until_resolved.sql';
+const shadowMigration = '20261111000000_keep_payment_hold_claims_in_shadow_refresh.sql';
+const migrationText = name => fs.readFileSync(path.join(process.cwd(), 'supabase/migrations', name), 'utf8');
+const rollbackText = () => fs.readFileSync(path.join(process.cwd(), 'supabase/rollbacks', shadowMigration), 'utf8');
+const originalDefinitions = {
+  'migration.reconcile_slot_claims_for_times': 'b7c6c85622ee8eabfff784c8e4805b88',
+  'migration.assert_slot_claim_integrity': 'd3bc74fa923444bbfda133ad0bcd32e0',
+  'public.roo_fetch_commerce_availability': '1abf74171cbffe29e8a81aec8b8da5cb',
+  'public.roo_cleanup_expired_supabase_holds': '1efbfaa0bc2294f1904484a7b3e318b4',
+  'public.roo_project_operational_shadow': '39c69cc7898c12b1729e58bb25c1a8d6',
+  'public.roo_cleanup_operational_shadow': 'fb8b81cf126eadb7f042f488a2286e39',
+  'migration.project_commerce_document_ids_unserialized': '5bba516f0d0e27ebb094410023a75aca',
+};
+const definitionHashes = async () => {
+  const rows = await fixture.database.sql`
+    select n.nspname || '.' || p.proname as name, md5(pg_get_functiondef(p.oid)) as hash
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname || '.' || p.proname = any(${Object.keys(originalDefinitions)})`;
+  assert.equal(rows.length, 7);
+  return Object.fromEntries(rows.map(row => [row.name, row.hash]));
+};
+const expiryFunctions = async () => {
+  const pattern = "phase in \\('active', 'payment'\\)\\s+and hold\\.expires_at";
+  const [result] = await fixture.database.sql`
+    select array_agg(n.nspname || '.' || p.proname order by n.nspname, p.proname) as functions
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where p.prokind = 'f'
+      and n.nspname not in ('pg_catalog', 'information_schema')
+      and pg_get_functiondef(p.oid) ~ ${pattern}`;
+  return result.functions;
+};
+
+test('payment hold rollback restores and reapplies both migrations', async () => {
+  const before = await definitionHashes();
+  await fixture.database.apply(shadowMigration, rollbackText());
+  try {
+    assert.deepEqual(await definitionHashes(), originalDefinitions);
+    assert.deepEqual(await expiryFunctions(), [
+      'migration.assert_slot_claim_integrity',
+      'migration.project_commerce_document_ids_unserialized',
+      'migration.reconcile_slot_claims_for_times',
+      'public.roo_cleanup_expired_supabase_holds',
+      'public.roo_cleanup_operational_shadow',
+      'public.roo_project_operational_shadow',
+    ]);
+    await fixture.content.create({ _id: 'package.fixture.rollback', _type: 'package', title: 'Rollback' });
+    assert.equal((await fixture.content.getDocument('package.fixture.rollback')).title, 'Rollback');
+  } finally {
+    await fixture.database.apply(holdMigration, migrationText(holdMigration));
+    await fixture.database.apply(shadowMigration, migrationText(shadowMigration));
+  }
+  assert.deepEqual(await definitionHashes(), before);
+  assert.equal(await expiryFunctions(), null);
+});
+
+test('payment hold rollback refuses an in-progress payment without changing definitions', async () => {
+  const checkout = await startCheckoutBeforeExpiry();
+  assert.equal((await holdFor(checkout.payload)).phase, 'payment_pending');
+  const before = await definitionHashes();
+  await assert.rejects(fixture.database.apply(shadowMigration, rollbackText()), /payment holds are present.*fix forward/i);
+  assert.deepEqual(await definitionHashes(), before);
+  const paid = await fixture.dodoWebhook(
+    `payment_${checkout.record.providerOrderId}`, 'payment.succeeded', `rollback_${checkout.record._id}`,
+  );
+  assert.equal(paid.status, 200, JSON.stringify(paid));
+  await assertBookedOnHeldSlot(checkout);
+});
 
 test('a payment still processing when the hold runs out keeps the slot and books it once it clears', async () => {
   fixture.setPaymentAmountOverrides({ status: 'processing' });
