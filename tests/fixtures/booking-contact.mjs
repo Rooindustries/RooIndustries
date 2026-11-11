@@ -294,7 +294,7 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
       paymentRefunds.set(paymentId, refunds);
       return dodoWebhook(paymentId, 'refund.succeeded', eventId);
     };
-    return { post, start, hold, snapshot, recordFor, seedUpgrade, commerce, database, details, evidence, save, stop,
+    return { post, start, hold, snapshot, recordFor, seedUpgrade, commerce, content, database, details, evidence, save, stop,
       setPaymentTax, setPaymentTaxInclusive, setPaymentAmountOverrides, refundPayment, dodoWebhook,
       setEmailFailure(value) { emailFailure = value; },
       setCheckoutPaymentStarted(value) { checkoutPaymentStarted = value; },

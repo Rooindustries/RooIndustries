@@ -101,9 +101,10 @@ test('a payment still processing when the hold runs out keeps the slot and books
   const checkout = await startCheckoutBeforeExpiry();
   const submitted = await cron();
   assert.equal(submitted.status, 200, JSON.stringify(submitted));
-  await holdRunsOut(checkout);
+  await holdRunsOut(checkout, 3_600_000);
   const expired = await cron();
   assert.equal(expired.status, 200, JSON.stringify(expired));
+  await fixture.content.create({ _id: 'package.fixture.shadow-refresh-processing', _type: 'package', title: 'Processing' });
   const held = await holdFor(checkout.payload);
   assert.equal(held.phase, 'payment_pending');
   assert.equal(held.paymentRecordId, checkout.record._id);
@@ -344,6 +345,7 @@ test('an unreachable checkout with no payment seen frees its slot a day after th
   assert.equal((await cron()).status, 200);
   assert.equal((await holdFor(checkout.payload)).phase, 'expired');
   assert.equal(await isOffered(checkout.payload), true);
+  await fixture.content.create({ _id: 'package.fixture.shadow-refresh-unpaid', _type: 'package', title: 'Unpaid' });
   assert.equal((await secondVisitor(checkout.payload)).status, 200);
 });
 
@@ -355,9 +357,21 @@ test('a checkout the cron can no longer reach keeps its slot when Dodo says the 
   });
   await holdRunsOut(checkout, 25 * 60 * 60_000);
   assert.equal((await cron()).status, 200);
+  await fixture.content.create({ _id: 'package.fixture.shadow-refresh-paid', _type: 'package', title: 'Paid' });
   assert.equal((await holdFor(checkout.payload)).phase, 'payment_pending');
   assert.equal(await isOffered(checkout.payload), false);
   assert.equal((await secondVisitor(checkout.payload)).status, 409);
+});
+
+test('payment holds are not tied to the original hold expiry', async () => {
+  const pattern = "phase in \\('active', 'payment'\\)\\s+and hold\\.expires_at";
+  const [result] = await fixture.database.sql`
+    select string_agg(oid::regprocedure::text, ',') as functions
+    from pg_proc
+    where prokind = 'f'
+      and pronamespace::regnamespace::text not in ('pg_catalog', 'information_schema')
+      and pg_get_functiondef(oid) ~ ${pattern}`;
+  assert.equal(result.functions, null);
 });
 
 test('a verified payment refunded before booking frees its slot a day after the hold ran out', async () => {
