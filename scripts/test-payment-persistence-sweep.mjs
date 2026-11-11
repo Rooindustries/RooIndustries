@@ -63,7 +63,7 @@ const recordId='paymentRecord.fixture',bookingId='booking.fixture';
 const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});return{promise,resolve};};
 const row=async id=>(await sql`select payload,source_revision,tombstoned from migration.source_documents where legacy_sanity_id=${id}`)[0];
 const record=async()=> (await row(recordId))?.payload;
-const removeRevision=async(id,state)=>{await sql`update migration.source_documents set payload=case when ${state}='null' then jsonb_set(payload,'{_rev}','null'::jsonb) else payload-'_rev' end,source_revision=null where legacy_sanity_id=${id}`;};
+const removeRevision=async(id,state)=>{await sql.begin(async tx=>{await tx`select pg_advisory_xact_lock(hashtextextended('cms-reference-integrity', 0))`;await tx`update migration.source_documents set payload=case when ${state}='null' then jsonb_set(payload,'{_rev}','null'::jsonb) else payload-'_rev' end,source_revision=null where legacy_sanity_id=${id}`;});};
 const snapshot=async({receipts=false}={})=>{
   const source=await sql`select legacy_sanity_id,payload,source_revision,tombstoned from migration.source_documents where (${receipts} or document_type<>'paymentWebhookReceipt') order by legacy_sanity_id`;
   const tables={};for(const name of ['payment_records','bookings','refunds','payment_events','payment_start_claims','payment_proof_claims','payment_upgrade_locks','slot_holds','slot_claims','coupons','coupon_redemptions','referral_ledger'])tables[name]=await sql.unsafe(`select to_jsonb(t) as row from commerce.${name} t order by to_jsonb(t)::text`);

@@ -130,6 +130,73 @@ const expiryFunctions = async () => {
   return result.functions;
 };
 
+const documentLockMigration = '20261111010000_require_commerce_lock_for_payment_hold_documents.sql';
+const importHold = (id, phase = 'payment_pending') => ({
+  legacy_sanity_id: id,
+  document_type: 'slotHold',
+  source_hash: 'a'.repeat(64),
+  payload: { _id: id, _type: 'slotHold', phase, startTimeUTC: '2099-01-01T04:30:00.000Z' },
+});
+const documentLockError = /payment hold document requires the cms-reference-integrity commerce lock/i;
+
+test('payment hold documents require the commerce lock on import and update', async () => {
+  const id = 'slotHold.fixture.unlocked-import';
+  const result = await fixture.database.client.rpc('roo_import_commerce_shadow_batch', {
+    p_documents: [importHold(id)],
+  });
+  assert.equal(result.error?.code, '23514');
+  assert.match(result.error.message, documentLockError);
+  assert.equal((await fixture.database.sql`select 1 from migration.source_documents where legacy_sanity_id = ${id}`).length, 0);
+  await fixture.content.create({ _id: 'package.fixture.after-refusal', _type: 'package', title: 'After refusal' });
+  assert.equal((await fixture.content.getDocument('package.fixture.after-refusal')).title, 'After refusal');
+  const hold = await fixture.hold();
+  assert.equal(hold.startTimeUTC, '2099-01-01T04:30:00.000Z');
+  await assert.rejects(fixture.database.sql`update migration.source_documents
+    set payload = jsonb_set(payload, '{phase}', '"payment"'::jsonb)
+    where legacy_sanity_id = ${hold.slotHoldId}`, documentLockError);
+  assert.equal((await holdFor(hold)).phase, 'active');
+});
+
+test('the commerce lock uses the stored bigint advisory key', async () => {
+  await fixture.database.sql.begin(async sql => {
+    await sql`select pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('cms-reference-integrity', 0))`;
+    const [lock] = await sql`select held.classid::bigint as high, held.objid::bigint as low,
+      held.objsubid, (key.value >> 32) & 4294967295 as expected_high,
+      key.value & 4294967295 as expected_low
+      from pg_catalog.pg_locks held
+      cross join (select pg_catalog.hashtextextended('cms-reference-integrity', 0) as value) key
+      where held.pid = pg_catalog.pg_backend_pid() and held.locktype = 'advisory' and held.granted
+        and held.objsubid = 1`;
+    assert.ok(lock);
+    assert.equal(lock.high, lock.expected_high);
+    assert.equal(lock.low, lock.expected_low);
+  });
+});
+
+test('payment document lock rollback restores the guard after accepting the old import', async () => {
+  const id = 'slotHold.fixture.rollback-import';
+  const stop = new Error('rollback fixture transaction');
+  await assert.rejects(fixture.database.sql.begin(async sql => {
+    await sql.unsafe(fs.readFileSync(path.join(process.cwd(), 'supabase/rollbacks', documentLockMigration), 'utf8'));
+    await sql`set local role service_role`;
+    await sql`select public.roo_import_commerce_shadow_batch(${sql.json([importHold(id)])})`;
+    await sql`reset role`;
+    assert.equal((await sql`select 1 from migration.source_documents where legacy_sanity_id = ${id}`).length, 1);
+    await sql.unsafe(migrationText(documentLockMigration));
+    await assert.rejects(sql.savepoint(async scoped => {
+      await scoped`set local role service_role`;
+      await scoped`select public.roo_import_commerce_shadow_batch(${scoped.json([importHold(id)])})`;
+    }), documentLockError);
+    throw stop;
+  }), error => error === stop);
+  assert.equal((await fixture.database.sql`select 1 from migration.source_documents where legacy_sanity_id = ${id}`).length, 0);
+  const result = await fixture.database.client.rpc('roo_import_commerce_shadow_batch', {
+    p_documents: [importHold(id)],
+  });
+  assert.equal(result.error?.code, '23514');
+  assert.match(result.error.message, documentLockError);
+});
+
 test('payment hold rollback restores and reapplies both migrations', async () => {
   const before = await definitionHashes();
   await fixture.database.apply(shadowMigration, rollbackText());
@@ -185,6 +252,18 @@ test('payment hold rollback refuses an in-progress payment without changing defi
   );
   assert.equal(paid.status, 200, JSON.stringify(paid));
   await assertBookedOnHeldSlot(checkout);
+});
+
+test('payment hold payload updates require the commerce lock', async () => {
+  const checkout = await startCheckoutBeforeExpiry();
+  const id = checkout.payload.slotHoldId;
+  const [before] = await fixture.database.sql`select payload from migration.source_documents where legacy_sanity_id = ${id}`;
+  assert.equal(before.payload.phase, 'payment_pending');
+  await assert.rejects(fixture.database.sql`update migration.source_documents
+    set payload = jsonb_set(payload, '{expiresAt}', '"2099-01-01T05:00:00.000Z"'::jsonb)
+    where legacy_sanity_id = ${id}`, documentLockError);
+  const [after] = await fixture.database.sql`select payload from migration.source_documents where legacy_sanity_id = ${id}`;
+  assert.deepEqual(after.payload, before.payload);
 });
 
 test('a payment still processing when the hold runs out keeps the slot and books it once it clears', async () => {
