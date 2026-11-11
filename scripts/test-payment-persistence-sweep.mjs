@@ -77,6 +77,7 @@ const reset=async()=>{
   if(!process.argv.includes('--fix-c-rate-before'))globalThis.__rooRateLimitBuckets?.clear();
   Date.now=originalNow;fixture.setRequestHook(null);providerHook=null;razorpayRefunds=[];scenarioNumber++;providerRequests=[];emailFailure=false;verificationStatus=200;verificationDisconnect=false;
   await sql.begin(async tx=>{
+    await tx`select pg_advisory_xact_lock(hashtextextended('cms-reference-integrity', 0))`;
     await tx`delete from commerce.coupon_redemptions`;
     await tx`delete from commerce.slot_claims`;
     await tx`delete from commerce.booking_slots`;

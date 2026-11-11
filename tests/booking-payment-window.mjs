@@ -157,22 +157,6 @@ test('payment hold documents require the commerce lock on import and update', as
   assert.equal((await holdFor(hold)).phase, 'active');
 });
 
-test('the commerce lock uses the stored bigint advisory key', async () => {
-  await fixture.database.sql.begin(async sql => {
-    await sql`select pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('cms-reference-integrity', 0))`;
-    const [lock] = await sql`select held.classid::bigint as high, held.objid::bigint as low,
-      held.objsubid, (key.value >> 32) & 4294967295 as expected_high,
-      key.value & 4294967295 as expected_low
-      from pg_catalog.pg_locks held
-      cross join (select pg_catalog.hashtextextended('cms-reference-integrity', 0) as value) key
-      where held.pid = pg_catalog.pg_backend_pid() and held.locktype = 'advisory' and held.granted
-        and held.objsubid = 1`;
-    assert.ok(lock);
-    assert.equal(lock.high, lock.expected_high);
-    assert.equal(lock.low, lock.expected_low);
-  });
-});
-
 test('payment document lock rollback restores the guard after accepting the old import', async () => {
   const id = 'slotHold.fixture.rollback-import';
   const stop = new Error('rollback fixture transaction');
@@ -782,4 +766,43 @@ test('a late processing webhook cannot undo a recorded success on a payment that
   await holdRunsOut(checkout, 25 * 60 * 60_000);
   assert.equal((await cron()).status, 200);
   assert.equal((await holdFor(checkout.payload)).phase, 'payment_pending');
+});
+
+for (const [name, change, shared] of [
+  ['tombstone', (sql, id) => sql`update migration.source_documents set tombstoned = true where legacy_sanity_id = ${id}`],
+  ['leave payment', (sql, id) => sql`update migration.source_documents set payload = jsonb_set(payload, '{phase}', '"active"'::jsonb) where legacy_sanity_id = ${id}`],
+  ['change revision', (sql, id) => sql`update migration.source_documents set source_revision = 'unlocked' where legacy_sanity_id = ${id}`],
+  ['change hash', (sql, id) => sql`update migration.source_documents set source_hash = ${'b'.repeat(64)} where legacy_sanity_id = ${id}`],
+  ['change id', (sql, id) => sql`update migration.source_documents set legacy_sanity_id = ${`${id}.changed`} where legacy_sanity_id = ${id}`],
+  ['delete', (sql, id) => sql`delete from migration.source_documents where legacy_sanity_id = ${id}`],
+  ['use a shared lock', (sql, id) => sql`update migration.source_documents set payload = jsonb_set(payload, '{phase}', '"payment"'::jsonb) where legacy_sanity_id = ${id}`, true],
+]) {
+  test(`a payment hold document cannot ${name} without the exclusive commerce lock`, async () => {
+    const { payload } = await startCheckoutBeforeExpiry();
+    const id = payload.slotHoldId;
+    const snapshot = async () => (await fixture.database.sql`
+      select to_jsonb(source) as row from migration.source_documents source where legacy_sanity_id = ${id}`)[0]?.row;
+    const before = await snapshot();
+    assert.ok(before);
+    try {
+      await assert.rejects(fixture.database.sql.begin(async sql => {
+        if (shared) await sql`select pg_catalog.pg_advisory_xact_lock_shared(pg_catalog.hashtextextended('cms-reference-integrity', 0))`;
+        await change(sql, id);
+        throw new Error('unlocked mutation succeeded');
+      }), documentLockError);
+    } finally {
+      assert.deepEqual(await snapshot(), before);
+    }
+  });
+}
+
+test('the exclusive commerce lock permits deleting a payment hold document', async () => {
+  const { payload } = await startCheckoutBeforeExpiry();
+  const stop = new Error('rollback fixture transaction');
+  await assert.rejects(fixture.database.sql.begin(async sql => {
+    await sql`select pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('cms-reference-integrity', 0))`;
+    const deleted = await sql`delete from migration.source_documents where legacy_sanity_id = ${payload.slotHoldId} returning legacy_sanity_id`;
+    assert.equal(deleted.length, 1);
+    throw stop;
+  }), error => error === stop);
 });
