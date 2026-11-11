@@ -170,6 +170,18 @@ for (const [label, expiry] of [
   });
 }
 
+test('a payment hold expiry is checked against the current time in a long transaction', async () => {
+  await withCommerceLock(async sql => {
+    await sql`select pg_sleep(2)`;
+    await assert.rejects(sql.savepoint(scoped => scoped`insert into migration.source_documents
+      (legacy_sanity_id, document_type, source_hash, payload)
+      values ('slotHold.fixture.transaction-expiry', 'slotHold', ${'a'.repeat(64)},
+        jsonb_build_object('_id', 'slotHold.fixture.transaction-expiry', '_type', 'slotHold',
+          'phase', 'payment', 'expiresAt', now() + interval '10 minutes'))`),
+    error => error.code === '23514' && freshExpiryError.test(error.message));
+  });
+});
+
 test('a new payment hold with a fresh expiry is accepted under the commerce lock', async () => {
   await withCommerceLock(async sql => {
     const id = 'slotHold.fixture.fresh-accepted';
