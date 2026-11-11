@@ -63,7 +63,7 @@ const recordId='paymentRecord.fixture',bookingId='booking.fixture';
 const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});return{promise,resolve};};
 const row=async id=>(await sql`select payload,source_revision,tombstoned from migration.source_documents where legacy_sanity_id=${id}`)[0];
 const record=async()=> (await row(recordId))?.payload;
-const removeRevision=async(id,state)=>{await sql`update migration.source_documents set payload=case when ${state}='null' then jsonb_set(payload,'{_rev}','null'::jsonb) else payload-'_rev' end,source_revision=null where legacy_sanity_id=${id}`;};
+const removeRevision=async(id,state)=>{await sql.begin(async tx=>{await tx`select pg_advisory_xact_lock(hashtextextended('cms-reference-integrity', 0))`;await tx`update migration.source_documents set payload=case when ${state}='null' then jsonb_set(payload,'{_rev}','null'::jsonb) else payload-'_rev' end,source_revision=null where legacy_sanity_id=${id}`;});};
 const snapshot=async({receipts=false}={})=>{
   const source=await sql`select legacy_sanity_id,payload,source_revision,tombstoned from migration.source_documents where (${receipts} or document_type<>'paymentWebhookReceipt') order by legacy_sanity_id`;
   const tables={};for(const name of ['payment_records','bookings','refunds','payment_events','payment_start_claims','payment_proof_claims','payment_upgrade_locks','slot_holds','slot_claims','coupons','coupon_redemptions','referral_ledger'])tables[name]=await sql.unsafe(`select to_jsonb(t) as row from commerce.${name} t order by to_jsonb(t)::text`);
@@ -77,6 +77,7 @@ const reset=async()=>{
   if(!process.argv.includes('--fix-c-rate-before'))globalThis.__rooRateLimitBuckets?.clear();
   Date.now=originalNow;fixture.setRequestHook(null);providerHook=null;razorpayRefunds=[];scenarioNumber++;providerRequests=[];emailFailure=false;verificationStatus=200;verificationDisconnect=false;
   await sql.begin(async tx=>{
+    await tx`select pg_advisory_xact_lock(hashtextextended('cms-reference-integrity', 0))`;
     await tx`delete from commerce.coupon_redemptions`;
     await tx`delete from commerce.slot_claims`;
     await tx`delete from commerce.booking_slots`;
@@ -2068,9 +2069,9 @@ try{
   });
   for(const revisionState of ['absent','null'])await run(`missing-release-hold-authorizing-revision${revisionState==='null'?'-null':''}`,async()=>{
     const r=await seed('paypal','started',{record:{bookingId:'',holdSnapshot:{slotHoldId:'slotHold.fixture',slotHoldExpiresAt:new Date(originalNow()-1000).toISOString()}}});paypalOrder.status='CREATED';paypalOrder.purchase_units[0].payments={captures:[]};
-    await commerce.create({_id:'slotHold.fixture',_type:'slotHold',backendOwner:'supabase',cutoverGeneration:0,startTimeUTC:'2099-01-01T10:00:00.000Z',packageTitle:'Vertex Essentials',phase:'holding',paymentRecordId:recordId,paymentProvider:'paypal',holdNonce:'old-release-owner',expiresAt:new Date(originalNow()+30000).toISOString()});await commerce.patch('slotHold.fixture').set({phase:'payment_pending'}).commit();await removeRevision('slotHold.fixture',revisionState);let raced=false,before;
-    fixture.setRequestHook(async(phase,request)=>{if(phase!=='after'||raced||!JSON.stringify(request.response).includes('old-release-owner'))return;raced=true;fixture.setRequestHook(null);await commerce.patch('slotHold.fixture').set({holdNonce:'newer-release-owner',expiresAt:new Date(originalNow()+120000).toISOString()}).commit();before=await snapshot();});
-    Date.now=()=>originalNow()+91000;const result=await requestFlow('cancel',{paymentAccessToken:tokenFor(r)});assert.equal(raced,true);assert.deepEqual(await snapshot(),before);assert.notEqual((await row('slotHold.fixture')).payload.phase,'released');return{httpStatus:result.status,revisionState,newerHoldOwnerRetained:true};
+    await commerce.create({_id:'slotHold.fixture',_type:'slotHold',backendOwner:'supabase',cutoverGeneration:0,startTimeUTC:'2099-01-01T10:00:00.000Z',packageTitle:'Vertex Essentials',phase:'holding',paymentRecordId:recordId,paymentProvider:'paypal',holdNonce:'old-release-owner',expiresAt:new Date(originalNow()+20*60_000).toISOString()});await commerce.patch('slotHold.fixture').set({phase:'payment_pending'}).commit();await removeRevision('slotHold.fixture',revisionState);let raced=false,before;
+    fixture.setRequestHook(async(phase,request)=>{if(phase!=='after'||raced||!JSON.stringify(request.response).includes('old-release-owner'))return;raced=true;fixture.setRequestHook(null);await commerce.patch('slotHold.fixture').set({holdNonce:'newer-release-owner',expiresAt:new Date(originalNow()+22*60_000).toISOString()}).commit();before=await snapshot();});
+    Date.now=()=>originalNow()+21*60_000;const result=await requestFlow('cancel',{paymentAccessToken:tokenFor(r)});assert.equal(raced,true);assert.deepEqual(await snapshot(),before);assert.notEqual((await row('slotHold.fixture')).payload.phase,'released');return{httpStatus:result.status,revisionState,newerHoldOwnerRetained:true};
   });
   for(const target of ['payment','booking'])for(const revisionState of ['absent','null'])await run(`missing-dodo-dispute-${target}-authorizing-revision${revisionState==='null'?'-null':''}`,async()=>{
     await seed('dodo');const id=target==='payment'?recordId:bookingId;await removeRevision(id,revisionState);dodoPayment.disputes=[{amount:'9.99',business_id:'business-fixture',created_at:'2026-01-01T00:00:00.000Z',currency:'USD',dispute_id:'dispute-fixture',dispute_stage:'dispute',dispute_status:'dispute_opened',payment_id:'payment-fixture'}];let raced=false,before;

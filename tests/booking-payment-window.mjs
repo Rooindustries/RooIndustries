@@ -130,6 +130,172 @@ const expiryFunctions = async () => {
   return result.functions;
 };
 
+const documentLockMigration = '20261111010000_require_commerce_lock_for_payment_hold_documents.sql';
+const importHold = (id, phase = 'payment_pending') => ({
+  legacy_sanity_id: id,
+  document_type: 'slotHold',
+  source_hash: 'a'.repeat(64),
+  payload: { _id: id, _type: 'slotHold', phase, startTimeUTC: '2099-01-01T04:30:00.000Z' },
+});
+const documentLockError = /payment hold document requires the cms-reference-integrity commerce lock/i;
+const freshExpiryError = /payment hold must start with a fresh expiry/i;
+
+const withCommerceLock = async run => {
+  const stop = new Error('rollback fixture transaction');
+  await assert.rejects(fixture.database.sql.begin(async sql => {
+    await sql`select pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('cms-reference-integrity', 0))`;
+    await run(sql);
+    throw stop;
+  }), error => error === stop);
+};
+
+const insertHoldDocument = async (sql, id, phase, expiresAt) => {
+  const document = { ...importHold(id, phase).payload, expiresAt };
+  await sql`insert into migration.source_documents (legacy_sanity_id, document_type, source_hash, payload)
+    values (${id}, 'slotHold', ${'a'.repeat(64)}, ${sql.json(document)})`;
+};
+
+for (const [label, expiry] of [
+  ['past', -60],
+  ['five minutes ahead', 5],
+  ['missing', null],
+  ['invalid', 'invalid'],
+]) {
+  test(`a new payment hold with expiry ${label} is refused even under the commerce lock`, async () => {
+    await withCommerceLock(async sql => {
+      const expiresAt = typeof expiry === 'number' ? new RealDate(RealDate.now() + expiry * 60_000).toISOString() : expiry;
+      await assert.rejects(sql.savepoint(scoped => insertHoldDocument(scoped, `slotHold.fixture.fresh-${label}`, 'payment', expiresAt)),
+        error => error.code === '23514' && freshExpiryError.test(error.message));
+    });
+  });
+}
+
+test('a payment hold expiry is checked against the current time in a long transaction', async () => {
+  await withCommerceLock(async sql => {
+    await sql`select pg_sleep(2)`;
+    await assert.rejects(sql.savepoint(scoped => scoped`insert into migration.source_documents
+      (legacy_sanity_id, document_type, source_hash, payload)
+      values ('slotHold.fixture.transaction-expiry', 'slotHold', ${'a'.repeat(64)},
+        jsonb_build_object('_id', 'slotHold.fixture.transaction-expiry', '_type', 'slotHold',
+          'phase', 'payment', 'expiresAt', now() + interval '10 minutes'))`),
+    error => error.code === '23514' && freshExpiryError.test(error.message));
+  });
+});
+
+test('a new payment hold with a fresh expiry is accepted under the commerce lock', async () => {
+  await withCommerceLock(async sql => {
+    const id = 'slotHold.fixture.fresh-accepted';
+    await insertHoldDocument(sql, id, 'payment_pending', new RealDate(RealDate.now() + 20 * 60_000).toISOString());
+    assert.equal((await sql`select 1 from migration.source_documents where legacy_sanity_id = ${id}`).length, 1);
+  });
+});
+
+test('service role can insert a payment hold under the commerce lock', async () => {
+  await withCommerceLock(async sql => {
+    await sql`set local role service_role`;
+    await insertHoldDocument(sql, 'slotHold.fixture.service-role', 'payment',
+      new RealDate(RealDate.now() + 20 * 60_000).toISOString());
+    await sql`reset role`;
+  });
+});
+
+test('moving an active hold to payment with a past expiry is refused under the commerce lock', async () => {
+  await withCommerceLock(async sql => {
+    const id = 'slotHold.fixture.stale-transition';
+    await insertHoldDocument(sql, id, 'active', new RealDate(RealDate.now() - 60 * 60_000).toISOString());
+    await assert.rejects(sql.savepoint(scoped => scoped`update migration.source_documents
+      set payload = jsonb_set(payload, '{phase}', '"payment"'::jsonb) where legacy_sanity_id = ${id}`),
+    error => error.code === '23514' && freshExpiryError.test(error.message));
+  });
+});
+
+test('a late payment hold may be updated only while its expiry stays unchanged', async () => {
+  await withCommerceLock(async sql => {
+    const id = 'slotHold.fixture.late-update';
+    const oldExpiry = new RealDate(RealDate.now() - 60 * 60_000).toISOString();
+    const otherExpiry = new RealDate(RealDate.now() - 30 * 60_000).toISOString();
+    await sql`set local session_replication_role = replica`;
+    await insertHoldDocument(sql, id, 'payment_pending', oldExpiry);
+    await sql`set local session_replication_role = origin`;
+    await assert.rejects(sql.savepoint(scoped => scoped`update migration.source_documents
+      set payload = jsonb_set(payload, '{expiresAt}', to_jsonb(${otherExpiry}::text)) where legacy_sanity_id = ${id}`),
+    error => error.code === '23514' && freshExpiryError.test(error.message));
+    const updated = await sql`update migration.source_documents
+      set payload = jsonb_set(payload, '{paymentRecordId}', '"payment.fixture"'::jsonb)
+      where legacy_sanity_id = ${id} returning payload`;
+    assert.equal(updated[0].payload.expiresAt, oldExpiry);
+    assert.equal(updated[0].payload.paymentRecordId, 'payment.fixture');
+  });
+});
+
+test('a late payment hold may be upserted only while its expiry stays unchanged', async () => {
+  await withCommerceLock(async sql => {
+    const id = 'slotHold.fixture.late-upsert';
+    const expiresAt = new RealDate(RealDate.now() - 60 * 60_000).toISOString();
+    const otherExpiry = new RealDate(RealDate.now() - 30 * 60_000).toISOString();
+    await sql`set local session_replication_role = replica`;
+    await insertHoldDocument(sql, id, 'payment_pending', expiresAt);
+    await sql`set local session_replication_role = origin`;
+    const upsert = (scoped, expiry, nonce) => scoped`insert into migration.source_documents
+      (legacy_sanity_id, document_type, source_hash, payload)
+      values (${id}, 'slotHold', ${'a'.repeat(64)}, ${scoped.json({ ...importHold(id).payload, expiresAt: expiry, holdNonce: nonce })})
+      on conflict (legacy_sanity_id) do update set
+        document_type = excluded.document_type, source_hash = excluded.source_hash,
+        payload = excluded.payload, tombstoned = false
+      returning payload`;
+    const updated = await upsert(sql, expiresAt, 'changed');
+    assert.equal(updated[0].payload.expiresAt, expiresAt);
+    assert.equal(updated[0].payload.holdNonce, 'changed');
+    await assert.rejects(sql.savepoint(scoped => upsert(scoped, otherExpiry, 'rejected')),
+      error => error.code === '23514' && freshExpiryError.test(error.message));
+    const [stored] = await sql`select payload from migration.source_documents where legacy_sanity_id = ${id}`;
+    assert.equal(stored.payload.expiresAt, expiresAt);
+    assert.equal(stored.payload.holdNonce, 'changed');
+  });
+});
+
+test('payment hold documents require the commerce lock on import and update', async () => {
+  const id = 'slotHold.fixture.unlocked-import';
+  const result = await fixture.database.client.rpc('roo_import_commerce_shadow_batch', {
+    p_documents: [importHold(id)],
+  });
+  assert.equal(result.error?.code, '23514');
+  assert.match(result.error.message, documentLockError);
+  assert.equal((await fixture.database.sql`select 1 from migration.source_documents where legacy_sanity_id = ${id}`).length, 0);
+  await fixture.content.create({ _id: 'package.fixture.after-refusal', _type: 'package', title: 'After refusal' });
+  assert.equal((await fixture.content.getDocument('package.fixture.after-refusal')).title, 'After refusal');
+  const hold = await fixture.hold();
+  assert.equal(hold.startTimeUTC, '2099-01-01T04:30:00.000Z');
+  await assert.rejects(fixture.database.sql`update migration.source_documents
+    set payload = jsonb_set(payload, '{phase}', '"payment"'::jsonb)
+    where legacy_sanity_id = ${hold.slotHoldId}`, documentLockError);
+  assert.equal((await holdFor(hold)).phase, 'active');
+});
+
+test('payment document lock rollback restores the guard after accepting the old import', async () => {
+  const id = 'slotHold.fixture.rollback-import';
+  const stop = new Error('rollback fixture transaction');
+  await assert.rejects(fixture.database.sql.begin(async sql => {
+    await sql.unsafe(fs.readFileSync(path.join(process.cwd(), 'supabase/rollbacks', documentLockMigration), 'utf8'));
+    await sql`set local role service_role`;
+    await sql`select public.roo_import_commerce_shadow_batch(${sql.json([importHold(id)])})`;
+    await sql`reset role`;
+    assert.equal((await sql`select 1 from migration.source_documents where legacy_sanity_id = ${id}`).length, 1);
+    await sql.unsafe(migrationText(documentLockMigration));
+    await assert.rejects(sql.savepoint(async scoped => {
+      await scoped`set local role service_role`;
+      await scoped`select public.roo_import_commerce_shadow_batch(${scoped.json([importHold(id)])})`;
+    }), documentLockError);
+    throw stop;
+  }), error => error === stop);
+  assert.equal((await fixture.database.sql`select 1 from migration.source_documents where legacy_sanity_id = ${id}`).length, 0);
+  const result = await fixture.database.client.rpc('roo_import_commerce_shadow_batch', {
+    p_documents: [importHold(id)],
+  });
+  assert.equal(result.error?.code, '23514');
+  assert.match(result.error.message, documentLockError);
+});
+
 test('payment hold rollback restores and reapplies both migrations', async () => {
   const before = await definitionHashes();
   await fixture.database.apply(shadowMigration, rollbackText());
@@ -185,6 +351,18 @@ test('payment hold rollback refuses an in-progress payment without changing defi
   );
   assert.equal(paid.status, 200, JSON.stringify(paid));
   await assertBookedOnHeldSlot(checkout);
+});
+
+test('payment hold payload updates require the commerce lock', async () => {
+  const checkout = await startCheckoutBeforeExpiry();
+  const id = checkout.payload.slotHoldId;
+  const [before] = await fixture.database.sql`select payload from migration.source_documents where legacy_sanity_id = ${id}`;
+  assert.equal(before.payload.phase, 'payment_pending');
+  await assert.rejects(fixture.database.sql`update migration.source_documents
+    set payload = jsonb_set(payload, '{expiresAt}', '"2099-01-01T05:00:00.000Z"'::jsonb)
+    where legacy_sanity_id = ${id}`, documentLockError);
+  const [after] = await fixture.database.sql`select payload from migration.source_documents where legacy_sanity_id = ${id}`;
+  assert.deepEqual(after.payload, before.payload);
 });
 
 test('a payment still processing when the hold runs out keeps the slot and books it once it clears', async () => {
@@ -703,4 +881,40 @@ test('a late processing webhook cannot undo a recorded success on a payment that
   await holdRunsOut(checkout, 25 * 60 * 60_000);
   assert.equal((await cron()).status, 200);
   assert.equal((await holdFor(checkout.payload)).phase, 'payment_pending');
+});
+
+for (const [name, change, shared] of [
+  ['tombstone', (sql, id) => sql`update migration.source_documents set tombstoned = true where legacy_sanity_id = ${id}`],
+  ['leave payment', (sql, id) => sql`update migration.source_documents set payload = jsonb_set(payload, '{phase}', '"active"'::jsonb) where legacy_sanity_id = ${id}`],
+  ['change revision', (sql, id) => sql`update migration.source_documents set source_revision = 'unlocked' where legacy_sanity_id = ${id}`],
+  ['change hash', (sql, id) => sql`update migration.source_documents set source_hash = ${'b'.repeat(64)} where legacy_sanity_id = ${id}`],
+  ['change id', (sql, id) => sql`update migration.source_documents set legacy_sanity_id = ${`${id}.changed`} where legacy_sanity_id = ${id}`],
+  ['delete', (sql, id) => sql`delete from migration.source_documents where legacy_sanity_id = ${id}`],
+  ['use a shared lock', (sql, id) => sql`update migration.source_documents set payload = jsonb_set(payload, '{phase}', '"payment"'::jsonb) where legacy_sanity_id = ${id}`, true],
+]) {
+  test(`a payment hold document cannot ${name} without the exclusive commerce lock`, async () => {
+    const { payload } = await startCheckoutBeforeExpiry();
+    const id = payload.slotHoldId;
+    const snapshot = async () => (await fixture.database.sql`
+      select to_jsonb(source) as row from migration.source_documents source where legacy_sanity_id = ${id}`)[0]?.row;
+    const before = await snapshot();
+    assert.ok(before);
+    try {
+      await assert.rejects(fixture.database.sql.begin(async sql => {
+        if (shared) await sql`select pg_catalog.pg_advisory_xact_lock_shared(pg_catalog.hashtextextended('cms-reference-integrity', 0))`;
+        await change(sql, id);
+        throw new Error('unlocked mutation succeeded');
+      }), documentLockError);
+    } finally {
+      assert.deepEqual(await snapshot(), before);
+    }
+  });
+}
+
+test('the exclusive commerce lock permits deleting a payment hold document', async () => {
+  const { payload } = await startCheckoutBeforeExpiry();
+  await withCommerceLock(async sql => {
+    const deleted = await sql`delete from migration.source_documents where legacy_sanity_id = ${payload.slotHoldId} returning legacy_sanity_id`;
+    assert.equal(deleted.length, 1);
+  });
 });
