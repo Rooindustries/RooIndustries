@@ -9,6 +9,7 @@ set search_path = ''
 as $$
 declare
   v_key bigint := pg_catalog.hashtextextended('cms-reference-integrity', 0);
+  v_was_payment_hold boolean := false;
 begin
   if tg_op = 'UPDATE'
     and (to_jsonb(old) - 'operational_imported') = (to_jsonb(new) - 'operational_imported') then
@@ -29,6 +30,17 @@ begin
   end if;
   if tg_op = 'DELETE' then
     return old;
+  end if;
+  if tg_op = 'UPDATE' then
+    v_was_payment_hold := coalesce(old.document_type = 'slotHold' and not old.tombstoned
+      and lower(coalesce(old.payload->>'phase', 'active')) in ('payment', 'payment_pending'), false);
+  end if;
+  if new.document_type = 'slotHold' and not new.tombstoned
+    and lower(coalesce(new.payload->>'phase', 'active')) in ('payment', 'payment_pending')
+    and (not v_was_payment_hold or old.payload->>'expiresAt' is distinct from new.payload->>'expiresAt')
+    and (migration.try_timestamptz(new.payload->>'expiresAt') >= now() + interval '10 minutes') is not true then
+    raise exception 'payment hold must start with a fresh expiry at least 10 minutes ahead'
+      using errcode = '23514';
   end if;
   return new;
 end;
