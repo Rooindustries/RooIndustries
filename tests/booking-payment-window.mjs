@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { after, before, beforeEach, test } from 'node:test';
 import { createBookingContactFixture } from './fixtures/booking-contact.mjs';
 
@@ -96,14 +98,104 @@ const assertBookedOnHeldSlot = async ({ payload, record }) => {
   return booking;
 };
 
+const holdMigration = '20261102000000_keep_payment_holds_until_resolved.sql';
+const shadowMigration = '20261111000000_keep_payment_hold_claims_in_shadow_refresh.sql';
+const migrationText = name => fs.readFileSync(path.join(process.cwd(), 'supabase/migrations', name), 'utf8');
+const rollbackText = () => fs.readFileSync(path.join(process.cwd(), 'supabase/rollbacks', shadowMigration), 'utf8');
+const originalDefinitions = {
+  'migration.reconcile_slot_claims_for_times': 'b7c6c85622ee8eabfff784c8e4805b88',
+  'migration.assert_slot_claim_integrity': 'd3bc74fa923444bbfda133ad0bcd32e0',
+  'public.roo_fetch_commerce_availability': '1abf74171cbffe29e8a81aec8b8da5cb',
+  'public.roo_cleanup_expired_supabase_holds': '1efbfaa0bc2294f1904484a7b3e318b4',
+  'public.roo_project_operational_shadow': '39c69cc7898c12b1729e58bb25c1a8d6',
+  'public.roo_cleanup_operational_shadow': 'fb8b81cf126eadb7f042f488a2286e39',
+  'migration.project_commerce_document_ids_unserialized': '5bba516f0d0e27ebb094410023a75aca',
+};
+const definitionHashes = async () => {
+  const rows = await fixture.database.sql`
+    select n.nspname || '.' || p.proname as name, md5(pg_get_functiondef(p.oid)) as hash
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname || '.' || p.proname = any(${Object.keys(originalDefinitions)})`;
+  assert.equal(rows.length, 7);
+  return Object.fromEntries(rows.map(row => [row.name, row.hash]));
+};
+const expiryFunctions = async () => {
+  const pattern = "phase in \\('active', 'payment'\\)\\s+and hold\\.expires_at";
+  const [result] = await fixture.database.sql`
+    select array_agg(n.nspname || '.' || p.proname order by n.nspname, p.proname) as functions
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where p.prokind = 'f'
+      and n.nspname not in ('pg_catalog', 'information_schema')
+      and pg_get_functiondef(p.oid) ~ ${pattern}`;
+  return result.functions;
+};
+
+test('payment hold rollback restores and reapplies both migrations', async () => {
+  const before = await definitionHashes();
+  await fixture.database.apply(shadowMigration, rollbackText());
+  try {
+    assert.deepEqual(await definitionHashes(), originalDefinitions);
+    assert.deepEqual(await expiryFunctions(), [
+      'migration.assert_slot_claim_integrity',
+      'migration.project_commerce_document_ids_unserialized',
+      'migration.reconcile_slot_claims_for_times',
+      'public.roo_cleanup_expired_supabase_holds',
+      'public.roo_cleanup_operational_shadow',
+      'public.roo_project_operational_shadow',
+    ]);
+    await fixture.content.create({ _id: 'package.fixture.rollback', _type: 'package', title: 'Rollback' });
+    assert.equal((await fixture.content.getDocument('package.fixture.rollback')).title, 'Rollback');
+  } finally {
+    await fixture.database.apply(shadowMigration, `${migrationText(holdMigration)}\n${migrationText(shadowMigration)}`);
+  }
+  assert.deepEqual(await definitionHashes(), before);
+  assert.equal(await expiryFunctions(), null);
+});
+
+test('payment hold rollback refuses an in-progress payment without changing definitions', async () => {
+  const checkout = await startCheckoutBeforeExpiry();
+  assert.equal((await holdFor(checkout.payload)).phase, 'payment_pending');
+  const before = await definitionHashes();
+  const refused = async (holds, documents) => {
+    await assert.rejects(fixture.database.apply(shadowMigration, rollbackText()),
+      new RegExp(`payment holds are present \\(slot holds: ${holds}, source documents: ${documents}\\); fix forward`, 'i'));
+    assert.deepEqual(await definitionHashes(), before);
+  };
+  const id = checkout.payload.slotHoldId;
+  const [source] = await fixture.database.sql`select payload from migration.source_documents where legacy_sanity_id = ${id}`;
+  const setState = async (document, phase) => fixture.database.sql.begin(async sql => {
+    await sql`set local session_replication_role = replica`;
+    await sql`update migration.source_documents set payload = ${sql.json(document)} where legacy_sanity_id = ${id}`;
+    await sql`update commerce.slot_holds set phase = ${phase} where legacy_sanity_id = ${id}`;
+  });
+  await refused(1, 1);
+  try {
+    await setState({ ...source.payload, phase: 'active' }, 'payment');
+    await refused(1, 0);
+    await setState(source.payload, 'active');
+    await refused(0, 1);
+    const { expiresAt: _, ...withoutExpiry } = source.payload;
+    await setState(withoutExpiry, 'active');
+    await refused(0, 1);
+  } finally {
+    await setState(source.payload, 'payment');
+  }
+  const paid = await fixture.dodoWebhook(
+    `payment_${checkout.record.providerOrderId}`, 'payment.succeeded', `rollback_${checkout.record._id}`,
+  );
+  assert.equal(paid.status, 200, JSON.stringify(paid));
+  await assertBookedOnHeldSlot(checkout);
+});
+
 test('a payment still processing when the hold runs out keeps the slot and books it once it clears', async () => {
   fixture.setPaymentAmountOverrides({ status: 'processing' });
   const checkout = await startCheckoutBeforeExpiry();
   const submitted = await cron();
   assert.equal(submitted.status, 200, JSON.stringify(submitted));
-  await holdRunsOut(checkout);
+  await holdRunsOut(checkout, 3_600_000);
   const expired = await cron();
   assert.equal(expired.status, 200, JSON.stringify(expired));
+  await fixture.content.create({ _id: 'package.fixture.shadow-refresh-processing', _type: 'package', title: 'Processing' });
   const held = await holdFor(checkout.payload);
   assert.equal(held.phase, 'payment_pending');
   assert.equal(held.paymentRecordId, checkout.record._id);
@@ -344,6 +436,7 @@ test('an unreachable checkout with no payment seen frees its slot a day after th
   assert.equal((await cron()).status, 200);
   assert.equal((await holdFor(checkout.payload)).phase, 'expired');
   assert.equal(await isOffered(checkout.payload), true);
+  await fixture.content.create({ _id: 'package.fixture.shadow-refresh-unpaid', _type: 'package', title: 'Unpaid' });
   assert.equal((await secondVisitor(checkout.payload)).status, 200);
 });
 
@@ -355,9 +448,21 @@ test('a checkout the cron can no longer reach keeps its slot when Dodo says the 
   });
   await holdRunsOut(checkout, 25 * 60 * 60_000);
   assert.equal((await cron()).status, 200);
+  await fixture.content.create({ _id: 'package.fixture.shadow-refresh-paid', _type: 'package', title: 'Paid' });
   assert.equal((await holdFor(checkout.payload)).phase, 'payment_pending');
   assert.equal(await isOffered(checkout.payload), false);
   assert.equal((await secondVisitor(checkout.payload)).status, 409);
+});
+
+test('payment holds are not tied to the original hold expiry', async () => {
+  const pattern = "phase in \\('active', 'payment'\\)\\s+and hold\\.expires_at";
+  const [result] = await fixture.database.sql`
+    select string_agg(oid::regprocedure::text, ',') as functions
+    from pg_proc
+    where prokind = 'f'
+      and pronamespace::regnamespace::text not in ('pg_catalog', 'information_schema')
+      and pg_get_functiondef(oid) ~ ${pattern}`;
+  assert.equal(result.functions, null);
 });
 
 test('a verified payment refunded before booking frees its slot a day after the hold ran out', async () => {
