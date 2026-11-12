@@ -15,27 +15,18 @@ test.afterEach(async ({ page, flow }, testInfo) => {
 const hold = (page) => page.evaluate(() => JSON.parse(sessionStorage.getItem("my_slot_hold")));
 const failureTypes = [429, 503, "non-json", "unknown", "network", "timeout"];
 
-async function expectPaymentSupportWarning(page) {
+async function expectNoPaymentWarning(page) {
   const payment = page.locator(".booking-payment");
-  const warning = payment.getByText(/^Refunds will not be issued/);
   const method = payment.getByRole("heading", { name: "Payment Method", exact: true });
-  await expect(warning).toHaveCount(1);
-  await expect(warning).toContainText("unsupported/custom parts");
-  await warning.scrollIntoViewIfNeeded();
-  await expect.poll(() => warning.evaluate(node => {
-    const box = node.getBoundingClientRect();
-    const scale = box.width / node.offsetWidth;
-    return {
-      onTop: node.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)),
-      readable: parseFloat(getComputedStyle(node).fontSize) * scale >= 10,
-      fits: box.left >= 0 && box.right <= window.innerWidth,
-    };
-  })).toEqual({ onTop: true, readable: true, fits: true });
-  const warningBox = await warning.boundingBox();
-  const methodBox = await method.boundingBox();
-  expect(warningBox.y + warningBox.height).toBeLessThanOrEqual(methodBox.y);
-  await expect(warning).toHaveClass(/border-warning-border/);
-  await expect(warning).toHaveClass(/bg-surface-card/);
+  await expect(method).toBeVisible();
+  await expect(page.getByText(/Refunds will not be issued/)).toHaveCount(0);
+  await expect(page.getByText(/unsupported\/custom parts/)).toHaveCount(0);
+  await expect.poll(async () => {
+    const methodBox = await method.boundingBox();
+    const boxes = await payment.locator(".border-warning-border:visible").all();
+    const bounds = await Promise.all(boxes.map(box => box.boundingBox()));
+    return bounds.filter(box => box && box.y + box.height <= methodBox.y).length;
+  }).toBe(0);
 }
 
 for (const viewport of [
@@ -47,21 +38,21 @@ for (const viewport of [
     test.use({ viewport });
 
     for (const route of ["/upgrade-xoc", "/upgrade/max"]) {
-      test(`upgrade from ${route} keeps the warning above payment choices`, async ({ page, flow }, testInfo) => {
+      test(`upgrade from ${route} shows no refund warning on the payment page`, async ({ page, flow }, testInfo) => {
         await flow.upgrade(route);
         await page.getByRole("button", { name: "Check eligibility", exact: true }).click();
         await page.getByRole("button", { name: "Proceed to Payment", exact: true }).click();
         await expect(page).toHaveURL(/\/payment$/);
         await expect(page.getByRole("heading", { name: "Payment Method", exact: true })).toBeVisible();
-        await expectPaymentSupportWarning(page);
+        await expectNoPaymentWarning(page);
         await page.screenshot({ path: testInfo.outputPath("payment.png"), animations: "disabled" });
         await page.reload();
-        await expectPaymentSupportWarning(page);
+        await expectNoPaymentWarning(page);
         expect(flow.state.calls.filter(({ path }) => path === "/api/payment/start")).toEqual([]);
       });
     }
 
-    test("a new Max booking also shows the warning at payment", async ({ page, flow }) => {
+    test("a new Max booking shows no refund warning on the payment page", async ({ page, flow }) => {
       await page.goto("/packages");
       await page.locator(".ri-package-card", { hasText: "Performance Vertex Max" })
         .getByRole("link", { name: "Book Now" }).click();
@@ -71,10 +62,28 @@ for (const viewport of [
       await flow.details();
       await page.getByRole("button", { name: "Review before payment", exact: true }).click();
       await flow.payment();
-      await expectPaymentSupportWarning(page);
+      await expectNoPaymentWarning(page);
     });
 
-    test("a non-Max payment has no support warning", async ({ page, flow }) => {
+    test("a new Max booking shows no refund warning after Back and Forward", async ({ page, flow }) => {
+      await page.goto("/packages");
+      await page.locator(".ri-package-card", { hasText: "Performance Vertex Max" })
+        .getByRole("link", { name: "Book Now" }).click();
+      await page.getByRole("button", { name: /^Earliest available:/ }).click();
+      await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+      await page.getByRole("button", { name: "Next", exact: true }).last().click();
+      await flow.details();
+      await page.getByRole("button", { name: "Review before payment", exact: true }).click();
+      await flow.payment();
+      await page.goBack();
+      await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
+      await expect(page.getByText(/Refunds will not be issued/)).toHaveCount(0);
+      await expect(page.getByText(/unsupported\/custom parts/)).toHaveCount(0);
+      await page.goForward();
+      await expectNoPaymentWarning(page);
+    });
+
+    test("a non-Max payment has no refund warning", async ({ page, flow }) => {
       await flow.review();
       await flow.payment();
       await expect(page.locator(".booking-payment").getByText(/^Refunds will not be issued/)).toHaveCount(0);

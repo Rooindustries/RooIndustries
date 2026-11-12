@@ -194,42 +194,53 @@ const delayLaterChunks = (page) => page.route("**/_next/static/chunks/**", async
   await route.fallback();
 });
 
-const maxWarning = (page) => page.locator('[role="dialog"].ri-booking').getByText(/^Refunds will not be issued/);
-
-async function expectReadableOnTop(warning) {
-  await expect(warning).toBeVisible();
-  await warning.scrollIntoViewIfNeeded();
-  await expect.poll(() => warning.evaluate(node => {
-    const box = node.getBoundingClientRect();
-    const scale = box.width / node.offsetWidth;
-    return {
-      onTop: node.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)),
-      readable: parseFloat(getComputedStyle(node).fontSize) * scale >= 10,
-    };
-  })).toEqual({ onTop: true, readable: true });
+async function expectNoDialogWarning(page) {
+  const dialog = page.locator('[role="dialog"].ri-booking');
+  await expect(dialog.getByText(/Refunds will not be issued/)).toHaveCount(0);
+  await expect(dialog.getByText(/unsupported\/custom parts/)).toHaveCount(0);
+  await expect(dialog.locator(".border-warning-border:visible")).toHaveCount(0);
 }
 
-async function expectMaxWarningOnEveryStep(page, flow) {
-  const errors = watchErrors(page);
-  const warning = maxWarning(page);
+async function openMaxSlot(page) {
   await page.goto("/packages");
-  await page.locator(".ri-package-card", { hasText: "Performance Vertex Max" }).getByRole("link", { name: "Book Now" }).click();
+  const link = page.locator(".ri-package-card", { hasText: "Performance Vertex Max" }).getByRole("link", { name: "Book Now" });
+  await link.click();
   await expect(page).toHaveURL(/\/booking$/);
   await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
-  await expectReadableOnTop(warning);
+  await expect(page.locator(".ri-booking-package-title")).toHaveText("Performance Vertex Max");
+}
+
+async function expectMaxSlotGap(page) {
+  const packageCard = page.locator(".ri-booking-package-title").locator("..");
+  const stepCard = page.getByTestId("booking-step-tracker").locator("..");
+  await expect.poll(async () => {
+    const packageBox = await packageCard.boundingBox();
+    const stepBox = await stepCard.boundingBox();
+    const { margin, scale } = await packageCard.evaluate(node => ({
+      margin: parseFloat(getComputedStyle(node).marginBottom),
+      scale: node.getBoundingClientRect().width / node.offsetWidth,
+    }));
+    return Math.abs((stepBox.y - (packageBox.y + packageBox.height)) / scale - margin);
+  }).toBeLessThanOrEqual(1);
+}
+
+async function expectNoMaxWarningOnEveryStep(page, flow) {
+  const errors = watchErrors(page);
+  await openMaxSlot(page);
+  await expectNoDialogWarning(page);
   await page.getByRole("button", { name: /^Earliest available:/ }).click();
   await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
-  await expectReadableOnTop(warning);
+  await expectNoDialogWarning(page);
   await page.getByRole("button", { name: "Next", exact: true }).last().click();
   await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toBeVisible();
-  await expectReadableOnTop(warning);
+  await expectNoDialogWarning(page);
   await flow.details();
   await page.getByRole("button", { name: "Review before payment", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
-  await expectReadableOnTop(warning);
+  await expectNoDialogWarning(page);
   await page.getByRole("button", { name: "Edit details", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toBeVisible();
-  await expectReadableOnTop(warning);
+  await expectNoDialogWarning(page);
   expect(errors).toEqual([]);
 }
 
@@ -476,9 +487,27 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       expect(errors).toEqual([]);
     });
 
-    test("the Max package refund warning stays readable inside the booking dialog on every step", async ({ page, flow }) => {
-      await expectMaxWarningOnEveryStep(page, flow);
+    test("the Max booking dialog shows no refund warning on any step", async ({ page, flow }) => {
+      await expectNoMaxWarningOnEveryStep(page, flow);
     });
+
+    test("the Max slot step closes the space left by the refund warning", async ({ page, flow }) => {
+      await openMaxSlot(page);
+      await expectMaxSlotGap(page);
+    });
+
+    if (viewport.width === 1440) {
+      test("a second tab shows no refund warning or extra gap for Max", async ({ page, context, flow }) => {
+        await openMaxSlot(page);
+        const second = await context.newPage();
+        const errors = watchErrors(second);
+        await openMaxSlot(second);
+        await expectNoDialogWarning(second);
+        await expectMaxSlotGap(second);
+        expect(errors).toEqual([]);
+        await second.close();
+      });
+    }
 
     test("other packages show no Max refund warning", async ({ page, flow }) => {
       await flow.booking();
@@ -606,7 +635,12 @@ test("the booking form skips its fade only on the direct load and fades on Back 
 test.describe("360px", () => {
   test.use({ viewport: { width: 360, height: 780 } });
 
-  test("the Max package refund warning stays readable inside the booking dialog on every step", async ({ page, flow }) => {
-    await expectMaxWarningOnEveryStep(page, flow);
+  test("the Max booking dialog shows no refund warning on any step", async ({ page, flow }) => {
+    await expectNoMaxWarningOnEveryStep(page, flow);
+  });
+
+  test("the Max slot step closes the space left by the refund warning", async ({ page, flow }) => {
+    await openMaxSlot(page);
+    await expectMaxSlotGap(page);
   });
 });
