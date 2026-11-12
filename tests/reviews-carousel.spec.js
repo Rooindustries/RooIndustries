@@ -294,6 +294,12 @@ const visibleReviews = (region) => region.evaluate((el) => {
     .sort((a, b) => a.left - b.left);
 });
 
+const CLOCK_START = Date.parse("2026-01-01T00:00:00Z");
+const holdClock = async (page) => {
+  await page.clock.install({ time: CLOCK_START });
+  await page.clock.pauseAt(CLOCK_START + 1000);
+};
+
 const runInfinite = async (page, region, direction, name) => {
   const result = await wheelAcross(page, region, direction, 5);
   writeEvidence(name, result);
@@ -359,7 +365,7 @@ test.describe("review carousel", () => {
   test.skip(REVIEW_COUNT === 2, "Runs against the default seven-review fixture.");
 
   test("rotation-keeps-place", async ({ page }) => {
-    await page.clock.install();
+    await holdClock(page);
     const region = await openCarousel(page, { width: 390, height: 844 });
     const atStart = async (id) => {
       const first = (await visibleReviews(region))[0];
@@ -373,7 +379,7 @@ test.describe("review carousel", () => {
   });
 
   test("rotation-keeps-place-mid-list", async ({ page }) => {
-    await page.clock.install();
+    await holdClock(page);
     const region = await openCarousel(page, { width: 390, height: 844 });
     const box = await region.boundingBox();
     await page.mouse.move(box.x + 180, box.y + 100);
@@ -387,7 +393,7 @@ test.describe("review carousel", () => {
   });
 
   test("rotation-after-scroll-back", async ({ page }) => {
-    await page.clock.install();
+    await holdClock(page);
     const region = await openCarousel(page, { width: 390, height: 844 });
     const box = await region.boundingBox();
     const start = await region.evaluate((el) => el.scrollLeft);
@@ -427,7 +433,7 @@ test.describe("review carousel", () => {
   });
 
   test("resize-mid-arrow", async ({ page }) => {
-    await page.clock.install();
+    await holdClock(page);
     const region = await openCarousel(page, { width: 1024, height: 900 });
     const before = (await visibleReviews(region))[0];
     const start = await probe(page, "state");
@@ -496,7 +502,7 @@ test.describe("review carousel", () => {
   });
 
   test("big-widen-keeps-place", async ({ page }) => {
-    await page.clock.install();
+    await holdClock(page);
     const region = await openCarousel(page, { width: 1024, height: 900 });
     const box = await region.boundingBox();
     await page.mouse.move(box.x + 400, box.y + 100);
