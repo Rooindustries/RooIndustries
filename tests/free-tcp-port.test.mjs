@@ -7,6 +7,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { test } from "node:test";
+import { request } from "@playwright/test";
 import { freeTcpPort, freeTcpPorts, listenOnPort, passHeldTcpPorts, releaseTcpPorts, reserveTcpPorts } from "../scripts/lib/free-tcp-port.mjs";
 import { createToolingContentFixture } from "./fixtures/tooling-content.mjs";
 
@@ -115,6 +116,28 @@ test("a server takes over a held port without it ever being free", async () => {
   await competitor;
   await new Promise((resolve) => server.close(resolve));
   assert.equal(stolen, false);
+});
+
+test("fixture connections stay open across the default keep-alive timeout", async () => {
+  const defaults = http.createServer();
+  const pause = defaults.keepAliveTimeout + (defaults.keepAliveTimeoutBuffer ?? 0);
+  const server = http.createServer((request, response) => response.end("[]"));
+  const contexts = [];
+  try {
+    await listenOnPort(server, host, 0);
+    const url = `http://${host}:${server.address().port}/`;
+    contexts.push(...await Promise.all(Array.from({ length: 50 }, () => request.newContext())));
+    const results = await Promise.allSettled(contexts.map(async (context) => {
+      await context.get(url);
+      await new Promise((resolve) => setTimeout(resolve, pause));
+      await context.get(url);
+    }));
+    const errors = results.filter((result) => result.status === "rejected").map((result) => String(result.reason));
+    assert.deepEqual(errors, [], errors.join("\n"));
+  } finally {
+    await Promise.all(contexts.map((context) => context.dispose()));
+    if (server.listening) await new Promise((resolve) => server.close(resolve));
+  }
 });
 
 test("a held port passes to a child process without ever being free", async () => {

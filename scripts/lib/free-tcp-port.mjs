@@ -75,7 +75,12 @@ export const portFromEnv = (name, env = process.env) => {
   return port;
 };
 
+const keepIdleConnections = (server) => {
+  if ("keepAliveTimeout" in server) server.keepAliveTimeout = 0;
+};
+
 export const listenOnPort = async (server, host, port) => {
+  keepIdleConnections(server);
   const holder = held.get(heldKey(host, port));
   held.delete(heldKey(host, port));
   server.listen(...(holder ? [holder] : [port, host]));
