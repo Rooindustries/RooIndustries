@@ -358,6 +358,61 @@ test.describe("review card size", () => {
 test.describe("review carousel", () => {
   test.skip(REVIEW_COUNT === 2, "Runs against the default seven-review fixture.");
 
+  test("rotation-keeps-place", async ({ page }) => {
+    const region = await openCarousel(page, { width: 390, height: 844 });
+    const atStart = async (id) => {
+      const first = (await visibleReviews(region))[0];
+      return first?.id === id && Math.abs(first.left - first.clear - 16) <= 3;
+    };
+    await expect.poll(() => atStart(LEAD_ORDER[0])).toBe(true);
+    await page.setViewportSize({ width: 844, height: 390 });
+    await expect.poll(() => atStart(LEAD_ORDER[0])).toBe(true);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect.poll(() => atStart(LEAD_ORDER[0])).toBe(true);
+  });
+
+  test("rotation-keeps-place-mid-list", async ({ page }) => {
+    const region = await openCarousel(page, { width: 390, height: 844 });
+    const box = await region.boundingBox();
+    await page.mouse.move(box.x + 180, box.y + 100);
+    await page.mouse.wheel(672, 0);
+    await expect.poll(async () => (await visibleReviews(region))[0]?.id).toBe(LEAD_ORDER[2]);
+    await page.setViewportSize({ width: 844, height: 390 });
+    await expect.poll(async () => {
+      const first = (await visibleReviews(region))[0];
+      return first?.id === LEAD_ORDER[2] && Math.abs(first.left - first.clear - 16) <= 3;
+    }).toBe(true);
+  });
+
+  test("resize-mid-drag", async ({ page }) => {
+    const region = await openCarousel(page, { width: 390, height: 844 });
+    const box = await region.boundingBox();
+    const x = box.x + 250;
+    const y = box.y + 100;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x - 100, y);
+    await page.setViewportSize({ width: 844, height: 390 });
+    await expect.poll(async () => (await visibleReviews(region))[0]?.id).toBe(LEAD_ORDER[0]);
+    const before = (await visibleReviews(region))[0];
+    await page.mouse.move(x - 101, y);
+    const after = (await visibleReviews(region))[0];
+    await page.mouse.up();
+    expect(after.id).toBe(before.id);
+    expect(after.left - before.left).toBeGreaterThanOrEqual(-2);
+    expect(after.left - before.left).toBeLessThanOrEqual(0);
+  });
+
+  test("resize-mid-arrow", async ({ page }) => {
+    const region = await openCarousel(page, { width: 1024, height: 900 });
+    await page.getByRole("button", { name: "Scroll reviews right" }).click();
+    await page.setViewportSize({ width: 600, height: 900 });
+    await page.waitForTimeout(700);
+    const first = (await visibleReviews(region))[0];
+    expect(first.id).toBe(LEAD_ORDER[1]);
+    expect(Math.abs(first.left - first.clear - 16)).toBeLessThanOrEqual(12);
+  });
+
   test.describe("recorded", () => {
     let page;
     let recordedContext;
@@ -770,6 +825,24 @@ test.describe("review carousel", () => {
 
 test.describe("review carousel with two reviews", () => {
   test.skip(REVIEW_COUNT !== 2, "Run with TOOLING_REVIEW_COUNT=2.");
+
+  test("big-widen-keeps-place", async ({ page }) => {
+    const region = await openCarousel(page, { width: 1024, height: 900 });
+    const box = await region.boundingBox();
+    await page.mouse.move(box.x + 400, box.y + 100);
+    await page.mouse.wheel(600, 0);
+    await expect.poll(async () => {
+      const state = await probe(page, "state");
+      return state.scrollLeft > state.scrollWidth - 2560 + 100;
+    }).toBe(true);
+    await region.focus();
+    const before = (await visibleReviews(region))[0];
+    await page.setViewportSize({ width: 2560, height: 900 });
+    await expect.poll(async () => {
+      const first = (await visibleReviews(region))[0];
+      return first?.id === before.id && Math.abs((first.left - first.clear) - (before.left - before.clear)) <= 3;
+    }).toBe(true);
+  });
 
   test("two-reviews-fill", async ({ page }) => {
     const region = await openCarousel(page);
