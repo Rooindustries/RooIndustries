@@ -115,7 +115,7 @@ await run('warranty-parity', async () => {
 await run('reviews-rating', async () => {
   await load('/#faq'); await wait(() => doc().querySelector('.ri-reviews-auto-track article'), 'Reviews absent');
   const ratings = [...doc().querySelectorAll('.ri-reviews-auto-track > div:first-child [aria-label$="out of 5 stars"]')].map(n => ({ label: n.getAttribute('aria-label'), filled: (n.textContent.match(/★/g) || []).length, text: n.textContent }));
-  assert(ratings.length === 4 && ratings.every((n, i) => n.filled === [1, 3, 5, 5][i]), `Filled stars mismatch: ${JSON.stringify(ratings)}`); return { ratings };
+  assert(ratings.length === 7 && ratings.every((n, i) => n.filled === [4, 5, 5, 3, 5, 1, 5][i]), `Filled stars mismatch: ${JSON.stringify(ratings)}`); return { ratings };
 });
 await run('reviews-pause', async () => {
   await load('/?perfdebug=1#faq'); await wait(() => doc().querySelector('.ri-reviews-auto-track'), 'Reviews absent');

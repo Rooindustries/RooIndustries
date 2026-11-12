@@ -283,6 +283,17 @@ const expectInfinite = (result) => {
   }
 };
 
+const LEAD_ORDER = ["Vulture", "SkinzOW", "Hydro", "Reviewer 1", "Reviewer 6", "Reviewer 0", "Reviewer 4"];
+
+const visibleReviews = (region) => region.evaluate((el) => {
+  const viewport = el.getBoundingClientRect();
+  const clear = Number(/rgba\(0, 0, 0, 0\) ([\d.]+)px/.exec(getComputedStyle(el).maskImage)?.[1] || 0);
+  return [...el.querySelectorAll("[data-review-id]")]
+    .map((card) => ({ id: card.dataset.reviewId, left: card.getBoundingClientRect().left - viewport.left, right: card.getBoundingClientRect().right - viewport.left }))
+    .filter((card) => card.right > clear && card.left < viewport.width - clear)
+    .sort((a, b) => a.left - b.left);
+});
+
 const runInfinite = async (page, region, direction, name) => {
   const result = await wheelAcross(page, region, direction, 5);
   writeEvidence(name, result);
@@ -291,7 +302,7 @@ const runInfinite = async (page, region, direction, name) => {
 };
 
 test.describe("review carousel", () => {
-  test.skip(REVIEW_COUNT === 2, "Runs against the default six-review fixture.");
+  test.skip(REVIEW_COUNT === 2, "Runs against the default seven-review fixture.");
 
   test.describe("recorded", () => {
     let page;
@@ -600,6 +611,17 @@ test.describe("review carousel", () => {
     }, { timeout: 15000 }).toBeGreaterThan(0);
   });
 
+  test("rotation-keeps-lead-creators", async ({ page }) => {
+    const region = await openCarousel(page, { width: 390, height: 844 });
+    await page.setViewportSize({ width: 844, height: 390 });
+    await expect.poll(async () => (await visibleReviews(region)).map((card) => card.id)[0]).toBe("Vulture");
+    const landscape = (await visibleReviews(region)).map((card) => card.id);
+    expect(landscape).toEqual(LEAD_ORDER.slice(0, landscape.length));
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect.poll(async () => (await visibleReviews(region))[0]?.id).toBe("Vulture");
+    expect((await visibleReviews(region))[0].left).toBeLessThanOrEqual(17);
+  });
+
   test("keyboard-focus-drops-fade", async ({ page }) => {
     const region = await openCarousel(page);
     const mask = () => region.evaluate((el) => getComputedStyle(el).maskImage);
@@ -729,31 +751,20 @@ test.describe("review carousel with two reviews", () => {
 });
 
 test.describe("review carousel order", () => {
-  test.skip(REVIEW_COUNT === 2, "Runs against the default six-review fixture.");
-  const expected = ["Vulture", "SkinzOW", "Hydro", "Reviewer 1", "Reviewer 0", "Reviewer 4"];
+  test.skip(REVIEW_COUNT === 2, "Runs against the default seven-review fixture.");
 
   for (const size of [{ width: 360, height: 780 }, { width: 390, height: 844 }, { width: 768, height: 1024 }, { width: 1024, height: 900 }, { width: 1440, height: 900 }]) {
     test(`visible-order-${size.width}`, async ({ page }) => {
       const region = await openCarousel(page, size);
-      const result = await region.evaluate((el) => {
-        const viewport = el.getBoundingClientRect();
-        const mask = getComputedStyle(el).maskImage;
-        const clear = Number(/rgba\(0, 0, 0, 0\) ([\d.]+)px/.exec(mask)?.[1] || 0);
-        return [...el.querySelectorAll("[data-review-id]")]
-          .map((card) => ({ id: card.dataset.reviewId, left: card.getBoundingClientRect().left, right: card.getBoundingClientRect().right }))
-          .filter((card) => card.right > viewport.left + clear && card.left < viewport.right - clear)
-          .sort((a, b) => a.left - b.left)
-          .map((card) => card.id);
-      });
-      console.log(`visible-order-${size.width}: ${JSON.stringify(result)}`);
-      expect(result.length).toBeGreaterThan(0);
-      expect(result).toEqual(expected.slice(0, result.length));
+      const ids = (await visibleReviews(region)).map((card) => card.id);
+      expect(ids.length).toBeGreaterThan(0);
+      expect(ids).toEqual(LEAD_ORDER.slice(0, ids.length));
     });
   }
 });
 
 test.describe("review carousel without JavaScript", () => {
-  test.skip(REVIEW_COUNT === 2, "Runs against the default six-review fixture.");
+  test.skip(REVIEW_COUNT === 2, "Runs against the default seven-review fixture.");
   test.use({ javaScriptEnabled: false });
 
   test("no-js-static", async ({ page, request }) => {
@@ -771,9 +782,9 @@ test.describe("review carousel without JavaScript", () => {
       firstCardText: (await firstCopy.first().innerText()).slice(0, 120),
     };
     writeEvidence("no-js-static", result);
-    expect(result.htmlFirstCopyCards).toBe(6);
-    expect(result.htmlReviewIds).toEqual(["Vulture", "SkinzOW", "Hydro", "Reviewer 1", "Reviewer 0", "Reviewer 4"]);
-    expect(result.renderedFirstCopyCards).toBe(6);
+    expect(result.htmlFirstCopyCards).toBe(7);
+    expect(result.htmlReviewIds).toEqual(LEAD_ORDER);
+    expect(result.renderedFirstCopyCards).toBe(7);
     expect(result.firstCardVisible).toBe(true);
   });
 });
