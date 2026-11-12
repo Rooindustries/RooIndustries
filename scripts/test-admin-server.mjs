@@ -6,7 +6,7 @@ import { registerHooks } from "node:module";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { localOrigin, refuseEnvFiles, validateDistDir } from "./lib/test-target-safety.mjs";
-import { listenOnPort, portFromEnv, releaseTcpPorts, reserveTcpPorts } from "./lib/free-tcp-port.mjs";
+import { listenOnPort, nextTestKeepAliveTimeout, portFromEnv, releaseTcpPorts, reserveTcpPorts } from "./lib/free-tcp-port.mjs";
 import fixturePorts from "../tests/fixtures/fixture-ports.cjs";
 import { lockBuildDirectory } from "./lib/build-lock.mjs";
 import { withNodeOption } from "./lib/node-options.mjs";
@@ -333,6 +333,6 @@ try {
     await execute(["scripts/validate-runtime-env.js"]);
     await execute([next, "build"]);
     await releaseTcpPorts(target.hostname, [port]);
-    await execute([next, "start", "--hostname", target.hostname, "--port", target.port]);
+    await execute([next, "start", "--hostname", target.hostname, "--port", target.port, "--keepAliveTimeout", String(nextTestKeepAliveTimeout)]);
   }
 } finally { await stop(); }
