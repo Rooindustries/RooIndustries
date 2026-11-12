@@ -42,9 +42,9 @@ const updateReviewAnchor = (motion) => {
   }
 };
 
-const readReviewScroll = (viewport, motion) => {
+const readReviewScroll = (viewport, motion, layoutChecked = false) => {
   if (Math.abs(viewport.scrollLeft - motion.written) >= 1) {
-    if (motion.ensureLayout?.()) return motion.position;
+    if (!layoutChecked && motion.ensureLayout?.()) return motion.position;
     motion.position = viewport.scrollLeft;
     motion.written = motion.position;
     updateReviewAnchor(motion);
@@ -300,7 +300,6 @@ function AutoReviewCarousel({ reviews }) {
   const motionRef = useRef({
     groupWidth: 0,
     layoutWidth: 0,
-    layoutGroupWidth: 0,
     reviewCount: 0,
     anchor: 0,
     position: 0,
@@ -323,27 +322,24 @@ function AutoReviewCarousel({ reviews }) {
     const measure = () => {
       const groupWidth = firstGroup.scrollWidth;
       if (!groupWidth) return;
+      motion.reviewCount = reviews.length;
       const neededGroups = Math.max(
         MIN_REVIEW_GROUPS,
         Math.ceil((2 * viewport.clientWidth) / groupWidth) + 2
       );
       if (
         motion.layoutWidth !== viewport.clientWidth ||
-        motion.layoutGroupWidth !== groupWidth ||
-        motion.reviewCount !== reviews.length
+        motion.groupWidth !== groupWidth
       ) {
-        const previousWidth = motion.layoutGroupWidth;
-        const previousCount = motion.reviewCount;
+        const previousWidth = motion.groupWidth;
         const pitch = groupWidth / reviews.length;
         const position = previousWidth ? groupWidth + motion.anchor * pitch : viewport.scrollLeft;
         if (motion.arrow && previousWidth) {
-          const oldPitch = previousWidth / previousCount;
+          const oldPitch = previousWidth / reviews.length;
           motion.arrow.from = groupWidth + ((motion.arrow.from - previousWidth) / oldPitch) * pitch;
           motion.arrow.to = groupWidth + ((motion.arrow.to - previousWidth) / oldPitch) * pitch;
         }
         motion.layoutWidth = viewport.clientWidth;
-        motion.layoutGroupWidth = groupWidth;
-        motion.reviewCount = reviews.length;
         motion.groupWidth = groupWidth;
         commitReviewScroll(viewport, motion, position);
         if (motion.drag) {
@@ -357,8 +353,7 @@ function AutoReviewCarousel({ reviews }) {
     motion.ensureLayout = () => {
       if (
         motion.layoutWidth === viewport.clientWidth &&
-        motion.layoutGroupWidth === firstGroup.scrollWidth &&
-        motion.reviewCount === reviews.length &&
+        motion.groupWidth === firstGroup.scrollWidth &&
         motion.groupWidth
       ) return false;
       measure();
@@ -449,7 +444,7 @@ function AutoReviewCarousel({ reviews }) {
       }
       const { groupWidth } = motion;
       if (!groupWidth) return;
-      const position = readReviewScroll(viewport, motion);
+      const position = readReviewScroll(viewport, motion, true);
       if (position < groupWidth || position >= groupWidth * 2) {
         commitReviewScroll(viewport, motion, position);
       }

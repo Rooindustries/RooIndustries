@@ -359,6 +359,7 @@ test.describe("review carousel", () => {
   test.skip(REVIEW_COUNT === 2, "Runs against the default seven-review fixture.");
 
   test("rotation-keeps-place", async ({ page }) => {
+    await page.clock.install();
     const region = await openCarousel(page, { width: 390, height: 844 });
     const atStart = async (id) => {
       const first = (await visibleReviews(region))[0];
@@ -372,6 +373,7 @@ test.describe("review carousel", () => {
   });
 
   test("rotation-keeps-place-mid-list", async ({ page }) => {
+    await page.clock.install();
     const region = await openCarousel(page, { width: 390, height: 844 });
     const box = await region.boundingBox();
     await page.mouse.move(box.x + 180, box.y + 100);
@@ -385,6 +387,7 @@ test.describe("review carousel", () => {
   });
 
   test("rotation-after-scroll-back", async ({ page }) => {
+    await page.clock.install();
     const region = await openCarousel(page, { width: 390, height: 844 });
     const box = await region.boundingBox();
     const start = await region.evaluate((el) => el.scrollLeft);
@@ -493,18 +496,17 @@ test.describe("review carousel", () => {
   });
 
   test("big-widen-keeps-place", async ({ page }) => {
+    await page.clock.install();
     const region = await openCarousel(page, { width: 1024, height: 900 });
     const box = await region.boundingBox();
     await page.mouse.move(box.x + 400, box.y + 100);
     await page.mouse.wheel(5 * 376 + 80, 0);
     await expect.poll(async () => (await visibleReviews(region))[0]?.id).toBe(LEAD_ORDER[5]);
-    const beforeAt = Date.now();
     const before = (await visibleReviews(region))[0];
     await page.setViewportSize({ width: 3840, height: 900 });
     await expect.poll(async () => {
       const first = (await visibleReviews(region))[0];
-      const drift = 3 + CRUISE * (Date.now() - beforeAt) / 1000;
-      return first?.id === before.id && Math.abs((first.left - first.clear) - (before.left - before.clear)) <= drift;
+      return first?.id === before.id && Math.abs((first.left - first.clear) - (before.left - before.clear)) <= 3;
     }, { timeout: 1000 }).toBe(true);
   });
 
