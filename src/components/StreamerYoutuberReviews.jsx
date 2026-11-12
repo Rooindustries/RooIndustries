@@ -227,7 +227,7 @@ function ReviewCard({ review, groupIndex }) {
         <p className={`shrink-0 ${isCreator ? "ri-review-champagne-text" : "text-ink-secondary"}`}>
           {isCreator ? "Creator review" : "Player review"}
         </p>
-        <p className="min-w-0 text-right text-ink-secondary">{review.game || "PC performance"}</p>
+        <p className="min-w-0 text-ink-secondary">{review.game || "PC performance"}</p>
       </div>
 
       <div className={`mt-3 sm:mt-1 flex min-h-4 flex-wrap items-end gap-x-3 gap-y-1 ${result ? "justify-between" : "justify-end"}`}>
