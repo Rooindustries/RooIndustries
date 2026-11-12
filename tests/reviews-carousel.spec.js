@@ -393,7 +393,11 @@ test.describe("review carousel", () => {
     await page.mouse.down();
     await page.mouse.move(x - 100, y);
     await page.setViewportSize({ width: 844, height: 390 });
-    await expect.poll(async () => (await visibleReviews(region))[0]?.id).toBe(LEAD_ORDER[0]);
+    await expect.poll(async () => {
+      const first = (await visibleReviews(region))[0];
+      const { pitch } = await probe(page, "state");
+      return first?.id === LEAD_ORDER[0] && Math.abs(first.left - first.clear - 16 + (100 / 336) * pitch) <= 2;
+    }).toBe(true);
     const before = (await visibleReviews(region))[0];
     await page.mouse.move(x - 101, y);
     const after = (await visibleReviews(region))[0];
@@ -405,12 +409,35 @@ test.describe("review carousel", () => {
 
   test("resize-mid-arrow", async ({ page }) => {
     const region = await openCarousel(page, { width: 1024, height: 900 });
+    const before = (await visibleReviews(region))[0];
+    const start = await probe(page, "state");
     await page.getByRole("button", { name: "Scroll reviews right" }).click();
+    await page.waitForFunction(({ scrollLeft, pitch }) => {
+      const current = document.querySelector('[role="region"][aria-label="Player reviews"]').scrollLeft - scrollLeft;
+      return current > pitch * 0.1 && current < pitch * 0.9;
+    }, start);
     await page.setViewportSize({ width: 600, height: 900 });
     await page.waitForTimeout(700);
     const first = (await visibleReviews(region))[0];
+    const { pitch } = await probe(page, "state");
     expect(first.id).toBe(LEAD_ORDER[1]);
-    expect(Math.abs(first.left - first.clear - 16)).toBeLessThanOrEqual(12);
+    expect(Math.abs((first.left - first.clear - 16) - (before.left - before.clear - 16) * pitch / start.pitch)).toBeLessThanOrEqual(2);
+  });
+
+  test("big-widen-keeps-place", async ({ page }) => {
+    const region = await openCarousel(page, { width: 1024, height: 900 });
+    const box = await region.boundingBox();
+    await page.mouse.move(box.x + 400, box.y + 100);
+    await page.mouse.wheel(5 * 376 + 80, 0);
+    await expect.poll(async () => (await visibleReviews(region))[0]?.id).toBe(LEAD_ORDER[5]);
+    const beforeAt = Date.now();
+    const before = (await visibleReviews(region))[0];
+    await page.setViewportSize({ width: 3840, height: 900 });
+    await expect.poll(async () => {
+      const first = (await visibleReviews(region))[0];
+      const drift = 3 + CRUISE * (Date.now() - beforeAt) / 1000;
+      return first?.id === before.id && Math.abs((first.left - first.clear) - (before.left - before.clear)) <= drift;
+    }, { timeout: 1000 }).toBe(true);
   });
 
   test.describe("recorded", () => {

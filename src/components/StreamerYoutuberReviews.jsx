@@ -36,13 +36,17 @@ const easeInOut = (progress) =>
   progress < 0.5 ? 2 * progress * progress : 1 - (2 - 2 * progress) ** 2 / 2;
 const easeOut = (progress) => 1 - (1 - progress) ** 3;
 
+const updateReviewAnchor = (motion) => {
+  if (motion.groupWidth) {
+    motion.anchor = (motion.position - motion.groupWidth) / (motion.groupWidth / motion.reviewCount);
+  }
+};
+
 const readReviewScroll = (viewport, motion) => {
-  if (motion.ensureLayout?.()) return motion.position;
   if (Math.abs(viewport.scrollLeft - motion.written) >= 1) {
+    if (motion.ensureLayout?.()) return motion.position;
     motion.position = viewport.scrollLeft;
-    if (motion.groupWidth) {
-      motion.anchor = (motion.position - motion.groupWidth) / (motion.groupWidth / motion.reviewCount);
-    }
+    updateReviewAnchor(motion);
   }
   return motion.position;
 };
@@ -58,7 +62,7 @@ const commitReviewScroll = (viewport, motion, position) => {
     }
   }
   motion.position = position + shift;
-  if (groupWidth) motion.anchor = (motion.position - groupWidth) / (groupWidth / motion.reviewCount);
+  updateReviewAnchor(motion);
   viewport.scrollLeft = motion.position;
   motion.written = viewport.scrollLeft;
 };
@@ -335,11 +339,6 @@ function AutoReviewCarousel({ reviews }) {
       ) {
         const previousWidth = motion.layoutGroupWidth;
         const previousCount = motion.reviewCount;
-        const countChanged = previousCount && previousCount !== reviews.length;
-        if (countChanged) {
-          motion.anchor = 0;
-          motion.arrow = null;
-        }
         const pitch = groupWidth / reviews.length;
         const position = previousWidth ? groupWidth + motion.anchor * pitch : viewport.scrollLeft;
         if (motion.arrow && previousWidth) {
@@ -393,10 +392,9 @@ function AutoReviewCarousel({ reviews }) {
       frameId = 0;
       const elapsed = Math.min(Math.max(time - previousTime, 0), MAX_FRAME_MS);
       previousTime = time;
-      motion.ensureLayout?.();
+      let position = readReviewScroll(viewport, motion);
       const { groupWidth, arrow } = motion;
       if (groupWidth) {
-        let position = readReviewScroll(viewport, motion);
         if (arrow) {
           arrow.startedAt ??= time;
           const progress = Math.min(1, (time - arrow.startedAt) / ARROW_SCROLL_MS);
@@ -447,13 +445,13 @@ function AutoReviewCarousel({ reviews }) {
     visibilityObserver?.observe(viewport);
 
     const onScroll = () => {
-      if (motion.ensureLayout?.()) return;
-      const { groupWidth } = motion;
-      if (!groupWidth) return;
       if (Math.abs(viewport.scrollLeft - motion.written) >= 1) {
+        if (motion.ensureLayout?.()) return;
         motion.interactedAt = performance.now();
         motion.arrow = null;
       }
+      const { groupWidth } = motion;
+      if (!groupWidth) return;
       const position = readReviewScroll(viewport, motion);
       if (position < groupWidth || position >= groupWidth * 2) {
         commitReviewScroll(viewport, motion, position);
@@ -530,8 +528,8 @@ function AutoReviewCarousel({ reviews }) {
     const drag = motionRef.current.drag;
     if (!drag || drag.pointerId !== event.pointerId || !viewport) return;
     motionRef.current.ensureLayout?.();
-    drag.lastX = event.clientX;
     if (!motionRef.current.groupWidth) return;
+    drag.lastX = event.clientX;
     commitReviewScroll(
       viewport,
       motionRef.current,
