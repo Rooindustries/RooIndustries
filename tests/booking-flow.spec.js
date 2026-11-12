@@ -27,6 +27,12 @@ async function expectNoPaymentWarning(page) {
     const bounds = await Promise.all(boxes.map(box => box.boundingBox()));
     return bounds.filter(box => box && box.y + box.height <= methodBox.y).length;
   }).toBe(0);
+  await expect.poll(() => method.evaluate(node => {
+    const card = node.parentElement;
+    const scale = card.getBoundingClientRect().width / card.offsetWidth;
+    const top = card.getBoundingClientRect().top + parseFloat(getComputedStyle(card).paddingTop) * scale;
+    return Math.abs(node.getBoundingClientRect().top - top) / scale;
+  })).toBeLessThanOrEqual(1);
 }
 
 for (const viewport of [
