@@ -7,7 +7,6 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { test } from "node:test";
-import { request } from "@playwright/test";
 import { freeTcpPort, freeTcpPorts, listenOnPort, passHeldTcpPorts, releaseTcpPorts, reserveTcpPorts } from "../scripts/lib/free-tcp-port.mjs";
 import { createToolingContentFixture } from "./fixtures/tooling-content.mjs";
 
@@ -118,24 +117,29 @@ test("a server takes over a held port without it ever being free", async () => {
   assert.equal(stolen, false);
 });
 
-test("fixture connections stay open across the default keep-alive timeout", async () => {
+test("fixture servers keep an idle connection open past the default keep-alive timeout", async () => {
   const defaults = http.createServer();
-  const pause = defaults.keepAliveTimeout + (defaults.keepAliveTimeoutBuffer ?? 0);
+  const idle = defaults.keepAliveTimeout + (defaults.keepAliveTimeoutBuffer ?? 0) + 1000;
   const server = http.createServer((request, response) => response.end("[]"));
-  const contexts = [];
+  const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+  const get = (port) => new Promise((resolve, reject) => {
+    http.get({ host, port, agent }, (response) => {
+      const { socket } = response;
+      response.resume();
+      response.on("end", () => resolve(socket));
+    }).on("error", reject);
+  });
   try {
     await listenOnPort(server, host, 0);
-    const url = `http://${host}:${server.address().port}/`;
-    contexts.push(...await Promise.all(Array.from({ length: 50 }, () => request.newContext())));
-    const results = await Promise.allSettled(contexts.map(async (context) => {
-      await context.get(url);
-      await new Promise((resolve) => setTimeout(resolve, pause));
-      await context.get(url);
-    }));
-    const errors = results.filter((result) => result.status === "rejected").map((result) => String(result.reason));
-    assert.deepEqual(errors, [], errors.join("\n"));
+    const { port } = server.address();
+    const first = await get(port);
+    let closed = false;
+    first.once("close", () => { closed = true; });
+    await new Promise((resolve) => setTimeout(resolve, idle));
+    assert.equal(closed, false);
+    assert.equal(await get(port), first);
   } finally {
-    await Promise.all(contexts.map((context) => context.dispose()));
+    agent.destroy();
     if (server.listening) await new Promise((resolve) => server.close(resolve));
   }
 });
