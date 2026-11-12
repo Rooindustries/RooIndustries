@@ -451,6 +451,7 @@ test.describe("review carousel", () => {
   });
 
   test("drag-across-regroup", async ({ page }) => {
+    await holdClock(page);
     await page.addInitScript(() => {
       const NativeResizeObserver = window.ResizeObserver;
       window.ResizeObserver = class extends NativeResizeObserver {
