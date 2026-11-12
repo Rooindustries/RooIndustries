@@ -297,7 +297,7 @@ function AutoReviewCarousel({ reviews }) {
     wheelAt: -Infinity,
     interactedAt: -Infinity,
     wake: null,
-    progress: null,
+    measuredWidth: 0,
   });
   const [groupCount, setGroupCount] = useState(1);
 
@@ -310,8 +310,6 @@ function AutoReviewCarousel({ reviews }) {
     const measure = () => {
       const groupWidth = firstGroup.scrollWidth;
       if (!groupWidth) return;
-      if (motion.groupWidth) motion.progress = readReviewScroll(viewport, motion) / motion.groupWidth - 1;
-      motion.progress ??= viewport.scrollLeft / groupWidth;
       const neededGroups = Math.max(
         MIN_REVIEW_GROUPS,
         Math.ceil((2 * viewport.clientWidth) / groupWidth) + 2
@@ -322,9 +320,17 @@ function AutoReviewCarousel({ reviews }) {
         return;
       }
       if (motion.groupWidth !== groupWidth) {
+        const previous = motion.measuredWidth;
+        const scale = previous ? groupWidth / previous : 1;
+        const position = previous ? readReviewScroll(viewport, motion) * scale : viewport.scrollLeft;
+        if (motion.drag) motion.drag.startScrollLeft *= scale;
+        if (motion.arrow) {
+          motion.arrow.from *= scale;
+          motion.arrow.to *= scale;
+        }
         motion.groupWidth = groupWidth;
-        motion.arrow = null;
-        commitReviewScroll(viewport, motion, groupWidth * (1 + motion.progress));
+        motion.measuredWidth = groupWidth;
+        commitReviewScroll(viewport, motion, position);
       }
     };
 
