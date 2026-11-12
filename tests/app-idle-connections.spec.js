@@ -1,6 +1,8 @@
 const http = require("node:http");
 const { test, expect } = require("@playwright/test");
 
+test.skip(process.env.ROO_TEST_DEV === "1" || process.env.TOOLING_DEV_SERVER === "1", "next dev has no keep-alive timeout option; this checks the production server.");
+
 test("the app keeps an idle connection open past the default timeout", async ({ baseURL }) => {
   const defaults = http.createServer();
   const idle = defaults.keepAliveTimeout + (defaults.keepAliveTimeoutBuffer ?? 0) + 1000;
