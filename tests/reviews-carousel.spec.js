@@ -384,6 +384,22 @@ test.describe("review carousel", () => {
     }).toBe(true);
   });
 
+  test("rotation-after-scroll-back", async ({ page }) => {
+    const region = await openCarousel(page, { width: 390, height: 844 });
+    const box = await region.boundingBox();
+    const start = await region.evaluate((el) => el.scrollLeft);
+    await page.mouse.move(box.x + 180, box.y + 100);
+    await page.mouse.wheel(200, 0);
+    await expect.poll(() => region.evaluate((el) => el.scrollLeft)).toBe(start + 200);
+    await page.mouse.wheel(-200, 0);
+    await expect.poll(() => region.evaluate((el) => el.scrollLeft)).toBe(start);
+    await page.setViewportSize({ width: 844, height: 390 });
+    await expect.poll(async () => {
+      const first = (await visibleReviews(region))[0];
+      return first?.id === LEAD_ORDER[0] && Math.abs(first.left - first.clear - 16) <= 3;
+    }).toBe(true);
+  });
+
   test("resize-mid-drag", async ({ page }) => {
     const region = await openCarousel(page, { width: 390, height: 844 });
     const box = await region.boundingBox();

@@ -46,6 +46,7 @@ const readReviewScroll = (viewport, motion) => {
   if (Math.abs(viewport.scrollLeft - motion.written) >= 1) {
     if (motion.ensureLayout?.()) return motion.position;
     motion.position = viewport.scrollLeft;
+    motion.written = motion.position;
     updateReviewAnchor(motion);
   }
   return motion.position;
