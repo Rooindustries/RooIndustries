@@ -60,6 +60,6 @@ describe("review carousel design", () => {
     expect(componentSource).not.toContain("rgba(212, 175, 55");
     expect(componentSource).toContain('isCreator ? "Creator review" : "Player review"');
     expect(componentSource).not.toContain(" · ");
-    expect(componentSource).toContain("...reviews.filter((review) => review.isVip)");
+    expect(componentSource).toContain("[...reviews].sort((a, b) => getReviewRank(a) - getReviewRank(b))");
   });
 });

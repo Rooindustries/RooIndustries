@@ -283,6 +283,17 @@ const expectInfinite = (result) => {
   }
 };
 
+const LEAD_ORDER = ["Vulture", "SkinzOW", "Hydro", "Reviewer 1", "Reviewer 6", "Reviewer 0", "Reviewer 4"];
+
+const visibleReviews = (region) => region.evaluate((el) => {
+  const viewport = el.getBoundingClientRect();
+  const clear = Number(/rgba\(0, 0, 0, 0\) ([\d.]+)px/.exec(getComputedStyle(el).maskImage)?.[1] || 0);
+  return [...el.querySelectorAll("[data-review-id]")]
+    .map((card) => ({ id: card.dataset.reviewId, clear, left: card.getBoundingClientRect().left - viewport.left, right: card.getBoundingClientRect().right - viewport.left }))
+    .filter((card) => card.right > clear && card.left < viewport.width - clear)
+    .sort((a, b) => a.left - b.left);
+});
+
 const runInfinite = async (page, region, direction, name) => {
   const result = await wheelAcross(page, region, direction, 5);
   writeEvidence(name, result);
@@ -291,7 +302,7 @@ const runInfinite = async (page, region, direction, name) => {
 };
 
 test.describe("review carousel", () => {
-  test.skip(REVIEW_COUNT === 2, "Runs against the default four-review fixture.");
+  test.skip(REVIEW_COUNT === 2, "Runs against the default seven-review fixture.");
 
   test.describe("recorded", () => {
     let page;
@@ -585,12 +596,13 @@ test.describe("review carousel", () => {
     expect(Math.abs((await scrollLeft()) - phoneStart)).toBeLessThanOrEqual(1);
     const firstCard = await region.evaluate((el) => {
       const viewport = el.getBoundingClientRect();
-      const cards = [...el.querySelectorAll(".ri-review-card")];
-      const card = cards.find((node) => node.getBoundingClientRect().right > viewport.left + 40);
-      const box = card.getBoundingClientRect();
-      return { left: box.left - viewport.left, right: viewport.right - box.right };
+      const cards = [...el.querySelectorAll(".ri-review-card")].map((node) => ({ id: node.dataset.reviewId, ...node.getBoundingClientRect().toJSON() }));
+      const visible = cards.filter((card) => card.right > viewport.left && card.left < viewport.right).sort((a, b) => a.left - b.left);
+      return { ids: visible.map((card) => card.id), left: visible[0].left - viewport.left, right: visible[0].right - viewport.right };
     });
-    expect(Math.abs(firstCard.left - firstCard.right)).toBeLessThanOrEqual(2);
+    expect(firstCard.ids[0]).toBe("Vulture");
+    expect(Math.abs(firstCard.left - 16)).toBeLessThanOrEqual(1);
+    expect(firstCard.right).toBeLessThanOrEqual(0);
     await page.setViewportSize({ width: 800, height: 900 });
     await expect.poll(async () => {
       const start = await scrollLeft();
@@ -727,8 +739,21 @@ test.describe("review carousel with two reviews", () => {
   });
 });
 
+test.describe("review carousel order", () => {
+  test.skip(REVIEW_COUNT === 2, "Runs against the default seven-review fixture.");
+
+  for (const size of [{ width: 360, height: 780 }, { width: 390, height: 844 }, { width: 768, height: 1024 }, { width: 1024, height: 900 }, { width: 1440, height: 900 }]) {
+    test(`visible-order-${size.width}`, async ({ page }) => {
+      const region = await openCarousel(page, size);
+      const ids = (await visibleReviews(region)).map((card) => card.id);
+      expect(ids.length).toBeGreaterThan(0);
+      expect(ids).toEqual(LEAD_ORDER.slice(0, ids.length));
+    });
+  }
+});
+
 test.describe("review carousel without JavaScript", () => {
-  test.skip(REVIEW_COUNT === 2, "Runs against the default four-review fixture.");
+  test.skip(REVIEW_COUNT === 2, "Runs against the default seven-review fixture.");
   test.use({ javaScriptEnabled: false });
 
   test("no-js-static", async ({ page, request }) => {
@@ -746,10 +771,19 @@ test.describe("review carousel without JavaScript", () => {
       firstCardText: (await firstCopy.first().innerText()).slice(0, 120),
     };
     writeEvidence("no-js-static", result);
-    expect(result.htmlFirstCopyCards).toBe(4);
-    expect(result.htmlReviewIds).toEqual(["Reviewer 0", "Reviewer 1", "Reviewer 2", "Reviewer 3"]);
-    expect(result.renderedFirstCopyCards).toBe(4);
+    expect(result.htmlFirstCopyCards).toBe(7);
+    expect(result.htmlReviewIds).toEqual(LEAD_ORDER);
+    expect(result.renderedFirstCopyCards).toBe(7);
     expect(result.firstCardVisible).toBe(true);
+    for (const size of [{ width: 390, height: 844 }, DESKTOP]) {
+      await page.setViewportSize(size);
+      await region.scrollIntoViewIfNeeded();
+      const cards = await visibleReviews(region);
+      const ids = cards.map((card) => card.id);
+      expect(ids[0], `${size.width}px`).toBe("Vulture");
+      expect(cards[0].left, `${size.width}px`).toBeGreaterThanOrEqual(cards[0].clear);
+      expect(ids, `${size.width}px`).toEqual(LEAD_ORDER.slice(0, ids.length));
+    }
   });
 });
 
