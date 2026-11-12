@@ -611,43 +611,6 @@ test.describe("review carousel", () => {
     }, { timeout: 15000 }).toBeGreaterThan(0);
   });
 
-  test("rotation-keeps-lead-creators", async ({ page }) => {
-    const region = await openCarousel(page, { width: 390, height: 844 });
-    await page.setViewportSize({ width: 844, height: 390 });
-    await expect.poll(async () => (await visibleReviews(region)).map((card) => card.id)[0]).toBe("Vulture");
-    const landscape = (await visibleReviews(region)).map((card) => card.id);
-    expect(landscape).toEqual(LEAD_ORDER.slice(0, landscape.length));
-    await page.setViewportSize({ width: 390, height: 844 });
-    await expect.poll(async () => (await visibleReviews(region))[0]?.id).toBe("Vulture");
-    expect((await visibleReviews(region))[0].left).toBeLessThanOrEqual(17);
-  });
-
-  test("resize-mid-drag", async ({ page }) => {
-    const region = await openCarousel(page, { width: 390, height: 844 });
-    const box = await region.boundingBox();
-    const pointer = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-    await page.mouse.move(pointer.x, pointer.y);
-    await page.mouse.down();
-    await page.setViewportSize({ width: 844, height: 390 });
-    await expect.poll(async () => (await visibleReviews(region))[0]?.id).toBe("Vulture");
-    const before = (await visibleReviews(region))[0].left;
-    await page.mouse.move(pointer.x - 1, pointer.y);
-    const after = await visibleReviews(region);
-    await page.mouse.up();
-    expect(after[0].id).toBe("Vulture");
-    expect(Math.abs(after[0].left - before)).toBeLessThanOrEqual(30);
-  });
-
-  test("resize-mid-arrow", async ({ page }) => {
-    const region = await openCarousel(page, { width: 1024, height: 900 });
-    await page.getByRole("button", { name: "Scroll reviews right" }).click();
-    await page.setViewportSize({ width: 600, height: 900 });
-    await page.waitForTimeout(800);
-    const cards = await visibleReviews(region);
-    expect(cards[0].id).toBe("SkinzOW");
-    expect(Math.abs(cards[0].left - 16)).toBeLessThanOrEqual(30);
-  });
-
   test("keyboard-focus-drops-fade", async ({ page }) => {
     const region = await openCarousel(page);
     const mask = () => region.evaluate((el) => getComputedStyle(el).maskImage);

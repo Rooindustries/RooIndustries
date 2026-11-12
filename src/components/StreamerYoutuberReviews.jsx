@@ -297,7 +297,6 @@ function AutoReviewCarousel({ reviews }) {
     wheelAt: -Infinity,
     interactedAt: -Infinity,
     wake: null,
-    measuredWidth: 0,
   });
   const [groupCount, setGroupCount] = useState(1);
 
@@ -320,16 +319,8 @@ function AutoReviewCarousel({ reviews }) {
         return;
       }
       if (motion.groupWidth !== groupWidth) {
-        const previous = motion.measuredWidth;
-        const scale = previous ? groupWidth / previous : 1;
-        const position = previous ? readReviewScroll(viewport, motion) * scale : viewport.scrollLeft;
-        if (motion.drag) motion.drag.startScrollLeft *= scale;
-        if (motion.arrow) {
-          motion.arrow.from *= scale;
-          motion.arrow.to *= scale;
-        }
+        const position = motion.groupWidth ? readReviewScroll(viewport, motion) : viewport.scrollLeft;
         motion.groupWidth = groupWidth;
-        motion.measuredWidth = groupWidth;
         commitReviewScroll(viewport, motion, position);
       }
     };
