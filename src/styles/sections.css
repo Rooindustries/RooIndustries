@@ -57,6 +57,10 @@
   mask-image: var(--reviews-mask);
 }
 
+.ri-reviews-auto-track {
+  padding-left: calc(var(--reviews-clear) + 1rem);
+}
+
 @media (min-width: 640px) {
   .ri-reviews-viewport {
     --reviews-clear: 3.75rem;

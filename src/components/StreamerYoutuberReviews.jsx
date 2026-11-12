@@ -16,6 +16,12 @@ const ARROW_SCROLL_MS = 450;
 const MAX_FRAME_MS = 100;
 const REVIEW_CARD_GAP = 16;
 const MIN_REVIEW_GROUPS = 3;
+const LEAD_CREATOR_REVIEWERS = ["vulture", "skinzow", "hydro"];
+const getReviewRank = (review) => {
+  if (!review.isVip) return LEAD_CREATOR_REVIEWERS.length + 1;
+  const index = LEAD_CREATOR_REVIEWERS.indexOf(String(review.name || "").trim().toLowerCase());
+  return index === -1 ? LEAD_CREATOR_REVIEWERS.length : index;
+};
 const REVIEW_CARD_WIDTH = "w-[320px] sm:w-[380px]";
 const REVIEW_SKELETON_CLASS =
   `${REVIEW_CARD_WIDTH} h-[296px] sm:h-[286px] rounded-2xl bg-skeleton animate-pulse flex-shrink-0`;
@@ -291,7 +297,6 @@ function AutoReviewCarousel({ reviews }) {
     wheelAt: -Infinity,
     interactedAt: -Infinity,
     wake: null,
-    centered: false,
   });
   const [groupCount, setGroupCount] = useState(1);
 
@@ -314,11 +319,8 @@ function AutoReviewCarousel({ reviews }) {
         return;
       }
       if (motion.groupWidth !== groupWidth) {
-        const firstCardWidth = firstGroup.firstElementChild?.offsetWidth || 0;
-        const startOffset = motion.centered ? 0 : Math.max(0, (viewport.clientWidth - firstCardWidth) / 2);
-        const position = motion.groupWidth ? readReviewScroll(viewport, motion) : viewport.scrollLeft - startOffset;
+        const position = motion.groupWidth ? readReviewScroll(viewport, motion) : viewport.scrollLeft;
         motion.groupWidth = groupWidth;
-        motion.centered = true;
         commitReviewScroll(viewport, motion, position);
       }
     };
@@ -423,10 +425,7 @@ function AutoReviewCarousel({ reviews }) {
 
   if (!reviews.length) return null;
 
-  const orderedReviews = [
-    ...reviews.filter((review) => review.isVip),
-    ...reviews.filter((review) => !review.isVip),
-  ];
+  const orderedReviews = [...reviews].sort((a, b) => getReviewRank(a) - getReviewRank(b));
 
   const markInteraction = () => {
     const motion = motionRef.current;
