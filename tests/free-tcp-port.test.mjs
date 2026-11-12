@@ -117,6 +117,33 @@ test("a server takes over a held port without it ever being free", async () => {
   assert.equal(stolen, false);
 });
 
+test("fixture servers keep an idle connection open past the default keep-alive timeout", async () => {
+  const defaults = http.createServer();
+  const idle = defaults.keepAliveTimeout + (defaults.keepAliveTimeoutBuffer ?? 0) + 1000;
+  const server = http.createServer((request, response) => response.end("[]"));
+  const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+  const get = (port) => new Promise((resolve, reject) => {
+    http.get({ host, port, agent }, (response) => {
+      const { socket } = response;
+      response.resume();
+      response.on("end", () => resolve(socket));
+    }).on("error", reject);
+  });
+  try {
+    await listenOnPort(server, host, 0);
+    const { port } = server.address();
+    const first = await get(port);
+    let closed = false;
+    first.once("close", () => { closed = true; });
+    await new Promise((resolve) => setTimeout(resolve, idle));
+    assert.equal(closed, false);
+    assert.equal(await get(port), first);
+  } finally {
+    agent.destroy();
+    if (server.listening) await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test("a held port passes to a child process without ever being free", async () => {
   const [port] = await reserveTcpPorts(host, [0]);
   const passed = passHeldTcpPorts(host, [port]);
