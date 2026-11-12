@@ -10,7 +10,7 @@ import { lockBuildDirectory } from "./lib/build-lock.mjs";
 import { withNodeOption } from "./lib/node-options.mjs";
 import { createToolingContentFixture } from "../tests/fixtures/tooling-content.mjs";
 import { apiRouteSecrets } from "../tests/fixtures/api-routes.mjs";
-import { adoptHeldTcpPorts, portFromEnv, releaseTcpPorts, reserveTcpPorts } from "./lib/free-tcp-port.mjs";
+import { adoptHeldTcpPorts, nextTestKeepAliveTimeout, portFromEnv, releaseTcpPorts, reserveTcpPorts } from "./lib/free-tcp-port.mjs";
 import fixturePorts from "../tests/fixtures/fixture-ports.cjs";
 
 await adoptHeldTcpPorts();
@@ -131,7 +131,7 @@ try {
       fs.writeFileSync(manifestPath, JSON.stringify({ version: 1, sourceHash, baseURL, contentURL, ...content }));
     }
     await releaseTcpPorts(testHost, [Number(target.port)]);
-    await execute([next, "start", "--hostname", testHost, "--port", target.port]);
+    await execute([next, "start", "--hostname", testHost, "--port", target.port, "--keepAliveTimeout", String(nextTestKeepAliveTimeout)]);
   }
 } catch (error) {
   if (!stopping) throw error;

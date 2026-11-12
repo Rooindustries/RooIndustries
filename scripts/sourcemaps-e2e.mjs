@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
-import { freeTcpPorts } from './lib/free-tcp-port.mjs';
+import { freeTcpPorts, nextTestKeepAliveTimeout } from './lib/free-tcp-port.mjs';
 import { spawnContained, stopChild } from './lib/start-on-port.mjs';
 import { lockBuildDirectory } from './lib/build-lock.mjs';
 import { inheritTestProcessGuard, installNetworkGuard, localOrigin, refuseEnvFiles, validateDistDir } from './lib/test-target-safety.mjs';
@@ -237,7 +237,7 @@ if (process.argv[2] === '--build') {
       assert(!browserFiles.some(path => path.endsWith('.map')));
       const site = new URL(siteOrigin);
       const nextBin = join(root, 'node_modules/next/dist/bin/next');
-      const nextStart = [nextBin, 'start', '--hostname', site.hostname, '--port', site.port];
+      const nextStart = [nextBin, 'start', '--hostname', site.hostname, '--port', site.port, '--keepAliveTimeout', String(nextTestKeepAliveTimeout)];
       const stdio = ['ignore', 'pipe', 'pipe', productionLock.fd];
       const child = spawnContained(process.execPath, nextStart, { cwd: root, env, stdio });
       const logs = [];

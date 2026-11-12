@@ -75,6 +75,8 @@ export const portFromEnv = (name, env = process.env) => {
   return port;
 };
 
+export const nextTestKeepAliveTimeout = 86400000;
+
 const keepIdleConnections = (server) => {
   if ("keepAliveTimeout" in server) server.keepAliveTimeout = 0;
 };

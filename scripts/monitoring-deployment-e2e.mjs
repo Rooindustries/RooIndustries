@@ -6,7 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { homedir, networkInterfaces } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
-import { freeTcpPorts } from './lib/free-tcp-port.mjs';
+import { freeTcpPorts, nextTestKeepAliveTimeout } from './lib/free-tcp-port.mjs';
 import { spawnGroup } from './lib/process-group.mjs';
 import { spawnContained, stopChild } from './lib/start-on-port.mjs';
 import { localImportsOf } from './lib/local-imports.mjs';
@@ -195,7 +195,7 @@ export function GET() { throw new Error('Fixture edge error'); }
       const env = lock.childEnv(environment({ ...mode.env, NEXT_DIST_DIR: dist }));
       console.log(`checking ${mode.name}`);
       if (!mode.dev && !mode.reuse) await execute(`${mode.name}-build`, [next, 'build'], env, [lock.fd]);
-      active = spawnContained(process.execPath, [next, mode.dev ? 'dev' : 'start', '--hostname', '127.0.0.1', '--port', new URL(site).port],
+      active = spawnContained(process.execPath, [next, mode.dev ? 'dev' : 'start', '--hostname', '127.0.0.1', '--port', new URL(site).port, ...(mode.dev ? [] : ['--keepAliveTimeout', String(nextTestKeepAliveTimeout)])],
         { cwd: work, env, stdio: ['ignore', 'pipe', 'pipe', lock.fd] });
       const logs = [];
       active.stdout.on('data', chunk => logs.push(chunk));
