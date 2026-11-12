@@ -289,7 +289,7 @@ const visibleReviews = (region) => region.evaluate((el) => {
   const viewport = el.getBoundingClientRect();
   const clear = Number(/rgba\(0, 0, 0, 0\) ([\d.]+)px/.exec(getComputedStyle(el).maskImage)?.[1] || 0);
   return [...el.querySelectorAll("[data-review-id]")]
-    .map((card) => ({ id: card.dataset.reviewId, left: card.getBoundingClientRect().left - viewport.left, right: card.getBoundingClientRect().right - viewport.left }))
+    .map((card) => ({ id: card.dataset.reviewId, clear, left: card.getBoundingClientRect().left - viewport.left, right: card.getBoundingClientRect().right - viewport.left }))
     .filter((card) => card.right > clear && card.left < viewport.width - clear)
     .sort((a, b) => a.left - b.left);
 });
@@ -775,6 +775,15 @@ test.describe("review carousel without JavaScript", () => {
     expect(result.htmlReviewIds).toEqual(LEAD_ORDER);
     expect(result.renderedFirstCopyCards).toBe(7);
     expect(result.firstCardVisible).toBe(true);
+    for (const size of [{ width: 390, height: 844 }, DESKTOP]) {
+      await page.setViewportSize(size);
+      await region.scrollIntoViewIfNeeded();
+      const cards = await visibleReviews(region);
+      const ids = cards.map((card) => card.id);
+      expect(ids[0], `${size.width}px`).toBe("Vulture");
+      expect(cards[0].left, `${size.width}px`).toBeGreaterThanOrEqual(cards[0].clear);
+      expect(ids, `${size.width}px`).toEqual(LEAD_ORDER.slice(0, ids.length));
+    }
   });
 });
 
