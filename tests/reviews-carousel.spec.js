@@ -294,6 +294,12 @@ const visibleReviews = (region) => region.evaluate((el) => {
     .sort((a, b) => a.left - b.left);
 });
 
+const CLOCK_START = Date.parse("2026-01-01T00:00:00Z");
+const holdClock = async (page) => {
+  await page.clock.install({ time: CLOCK_START });
+  await page.clock.pauseAt(CLOCK_START + 1000);
+};
+
 const runInfinite = async (page, region, direction, name) => {
   const result = await wheelAcross(page, region, direction, 5);
   writeEvidence(name, result);
@@ -357,6 +363,159 @@ test.describe("review card size", () => {
 
 test.describe("review carousel", () => {
   test.skip(REVIEW_COUNT === 2, "Runs against the default seven-review fixture.");
+
+  test("rotation-keeps-place", async ({ page }) => {
+    await holdClock(page);
+    const region = await openCarousel(page, { width: 390, height: 844 });
+    const atStart = async (id) => {
+      const first = (await visibleReviews(region))[0];
+      return first?.id === id && Math.abs(first.left - first.clear - 16) <= 3;
+    };
+    await expect.poll(() => atStart(LEAD_ORDER[0])).toBe(true);
+    await page.setViewportSize({ width: 844, height: 390 });
+    await expect.poll(() => atStart(LEAD_ORDER[0])).toBe(true);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect.poll(() => atStart(LEAD_ORDER[0])).toBe(true);
+  });
+
+  test("rotation-keeps-place-mid-list", async ({ page }) => {
+    await holdClock(page);
+    const region = await openCarousel(page, { width: 390, height: 844 });
+    const box = await region.boundingBox();
+    await page.mouse.move(box.x + 180, box.y + 100);
+    await page.mouse.wheel(672, 0);
+    await expect.poll(async () => (await visibleReviews(region))[0]?.id).toBe(LEAD_ORDER[2]);
+    await page.setViewportSize({ width: 844, height: 390 });
+    await expect.poll(async () => {
+      const first = (await visibleReviews(region))[0];
+      return first?.id === LEAD_ORDER[2] && Math.abs(first.left - first.clear - 16) <= 3;
+    }).toBe(true);
+  });
+
+  test("rotation-after-scroll-back", async ({ page }) => {
+    await holdClock(page);
+    const region = await openCarousel(page, { width: 390, height: 844 });
+    const box = await region.boundingBox();
+    const start = await region.evaluate((el) => el.scrollLeft);
+    await page.mouse.move(box.x + 180, box.y + 100);
+    await page.mouse.wheel(200, 0);
+    await expect.poll(() => region.evaluate((el) => el.scrollLeft)).toBe(start + 200);
+    await page.mouse.wheel(-200, 0);
+    await expect.poll(() => region.evaluate((el) => el.scrollLeft)).toBe(start);
+    await page.setViewportSize({ width: 844, height: 390 });
+    await expect.poll(async () => {
+      const first = (await visibleReviews(region))[0];
+      return first?.id === LEAD_ORDER[0] && Math.abs(first.left - first.clear - 16) <= 3;
+    }).toBe(true);
+  });
+
+  test("resize-mid-drag", async ({ page }) => {
+    const region = await openCarousel(page, { width: 390, height: 844 });
+    const box = await region.boundingBox();
+    const x = box.x + 250;
+    const y = box.y + 100;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x - 100, y);
+    await page.setViewportSize({ width: 844, height: 390 });
+    await expect.poll(async () => {
+      const first = (await visibleReviews(region))[0];
+      const { pitch } = await probe(page, "state");
+      return first?.id === LEAD_ORDER[0] && Math.abs(first.left - first.clear - 16 + (100 / 336) * pitch) <= 2;
+    }).toBe(true);
+    const before = (await visibleReviews(region))[0];
+    await page.mouse.move(x - 101, y);
+    const after = (await visibleReviews(region))[0];
+    await page.mouse.up();
+    expect(after.id).toBe(before.id);
+    expect(after.left - before.left).toBeGreaterThanOrEqual(-2);
+    expect(after.left - before.left).toBeLessThanOrEqual(0);
+  });
+
+  test("resize-mid-arrow", async ({ page }) => {
+    await holdClock(page);
+    const region = await openCarousel(page, { width: 1024, height: 900 });
+    const before = (await visibleReviews(region))[0];
+    const start = await probe(page, "state");
+    await page.getByRole("button", { name: "Scroll reviews right" }).click();
+    await page.clock.runFor(200);
+    const middle = await probe(page, "state");
+    expect(middle.scrollLeft).toBeGreaterThan(start.scrollLeft);
+    expect(middle.scrollLeft).toBeLessThan(start.scrollLeft + start.pitch);
+    await page.setViewportSize({ width: 600, height: 900 });
+    await page.clock.runFor(600);
+    const first = (await visibleReviews(region))[0];
+    const { pitch } = await probe(page, "state");
+    expect(first.id).toBe(LEAD_ORDER[1]);
+    expect(Math.abs((first.left - first.clear - 16) - (before.left - before.clear - 16) * pitch / start.pitch)).toBeLessThanOrEqual(2);
+  });
+
+  test("drag-across-regroup", async ({ page }) => {
+    await holdClock(page);
+    await page.addInitScript(() => {
+      const NativeResizeObserver = window.ResizeObserver;
+      window.ResizeObserver = class extends NativeResizeObserver {
+        constructor(callback) {
+          super((entries, observer) => {
+            callback(entries, observer);
+            const race = window.__regroupRace;
+            const viewport = document.querySelector('[role="region"][aria-label="Player reviews"]');
+            if (!race?.armed || viewport.clientWidth < 3000) return;
+            race.armed = false;
+            race.groupsBefore = viewport.firstElementChild.children.length;
+            for (const type of ["pointermove", "pointerup"]) {
+              viewport.dispatchEvent(new PointerEvent(type, {
+                bubbles: true, pointerId: race.pointerId, pointerType: "mouse",
+                button: 0, buttons: type === "pointermove" ? 1 : 0,
+                clientX: race.x - 200, clientY: race.y,
+              }));
+            }
+            race.groupsAfter = viewport.firstElementChild.children.length;
+          });
+        }
+      };
+      document.addEventListener("pointerdown", (event) => {
+        window.__lastReviewPointerId = event.pointerId;
+      }, true);
+    });
+    const region = await openCarousel(page, { width: 1024, height: 900 });
+    const start = await probe(page, "state");
+    const box = await region.boundingBox();
+    const x = box.x + 400;
+    const y = box.y + 100;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x - 100, y);
+    await page.evaluate(({ x, y }) => {
+      window.__regroupRace = { armed: true, x, y, pointerId: window.__lastReviewPointerId };
+    }, { x, y });
+    await page.setViewportSize({ width: 3840, height: 900 });
+    await expect.poll(() => page.evaluate(() => window.__regroupRace?.armed)).toBe(false);
+    const race = await page.evaluate(() => window.__regroupRace);
+    expect(race.groupsAfter).toBe(race.groupsBefore);
+    await expect.poll(async () => (await probe(page, "state")).groups).toBeGreaterThan(race.groupsBefore);
+    const end = await probe(page, "state");
+    const logical = (state) => state.order.indexOf(state.leftEdge.id) + state.leftEdge.offset / state.pitch;
+    const expected = (logical(start) + 200 / start.pitch) % start.order.length;
+    const actual = logical(end);
+    const distance = Math.abs(actual - expected);
+    expect(Math.min(distance, start.order.length - distance) * end.pitch).toBeLessThanOrEqual(2);
+  });
+
+  test("big-widen-keeps-place", async ({ page }) => {
+    await holdClock(page);
+    const region = await openCarousel(page, { width: 1024, height: 900 });
+    const box = await region.boundingBox();
+    await page.mouse.move(box.x + 400, box.y + 100);
+    await page.mouse.wheel(5 * 376 + 80, 0);
+    await expect.poll(async () => (await visibleReviews(region))[0]?.id).toBe(LEAD_ORDER[5]);
+    const before = (await visibleReviews(region))[0];
+    await page.setViewportSize({ width: 3840, height: 900 });
+    await expect.poll(async () => {
+      const first = (await visibleReviews(region))[0];
+      return first?.id === before.id && Math.abs((first.left - first.clear) - (before.left - before.clear)) <= 3;
+    }, { timeout: 1000 }).toBe(true);
+  });
 
   test.describe("recorded", () => {
     let page;
