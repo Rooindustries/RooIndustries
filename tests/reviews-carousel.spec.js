@@ -301,6 +301,60 @@ const runInfinite = async (page, region, direction, name) => {
   return result;
 };
 
+test.describe("review card size", () => {
+  test.skip(REVIEW_COUNT === 2, "Runs against the default seven-review fixture.");
+
+  for (const size of [{ width: 360, height: 780 }, { width: 390, height: 844 }, { width: 640, height: 900 }, { width: 768, height: 1024 }, { width: 1024, height: 900 }, { width: 1440, height: 900 }]) {
+    test(`size-${size.width}`, async ({ page }) => {
+      const region = await openCarousel(page, size);
+      const result = await region.evaluate((el) => {
+        const cards = [...el.querySelectorAll('[data-group-index="0"]')];
+        const style = (element) => getComputedStyle(element);
+        const metrics = cards.map((card) => {
+          const footer = card.querySelector("footer");
+          const avatar = footer.firstElementChild;
+          const details = footer.lastElementChild;
+          return {
+            width: style(card).width,
+            padding: style(card).paddingTop,
+            radius: style(card).borderTopLeftRadius,
+            quote: style(card.querySelector("blockquote p")).fontSize,
+            quoteLeading: style(card.querySelector("blockquote p")).lineHeight,
+            name: style(details.firstElementChild).fontSize,
+            profession: style(details.lastElementChild).fontSize,
+            avatarWidth: style(avatar).width,
+            avatarHeight: style(avatar).height,
+          };
+        });
+        const spilled = cards.filter((card) => {
+          const edge = card.getBoundingClientRect().right + 1;
+          return [...card.querySelectorAll("*")]
+            .filter((child) => child.getBoundingClientRect().width > 1)
+            .some((child) => child.getBoundingClientRect().right > edge);
+        }).map((card) => card.dataset.reviewId);
+        return {
+          metrics,
+          tallest: Math.max(...cards.map((card) => card.getBoundingClientRect().height)),
+          sectionHeight: el.closest("section").getBoundingClientRect().height,
+          sectionTop: style(el.closest("section")).paddingTop,
+          headingGap: style(el.closest("section").querySelector(".ri-reviews-heading").parentElement).marginBottom,
+          spilled,
+        };
+      });
+      console.log(`size-${size.width}: ${JSON.stringify(result)}`);
+      const compact = size.width >= 640;
+      const expected = compact
+        ? { width: "360px", padding: "12px", radius: "12px", quote: "12px", quoteLeading: "16.2px", name: "13px", profession: "9px", avatarWidth: "32px", avatarHeight: "32px" }
+        : { width: "320px", padding: "20px", radius: "16px", quote: "15px", quoteLeading: "22.5px", name: "15px", profession: "13px", avatarWidth: "40px", avatarHeight: "40px" };
+      expect(result.metrics.length).toBeGreaterThan(0);
+      for (const metrics of result.metrics) expect.soft(metrics).toEqual(expected);
+      expect.soft({ sectionTop: result.sectionTop, headingGap: result.headingGap }).toEqual(compact ? { sectionTop: "20px", headingGap: "12px" } : { sectionTop: "24px", headingGap: "32px" });
+      if (compact) expect.soft(result.tallest).toBeLessThanOrEqual(200);
+      expect.soft(result.spilled).toEqual([]);
+    });
+  }
+});
+
 test.describe("review carousel", () => {
   test.skip(REVIEW_COUNT === 2, "Runs against the default seven-review fixture.");
 

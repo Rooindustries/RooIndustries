@@ -22,9 +22,9 @@ const getReviewRank = (review) => {
   const index = LEAD_CREATOR_REVIEWERS.indexOf(String(review.name || "").trim().toLowerCase());
   return index === -1 ? LEAD_CREATOR_REVIEWERS.length : index;
 };
-const REVIEW_CARD_WIDTH = "w-[320px] sm:w-[380px]";
+const REVIEW_CARD_WIDTH = "w-[320px] sm:w-[360px]";
 const REVIEW_SKELETON_CLASS =
-  `${REVIEW_CARD_WIDTH} h-[296px] sm:h-[286px] rounded-2xl bg-skeleton animate-pulse flex-shrink-0`;
+  `${REVIEW_CARD_WIDTH} h-[296px] sm:h-[184px] rounded-2xl sm:rounded-xl bg-skeleton animate-pulse flex-shrink-0`;
 const REVIEW_SWIPE_ONLY_QUERY = "(max-width: 639.98px)";
 const REVIEW_ARROW_CLASS =
   "absolute top-1/2 -translate-y-1/2 z-10 hidden sm:grid h-10 w-10 place-items-center rounded-full border border-line-soft " +
@@ -136,9 +136,9 @@ export default function StreamerYoutuberReviews({ initialData = null }) {
   return (
     <section
       ref={sectionRef}
-      className="py-6 sm:py-8 text-center text-ink relative overflow-hidden"
+      className="py-6 sm:pt-5 sm:pb-4 text-center text-ink relative overflow-hidden"
     >
-      <div className="px-4 sm:px-6 mb-8">
+      <div className="px-4 sm:px-6 mb-8 sm:mb-3">
         <h2 className="ri-reviews-heading section-title">
           {data?.title || defaultTitle}
         </h2>
@@ -166,7 +166,7 @@ function ReviewerAvatar({ review, isCreator }) {
       <img
         src={getReviewAvatarUrl(review.pfp)}
         alt={review.name}
-        className="w-10 h-10 rounded-full object-cover flex-shrink-0"
+        className="w-10 h-10 sm:w-8 sm:h-8 rounded-full object-cover flex-shrink-0"
         style={{
           boxShadow: isCreator ? "0 0 0 2px #f5c954" : "none",
         }}
@@ -179,7 +179,7 @@ function ReviewerAvatar({ review, isCreator }) {
 
   return (
     <div
-      className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-black flex-shrink-0 bg-surface-hover"
+      className="w-10 h-10 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-sm sm:text-xs font-black flex-shrink-0 bg-surface-hover"
       style={{ color: "var(--color-accent)" }}
       aria-hidden="true"
     >
@@ -213,7 +213,7 @@ function ReviewCard({ review, groupIndex }) {
       data-group-index={groupIndex}
       className={`ri-review-card ${
         isCreator ? "ri-review-card-creator" : "ri-review-card-standard"
-      } flex flex-col ${REVIEW_CARD_WIDTH} min-h-[232px] p-5 rounded-2xl text-left flex-shrink-0`}
+      } flex flex-col ${REVIEW_CARD_WIDTH} min-h-[232px] sm:min-h-[184px] break-words p-5 sm:p-3 rounded-2xl sm:rounded-xl text-left flex-shrink-0`}
       style={{
         background: isCreator
           ? "linear-gradient(145deg, rgba(250, 219, 120, 0.12), var(--color-surface-solid) 52%)"
@@ -223,17 +223,17 @@ function ReviewCard({ review, groupIndex }) {
           : "inset 0 0 0 1px var(--color-border-soft), 0 16px 40px rgba(0, 0, 0, 0.18)",
       }}
     >
-      <div className="flex items-center justify-between gap-3 text-[11px] font-bold uppercase tracking-[0.12em]">
+      <div className="flex items-center justify-between gap-3 text-[11px] sm:text-[10px] font-bold uppercase tracking-[0.12em] sm:tracking-[0.14em]">
         <p className={isCreator ? "ri-review-champagne-text" : "text-ink-secondary"}>
           {isCreator ? "Creator review" : "Player review"}
         </p>
-        <p className="text-ink-secondary">{review.game || "PC performance"}</p>
+        <p className="min-w-0 text-ink-secondary">{review.game || "PC performance"}</p>
       </div>
 
-      <div className={`mt-3 flex min-h-4 flex-wrap items-end gap-x-3 gap-y-1 ${result ? "justify-between" : "justify-end"}`}>
+      <div className={`mt-3 sm:mt-1 flex min-h-4 flex-wrap items-end gap-x-3 gap-y-1 ${result ? "justify-between" : "justify-end"}`}>
         {result && (
           <p className="min-w-0 font-black leading-none tracking-[-0.04em] tabular-nums">
-            <span className="mr-2 text-[11px] uppercase tracking-[0.1em] text-ink-secondary">
+            <span className="mr-2 text-[11px] sm:text-[10px] uppercase tracking-[0.1em] sm:tracking-[0.12em] text-ink-secondary">
               {result.label}
             </span>
             <span className="whitespace-nowrap">
@@ -257,24 +257,24 @@ function ReviewCard({ review, groupIndex }) {
         </p>
       </div>
 
-      <blockquote className="mt-3 flex-1">
-        <p className="text-ink text-[15px] leading-[1.5] break-words whitespace-normal">
+      <blockquote className="mt-3 sm:mt-2 flex-1">
+        <p className="text-ink text-[15px] sm:text-[12px] leading-[1.5] sm:leading-[1.35] break-words whitespace-normal">
           “{review.text}”
         </p>
       </blockquote>
 
-      <footer className="mt-4 flex items-center gap-3">
+      <footer className="mt-4 sm:mt-2 flex items-center gap-3 sm:gap-2">
         <ReviewerAvatar review={review} isCreator={isCreator} />
         <div className="min-w-0">
           <p
-            className={`font-bold text-[15px] leading-tight text-ink truncate ${
+            className={`font-bold sm:font-extrabold text-[15px] sm:text-[13px] leading-tight text-ink truncate ${
               isCreator ? "ri-review-champagne-text" : ""
             }`}
           >
             {review.name}
           </p>
           {review.profession && (
-            <p className="mt-0.5 text-[13px] leading-snug text-ink-secondary">
+            <p className="mt-0.5 text-[13px] sm:text-[9px] leading-snug text-ink-secondary">
               {review.profession}
             </p>
           )}
