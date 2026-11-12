@@ -327,16 +327,10 @@ function AutoReviewCarousel({ reviews }) {
         MIN_REVIEW_GROUPS,
         Math.ceil((2 * viewport.clientWidth) / groupWidth) + 2
       );
-      if (neededGroups !== groupCount) {
-        motion.groupWidth = 0;
-        setGroupCount(neededGroups);
-        return;
-      }
       if (
         motion.layoutWidth !== viewport.clientWidth ||
         motion.layoutGroupWidth !== groupWidth ||
-        motion.reviewCount !== reviews.length ||
-        !motion.groupWidth
+        motion.reviewCount !== reviews.length
       ) {
         const previousWidth = motion.layoutGroupWidth;
         const previousCount = motion.reviewCount;
@@ -357,6 +351,7 @@ function AutoReviewCarousel({ reviews }) {
           motion.drag.startScrollLeft = motion.position;
         }
       }
+      if (neededGroups !== groupCount) setGroupCount(neededGroups);
     };
 
     motion.ensureLayout = () => {
@@ -370,6 +365,7 @@ function AutoReviewCarousel({ reviews }) {
       return true;
     };
     measure();
+    if (motion.groupWidth) commitReviewScroll(viewport, motion, motion.position);
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
     observer?.observe(viewport);
     observer?.observe(firstGroup);
