@@ -213,7 +213,7 @@ function ReviewCard({ review, groupIndex }) {
       data-group-index={groupIndex}
       className={`ri-review-card ${
         isCreator ? "ri-review-card-creator" : "ri-review-card-standard"
-      } flex flex-col ${REVIEW_CARD_WIDTH} min-h-[232px] sm:min-h-[184px] p-5 sm:p-3 rounded-2xl sm:rounded-xl text-left flex-shrink-0`}
+      } flex flex-col ${REVIEW_CARD_WIDTH} min-h-[232px] sm:min-h-[184px] [overflow-wrap:anywhere] p-5 sm:p-3 rounded-2xl sm:rounded-xl text-left flex-shrink-0`}
       style={{
         background: isCreator
           ? "linear-gradient(145deg, rgba(250, 219, 120, 0.12), var(--color-surface-solid) 52%)"
@@ -224,10 +224,10 @@ function ReviewCard({ review, groupIndex }) {
       }}
     >
       <div className="flex items-center justify-between gap-3 text-[11px] sm:text-[10px] font-bold uppercase tracking-[0.12em] sm:tracking-[0.14em]">
-        <p className={isCreator ? "ri-review-champagne-text" : "text-ink-secondary"}>
+        <p className={`shrink-0 ${isCreator ? "ri-review-champagne-text" : "text-ink-secondary"}`}>
           {isCreator ? "Creator review" : "Player review"}
         </p>
-        <p className="text-ink-secondary">{review.game || "PC performance"}</p>
+        <p className="min-w-0 text-right text-ink-secondary">{review.game || "PC performance"}</p>
       </div>
 
       <div className={`mt-3 sm:mt-1 flex min-h-4 flex-wrap items-end gap-x-3 gap-y-1 ${result ? "justify-between" : "justify-end"}`}>
