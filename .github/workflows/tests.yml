@@ -374,7 +374,8 @@ jobs:
             booking-hold upgrade-credit upgrade-credit:ownership emails:postgres17 referral:postgres17
             referral-social:postgres17 backend-integrity:postgres17 referral-authority:postgres17
             referral-email:postgres17 referral-integrity:postgres17 account-domain:postgres17
-            account-check:postgres17 commerce-readiness:postgres17 referral-email:origins tooling:safety
+            account-check:postgres17 commerce-readiness:postgres17 commerce-readiness-scale:postgres17
+            referral-email:origins tooling:safety
       - uses: ./.github/actions/save-caches
         with:
           build-dirs: |

@@ -102,6 +102,7 @@
     "test:account-domain:postgres17": "node scripts/test-account-domain-identity-postgres.mjs",
     "test:account-check:postgres17": "node scripts/test-account-check-postgres.mjs",
     "test:commerce-readiness:postgres17": "node scripts/test-commerce-readiness-postgres.mjs",
+    "test:commerce-readiness-scale:postgres17": "node scripts/test-commerce-readiness-scale-postgres.mjs",
     "repair:supabase:commerce:dry-run": "node scripts/repair-supabase-commerce-integrity.mjs",
     "repair:supabase:commerce:apply": "node scripts/repair-supabase-commerce-integrity.mjs --apply",
     "repair:referral-accounting:dry-run": "node scripts/repair-referral-accounting.mjs",
