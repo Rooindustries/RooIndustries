@@ -8,15 +8,6 @@ type StoredAttribution = Record<string, unknown> & {
 const COOKIE = "roo_attr";
 const SESSION_KEY = "sales_attribution";
 const MAX_AGE_SECONDS = 7776000;
-const MAX_COOKIE_VALUE = 3800;
-const TRIMS: [string, ...string[]][] = [
-  ["firstTouch", "fbclid", "gclid"],
-  ["firstTouch", "content", "term"],
-  ["firstTouch", "referrerHost", "medium"],
-  ["lastTouch", "content", "term"],
-  ["firstTouch", "source", "campaign", "creatorCode"],
-  ["lastTouch", "referrerHost", "medium"],
-];
 
 let memory: StoredAttribution | null = null;
 
@@ -29,19 +20,6 @@ const encode = (value: unknown) => {
 const decode = (text: string): unknown => {
   const binary = atob(text.replace(/-/g, "+").replace(/_/g, "/"));
   return JSON.parse(new TextDecoder().decode(Uint8Array.from(binary, (char) => char.charCodeAt(0))));
-};
-
-const fitCookieValue = (value: StoredAttribution) => {
-  let candidate = value;
-  let encoded = encode(candidate);
-  for (const [touchKey, ...fields] of TRIMS) {
-    if (encoded.length <= MAX_COOKIE_VALUE) break;
-    const touch = { ...candidate[touchKey] as Record<string, unknown> };
-    for (const field of fields) delete touch[field];
-    candidate = { ...candidate, [touchKey]: touch };
-    encoded = encode(candidate);
-  }
-  return encoded.length <= MAX_COOKIE_VALUE ? encoded : "";
 };
 
 const readCookie = () => {
@@ -73,8 +51,7 @@ const writeSession = (value: StoredAttribution | null) => {
 };
 
 const writeCookie = (value: StoredAttribution) => {
-  const encoded = fitCookieValue(value);
-  if (!encoded) return false;
+  const encoded = encode(value);
   if (readCookie() !== encoded) setCookie(encoded, MAX_AGE_SECONDS);
   return readCookie() === encoded;
 };
@@ -94,7 +71,7 @@ export function writeStoredAttribution(value: StoredAttribution) {
       writeSession(null);
       return;
     }
-    if (readConsent() !== "granted" && readCookie()) setCookie("", 0);
+    if (readCookie()) setCookie("", 0);
   } catch {}
   writeSession(value);
 }

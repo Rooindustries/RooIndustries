@@ -1295,7 +1295,7 @@ export default function Payment({ hideFooter = false }) {
         throw new Error(data?.error || "Unable to start payment.");
       }
 
-      if (data.status === "started") trackCheckoutSessionStarted({ packageTitle: bookingData.packageTitle,
+      if (data.checkoutCreated === true) trackCheckoutSessionStarted({ packageTitle: bookingData.packageTitle,
         price: data.quote?.netAmount, provider });
       if (data.quote) setServerQuote(data.quote);
       if (data.quoteFingerprint || data.fingerprint) {

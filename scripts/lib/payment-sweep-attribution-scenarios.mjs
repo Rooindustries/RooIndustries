@@ -50,8 +50,14 @@ const v1Touch = {
 };
 
 const payWithAttribution = async (ctx, salesAttribution) => {
-  const { result: started, calls } = await recordProviderCalls(() => startPayPalCheckout(ctx, { salesAttribution }));
+  const { result: [started, restarted], calls } = await recordProviderCalls(async () => {
+    const first = await startPayPalCheckout(ctx, { salesAttribution });
+    return [first, await first.restart()];
+  });
   assert.equal(started.status, 200, JSON.stringify(started));
+  assert.equal(started.body.checkoutCreated, true, JSON.stringify(started.body));
+  assert.equal(restarted.status, 200, JSON.stringify(restarted));
+  assert.equal(restarted.body.checkoutCreated, false, JSON.stringify(restarted.body));
   const orders = paypalOrders(calls);
   assert.equal(orders.length, 1, JSON.stringify(started));
   const webhook = await postPayPalCaptureWebhook(ctx);

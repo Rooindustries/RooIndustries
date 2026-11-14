@@ -140,3 +140,80 @@ test("checkout still starts when the browser cannot make a journey id", async ({
   const [start] = flow.startBodies();
   expect(start.bookingPayload.salesAttribution ?? null).toBeNull();
 });
+
+const longestHost = `${["a", "b", "c"].map((letter) => letter.repeat(63)).join(".")}.${"d".repeat(57)}.com`;
+const fourByteLabel = (offset) => String.fromCodePoint(0x20000 + offset).repeat(25);
+const longestLanding = (offset, creatorCode) => ({
+  utm_source: fourByteLabel(offset), utm_medium: fourByteLabel(offset + 1), utm_campaign: fourByteLabel(offset + 2),
+  utm_content: fourByteLabel(offset + 3), utm_term: fourByteLabel(offset + 4),
+  fbclid: `IwAR${String(offset).repeat(196)}`.slice(0, 200), gclid: `Cj0K${String(offset).repeat(196)}`.slice(0, 200),
+  ref: creatorCode,
+});
+const longestTouch = (landingPath, landing) => ({
+  landingPath, referrerHost: longestHost, creatorCode: landing.ref, source: landing.utm_source,
+  medium: landing.utm_medium, campaign: landing.utm_campaign, content: landing.utm_content, term: landing.utm_term,
+  fbclid: landing.fbclid, gclid: landing.gclid,
+});
+
+test("the longest multi-byte values in every field keep both touches in the cookie and the checkout", async ({
+  page, flow,
+}) => {
+  const firstCode = `f${"1".repeat(63)}`;
+  const lastCode = `l${"2".repeat(63)}`;
+  await page.route("**/api/ref/validateReferral*", (route) => {
+    const code = new URL(route.request().url()).searchParams.get("code");
+    const referral = { code, currentDiscountPercent: 0 };
+    return route.fulfill({ json: { ok: true, active: true, eligible: true, referral } });
+  });
+  const first = longestLanding(1, firstCode);
+  const last = longestLanding(6, lastCode);
+  const referer = `http://${longestHost}/`;
+  await page.goto(`/?${new URLSearchParams(first)}`, { referer });
+  await cookieBanner(page).getByRole("button", { name: "Accept", exact: true }).click();
+  await expect.poll(() => attributionCookie(page)).toBeDefined();
+  await page.goto(`/packages?${new URLSearchParams(last)}`, { referer });
+  await expect.poll(async () => decodeCookie(await attributionCookie(page)).lastTouch.source).toBe(last.utm_source);
+  const stored = decodeCookie(await attributionCookie(page));
+  expect(withoutTime(stored.firstTouch)).toEqual(longestTouch("/", first));
+  expect(withoutTime(stored.lastTouch)).toEqual(longestTouch("/packages", last));
+  expect(await page.evaluate(() => sessionStorage.getItem("sales_attribution"))).toBeNull();
+
+  await flow.review();
+  await flow.payment();
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Checkout handoff", exact: true })).toBeVisible();
+  const [start] = flow.startBodies();
+  expect(start.bookingPayload.salesAttribution).toEqual(stored);
+});
+
+test("phone numbers in campaign fields are dropped and numeric ad ids are kept", async ({ page, flow }) => {
+  const phones = {
+    utm_source: "+44 7700 900123", utm_medium: "(555) 123-4567", utm_campaign: "+919876543210",
+    utm_content: "555.123.4567", utm_term: "call +1 555 123 4567", fbclid: "555-123-4567", gclid: "Cj0K.fixture-2",
+  };
+  await page.goto(`/?${new URLSearchParams(phones)}`);
+  await expect.poll(() => storedAttribution(page)).not.toBeNull();
+  const phoneTouch = { landingPath: "/", gclid: "Cj0K.fixture-2" };
+  expect(withoutTime((await storedAttribution(page)).lastTouch)).toEqual(phoneTouch);
+
+  const ids = {
+    utm_source: "meta", utm_campaign: "120210123456789012", utm_content: "23851234567890123", utm_term: "9876543210",
+  };
+  await page.goto(`/packages?${new URLSearchParams(ids)}`);
+  await expect.poll(async () => (await storedAttribution(page)).lastTouch.landingPath).toBe("/packages");
+  const idTouch = {
+    landingPath: "/packages", source: "meta", campaign: "120210123456789012", content: "23851234567890123",
+    term: "9876543210",
+  };
+  const landed = await storedAttribution(page);
+  expect(withoutTime(landed.firstTouch)).toEqual(phoneTouch);
+  expect(withoutTime(landed.lastTouch)).toEqual(idTouch);
+
+  await flow.review();
+  await flow.payment();
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Checkout handoff", exact: true })).toBeVisible();
+  const [start] = flow.startBodies();
+  expect(start.bookingPayload.salesAttribution).toEqual(landed);
+  expect(JSON.stringify(start)).not.toMatch(/900123|123-4567|123\.4567|919876543210/);
+});

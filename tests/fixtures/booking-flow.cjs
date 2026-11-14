@@ -8,6 +8,17 @@ const providers = {
   paypal: { enabled: false, mode: "disabled" },
 };
 
+const startedCheckout = (baseURL, checkouts, request) => {
+  const holdId = request.postDataJSON()?.bookingPayload?.slotHoldId || "";
+  const checkoutCreated = !checkouts.has(holdId);
+  checkouts.add(holdId);
+  return {
+    ok: true, paymentAccessToken: "fixture-payment", status: "started", checkoutCreated,
+    providerPayload: { checkoutUrl: `${baseURL}/__test/checkout-handoff` },
+    sessionExpiresAt: new Date(Date.now() + 20 * 60 * 1000).toISOString(),
+  };
+};
+
 const test = base.extend({
   cpuThrottling: [async ({ page, browserName }, use, testInfo) => {
     const rate = Number(process.env.PW_CPU_THROTTLING_RATE || 1);
@@ -41,6 +52,7 @@ const test = base.extend({
       holdMs: 20 * 60 * 1000,
       holdCount: 0,
       holds: new Map(),
+      checkouts: new Set(),
       collision: false,
     };
     page.on("requestfailed", (request) => state.aborted.push(new URL(request.url()).pathname));
@@ -146,13 +158,7 @@ const test = base.extend({
           couponDiscountAmount, referralDiscountAmount, referralDiscountPercent,
         } });
       }
-      if (path === "/api/payment/start") {
-        return json(route, {
-          ok: true, paymentAccessToken: "fixture-payment", status: "started",
-          providerPayload: { checkoutUrl: `${baseURL}/__test/checkout-handoff` },
-          sessionExpiresAt: new Date(Date.now() + 20 * 60 * 1000).toISOString(),
-        });
-      }
+      if (path === "/api/payment/start") return json(route, startedCheckout(baseURL, state.checkouts, request));
       return route.fallback();
     });
     const booking = async (path = "/booking") => {
@@ -219,11 +225,40 @@ const settleIdle = (page) => page.evaluate(() => new Promise((resolve) => {
 const bookingEventId = (paymentRecordId) =>
   createHash("sha256").update(`booking-confirmed:${paymentRecordId}`).digest("hex").slice(0, 40);
 
-const routePaidStart = (page, baseURL) => page.route("**/api/payment/start", (route) => route.fulfill({ json: {
-  ok: true, paymentAccessToken: "fixture-payment", status: "started",
-  providerPayload: { checkoutUrl: `${baseURL}/__test/checkout-handoff` },
-  sessionExpiresAt: new Date(Date.now() + 20 * 60 * 1000).toISOString(),
-  quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
-} }));
+const routePaidStart = (page, baseURL) => {
+  const checkouts = new Set();
+  return page.context().route("**/api/payment/start", (route) => route.fulfill({ json: {
+    ...startedCheckout(baseURL, checkouts, route.request()),
+    quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
+  } }));
+};
 
-module.exports = { test, expect, cookieBanner, settleIdle, bookingEventId, routePaidStart };
+
+const startInTwoTabsAndReload = async (page, flow) => {
+  const context = page.context();
+  const holds = [];
+  context.on("request", (request) => {
+    if (new URL(request.url()).pathname !== "/api/payment/start") return;
+    holds.push(request.postDataJSON()?.bookingPayload?.slotHoldId);
+  });
+  await context.route("**/api/payment/status", (route) => route.fulfill({ json: { ok: true, status: "started" } }));
+  await flow.review("/booking?package=overhaul");
+  await flow.payment();
+  const opened = context.waitForEvent("page");
+  await page.evaluate(() => { window.open("/payment"); });
+  const second = await opened;
+  await expect(second.getByRole("heading", { name: "Complete Payment", exact: true })).toBeVisible();
+  for (const tab of [page, second]) {
+    await tab.getByRole("button", { name: "Pay your way", exact: true }).click();
+    await expect(tab).toHaveURL(/\/__test\/checkout-handoff$/);
+  }
+  await page.goto("/payment");
+  await page.getByRole("button", { name: "Resume checkout", exact: true }).click();
+  await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
+  await settleIdle(second);
+  expect(holds.length).toBeGreaterThanOrEqual(2);
+  expect(new Set(holds).size).toBe(1);
+};
+module.exports = {
+  test, expect, cookieBanner, settleIdle, bookingEventId, routePaidStart, startInTwoTabsAndReload,
+};

@@ -1,5 +1,5 @@
 const {
-  test, expect, cookieBanner: banner, settleIdle: settle, bookingEventId, routePaidStart,
+  test, expect, cookieBanner: banner, settleIdle: settle, bookingEventId, routePaidStart, startInTwoTabsAndReload,
 } = require("./fixtures/booking-flow.cjs");
 
 const pixelId = String(process.env.TOOLING_META_PIXEL_ID || "").trim();
@@ -21,15 +21,17 @@ test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata", reducedMotion: "
 
 let meta;
 
-test.beforeEach(async ({ page, flow }) => {
+test.beforeEach(async ({ page, context, flow }) => {
   expect(flow.state.calls).toEqual([]);
   meta = { scripts: [], beacons: [], calls: [] };
-  await page.exposeFunction("__recordMeta", (args) => meta.calls.push({ path: new URL(page.url()).pathname, args }));
-  await page.route("https://connect.facebook.net/**", (route) => {
+  await context.exposeBinding("__recordMeta", ({ page: source }, args) => meta.calls.push({
+    path: new URL(source.url()).pathname, tab: source === page ? "first" : "other", args,
+  }));
+  await context.route("https://connect.facebook.net/**", (route) => {
     meta.scripts.push(route.request().url());
     return route.fulfill({ contentType: "application/javascript", body: fakeFbevents });
   });
-  await page.route("https://www.facebook.com/**", (route) => {
+  await context.route("https://www.facebook.com/**", (route) => {
     meta.beacons.push(route.request().url());
     return route.fulfill({ status: 204, body: "" });
   });
@@ -518,6 +520,59 @@ if (!pixelId) {
       await expect.poll(() => tracked("PageView").length).toBe(3);
       await settle(page);
       expect(tracked("PageView").map(({ path }) => path)).toEqual(["/packages", "/reviews", "/packages"]);
+    });
+
+    test("InitiateCheckout is sent once per created checkout across tabs and a reload", async ({
+      page, flow, baseURL,
+    }) => {
+      await routePaidStart(page, baseURL);
+      await page.goto("/packages");
+      await banner(page).getByRole("button", { name: "Accept", exact: true }).click();
+      await expect.poll(() => tracked("PageView").length).toBe(1);
+      await startInTwoTabsAndReload(page, flow);
+      expect(tracked("InitiateCheckout")).toHaveLength(1);
+    });
+
+    const fromFirstTab = () => meta.calls.filter(({ tab }) => tab === "first");
+    const reviewsLink = (page) => page.locator('main a[href="/reviews"], footer a[href="/reviews"]').first();
+
+    test("a Decline in another tab stops the pixel and removes the ad cookie here", async ({ page, context }) => {
+      await page.goto("/packages?utm_source=meta&utm_campaign=spring");
+      await banner(page).getByRole("button", { name: "Accept", exact: true }).click();
+      await expect.poll(() => tracked("PageView").length).toBe(1);
+      await expect.poll(() => adCookie(context)).toBeDefined();
+      const other = await context.newPage();
+      await other.goto("/reviews");
+      await other.getByRole("button", { name: "Cookie settings", exact: true }).click();
+      await banner(other).getByRole("button", { name: "Decline", exact: true }).click();
+      await expect.poll(() => adCookie(context)).toBeUndefined();
+      const revokes = () => fromFirstTab().filter(({ args }) => args.join() === "consent,revoke").length;
+      await expect.poll(revokes).toBe(2);
+      const before = fromFirstTab().length;
+      await overhaulDetails(page).click();
+      await closeDetails(page);
+      await reviewsLink(page).click();
+      await expect(page).toHaveURL(/\/reviews$/);
+      await settle(page);
+      await page.waitForLoadState("networkidle");
+      expect(fromFirstTab().slice(before)).toEqual([]);
+      expect(await adCookie(context)).toBeUndefined();
+      await expect(banner(page)).toHaveCount(0);
+    });
+
+    test("an Accept in another tab starts the pixel here", async ({ page, context }) => {
+      await page.goto("/packages");
+      await expect(banner(page)).toBeVisible();
+      await settle(page);
+      const other = await context.newPage();
+      await other.goto("/reviews");
+      await banner(other).getByRole("button", { name: "Accept", exact: true }).click();
+      await expect(banner(page)).toHaveCount(0);
+      await expect.poll(() => fromFirstTab().filter(({ args }) => args[1] === "PageView").map(({ path }) => path))
+        .toEqual(["/packages"]);
+      await overhaulDetails(page).click();
+      await expect.poll(() => fromFirstTab().filter(({ args }) => args[1] === "ViewContent").length).toBe(1);
+      await closeDetails(page);
     });
   });
 }

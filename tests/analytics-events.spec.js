@@ -1,5 +1,6 @@
 const {
   test: bookingTest, expect, cookieBanner: banner, settleIdle: settle, bookingEventId, routePaidStart: routeStart,
+  startInTwoTabsAndReload,
 } = require("./fixtures/booking-flow.cjs");
 
 const safety = () => import("../scripts/lib/test-target-safety.mjs");
@@ -36,18 +37,18 @@ const test = bookingTest.extend({
   launchOptions: [async ({ launchOptions, productionHost }, use) =>
     use({ ...launchOptions, args: productionHost.args }), { scope: "worker" }],
   baseURL: async ({ productionHost }, use) => use(productionHost.origin),
-  vercel: [async ({ page, flow, baseURL, analyticsThrows }, use) => {
+  vercel: [async ({ context, flow, baseURL, analyticsThrows }, use) => {
     const vercel = { calls: [], scripts: [], served: [] };
-    await page.exposeFunction("__recordVercel", (path, method, payload) =>
+    await context.exposeFunction("__recordVercel", (path, method, payload) =>
       vercel.calls.push({ path, method, payload }));
-    await page.addInitScript((throws) => {
+    await context.addInitScript((throws) => {
       window.va = (method, payload) => {
         if (method === "beforeSend") window.__vercelBeforeSend = payload;
         window.__recordVercel(location.pathname, method, method === "beforeSend" ? typeof payload : payload);
         if (throws && method === "event") throw new Error("Analytics script failure");
       };
     }, analyticsThrows);
-    await page.route(`**${insightsScript}`, (route) => {
+    await context.route(`**${insightsScript}`, (route) => {
       vercel.scripts.push(route.request().url());
       return route.fulfill({
         contentType: "application/javascript",
@@ -55,9 +56,9 @@ const test = bookingTest.extend({
       });
     });
     for (const script of productionOnlyScripts) {
-      await page.route(script, (route) => route.fulfill({ contentType: "application/javascript", body: "" }));
+      await context.route(script, (route) => route.fulfill({ contentType: "application/javascript", body: "" }));
     }
-    page.on("response", (response) => {
+    context.on("response", (response) => {
       const type = response.request().resourceType();
       if (!["document", "fetch", "xhr", "script"].includes(type)) return;
       const { pathname } = new URL(response.url());
@@ -188,6 +189,16 @@ test("checkout_started fires once, only after the payment start succeeds", async
     package: overhaul, package_slug: "overhaul", provider: "dodo", value: 84.99, currency: "USD",
   });
   expect(JSON.stringify(vercel.calls)).not.toMatch(personalData);
+});
+
+test("checkout_started fires once per created checkout across tabs and a reload", async ({
+  page, flow, vercel, baseURL,
+}) => {
+  await page.goto("/packages");
+  await banner(page).getByRole("button", { name: "Decline", exact: true }).click();
+  await routeStart(page, baseURL);
+  await startInTwoTabsAndReload(page, flow);
+  expect(events(vercel, "checkout_started")).toHaveLength(1);
 });
 
 for (const failure of [500, "unknown", "network"]) {

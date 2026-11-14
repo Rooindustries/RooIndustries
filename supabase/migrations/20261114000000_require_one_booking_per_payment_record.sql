@@ -1,12 +1,12 @@
 set lock_timeout = '5s';
 set statement_timeout = '120s';
 
-lock table commerce.bookings in access exclusive mode;
-
-do $$
+do $migration$
 declare
   v_duplicates text;
 begin
+  lock table commerce.bookings in access exclusive mode;
+
   select string_agg(duplicate.summary, '; ' order by duplicate.summary)
   into v_duplicates
   from (
@@ -26,11 +26,11 @@ begin
     raise exception 'duplicate bookings share a payment record: %', v_duplicates
       using errcode = '23505';
   end if;
+
+  create unique index if not exists bookings_payment_record_id_key
+    on commerce.bookings (payment_record_id)
+    where payment_record_id is not null;
+
+  drop index if exists commerce.bookings_payment_record_id_idx;
 end;
-$$;
-
-create unique index if not exists bookings_payment_record_id_key
-  on commerce.bookings (payment_record_id)
-  where payment_record_id is not null;
-
-drop index if exists commerce.bookings_payment_record_id_idx;
+$migration$;

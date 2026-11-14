@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { captureConsole, fixtureMail, readRollback, withEnv } from "./payment-sweep-ads-fixtures.mjs";
+import {
+  captureConsole, fixtureMail, psqlFile, readRollback, sqlFilePath, withEnv,
+} from "./payment-sweep-ads-fixtures.mjs";
 
 const uniqueMigration = "20261114000000_require_one_booking_per_payment_record.sql";
 const eventsMigration = "20261114001000_record_booking_paid_events.sql";
@@ -390,6 +392,10 @@ export const registerBookingPaidScenarios = async (ctx) => {
       });
       assert.equal(await indexExists("bookings_payment_record_id_idx"), true);
       assert.equal(await indexExists("bookings_payment_record_id_key"), false);
+      const autocommit = psqlFile(fixture, sqlFilePath("migrations", uniqueMigration));
+      assert.match(autocommit.stderr, /duplicate bookings share a payment record/);
+      assert.equal(await indexExists("bookings_payment_record_id_idx"), true);
+      assert.equal(await indexExists("bookings_payment_record_id_key"), false);
     } finally {
       await sql`delete from commerce.bookings where legacy_sanity_id = 'booking.ads-duplicate'`;
       if (!(await indexExists("bookings_payment_record_id_key"))) await fixture.apply(uniqueMigration);
@@ -405,6 +411,40 @@ export const registerBookingPaidScenarios = async (ctx) => {
       values (gen_random_uuid(), 'booking.ads-second', 'captured', 'Vertex Essentials', ${payment.id})`,
     (error) => error.code === "23505" && error.constraint_name === "bookings_payment_record_id_key");
     return { rejection, uniqueIndex: index };
+  }));
+  await run("ads-rollbacks-refuse-unreported-rows", withMail(async () => {
+    await clearEvents();
+    const checkout = await a1Start("paypal");
+    assert.equal((await a1Hook("paypal")).status, 200);
+    await finalize(checkout);
+    assert.equal((await assertOneEvent(checkout.id)).status, "pending");
+    const [message] = await sql`select public.roo_record_contact_message(${contactFields.name},
+      ${contactFields.email}, ${contactFields.message}, null, 'pending') as id`;
+    const schema = async () => (await sql`select
+      to_regclass('ops.booking_paid_events') is not null as events,
+      to_regclass('ops.contact_messages') is not null as contact,
+      to_regprocedure('public.roo_claim_booking_paid_events(integer)') is not null as claim_events,
+      to_regprocedure('public.roo_claim_contact_retries(integer)') is not null as claim_contact,
+      exists (select 1 from pg_trigger where tgname = 'commerce_bookings_record_booking_paid_event') as event_trigger`)[0];
+    const before = await schema();
+    assert.ok(Object.values(before).every(Boolean), JSON.stringify(before));
+    let refused;
+    try {
+      refused = {
+        events: psqlFile(fixture, sqlFilePath("rollbacks", eventsMigration)).stderr,
+        contact: psqlFile(fixture, sqlFilePath("rollbacks", contactMigration)).stderr,
+      };
+      assert.match(refused.events, /paid booking events were never reported: 1/);
+      assert.match(refused.contact, /contact messages were never delivered: \d+/);
+      assert.deepEqual(await schema(), before);
+      assert.deepEqual((await events()).map(({ status }) => status), ["pending"]);
+      const [kept] = await sql`select status from ops.contact_messages where id = ${message.id}`;
+      assert.equal(kept?.status, "pending");
+    } finally {
+      await sql`delete from ops.contact_messages where id = ${message.id}`;
+      await clearEvents();
+    }
+    return { refused, schema: before };
   }));
   await run("ads-cron-duties-before-migrations", withMail(async () => {
     await clearEvents();

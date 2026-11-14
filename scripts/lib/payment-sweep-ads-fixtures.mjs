@@ -1,12 +1,20 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 export const sweepRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const sandboxOrigin = "https://api-m.sandbox.paypal.com";
 export const fixtureMail = { FROM_EMAIL: "noreply@example.invalid", OWNER_EMAIL: "owner@example.invalid" };
 
-export const readRollback = (name) => fs.readFileSync(path.join(sweepRoot, "supabase/rollbacks", name), "utf8");
+export const sqlFilePath = (folder, name) => path.join(sweepRoot, "supabase", folder, name);
+export const readRollback = (name) => fs.readFileSync(sqlFilePath("rollbacks", name), "utf8");
+
+export const psqlFile = (fixture, file) => spawnSync(path.join(fixture.pgBin, "psql"), [
+  "-X", "-q", "-v", "ON_ERROR_STOP=0", "-h", fixture.host, "-p", String(fixture.pgPort),
+  "-U", os.userInfo().username, "-d", "postgres", "-f", file,
+], { encoding: "utf8" });
 
 export const withEnv = async (values, fn) => {
   const saved = Object.fromEntries(Object.keys(values).map((key) => [key, process.env[key]]));
@@ -89,7 +97,8 @@ export const startPayPalCheckout = async (ctx, bookingFields = {}) => {
   };
   const quote = await resolvePaymentQuote({ packageTitle, client: ctx.commerce });
   const quoteFingerprint = buildQuoteFingerprint({ bookingPayload, quote });
-  return ctx.requestFlow("start", { body: { provider: "paypal", bookingPayload, quoteFingerprint } });
+  const start = () => ctx.requestFlow("start", { body: { provider: "paypal", bookingPayload, quoteFingerprint } });
+  return { ...await start(), restart: start };
 };
 
 export const postPayPalCaptureWebhook = async ({ origin, paypalReq }) => {

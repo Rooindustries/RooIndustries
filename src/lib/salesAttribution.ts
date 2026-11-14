@@ -25,22 +25,52 @@ export type SalesAttribution = {
 };
 
 const JOURNEY_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
-const LABEL = /^[\p{L}\p{M}\p{N} ._\-+:/|()@!~]{1,100}$/u;
+const LABEL = /^[\p{L}\p{M}\p{N} ._\-+:/|()@!~]+$/u;
+const LABEL_BYTES = 100;
+const PHONE_SEPARATOR = /[\s.()-]/;
+const PHONE_TEXT = /^[\d\s.()-]+$/;
+const PHONE_AFTER_PLUS = /(?:^|[^\p{L}\p{N}])\+[\d\s.()-]+/gu;
 const EMAIL = /[^\s@]+@[^\s@]+\.[^\s@]+/;
 const CLICK_ID = /^[A-Za-z0-9_.-]{1,200}$/;
 const HOST = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
 const CAPTURED_AT = /^\d{4}-\d{2}-\d{2}T/;
 const REFERRAL_CODE = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
 
+const phoneDigits = (text: string) => {
+  const digits = text.replace(/\D/g, "").length;
+  return digits >= 7 && digits <= 15;
+};
+const looksLikePhone = (text: string) =>
+  [...text.matchAll(PHONE_AFTER_PLUS)].some(([run]) => phoneDigits(run)) ||
+  (PHONE_TEXT.test(text) && PHONE_SEPARATOR.test(text) && phoneDigits(text));
+
+const utf8Bytes = (char: string) => {
+  const code = char.codePointAt(0) || 0;
+  return code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
+};
+const withinBytes = (text: string, limit: number) => {
+  let used = 0;
+  let end = 0;
+  for (const char of text) {
+    used += utf8Bytes(char);
+    if (used > limit) break;
+    end += char.length;
+  }
+  return text.slice(0, end).trim();
+};
+
+const safeLabel = (text: string) => LABEL.test(text) && !EMAIL.test(text) && !looksLikePhone(text);
 const label = (value: unknown) => {
   if (typeof value !== "string") return "";
   const text = value.normalize("NFKC").replace(/\s+/g, " ").replace(/[\p{Cc}\p{Cf}<>"'`\\]/gu, "")
     .replace(/ {2,}/g, " ").trim();
-  return LABEL.test(text) && !EMAIL.test(text) ? text : "";
+  const bounded = withinBytes(text, LABEL_BYTES);
+  return safeLabel(text) && safeLabel(bounded) ? bounded : "";
 };
 const referralCode = (value: unknown) =>
   typeof value === "string" && REFERRAL_CODE.test(value.trim()) && /[a-z]/i.test(value) ? value.trim() : "";
-const clickId = (value: unknown) => typeof value === "string" && CLICK_ID.test(value) ? value : "";
+const clickId = (value: unknown) =>
+  typeof value === "string" && CLICK_ID.test(value) && !looksLikePhone(value) ? value : "";
 
 const FIELDS = {
   creatorCode: ["ref", referralCode],

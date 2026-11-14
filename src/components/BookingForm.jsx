@@ -559,7 +559,8 @@ export default function BookingForm() {
   const [preventHoldAutoload, setPreventHoldAutoload] = useState(false);
   const [drafts, setDrafts] = useState({});
 
-  const { navigationPackage, bookingPackage } = useBookingPackage(location, persistedPackage);
+  const { navigationPackage, bookingPackage, pricesReady, pricesError, retryPrices } =
+    useBookingPackage(location, persistedPackage);
   const selectedPackage = useMemo(() => preparePackage(bookingPackage), [bookingPackage]);
   useBookingPackageView(navigationPackage && selectedPackage);
 
@@ -2492,15 +2493,15 @@ export default function BookingForm() {
           pageFadeIn ? "opacity-100" : "opacity-0"
         }`}
       >
-        {!settings || (step === 1 && !availabilityReady && !earliestAvailableSlot) ? (
+        {!settings || !pricesReady || (step === 1 && !availabilityReady && !earliestAvailableSlot) ? (
           <div className="mt-20 flex flex-col items-center gap-3 text-center">
             <div className="text-accent">
-              {settingsError || "Loading..."}
+              {settingsError || pricesError || "Loading..."}
             </div>
-            {settingsError && (
+            {(settingsError || pricesError) && (
               <button
                 type="button"
-                onClick={reloadAvailability}
+                onClick={settingsError ? reloadAvailability : retryPrices}
                 className="rounded-lg border border-info-border bg-info-soft px-4 py-2 text-sm font-semibold text-info-text transition hover:bg-surface-hover-accent focus:outline-none focus:ring-2 focus:ring-[color:var(--color-focus-ring)]"
               >
                 Retry

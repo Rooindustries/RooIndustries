@@ -2,8 +2,8 @@ const COOKIE_NOTICE = {
   heading: "Cookies and browser storage",
   paragraphs: [
     [
-      "Roo Industries keeps a little data in your browser so the site works. Ad measurement only starts",
-      "after you click Accept on the cookie banner.",
+      "Roo Industries keeps a little data in your browser so the site works. Some measurement works without",
+      "cookies. The roo_attr cookie and the Meta pixel only start after you click Accept on the cookie banner.",
     ].join(" "),
     [
       "Always on: roo-consent in local storage remembers whether you accepted or declined, and roo-theme",
@@ -11,8 +11,9 @@ const COOKIE_NOTICE = {
     ].join(" "),
     [
       "Always on: session storage keeps your booking draft, the time slot you are holding, your checkout",
-      "progress, the referral or coupon code you used and the link or campaign that brought you here. It",
-      "also marks a visit or booking as already counted. All of it clears when you close the tab.",
+      "progress, the referral or coupon code you used and, until you accept cookies, the link or campaign that",
+      "brought you here. It also marks a visit or booking as already counted. All of it clears when you close",
+      "the tab.",
     ].join(" "),
     [
       "Sign-ins: creators who log in to the referral portal get a ref_session cookie for 12 hours, or 30",
@@ -21,9 +22,10 @@ const COOKIE_NOTICE = {
       "edit the site get their own session cookie.",
     ].join(" "),
     [
-      "Measurement without cookies: Vercel Analytics and Speed Insights count page visits and page speed",
-      "without cookies. On public pages, Seorce keeps a visit id and page count in session storage to",
-      "measure search traffic.",
+      "Measurement without cookies: Vercel Analytics counts visits and bookings without cookies, together with",
+      "the campaign, ad or referral link that brought you here. Unless you click Accept, that link is kept for",
+      "the current tab only. Speed Insights measures page speed without cookies. On public pages, Seorce keeps",
+      "a visit id and page count in session storage to measure search traffic.",
     ].join(" "),
     [
       "Chat: the Intercom chat widget sets its own cookies (intercom-id, intercom-session and",
@@ -32,9 +34,9 @@ const COOKIE_NOTICE = {
     ].join(" "),
     [
       "Only after Accept: the roo_attr cookie keeps the ad, campaign or referral link that brought you here",
-      "for 90 days. When our Meta pixel is turned on, it tells Meta which pages you viewed and when you",
-      "start checkout or book, so we can measure our ads. It never sends your name, email or phone, and",
-      "Meta sets its own _fbp cookie.",
+      "for 90 days. When our Meta pixel is turned on, it tells Meta which pages and packages you viewed and",
+      "when you start checkout or book, so we can measure our ads. It never sends your name, email or phone,",
+      "and Meta sets its own _fbp cookie.",
     ].join(" "),
     [
       "Contact messages: messages sent through the contact form are stored so we can reply. Delivered",
