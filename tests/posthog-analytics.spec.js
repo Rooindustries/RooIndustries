@@ -69,7 +69,10 @@ async function serveAsProduction(context, baseURL) {
     if (url.pathname === "/__test/checkout-handoff") return route.fulfill({ contentType: "text/html", body: "<h1>Checkout handoff</h1>" });
     if (url.pathname.startsWith("/_vercel/")) return route.fulfill({ status: 204, body: "" });
     if (api[url.pathname]) return route.fulfill({ json: api[url.pathname](request) });
-    const response = await route.fetch({ url: new URL(`${url.pathname}${url.search}`, baseURL).href, maxRedirects: 0 });
+    const local = new URL(baseURL);
+    local.pathname = url.pathname;
+    local.search = url.search;
+    const response = await route.fetch({ url: local.href, maxRedirects: 0 });
     return route.fulfill({ response });
   });
   await context.route(/^https:\/\/(scripts\.seorce\.com|widget\.intercom\.io|js\.intercomcdn\.com)\//, (route) =>
