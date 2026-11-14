@@ -37,7 +37,7 @@ import {
   toMoney,
 } from "../lib/checkoutCodes";
 import { trackEvent } from "../lib/analytics";
-import { captureSalesAttribution } from "../lib/salesAttribution";
+import { bookingPackagePath, useBookingPackageView, useNavigationPackage } from "../lib/bookingPackageParam";
 import { isValidEmail } from "../lib/emailValidation";
 import { classifyHoldResponse } from "../lib/holdResponse";
 
@@ -559,23 +559,14 @@ export default function BookingForm() {
   const [preventHoldAutoload, setPreventHoldAutoload] = useState(false);
   const [drafts, setDrafts] = useState({});
 
-  const navigationPackage = useMemo(() => {
-    const direct = location.state?.bookingPackage;
-    if (direct?.title) return direct;
-    const bookingData = location.state?.bookingData;
-    if (!bookingData?.packageTitle) return null;
-    return {
-      title: bookingData.packageTitle,
-      price: bookingData.packagePrice || "",
-      tag: bookingData.packageTag || "",
-    };
-  }, [location.state]);
+  const navigationPackage = useNavigationPackage(location);
 
   const selectedPackage = useMemo(() => {
     if (navigationPackage?.title) return preparePackage(navigationPackage);
     if (persistedPackage) return preparePackage(persistedPackage);
     return DEFAULT_VERTEX_PACKAGE;
   }, [navigationPackage, persistedPackage]);
+  useBookingPackageView(navigationPackage && selectedPackage);
 
   const prevPackageRef = useRef(selectedPackage.title);
   const prevPackageDataRef = useRef(selectedPackage);
@@ -2365,7 +2356,6 @@ export default function BookingForm() {
     const finalCouponCode = String(appliedCoupon?.code || "").trim();
 
     const payload = {
-      salesAttribution: captureSalesAttribution(),
       displayDate,
       displayTime,
 
@@ -2418,8 +2408,6 @@ export default function BookingForm() {
     } catch {
       console.error("Failed to persist checkout state");
     }
-
-    trackEvent("checkout_started", { package: selectedPackage.title });
 
     navigate("/payment", {
       state: {
@@ -3473,7 +3461,7 @@ export default function BookingForm() {
                             console.error("Failed to store booking form draft");
                           }
                           navigate(
-                            "/booking",
+                            bookingPackagePath(displayPackage?.title || DEFAULT_VERTEX_PACKAGE.title),
                             location.state?.backgroundLocation
                               ? {
                                   state: {

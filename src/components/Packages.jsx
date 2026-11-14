@@ -11,7 +11,8 @@ import homeCopy from "../lib/homeCopy";
 import packageContent from "../lib/packageContent";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 import { persistBookingPackageSelection } from "../lib/checkoutStorage";
-import { trackEvent } from "../lib/analytics";
+import { trackEvent, trackPackageView } from "../lib/analytics";
+import { bookingPackagePath } from "../lib/bookingPackageParam";
 import { getSessionAvailability } from "../lib/sessionAvailability";
 import { reportRequestError, requestDeadline } from "../lib/clientRequest";
 
@@ -58,6 +59,7 @@ export default function Packages({
   const UPGRADE_FAQ_HASH = "upgrade-path";
 
   const openDetails = (pkg) => {
+    trackPackageView({ title: pkg.title, price: pkg.price, surface: "packages" });
     startTransition(() => {
       setDetailsLoaded(true);
       setDetailsPkg(pkg);
@@ -363,7 +365,7 @@ export default function Packages({
 
                   <div className="pt-7 flex flex-col sm:flex-row xl:flex-col gap-3 xl:self-end">
                     <Link
-                      to="/booking"
+                      to={bookingPackagePath(p.title)}
                       state={{
                         ...bookingState,
                         bookingPackage: {

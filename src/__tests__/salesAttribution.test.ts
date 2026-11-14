@@ -20,7 +20,7 @@ describe("sales attribution", () => {
     sessionStorage.setItem("referral_session", "winton");
     window.history.replaceState({}, "", "/?ref=winton&utm_campaign=vertex-max");
     const initial = captureSalesAttribution();
-    expect(initial).toEqual(expect.objectContaining({ creatorCode: "winton", campaign: "vertex-max" }));
+    expect(initial.lastTouch).toEqual(expect.objectContaining({ creatorCode: "winton", campaign: "vertex-max" }));
     window.history.replaceState({}, "", "/booking?ref=winton");
     expect(captureSalesAttribution()).toEqual(initial);
     window.history.replaceState({}, "", "/payment");
@@ -32,7 +32,7 @@ describe("sales attribution", () => {
     const { captureSalesAttribution } = require("../lib/salesAttribution");
     sessionStorage.setItem("referral_session", "winton");
     window.history.replaceState({}, "", "/?ref=soapy");
-    expect(captureSalesAttribution().creatorCode).toBe("soapy");
+    expect(captureSalesAttribution().lastTouch.creatorCode).toBe("soapy");
     expect(sessionStorage.getItem("referral_session")).toBe("winton");
   });
 
@@ -40,7 +40,7 @@ describe("sales attribution", () => {
     const { captureSalesAttribution, sanitizeAnalyticsEvent } = require("../lib/salesAttribution");
     window.history.replaceState({}, "", "/upgrade-xoc?ref=winton&utm_campaign=upgrade");
     const initial = captureSalesAttribution();
-    expect(initial).toEqual(expect.objectContaining({ creatorCode: "winton", campaign: "upgrade", landingPath: "/upgrade" }));
+    expect(initial.lastTouch).toEqual(expect.objectContaining({ creatorCode: "winton", campaign: "upgrade", landingPath: "/upgrade" }));
     window.history.replaceState({}, "", "/payment");
     expect(captureSalesAttribution()).toEqual(initial);
     expect(sanitizeAnalyticsEvent({ type: "pageview", url: "https://www.rooindustries.com/upgrade-xoc?ref=winton" }).url).toBe("https://www.rooindustries.com/upgrade");
@@ -48,10 +48,12 @@ describe("sales attribution", () => {
 
   test("discards arbitrary customer data, URLs, and invalid identifiers", () => {
     const { sanitizeSalesAttribution } = require("../lib/salesAttribution");
-    expect(sanitizeSalesAttribution({ ...sample, email: "buyer@example.invalid", source: "buyer@example.invalid", campaign: "https://example.invalid/?token=secret", landingPath: "/download/private-token", referrerHost: "https://example.invalid" })).toEqual({ version: 1, journeyId: sample.journeyId, capturedAt: sample.capturedAt, landingPath: "/", creatorCode: "winton" });
+    const touch = { capturedAt: sample.capturedAt, landingPath: "/", creatorCode: "winton" };
+    expect(sanitizeSalesAttribution({ ...sample, email: "buyer@example.invalid", source: "buyer@example.invalid", campaign: "https://example.invalid/?token=secret", landingPath: "/download/private-token", referrerHost: "https://example.invalid" })).toEqual({ version: 2, journeyId: sample.journeyId, firstTouch: touch, lastTouch: touch });
     expect(sanitizeSalesAttribution({ ...sample, journeyId: "buyer@example.invalid" })).toBeNull();
     expect(sanitizeSalesAttribution({ ...sample, capturedAt: "not-a-date" })).toBeNull();
-    expect(sanitizeSalesAttribution({ ...sample, campaign: "Alice Customer", content: "919876543210", source: "token.segment.signature" })).toEqual({ version: 1, journeyId: sample.journeyId, capturedAt: sample.capturedAt, landingPath: "/", creatorCode: "winton" });
+    const kept = { ...touch, campaign: "Alice Customer", content: "919876543210", source: "token.segment.signature" };
+    expect(sanitizeSalesAttribution({ ...sample, campaign: "Alice Customer", content: "919876543210", source: "token.segment.signature" })).toEqual({ version: 2, journeyId: sample.journeyId, firstTouch: kept, lastTouch: kept });
   });
 
   test("redacts payment URLs and omits authentication routes", () => {
@@ -79,8 +81,8 @@ describe("sales attribution", () => {
     const first = captureSalesAttribution();
     window.history.replaceState({}, "", "/?ref=winton&utm_campaign=second");
     const second = captureSalesAttribution();
-    expect(second.journeyId).not.toBe(first.journeyId);
-    expect(second.campaign).toBe("second");
+    expect(second.journeyId).toBe(first.journeyId);
+    expect(second.lastTouch.campaign).toBe("second");
   });
 
   test("does not block checkout when browser randomness is unavailable", () => {
@@ -111,8 +113,10 @@ describe("confirmed purchase receipts", () => {
 
   test("issues a stable anonymous receipt only after a verified booking", () => {
     const { buildSalesReceipt } = require("../server/api/payment/salesReceipt");
+    const { journeyId, version, ...sampleTouch } = sample;
+    const upgradedSample = { version: 2, journeyId, firstTouch: sampleTouch, lastTouch: sampleTouch };
     const receipt = buildSalesReceipt(record);
-    expect(receipt).toEqual(expect.objectContaining({ eventId: expect.stringMatching(/^[a-f0-9]{40}$/), amount: 89.95, currency: "USD", attribution: sample, referralCode: "winton" }));
+    expect(receipt).toEqual(expect.objectContaining({ eventId: expect.stringMatching(/^[a-f0-9]{40}$/), amount: 89.95, currency: "USD", attribution: upgradedSample, referralCode: "winton" }));
     expect(buildSalesReceipt(record)).toEqual(receipt);
     expect(JSON.stringify(receipt)).not.toMatch(/private-order|buyer@example/);
   });

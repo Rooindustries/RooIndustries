@@ -27,7 +27,6 @@
   const originalFetch = window.fetch.bind(window);
   window.fetch = (input, init) => {
     const url = new URL(typeof input === 'string' || input instanceof URL ? input : input.url, location.origin);
-    if (url.origin === 'https://formspree.io') return originalFetch(`/__ui/formspree?form=${encodeURIComponent(url.pathname.split('/').pop())}`, init);
     if (url.origin !== location.origin) return Promise.reject(new Error('Fixture refuses external browser fetch'));
     return originalFetch(input, init);
   };

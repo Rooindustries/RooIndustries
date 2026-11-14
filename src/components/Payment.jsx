@@ -6,8 +6,8 @@ import { PayPalScriptProvider, PayPalButtons, usePayPalScriptReducer } from "@pa
 import { motion } from "framer-motion";
 import { WalletCards } from "lucide-react";
 import packagePricing from "../lib/packagePricing";
-import { captureSalesAttribution, sanitizeSalesAttribution } from "../lib/salesAttribution";
-import { trackConfirmedPurchase } from "../lib/analytics";
+import { bookingSalesAttribution, preloadMetaPixel } from "../lib/analyticsModules";
+import { trackCheckoutSessionStarted, trackConfirmedPurchase } from "../lib/analytics";
 import { preloadConfirmationPage, preloadConfirmationPages } from "../lib/confirmationPages";
 import { useBookingDialogPending } from "../lib/bookingDialogHold";
 import { beginCheckoutConfirmation } from "../lib/checkoutConfirmation";
@@ -112,6 +112,7 @@ function PayPalCheckout({ children }) {
 
 export default function Payment({ hideFooter = false }) {
   useEffect(() => { clearBookingConfirmation(); }, []);
+  useEffect(preloadMetaPixel, []);
   useEffect(() => {
     preloadConfirmationPages().catch(() => {});
   }, []);
@@ -543,9 +544,9 @@ export default function Payment({ hideFooter = false }) {
     !!providerConfig?.paypal?.enabled || showInternalPayments;
   const canDisplayPaypalMethod = shouldRenderPaypalBlock && canUsePaypal;
 
-  const buildCheckoutPayload = () => ({
+  const buildCheckoutPayload = (salesAttribution) => ({
     ...bookingData,
-    salesAttribution: sanitizeSalesAttribution(bookingData.salesAttribution) || captureSalesAttribution(),
+    salesAttribution,
     packageTitle,
     packagePrice,
     email: bookingData.email || "",
@@ -1268,7 +1269,7 @@ export default function Payment({ hideFooter = false }) {
         body: JSON.stringify({
           provider,
           quoteFingerprint,
-          bookingPayload: buildCheckoutPayload(),
+          bookingPayload: buildCheckoutPayload(await bookingSalesAttribution(bookingData.salesAttribution)),
         }),
       });
 
@@ -1294,6 +1295,8 @@ export default function Payment({ hideFooter = false }) {
         throw new Error(data?.error || "Unable to start payment.");
       }
 
+      if (data.status === "started") trackCheckoutSessionStarted({ packageTitle: bookingData.packageTitle,
+        price: data.quote?.netAmount, provider, currency: "USD" });
       if (data.quote) setServerQuote(data.quote);
       if (data.quoteFingerprint || data.fingerprint) {
         setQuoteFingerprint(

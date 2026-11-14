@@ -458,6 +458,7 @@ html {
   background-color: var(--color-canvas-deep);
   font-family: "Manrope Variable", system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+  scroll-padding-bottom: var(--consent-banner-space, 0px);
 }
 
 html.js {
@@ -533,6 +534,7 @@ body {
 body {
   background: var(--gradient-app-bg);
   color: var(--color-text-primary);
+  padding-bottom: var(--consent-banner-space, 0px);
 }
 
 .skip-to-content {

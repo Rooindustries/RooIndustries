@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, useLayoutEffect } from "react
 import { flushSync } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { BookingDialogHoldContext, BookingDialogReadyContext } from "../lib/bookingDialogHold";
+import { CONSENT_BANNER_SPACE, readConsentBannerSpace } from "../lib/consentBannerSpace";
 import { useLowPerformanceMode } from "../lib/performanceMode";
 import { isTopDialog, useDialogFocus } from "../lib/useDialogFocus";
 import { setVisibleTimeout } from "../lib/visibleTimeout";
@@ -18,6 +19,11 @@ const MAX_SCALE = 1.2;
 const CLOSE_ROW_HEIGHT = 48;
 const CONTENT_REVEAL_FALLBACK_MS = 300;
 const CONTENT_READY_MAX_WAIT_MS = 1500;
+
+const bannerSpace = `var(${CONSENT_BANNER_SPACE}, 0px)`;
+const stageStyle = (viewport) => (viewport
+  ? { ...viewport, height: `calc(${viewport.height}px - ${bannerSpace})` }
+  : { inset: 0, bottom: bannerSpace });
 
 export default function BookingModal({ open, onClose, children, skipInitialSizeAnimation = false, contentKey, routePath, reservationRef }) {
   const contentRef = useRef(null);
@@ -116,6 +122,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
       const visual = window.visualViewport;
       const width = document.documentElement.clientWidth || window.innerWidth;
       const height = visual?.height || window.innerHeight;
+      const available = height - readConsentBannerSpace();
       const top = visual?.offsetTop || 0;
       const currentIsMobile = mobileQuery.matches || width < MOBILE_BREAKPOINT;
       const baseWidth = currentIsMobile ? Math.max(width, MOBILE_BASE_WIDTH) : DESKTOP_BASE_WIDTH;
@@ -132,7 +139,9 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
         scale = Math.min(width / baseWidth, 1);
       } else {
         const widthScale = ((width * 0.95) / baseWidth) * DESKTOP_SCALE_BOOST;
-        const heightScale = contentHeight ? (height - DESKTOP_PADDING_Y - CLOSE_ROW_HEIGHT) / contentHeight : MAX_SCALE;
+        const heightScale = contentHeight
+          ? (available - DESKTOP_PADDING_Y - CLOSE_ROW_HEIGHT) / contentHeight
+          : MAX_SCALE;
         scale = Math.min(widthScale, heightScale);
       }
 
@@ -145,7 +154,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
         wrapperWidth: contentRef.current ? baseWidth * scale : 0,
         wrapperHeight: contentHeight ? CLOSE_ROW_HEIGHT + contentHeight * scale : 0,
         viewportWidth: width,
-        viewportHeight: height,
+        viewportHeight: available,
         viewportTop: top,
       };
       const prevLayout = lastLayoutRef.current;
@@ -188,6 +197,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
     window.visualViewport?.addEventListener("scroll", applyViewport);
     const observer = new ResizeObserver(scheduleLayout);
     if (contentRef.current) observer.observe(contentRef.current);
+    if (stageRef.current) observer.observe(stageRef.current);
 
     return () => {
       window.removeEventListener("resize", applyViewport);
@@ -382,7 +392,7 @@ export default function BookingModal({ open, onClose, children, skipInitialSizeA
         <motion.div
           ref={stageRef}
           className={`booking-dialog-stage fixed z-[70] overflow-y-auto overflow-x-hidden${stageRevealed ? "" : " [html.js_&]:invisible"}`}
-          style={viewport || { inset: 0 }}
+          style={stageStyle(viewport)}
           initial={hydrating ? false : { opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}

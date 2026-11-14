@@ -53,3 +53,20 @@ test("privacy Markdown preserves PortableText line breaks", async ({ page, reque
   });
   await section.screenshot({ path: "test-results/privacy-markdown/line-breaks.png" });
 });
+
+test("privacy HTML and Markdown share the same cookie notice", async ({ page, request }) => {
+  const { COOKIE_NOTICE } = require("../src/lib/cookieNotice.js");
+  const markdown = await (await request.get("/markdown?path=/privacy")).text();
+  const unescape = (text) => text.replace(/\\([!-/:-@[-`{-~])/g, "$1");
+  const markdownSection = markdown.split("## Cookies and browser storage\n\n")[1].split("\n\nLast updated")[0]
+    .split("\n\n[Contact")[0].split("\n\n").map(unescape);
+  expect(markdownSection).toEqual(COOKIE_NOTICE.paragraphs);
+
+  await page.goto("/privacy");
+  const sections = page.locator("main section");
+  const cookieSection = sections.last();
+  await expect(cookieSection.getByRole("heading", { level: 2 })).toHaveText(COOKIE_NOTICE.heading);
+  expect(await cookieSection.locator("p").allTextContents()).toEqual(markdownSection);
+  await expect(sections.filter({ has: page.getByRole("heading", { name: "Synthetic line breaks" }) })).toHaveCount(1);
+});
+

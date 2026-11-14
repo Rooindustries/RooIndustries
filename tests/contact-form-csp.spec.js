@@ -9,6 +9,26 @@ test.use({
   video: "off",
 });
 
+test.skip(process.env.TOOLING_API_ROUTES !== "1", "Run with npm run test:contact.");
+
+const inbox = "serviroo@rooindustries.com";
+const fields = {
+  name: "Fixture Person",
+  email: "person@fixture.invalid",
+  message: "Synthetic contact submission.",
+};
+const thanks = "Thanks, your message is in. We'll reply by email.";
+let apiFixture;
+let restoreNetworkGuard;
+
+test.beforeAll(async ({ baseURL }) => {
+  const { installNetworkGuard } = await import("../scripts/lib/test-target-safety.mjs");
+  apiFixture = await import("./fixtures/api-routes.mjs");
+  restoreNetworkGuard = installNetworkGuard([baseURL, apiFixture.apiFixtureOrigin(baseURL)]);
+});
+
+test.afterAll(() => restoreNetworkGuard?.());
+
 test.beforeEach(async ({ context, baseURL }) => {
   const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
   await guardBrowserContext(context, [baseURL]);
@@ -22,86 +42,150 @@ test.beforeEach(async ({ context, baseURL }) => {
       });
     });
   });
+  await apiFixture.configureApiFixture(baseURL, { reset: true });
 });
 
-for (const outcome of ["success", "error", "form-error", "offline"]) {
-  test(`contact submission reaches Formspree and shows ${outcome}`, async ({ page, baseURL }, testInfo) => {
-    const submissions = [];
-    const fields = {
-      name: "Fixture Person",
-      email: "person@fixture.invalid",
-      message: "Synthetic contact submission.",
-    };
+const logFile = (testInfo) => `${testInfo.config.metadata.toolingDistDir}-server.log`;
+const readLog = (testInfo) => fs.readFileSync(logFile(testInfo), "utf8");
 
-    await page.route("https://formspree.io/f/*", async (route) => {
-      const request = route.request();
-      if (request.method() === "OPTIONS") {
-        await route.fulfill({
-          status: 204,
-          headers: {
-            "access-control-allow-origin": new URL(baseURL).origin,
-            "access-control-allow-headers": "*",
-            "access-control-allow-methods": "POST",
-          },
-        });
-        return;
-      }
-      expect(request.method()).toBe("POST");
-      submissions.push({ url: request.url(), body: request.postData() });
-      if (outcome === "offline") {
-        await route.abort("internetdisconnected");
-        return;
-      }
-      await route.fulfill({
-        status: outcome === "success" ? 200 : outcome === "form-error" ? 403 : 422,
-        contentType: "application/json",
-        headers: { "access-control-allow-origin": new URL(baseURL).origin },
-        body: JSON.stringify(outcome === "success"
-          ? { next: "/contact", ok: true }
-          : outcome === "form-error"
-            ? { errors: [{ code: "FORM_DISABLED", message: "Synthetic form error" }] }
-            : { errors: [{ field: "email", code: "TYPE_EMAIL", message: "Synthetic email error" }] }),
-      });
-    });
+const fixtureState = async (baseURL) => {
+  const state = await apiFixture.readApiFixture(baseURL);
+  return {
+    rows: state.contactMessages,
+    emails: state.emails.filter((email) => email.idempotencyKey.startsWith("contact-message-")),
+  };
+};
 
-    try {
-      await page.goto("/contact");
-      await page.getByPlaceholder("Your name", { exact: true }).fill(fields.name);
-      await page.getByPlaceholder("your.email@example.com", { exact: true }).fill(fields.email);
-      await page.getByPlaceholder("Tell me about your PC and what you'd like to optimize...", { exact: true }).fill(fields.message);
-      await page.getByRole("button", { name: "Send Message", exact: true }).click();
-      await expect.poll(async () => submissions.length + await page.evaluate(() => window.__contactCspViolations.length)).toBeGreaterThan(0);
-      expect(await page.evaluate(() => window.__contactCspViolations)).toEqual([]);
-      expect(submissions).toHaveLength(1);
-      for (const [name, value] of Object.entries(fields)) {
-        expect(submissions[0].body).toContain(`name="${name}"`);
-        expect(submissions[0].body).toContain(value);
-      }
-      if (outcome === "success") {
-        await expect(page.getByText("Thank you! Your message has been sent.")).toBeVisible();
-      } else if (outcome === "error") {
-        await expect(page.getByText("Synthetic email error", { exact: false })).toBeVisible();
-        await expect(page.locator("form").getByRole("alert")).toHaveCount(0);
-        await expect(page.getByRole("button", { name: "Send Message", exact: true })).toBeEnabled();
-      } else {
-        await expect(page.locator("form").getByRole("alert")).toContainText("Your message didn't send");
-        await expect(page.locator("form").getByRole("alert")).toContainText("serviroo@rooindustries.com");
-        await expect(page.getByPlaceholder("Tell me about your PC and what you'd like to optimize...", { exact: true })).toHaveValue(fields.message);
-        await expect(page.getByRole("button", { name: "Send Message", exact: true })).toBeEnabled();
-      }
-      expect(await page.evaluate(() => window.__contactCspViolations)).toEqual([]);
-    } finally {
-      const evidencePath = testInfo.outputPath("contact-csp.json");
-      fs.writeFileSync(evidencePath, JSON.stringify({
-        outcome,
-        submissions,
-        violations: await page.evaluate(() => window.__contactCspViolations),
-      }, null, 2));
-      await testInfo.attach("contact-csp", {
-        contentType: "application/json",
-        path: evidencePath,
-      });
-      await page.screenshot({ path: testInfo.outputPath("contact-result.png"), fullPage: true, animations: "disabled" });
-    }
+const submitForm = async (page, values = fields, company = "") => {
+  await page.getByPlaceholder("Your name", { exact: true }).fill(values.name);
+  await page.getByPlaceholder("your.email@example.com", { exact: true }).fill(values.email);
+  await page
+    .getByPlaceholder("Tell me about your PC and what you'd like to optimize...", { exact: true })
+    .fill(values.message);
+  if (company) await page.locator("#contact-company").fill(company, { force: true });
+  const response = page.waitForResponse(
+    (entry) => new URL(entry.url()).pathname === "/api/contact" && entry.request().method() === "POST"
+  );
+  await page.getByRole("button", { name: "Send Message", exact: true }).click();
+  return response;
+};
+
+const finish = async (page, testInfo, baseURL) => {
+  expect(await page.evaluate(() => window.__contactCspViolations)).toEqual([]);
+  const evidencePath = testInfo.outputPath("contact-state.json");
+  fs.writeFileSync(evidencePath, JSON.stringify(await fixtureState(baseURL), null, 2));
+  await testInfo.attach("contact-state", { contentType: "application/json", path: evidencePath });
+};
+
+test("a valid message is recorded, sent to the inbox and confirmed", async ({ page, baseURL }, testInfo) => {
+  await page.goto("/contact");
+  const response = await submitForm(page);
+  expect(response.status()).toBe(200);
+  expect(response.headers()["cache-control"]).toBe("no-store");
+  await expect(page.getByText(thanks, { exact: true })).toBeVisible();
+  const { rows, emails } = await fixtureState(baseURL);
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ ...fields, status: "sent", attempts: 1, provider_message_id: emails[0]?.id });
+  expect(rows[0].client_hash).toMatch(/^[a-f0-9]{64}$/);
+  expect(emails).toHaveLength(1);
+  expect(emails[0]).toMatchObject({
+    idempotencyKey: `contact-message-${rows[0].id}`,
+    to: [inbox],
+    reply_to: fields.email,
+    subject: `Contact form: ${fields.name}`,
   });
-}
+  expect(emails[0].text).toContain(fields.message);
+  await finish(page, testInfo, baseURL);
+});
+
+test("an invalid message shows the field error and stores nothing", async ({ page, baseURL }, testInfo) => {
+  await page.goto("/contact");
+  const response = await submitForm(page, { ...fields, message: "Too short" });
+  expect(response.status()).toBe(400);
+  const message = page.getByPlaceholder("Tell me about your PC and what you'd like to optimize...", { exact: true });
+  await expect(page.getByText("Write a message between 10 and 5,000 characters.", { exact: true })).toBeVisible();
+  await expect(message).toHaveAttribute("aria-invalid", "true");
+  await expect(message).toHaveValue("Too short");
+  await expect(page.getByRole("button", { name: "Send Message", exact: true })).toBeEnabled();
+  expect(await fixtureState(baseURL)).toEqual({ rows: [], emails: [] });
+  await finish(page, testInfo, baseURL);
+});
+
+test("the sixth post inside the window is rate limited", async ({ page, baseURL }, testInfo) => {
+  await page.goto("/contact");
+  const statuses = await page.evaluate(async () => {
+    const results = [];
+    for (let index = 0; index < 5; index += 1) {
+      const response = await fetch("/api/contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Fixture Person", email: "person@fixture.invalid", message: "short" }),
+      });
+      results.push(response.status);
+    }
+    return results;
+  });
+  expect(statuses).toEqual([400, 400, 400, 400, 400]);
+  const response = await submitForm(page);
+  expect(response.status()).toBe(429);
+  const alert = page.locator("form").getByRole("alert");
+  await expect(alert).toContainText("Too many messages right now.");
+  await expect(alert).toContainText(inbox);
+  await expect(page.getByRole("button", { name: "Send Message", exact: true })).toBeEnabled();
+  expect(await fixtureState(baseURL)).toEqual({ rows: [], emails: [] });
+  await finish(page, testInfo, baseURL);
+});
+
+test("a failed send stays queued for retry and is logged", async ({ page, baseURL }, testInfo) => {
+  await apiFixture.configureApiFixture(baseURL, { contactDelivery: "failed" });
+  const logStart = readLog(testInfo).length;
+  await page.goto("/contact");
+  const response = await submitForm(page);
+  expect(response.status()).toBe(202);
+  expect(await response.json()).toEqual({ ok: true, queued: true });
+  await expect(page.getByText(thanks, { exact: true })).toBeVisible();
+  const { rows, emails } = await fixtureState(baseURL);
+  expect(emails).toEqual([]);
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({
+    ...fields,
+    status: "failed",
+    attempts: 1,
+    last_error_code: "email_provider_unavailable",
+  });
+  expect(rows[0].next_attempt_at).toBeGreaterThan(Date.now());
+  await expect.poll(() => readLog(testInfo).slice(logStart)).toContain("contact_message_send_failed");
+  const lines = readLog(testInfo).slice(logStart).split("\n").filter((line) => line.includes("contact_message_"));
+  expect(lines.join("\n")).toContain("email_provider_unavailable");
+  expect(lines.join("\n")).not.toContain("@");
+  await finish(page, testInfo, baseURL);
+});
+
+test("a filled honeypot is recorded as spam and never sent", async ({ page, baseURL }, testInfo) => {
+  await page.goto("/contact");
+  const response = await submitForm(page, fields, "Fixture Company");
+  expect(response.status()).toBe(200);
+  await expect(page.getByText(thanks, { exact: true })).toBeVisible();
+  const { rows, emails } = await fixtureState(baseURL);
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ ...fields, status: "spam", attempts: 0 });
+  expect(emails).toEqual([]);
+  await finish(page, testInfo, baseURL);
+});
+
+test("a missing message store shows the email address instead of success", async ({ page, baseURL }, testInfo) => {
+  await apiFixture.configureApiFixture(baseURL, { contactRecord: "missing" });
+  const logStart = readLog(testInfo).length;
+  await page.goto("/contact");
+  const response = await submitForm(page);
+  expect(response.status()).toBe(503);
+  const alert = page.locator("form").getByRole("alert");
+  await expect(alert).toContainText("Your message didn't send.");
+  await expect(alert).toContainText(inbox);
+  await expect(page.getByText(thanks, { exact: true })).toHaveCount(0);
+  await expect(page.getByPlaceholder("Tell me about your PC and what you'd like to optimize...", { exact: true }))
+    .toHaveValue(fields.message);
+  expect(await fixtureState(baseURL)).toEqual({ rows: [], emails: [] });
+  await expect.poll(() => readLog(testInfo).slice(logStart)).toContain("contact_message_record_failed");
+  await finish(page, testInfo, baseURL);
+});

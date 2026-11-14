@@ -1,38 +1,78 @@
 import React, { useEffect, useRef, useState } from "react";
-import { useForm, ValidationError } from "@formspree/react";
 import { getPublicContent } from "../lib/publicContentClient";
 import companyContent from "../lib/companyContent";
 
-const { CONTACT_GUIDANCE } = companyContent;
+const { CONTACT_GUIDANCE, CONTACT_EMAIL } = companyContent;
+
+const INPUT_CLASS = [
+  "w-full p-3 bg-surface-input rounded text-ink border border-line-input",
+  "focus:border-info-border focus:outline-none placeholder:text-ink-muted",
+].join(" ");
+
+const SENT_NOTICE = [
+  "w-full max-w-xl p-6 rounded-lg border border-success-border bg-success-soft backdrop-blur-sm",
+  "text-center text-success-text font-semibold",
+].join(" ");
+
+const FieldError = ({ id, message }) =>
+  message ? (
+    <p id={id} className="mt-1 text-sm text-danger-text">
+      {message}
+    </p>
+  ) : null;
 
 export default function Contact({ initialData = null }) {
   const [contactData, setContactData] = useState(initialData);
-  const [contentFailed, setContentFailed] = useState(false);
+  const [submission, setSubmission] = useState({ state: "idle", fields: {}, error: "" });
   const [copyStatus, setCopyStatus] = useState("idle");
   const copyResetTimeoutRef = useRef(null);
 
-  const formId = typeof contactData?.formId === "string" ? contactData.formId.trim() : "";
-  const configReady = Boolean(contactData);
-  const [state, handleSubmit] = useForm(formId || "mpwybpen");
-  const submitConfiguredForm = (event) => {
-    if (!configReady) {
-      event.preventDefault();
-      return;
+  const contactEmail = contactData?.email || CONTACT_EMAIL;
+  const sending = submission.state === "sending";
+
+  const submitMessage = async (event) => {
+    event.preventDefault();
+    if (sending) return;
+    const form = new FormData(event.currentTarget);
+    const payload = Object.fromEntries(
+      ["name", "email", "message", "company"].map((field) => [field, String(form.get(field) || "")])
+    );
+    setSubmission({ state: "sending", fields: {}, error: "" });
+    try {
+      const response = await fetch("/api/contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(20000),
+      });
+      const result = await response.json().catch(() => ({}));
+      if ((response.status === 200 || response.status === 202) && result?.ok) {
+        setSubmission({ state: "sent", fields: {}, error: "" });
+        return;
+      }
+      if (response.status === 400 && result?.fields) {
+        setSubmission({ state: "invalid", fields: result.fields, error: "" });
+        return;
+      }
+      setSubmission({ state: "failed", fields: {}, error: response.status === 429 ? "limited" : "failed" });
+    } catch {
+      setSubmission({ state: "failed", fields: {}, error: "failed" });
     }
-    return handleSubmit(event);
   };
+
+  const fieldProps = (field) =>
+    submission.fields[field]
+      ? { "aria-invalid": true, "aria-describedby": `contact-${field}-error` }
+      : {};
 
   useEffect(() => {
     let active = true;
     getPublicContent("contact")
       .then((data) => {
         if (!active) return;
-        setContactData(data || initialData);
-        setContentFailed(!data && !initialData);
+        if (data) setContactData(data);
       })
-      .catch(() => {
-        if (active) setContentFailed(!initialData);
-      });
+      .catch(() => {});
     return () => { active = false; };
   }, []);
 
@@ -56,7 +96,7 @@ export default function Contact({ initialData = null }) {
   };
 
   const handleCopy = async () => {
-    const email = contactData?.email || "serviroo@rooindustries.com";
+    const email = contactEmail;
     setCopyStatus("copying");
 
     try {
@@ -93,8 +133,8 @@ export default function Contact({ initialData = null }) {
           >
             <path d="M2 4a2 2 0 012-2h16a2 2 0 012 2v1.8l-10 6.25L2 5.8V4zm0 4.2V20a2 2 0 002 2h16a2 2 0 002-2V8.2l-10 6.25L2 8.2z" />
           </svg>
-          <a href={`mailto:${contactData?.email || "serviroo@rooindustries.com"}`} className="text-lg font-medium">
-            {contactData?.email || "serviroo@rooindustries.com"}
+          <a href={`mailto:${contactEmail}`} className="text-lg font-medium">
+            {contactEmail}
           </a>
         </div>
         <button
@@ -120,21 +160,16 @@ export default function Contact({ initialData = null }) {
         </p>
       ) : null}
 
-      {!configReady ? (
-        <p className="mb-5 w-full max-w-xl text-sm text-ink-muted" role="status">
-          {contentFailed
-            ? "The contact form is temporarily unavailable. Please email us directly using the address above."
-            : "Loading the contact form..."}
-        </p>
-      ) : null}
-
-      {state.succeeded ? (
-        <div className="w-full max-w-xl p-6 rounded-lg border border-success-border bg-success-soft backdrop-blur-sm text-center text-success-text font-semibold">
-          Thank you! Your message has been sent.
+      {submission.state === "sent" ? (
+        <div
+          className={SENT_NOTICE}
+          role="status"
+        >
+          Thanks, your message is in. We'll reply by email.
         </div>
       ) : (
         <form
-          onSubmit={submitConfiguredForm}
+          onSubmit={submitMessage}
           className="p-6 rounded-lg w-full max-w-xl space-y-5 border border-line-input bg-surface-card backdrop-blur-sm"
         >
           <div>
@@ -145,9 +180,11 @@ export default function Contact({ initialData = null }) {
               name="name"
               placeholder="Your name"
               required
-              className="w-full p-3 bg-surface-input rounded text-ink border border-line-input focus:border-info-border focus:outline-none placeholder:text-ink-muted"
+              maxLength={100}
+              className={INPUT_CLASS}
+              {...fieldProps("name")}
             />
-            <ValidationError prefix="Name" field="name" errors={state.errors} />
+            <FieldError id="contact-name-error" message={submission.fields.name} />
           </div>
           <div>
             <label htmlFor="contact-email" className="block mb-1 font-semibold">Email</label>
@@ -157,13 +194,10 @@ export default function Contact({ initialData = null }) {
               name="email"
               placeholder="your.email@example.com"
               required
-              className="w-full p-3 bg-surface-input rounded text-ink border border-line-input focus:border-info-border focus:outline-none placeholder:text-ink-muted"
+              className={INPUT_CLASS}
+              {...fieldProps("email")}
             />
-            <ValidationError
-              prefix="Email"
-              field="email"
-              errors={state.errors}
-            />
+            <FieldError id="contact-email-error" message={submission.fields.email} />
           </div>
           <div>
             <label htmlFor="contact-message" className="block mb-1 font-semibold">Message</label>
@@ -173,25 +207,30 @@ export default function Contact({ initialData = null }) {
               placeholder="Tell me about your PC and what you'd like to optimize..."
               rows="5"
               required
-              className="w-full p-3 bg-surface-input rounded text-ink border border-line-input focus:border-info-border focus:outline-none placeholder:text-ink-muted"
+              maxLength={5000}
+              className={INPUT_CLASS}
+              {...fieldProps("message")}
             ></textarea>
-            <ValidationError
-              prefix="Message"
-              field="message"
-              errors={state.errors}
-            />
+            <FieldError id="contact-message-error" message={submission.fields.message} />
+          </div>
+          <div className="sr-only" aria-hidden="true">
+            <label htmlFor="contact-company">Company</label>
+            <input type="text" id="contact-company" name="company" tabIndex={-1} autoComplete="off" />
           </div>
 
-          {state.errors?.getFormErrors().length ? (
+          {submission.state === "failed" ? (
             <p role="alert" className="text-sm text-danger-text">
-              Your message didn't send. Please try again, or email{" "}
-              {contactData?.email || "serviroo@rooindustries.com"} directly.
+              {submission.error === "limited"
+                ? "Too many messages right now. Please try again later, or email "
+                : "Your message didn't send. Please try again, or email "}
+              {contactEmail} directly.
             </p>
           ) : null}
 
           <button
             type="submit"
-            disabled={!configReady || state.submitting}
+            disabled={sending}
+            aria-busy={sending}
             className="glow-button w-full text-white font-semibold py-3 rounded transition duration-200 inline-flex items-center justify-center gap-2"
           >
             Send Message
@@ -204,7 +243,7 @@ export default function Contact({ initialData = null }) {
           <p className="text-sm text-ink-muted text-center pt-2">
             Your message will be sent{" "}
             <span className="text-ink font-medium">directly</span> to{" "}
-            {contactData?.email || "serviroo@rooindustries.com"}
+            {contactEmail}
           </p>
         </form>
       )}

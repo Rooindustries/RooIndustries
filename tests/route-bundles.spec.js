@@ -4,7 +4,7 @@ const fs = require("node:fs");
 
 test.use({ javaScriptEnabled: true, viewport: { width: 1440, height: 900 }, serviceWorkers: "block", trace: "off", video: "off" });
 
-const vendorMarkers = ["formspree.io", "Could not find Elements context", "[@portabletext/react]"];
+const vendorMarkers = ["/api/contact", "Could not find Elements context", "[@portabletext/react]"];
 
 const attachJson = async (testInfo, name, value) => {
   const file = testInfo.outputPath(`${name}.json`);
@@ -103,7 +103,7 @@ for (const [route, title] of [["/contact", "Get In Touch"], ["/privacy", "Privac
     await attachLayout(page, testInfo);
   });
 
-  const marker = route === "/contact" ? "formspree.io" : "[@portabletext/react]";
+  const marker = route === "/contact" ? "/api/contact" : "[@portabletext/react]";
   for (const state of ["delayed", "failed"]) {
     test(`${route} handles a ${state} route chunk`, async ({ page, baseURL }, testInfo) => {
       const chunks = [];
@@ -215,22 +215,18 @@ for (const [route, title] of [["/contact", "Get In Touch"], ["/privacy", "Privac
 }
 
 for (const result of ["success", "error"]) {
-  test(`Contact form handles ${result} and copies its email`, async ({ page, context, baseURL }, testInfo) => {
+  test(`Contact form handles ${result} and copies its email`, async ({ page, context }, testInfo) => {
     const submissions = [];
     await context.addInitScript(() => {
       Object.defineProperty(navigator, "clipboard", { value: { writeText: async value => { window.__copiedEmail = value; } } });
     });
-    await page.route("https://formspree.io/**", async route => {
-      if (route.request().method() === "OPTIONS") {
-        return route.fulfill({ status: 204, headers: { "access-control-allow-origin": baseURL, "access-control-allow-headers": "*", "access-control-allow-methods": "POST" } });
-      }
+    await page.route("**/api/contact", async route => {
       expect(route.request().method()).toBe("POST");
       submissions.push(route.request().postData());
       await route.fulfill({
-        status: result === "success" ? 200 : 422,
-        headers: { "access-control-allow-origin": baseURL },
+        status: result === "success" ? 200 : 400,
         contentType: "application/json",
-        body: JSON.stringify(result === "success" ? { next: "/contact" } : { errors: [{ field: "email", code: "TYPE_EMAIL", message: "Synthetic email error" }] }),
+        body: JSON.stringify(result === "success" ? { ok: true } : { ok: false, fields: { email: "Synthetic email error" } }),
       });
     });
     await page.goto("/contact");
@@ -241,7 +237,7 @@ for (const result of ["success", "error"]) {
     await page.getByPlaceholder("your.email@example.com", { exact: true }).fill("person@fixture.invalid");
     await page.getByPlaceholder("Tell me about your PC and what you'd like to optimize...", { exact: true }).fill("Synthetic contact form check.");
     await page.getByRole("button", { name: "Send Message", exact: true }).click();
-    if (result === "success") await expect(page.getByText("Thank you! Your message has been sent.")).toBeVisible();
+    if (result === "success") await expect(page.getByText("Thanks, your message is in. We'll reply by email.")).toBeVisible();
     else {
       await expect(page.getByText("Synthetic email error", { exact: false })).toBeVisible();
       await expect(page.getByRole("button", { name: "Send Message", exact: true })).toBeEnabled();

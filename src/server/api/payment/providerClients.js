@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import providerConfig from "./providerConfig.js";
 import { logSafeError } from "../../safeErrorLog.js";
+import envValue from "../../supabase/envValue.cjs";
 
 const {
   allowProviderModeInRuntime,
@@ -8,6 +9,7 @@ const {
   resolvePaymentRuntimePolicy,
   resolveRazorpayMode,
 } = providerConfig;
+const { readProcessEnvValue: env, readFirstProcessEnvValue: firstEnv } = envValue;
 
 const getPayPalBaseUrl = (runtimePolicy = resolvePaymentRuntimePolicy()) =>
   resolvePayPalMode(runtimePolicy) === "live"
@@ -15,26 +17,13 @@ const getPayPalBaseUrl = (runtimePolicy = resolvePaymentRuntimePolicy()) =>
     : "https://api-m.sandbox.paypal.com";
 
 export const getPayPalCredentials = () => ({
-  clientId: String(
-    process.env.PAYPAL_CLIENT_ID ||
-      process.env.REACT_APP_PAYPAL_CLIENT_ID ||
-      process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID ||
-      ""
-  ).trim(),
-  clientSecret: String(process.env.PAYPAL_CLIENT_SECRET || "").trim(),
+  clientId: firstEnv("PAYPAL_CLIENT_ID", "REACT_APP_PAYPAL_CLIENT_ID", "NEXT_PUBLIC_PAYPAL_CLIENT_ID"),
+  clientSecret: env("PAYPAL_CLIENT_SECRET"),
 });
 
-export const DEFAULT_RAZORPAY_CURRENCY = String(
-  process.env.RAZORPAY_CURRENCY || "USD"
-)
-  .trim()
-  .toUpperCase() || "USD";
+export const DEFAULT_RAZORPAY_CURRENCY = env("RAZORPAY_CURRENCY").toUpperCase() || "USD";
 
-export const DEFAULT_PAYPAL_CURRENCY = String(
-  process.env.PAYPAL_CURRENCY || process.env.RAZORPAY_CURRENCY || "USD"
-)
-  .trim()
-  .toUpperCase() || "USD";
+export const DEFAULT_PAYPAL_CURRENCY = firstEnv("PAYPAL_CURRENCY", "RAZORPAY_CURRENCY").toUpperCase() || "USD";
 
 export const toMoney = (value) => {
   const normalized =
@@ -71,8 +60,8 @@ export const parseMoneySubunits = (value, currency = "USD") => {
 
 export const resolveRazorpayCredentials = () => {
   const runtimePolicy = resolvePaymentRuntimePolicy();
-  const keyId = String(process.env.RAZORPAY_KEY_ID || "").trim();
-  const keySecret = String(process.env.RAZORPAY_KEY_SECRET || "").trim();
+  const keyId = env("RAZORPAY_KEY_ID");
+  const keySecret = env("RAZORPAY_KEY_SECRET");
   const mode = resolveRazorpayMode(keyId);
   const enabled =
     !!keyId &&
@@ -492,7 +481,7 @@ export const verifyRazorpayPayment = async ({
 export const verifyRazorpayWebhookSignature = ({
   rawBody,
   signature,
-  secret = String(process.env.RAZORPAY_WEBHOOK_SECRET || "").trim(),
+  secret = env("RAZORPAY_WEBHOOK_SECRET"),
 }) => {
   if (!rawBody || !signature || !secret) return false;
   const expected = crypto
@@ -853,7 +842,7 @@ export const inspectPayPalCapture = async ({ paymentId }) => {
 export const verifyPayPalWebhookSignature = async ({
   rawBody,
   headers = {},
-  webhookId = String(process.env.PAYPAL_WEBHOOK_ID || "").trim(),
+  webhookId = env("PAYPAL_WEBHOOK_ID"),
 }) => {
   if (!rawBody || !webhookId) {
     return { ok: false, reason: "paypal_webhook_not_configured" };

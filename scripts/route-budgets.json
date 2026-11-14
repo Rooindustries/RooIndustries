@@ -230,11 +230,27 @@
       "js": 6144,
       "css": 1024
     },
+    "src/components/Footer.jsx -> ../lib/consent": {
+      "js": 1024,
+      "css": 1024
+    },
     "src/components/Packages.jsx -> ./PackageDetailsModal": {
       "js": 41984,
       "css": 1024
     },
+    "src/components/SupabaseSocialLogin.jsx -> ../lib/supabaseBrowser": {
+      "js": 68608,
+      "css": 1024
+    },
     "src/legacyPages/Book.jsx -> ../components/Footer": {
+      "js": 4096,
+      "css": 1024
+    },
+    "src/lib/analyticsModules.js -> ./metaPixel": {
+      "js": 3072,
+      "css": 1024
+    },
+    "src/lib/analyticsModules.js -> ./salesAttribution": {
       "js": 4096,
       "css": 1024
     },
@@ -250,12 +266,12 @@
       "js": 147456,
       "css": 1024
     },
-    "src/next/NotFoundEntry.jsx -> ./LegacyRoutePage": {
-      "js": 46080,
+    "src/next/AppClientRuntime.jsx -> ./ConsentRuntime": {
+      "js": 3072,
       "css": 1024
     },
-    "src/components/SupabaseSocialLogin.jsx -> ../lib/supabaseBrowser": {
-      "js": 68608,
+    "src/next/NotFoundEntry.jsx -> ./LegacyRoutePage": {
+      "js": 46080,
       "css": 1024
     }
   }

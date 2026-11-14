@@ -4,10 +4,12 @@ import path from "node:path";
 import http from "node:http";
 import https from "node:https";
 import childProcess from "node:child_process";
-import { syncBuiltinESMExports } from "node:module";
+import { createRequire, syncBuiltinESMExports } from "node:module";
 import { promisify } from "node:util";
 import { getGlobalDispatcher, setGlobalDispatcher } from "undici";
 import { withNodeOption } from "./node-options.mjs";
+
+const { readEnvValue } = createRequire(import.meta.url)("../../src/server/supabase/envValue.cjs");
 
 const connect = net.createConnection;
 const isPrivateTestHost = value => {
@@ -292,7 +294,9 @@ export function prepareTestTarget({ browser = false } = {}) {
     if (/(?:KEY_ID|CLIENT_ID|SERVICE_ROLE_KEY|SECRET_KEY|PUBLISHABLE_KEY|ANON_KEY)$/.test(name) && value !== token) fail(`Non-fixture credentials in ${name}.`);
     if (/^(?:NODE_ENV|VERCEL_ENV|NEXT_PUBLIC_VERCEL_ENV|REACT_APP_VERCEL_ENV)$/.test(name) && !["test", "development"].includes(value)) fail("Live runtime refused.");
     if (/ALLOW_LIVE|ENABLE_LIVE|LIVE_PAYMENTS/.test(name) && !["0", "false"].includes(value)) fail("Live payment overrides refused.");
-    if (/^(?:NEXT_PUBLIC_)?PAYPAL_ENV$/.test(name) && value !== "sandbox") fail("Live PayPal mode refused.");
+    if (/^(?:NEXT_PUBLIC_)?PAYPAL_ENV$/.test(name) && readEnvValue(process.env, name) !== "sandbox") {
+      fail("Live PayPal mode refused.");
+    }
     if (name === "DODO_PAYMENTS_ENVIRONMENT" && value !== "test_mode") fail("Live Dodo mode refused.");
     if (/^(?:NEXT_PUBLIC_|REACT_APP_)?SANITY_DATASET$/.test(name) && value !== dataset) fail("Sanity dataset is not owned by this fixture.");
     if (/^(?:NEXT_PUBLIC_|REACT_APP_)?SANITY_PROJECT_ID$/.test(name) && value !== "toolingfixture") fail("Sanity project is not a fixture.");

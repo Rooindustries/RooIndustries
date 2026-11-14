@@ -70,6 +70,7 @@ const env = withNodeOption({
   NEXT_TELEMETRY_DISABLED: "1",
   SENTRY_CLI_NO_TELEMETRY: "1",
   NEXT_PUBLIC_SENTRY_DSN: process.env.NEXT_PUBLIC_SENTRY_DSN || "",
+  NEXT_PUBLIC_META_PIXEL_ID: process.env.TOOLING_META_PIXEL_ID || "",
   BASE_URL: baseURL,
   ROO_TEST_HOST: testHost,
   NEXT_DIST_DIR: dist,
@@ -89,6 +90,7 @@ for (const file of tracked.filter(file => /^(?:src\/|app\/|scripts\/|tests\/fixt
 fingerprint.update(fs.readFileSync(fileURLToPath(import.meta.url)));
 fingerprint.update(fs.readFileSync(fileURLToPath(new URL("./lib/test-target-safety.mjs", import.meta.url))));
 fingerprint.update(env.NEXT_PUBLIC_SENTRY_DSN);
+fingerprint.update(`meta-pixel:${env.NEXT_PUBLIC_META_PIXEL_ID}`);
 fingerprint.update(String(monitoringStartup));
 const sourceHash = fingerprint.digest("hex");
 let active;

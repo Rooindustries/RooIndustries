@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react";
 import { isProductionBrowser } from "../lib/productionBrowser";
 import { Analytics } from "@vercel/analytics/react";
-import { sanitizeAnalyticsEvent } from "../lib/salesAttribution";
+import { sanitizeAnalyticsEvent } from "../lib/salesPaths";
 import { initializePerformanceProfile } from "../lib/performanceProfile";
 import { rememberReferralFromSearch } from "../lib/checkoutStorage";
+import { reportRequestError } from "../lib/clientRequest";
 
 const CHECKOUT_PATHS = ["/booking", "/payment", "/payment-success", "/thank-you"];
 const SEORCE_PROJECT_ID = "6a2e76bf3f9dac8c30e27b89";
@@ -71,6 +72,7 @@ export const loadSeorceScript = ({
 
 export default function AppClientRuntime() {
   const [analyticsEnabled, setAnalyticsEnabled] = useState(false);
+  const [ConsentRuntime, setConsentRuntime] = useState(null);
 
   useEffect(() => {
     setAnalyticsEnabled(isProductionBrowser());
@@ -96,5 +98,23 @@ export default function AppClientRuntime() {
     };
   }, []);
 
-  return analyticsEnabled ? <Analytics beforeSend={sanitizeAnalyticsEvent} /> : null;
+  useEffect(() => {
+    let cancelled = false;
+    const cleanup = runWhenIdle(() => {
+      import("./ConsentRuntime").then(({ default: Runtime }) => {
+        if (!cancelled) setConsentRuntime(() => Runtime);
+      }).catch(reportRequestError);
+    });
+    return () => {
+      cancelled = true;
+      cleanup();
+    };
+  }, []);
+
+  return (
+    <>
+      {analyticsEnabled ? <Analytics beforeSend={sanitizeAnalyticsEvent} /> : null}
+      {ConsentRuntime ? <ConsentRuntime /> : null}
+    </>
+  );
 }

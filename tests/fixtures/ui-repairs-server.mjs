@@ -64,7 +64,6 @@ export function uiRepairsFixture({ json, read, base }) {
         const artifact = path.resolve(`test-results/ui-repairs-${phase}-${scenario}.json`); fs.mkdirSync(path.dirname(artifact), { recursive: true }); fs.writeFileSync(artifact, JSON.stringify(body, null, 2)); json(res, { saved: artifact }); return true;
       }
       if (p.startsWith('/__ui/hosted/')) { state.calls.push({ path: p, hosted: true }); res.setHeader('Content-Type', 'text/html'); res.end('<!doctype html><title>Synthetic hosted checkout</title><a href="/payment?dodo_return=1">Synthetic return</a>'); return true; }
-      if (p === '/__ui/formspree') { let body = ''; for await (const chunk of req) body += chunk; state.calls.push({ path: p, form: url.searchParams.get('form'), bodyPresent: body.includes('Synthetic message') }); json(res, { next: `${base}/contact` }); return true; }
       if (!state.active) return false;
       if (p.startsWith('/api/content/')) {
         const resource = decodeURIComponent(p.split('/').pop()); state.calls.push({ path: p, slug: url.searchParams.get('slug') });
@@ -75,6 +74,7 @@ export function uiRepairsFixture({ json, read, base }) {
       if (!p.startsWith('/api/')) return false;
       const body = req.method === 'POST' || req.method === 'PATCH' ? await read(req) : {};
       state.calls.push({ path: p, method: req.method, body });
+      if (p === '/api/contact') { json(res, { ok: true }); return true; }
       if (p === '/api/ref/getUpgradeInfo') { pending.set('upgrade', { res, body: { ...upgrade, booking: { ...upgrade.booking, _id: body.id }, upgradeIntentToken: `intent-${body.id}` } }); return true; }
       if (p === '/api/admin/referral-creators') {
         if (req.method === 'PATCH') { pending.set('editor', { res, body: { creator: { ...creator, total_basis_points: Number(body.totalPercent) * 100, commission_basis_points: Number(body.commissionPercent) * 100, discount_basis_points: Number(body.discountPercent) * 100, terms_version: 2 }, syncPending: false } }); return true; }

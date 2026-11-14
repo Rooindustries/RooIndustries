@@ -154,12 +154,12 @@ const test = base.extend({
       }
       return route.fallback();
     });
-    const booking = async () => {
-      await page.goto("/booking");
+    const booking = async (path = "/booking") => {
+      await page.goto(path);
       await page.getByRole("button", { name: /^Earliest available:/ }).click();
     };
-    const reserve = async () => {
-      await booking();
+    const reserve = async (path) => {
+      await booking(path);
       await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
       await page.getByRole("button", { name: "Next", exact: true }).last().click();
       await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toBeVisible();
@@ -170,12 +170,15 @@ const test = base.extend({
       await page.getByRole("textbox", { name: "PC specifications", exact: true }).fill("Ryzen 7700 / RTX 4070");
       await page.getByRole("textbox", { name: "Main game or application", exact: true }).fill("CS2");
     };
-    const review = async () => {
-      await reserve();
+    const review = async (path) => {
+      await reserve(path);
       await details();
       await page.getByRole("button", { name: "Review before payment", exact: true }).click();
       await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
     };
+    const startBodies = () => state.calls
+      .filter((call) => call.path === "/api/payment/start")
+      .map((call) => call.body);
     const payment = async () => {
       await page.getByRole("button", { name: "Continue to payment", exact: true }).click();
       await expect(page.getByRole("heading", { name: "Complete Payment", exact: true })).toBeVisible();
@@ -195,7 +198,7 @@ const test = base.extend({
       await page.getByPlaceholder("e.g. 1a2b3c4d5e6f7g8h9i", { exact: true }).fill("fixture-order");
     };
     try {
-      await use({ state, booking, reserve, details, review, payment, codeInput, upgrade });
+      await use({ state, booking, reserve, details, review, payment, codeInput, upgrade, startBodies });
     } finally {
       await testInfo.attach("requests", { body: JSON.stringify({ calls: state.calls, aborted: state.aborted }, null, 2), contentType: "application/json" });
       if (!page.isClosed()) {

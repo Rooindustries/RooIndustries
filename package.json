@@ -4,7 +4,6 @@
   "private": true,
   "dependencies": {
     "@fontsource-variable/roboto-flex": "^5.2.8",
-    "@formspree/react": "^3.0.0",
     "@neondatabase/serverless": "^1.1.0",
     "@paypal/react-paypal-js": "^8.9.2",
     "@portabletext/react": "^4.0.3",
@@ -37,9 +36,9 @@
     "react-router": "7.18.3",
     "react-router-dom": "7.18.3",
     "resend": "6.17.2",
+    "sharp": "0.35.5",
     "uuid": "11.1.1",
-    "web-vitals": "^2.1.4",
-    "sharp": "0.35.5"
+    "web-vitals": "^2.1.4"
   },
   "scripts": {
     "predev": "node scripts/generate-sitemap.js && node scripts/generate-robots.js --development",
@@ -56,7 +55,10 @@
     "test:monitoring:deployments": "node scripts/monitoring-deployment-e2e.mjs",
     "test:monitoring:startup": "node scripts/monitoring-next-startup-e2e.mjs",
     "test:smoke:production": "node --test tests/production-smoke.test.mjs",
-    "test:contact:csp": "playwright test tests/contact-form-csp.spec.js --project=chromium",
+    "test:contact": "cross-env TOOLING_API_ROUTES=1 NODE_OPTIONS=--import=./tests/fixtures/contact-server-log.mjs playwright test tests/contact-form-csp.spec.js --project=chromium",
+    "test:consent": "playwright test tests/consent-pixel.spec.js --project=chromium",
+    "test:consent:pixel": "cross-env TOOLING_META_PIXEL_ID=000000000000001 PW_SERVER_ID=pixel playwright test tests/consent-pixel.spec.js --project=chromium",
+    "test:ads:postgres17": "node scripts/test-payment-persistence-sweep.mjs --full-chain --scenario-prefix=ads-",
     "test:booking-flow": "playwright test tests/booking-flow.spec.js --project=chromium",
     "test:claims": "playwright test tests/backed-claims.spec.js --project=chromium",
     "test:booking-initial-slot": "playwright test tests/booking-initial-slot.spec.js --project=chromium",

@@ -429,7 +429,7 @@ if (
 }
 
 for (const name of ["DATA_PRIMARY_BACKEND", "COMMERCE_PRIMARY_BACKEND"]) {
-  const value = String(process.env[name] || "").trim().toLowerCase();
+  const value = readEnvValue(process.env, name).toLowerCase();
   if (!["", "supabase", "sanity"].includes(value)) {
     console.error(`${name} must be empty, supabase or sanity.`);
     process.exit(1);
@@ -696,6 +696,9 @@ if (providerConsistencyWarnings.length > 0) {
 
 console.log(`[env] CMS write control: configured=${cmsWritePause.configured}, paused=${cmsWritePause.value}`);
 console.log(
-  `[env] Payment runtime: runtime=${paymentRuntimePolicy.runtime}, previewPaymentsEnabled=${previewPaymentsEnabled}, livePaymentsEnabled=${livePaymentsEnabled}, razorpayEnabled=${paymentProviders.razorpay.enabled}, paypalEnabled=${paymentProviders.paypal.enabled}`
+  `[env] Payment runtime: runtime=${paymentRuntimePolicy.runtime}, ` +
+    `previewPaymentsEnabled=${previewPaymentsEnabled}, livePaymentsEnabled=${livePaymentsEnabled}, ` +
+    `razorpayEnabled=${paymentProviders.razorpay.enabled}, paypalEnabled=${paymentProviders.paypal.enabled}, ` +
+    `paypalMode=${paymentProviders.paypal.mode}`
 );
 process.exit(0);

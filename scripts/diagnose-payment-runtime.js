@@ -4,14 +4,14 @@ const {
   resolvePaymentProviders,
   resolvePaymentRuntimePolicy,
 } = require("../src/server/api/payment/providerConfig.js");
+const {
+  readProcessEnvValue: env,
+  readFirstProcessEnvValue: firstEnv,
+} = require("../src/server/supabase/envValue.cjs");
 
 const runtimePolicy = resolvePaymentRuntimePolicy();
 const providers = resolvePaymentProviders();
-const explicitPayPalEnv = String(
-  process.env.PAYPAL_ENV || process.env.NEXT_PUBLIC_PAYPAL_ENV || ""
-)
-  .trim()
-  .toLowerCase();
+const explicitPayPalEnv = firstEnv("PAYPAL_ENV", "NEXT_PUBLIC_PAYPAL_ENV").toLowerCase();
 
 const report = {
   generatedAt: new Date().toISOString(),
@@ -20,36 +20,27 @@ const report = {
     previewPaymentsEnabled: runtimePolicy.previewPaymentsEnabled === true,
     livePaymentsEnabled: runtimePolicy.livePaymentsEnabled === true,
     explicitPayPalEnv: explicitPayPalEnv || "default",
-    allowLivePaymentsInDevelopment:
-      String(process.env.ALLOW_LIVE_PAYMENTS_IN_DEVELOPMENT || "").trim() !== "",
-    allowLivePaymentsInPreview:
-      String(process.env.ALLOW_LIVE_PAYMENTS_IN_PREVIEW || "").trim() !== "",
+    allowLivePaymentsInDevelopment: env("ALLOW_LIVE_PAYMENTS_IN_DEVELOPMENT") !== "",
+    allowLivePaymentsInPreview: env("ALLOW_LIVE_PAYMENTS_IN_PREVIEW") !== "",
   },
   providers: {
     dodo: {
       enabled: providers?.dodo?.enabled === true,
       mode: providers?.dodo?.mode || "missing",
-      credentialsPresent: !!String(process.env.DODO_PAYMENTS_API_KEY || "").trim(),
-      webhookKeyPresent: !!String(process.env.DODO_PAYMENTS_WEBHOOK_KEY || "").trim(),
+      credentialsPresent: !!env("DODO_PAYMENTS_API_KEY"),
+      webhookKeyPresent: !!env("DODO_PAYMENTS_WEBHOOK_KEY"),
     },
     razorpay: {
       enabled: providers?.razorpay?.enabled === true,
       mode: providers?.razorpay?.mode || "unknown",
-      credentialsPresent:
-        !!String(process.env.RAZORPAY_KEY_ID || "").trim() &&
-        !!String(process.env.RAZORPAY_KEY_SECRET || "").trim(),
+      credentialsPresent: !!env("RAZORPAY_KEY_ID") && !!env("RAZORPAY_KEY_SECRET"),
     },
     paypal: {
       enabled: providers?.paypal?.enabled === true,
       mode: providers?.paypal?.mode || "unknown",
       credentialsPresent:
-        !!String(
-          process.env.PAYPAL_CLIENT_ID ||
-            process.env.REACT_APP_PAYPAL_CLIENT_ID ||
-            process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID ||
-            ""
-        ).trim() &&
-        !!String(process.env.PAYPAL_CLIENT_SECRET || "").trim(),
+        !!firstEnv("PAYPAL_CLIENT_ID", "REACT_APP_PAYPAL_CLIENT_ID", "NEXT_PUBLIC_PAYPAL_CLIENT_ID") &&
+        !!env("PAYPAL_CLIENT_SECRET"),
     },
   },
   notes: [

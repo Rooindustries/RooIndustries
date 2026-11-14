@@ -10,6 +10,8 @@ import { reconcileBookingEmailDispatches } from "../ref/bookingEmails.js";
 import { reconcileReferralEmailDispatches } from "../ref/referralEmailDispatches.js";
 
 import { reconcileCredentialOperations } from "../../supabase/credentialRecovery.js";
+import { reportBookingPaidEvents } from "../../analytics/bookingPaidEvents.js";
+import { retryContactMessages } from "../../contact/contactMessages.js";
 
 import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
 
@@ -74,6 +76,8 @@ export default async function handler(req, res) {
     duty("referralEmailRecovery",() => reconcileReferralEmailDispatches({limit:10})),
     duty("credentialRecovery",() => reconcileCredentialOperations({limit:10})),
     duty("rateLimitBucketsCleaned",() => cleanupExpiredRateLimitBuckets()),
+    duty("bookingPaidEvents",() => reportBookingPaidEvents({})),
+    duty("contactMessages",() => retryContactMessages({limit:20})),
     duty("emailOnlyRecovery",async () => ({supabase:await reconcileBookingEmailDispatches({client:client || createPaymentBackendClient("supabase")})})),
     duty("commerceMetricsCleaned",async () => {
       const result=await createSupabaseAdminClient().rpc("roo_cleanup_commerce_metrics",{});if(result.error)throw result.error;return Number(result.data || 0);

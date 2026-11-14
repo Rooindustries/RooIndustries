@@ -9,6 +9,9 @@ import https from 'node:https';
 import { once } from 'node:events';
 import { registerHooks, syncBuiltinESMExports } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { registerEnvScenarios } from './lib/payment-sweep-env-scenarios.mjs';
+import { registerBookingPaidScenarios } from './lib/payment-sweep-booking-paid-scenarios.mjs';
+import { registerAttributionScenarios } from './lib/payment-sweep-attribution-scenarios.mjs';
 
 const host=process.env.ROO_TEST_HOST||'127.0.0.1';
 const originalFetch=globalThis.fetch;
@@ -40,6 +43,7 @@ for(const [module,protocol] of [[http,'http:'],[https,'https:']]){
 syncBuiltinESMExports();
 registerHooks({resolve(specifier,context,nextResolve){try{return nextResolve(specifier,context);}catch(error){if(specifier==='next/server')return nextResolve('next/server.js',context);if(!specifier.startsWith('.')||!context.parentURL?.startsWith('file:'))throw error;for(const suffix of ['.js','.ts','/index.js']){const candidate=new URL(`${specifier}${suffix}`,context.parentURL);if(fs.existsSync(fileURLToPath(candidate)))return nextResolve(candidate.href,context);}throw error;}}});
 const only=process.argv.find(v=>v.startsWith('--scenario='))?.slice(11).split(',');
+const onlyPrefix=process.argv.find(v=>v.startsWith('--scenario-prefix='))?.slice(18);
 const a2Mode=process.argv.includes('--a2');
 const currencyMode=process.argv.includes('--currency-config');
 const recoveryMode = process.argv.includes('--recovery');
@@ -123,6 +127,7 @@ const a1RebuildProof=async(name)=>{
 };
 const run = async (name, fn) => {
   if (!supportedScenario(name) || (only && !only.includes(name))) return;
+  if (onlyPrefix && !name.startsWith(onlyPrefix)) return;
   const emailSettings = { FROM_EMAIL: process.env.FROM_EMAIL, OWNER_EMAIL: process.env.OWNER_EMAIL };
   if (name.startsWith('recovery-')) {
     Object.assign(process.env, { FROM_EMAIL: 'noreply@example.invalid', OWNER_EMAIL: 'owner@example.invalid' });
@@ -2756,6 +2761,10 @@ try{
     assert.equal(finalized.body.bookingSummary.bookingId, (await row(finalizing.id)).payload.bookingId);
     return { paymentRecord: payment, booking, cancelled, webhook, finalized };
   });
+  const ctx={run,seed,requestFlow,paypalReq,razorReq,dodoReq,sql,record,row,flow,commerce,fixture,origin,
+    a1Start,a1Hook};
+  for(const register of [registerEnvScenarios,registerBookingPaidScenarios,registerAttributionScenarios])
+    await register(ctx);
   assert.ok(evidence.scenarios.length,'Unknown named scenario');if(only)assert.equal(evidence.scenarios.length,new Set(only).size,'Unknown selected payment scenario');assert.equal(blockedNetwork,0);
   evidence.modules=Object.fromEntries(['@supabase/supabase-js','@supabase/ssr','postgres','dodopayments'].map(name=>[name,JSON.parse(fs.readFileSync(path.join(process.cwd(),'node_modules',name,'package.json'),'utf8')).version]));
   evidence.sourceHashes=Object.fromEntries(['src/server/api/payment/flow.js','src/server/api/payment/providerClients.js','src/server/api/payment/dodoProvider.js','src/server/api/ref/createBooking.js','src/server/api/ref/bookingCommit.js','src/server/api/payment/reconcile.js','src/server/api/ref/bookingEmails.js','src/components/Payment.jsx','src/server/api/ref/bookingRefunds.js','scripts/test-payment-persistence-sweep.mjs','scripts/lib/sweep-postgres-fixture.mjs','supabase/migrations/20261005000500_project_booking_payment_currency_subunits.sql'].map(name=>[name,crypto.createHash('sha256').update(sourceText(name)).digest('hex')]));

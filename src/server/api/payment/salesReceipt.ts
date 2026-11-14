@@ -1,6 +1,9 @@
 import { createHash } from "crypto";
 import { sanitizeSalesAttribution } from "../../../lib/salesAttribution.ts";
 
+export const bookingEventId = (paymentRecordId: string) =>
+  createHash("sha256").update(`booking-confirmed:${paymentRecordId}`).digest("hex").slice(0, 40);
+
 export function buildSalesReceipt(record: Record<string, any> = {}) {
   try {
     if (!record._id || !record.bookingId || !["booked", "email_partial"].includes(record.status)) return null;
@@ -10,7 +13,7 @@ export function buildSalesReceipt(record: Record<string, any> = {}) {
     const currency = record.providerPublicData?.currency || (record.provider === "free" ? "USD" : record.currency);
     if (!Number.isFinite(amount) || amount < 0 || !/^[A-Z]{3}$/.test(currency || "")) return null;
     return {
-      eventId: createHash("sha256").update(`booking-confirmed:${record._id}`).digest("hex").slice(0, 40),
+      eventId: bookingEventId(record._id),
       packageTitle: String(record.bookingPayload?.packageTitle || "").slice(0, 120),
       paymentType: record.provider === "free" ? "free" : "paid",
       provider: String(record.provider),

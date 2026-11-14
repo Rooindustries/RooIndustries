@@ -21,6 +21,7 @@ const COMMERCE_KEY_PREFIXES = [
   "validate-coupon:",
   "get-upgrade-info:",
   "download-validate:",
+  "contact-message:",
 ];
 
 const isCommerceKey = (key) =>

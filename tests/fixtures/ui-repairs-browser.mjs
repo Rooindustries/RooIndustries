@@ -56,11 +56,17 @@ await run('editor-draft-order', async () => {
   assert(actual.total === '25' && actual.commission === '10' && actual.discount === '15' && actual.reason === 'reasonB', `Later draft B discarded: ${JSON.stringify(actual)}`); return { actual, calls: (await control()).calls };
 });
 await run('contact-config', async () => {
-  await load('/contact', { mode: 'delayed' }); await call('/api/content/contact'); const blockedBeforeConfig = !button('Send Message') || button('Send Message').disabled;
-  await release('contact'); await wait(() => text().includes('Synthetic contact'), 'Delayed CMS configuration absent');
-  input('input[name=name]', 'Synthetic name'); input('input[name=email]', 'ui@fixture.invalid'); input('textarea[name=message]', 'Synthetic message'); submit(); await call('/__ui/formspree');
-  const calls = (await control()).calls.filter(c => c.path === '/__ui/formspree'); assert(calls.length === 1 && calls[0].form === 'formB' && blockedBeforeConfig, `Real Formspree SDK ignored delayed configured formB: ${JSON.stringify({calls,blockedBeforeConfig})}`);
-  await wait(() => text().includes('Your message has been sent'), 'SDK success response not rendered'); return { calls, externalSends: 0, standIn: 'Actual @formspree/react3 SDK; browser fetch redirected before network to local HTTP' };
+  await load('/contact', { mode: 'delayed' }); await call('/api/content/contact');
+  const enabledBeforeConfig = Boolean(button('Send Message')) && !button('Send Message').disabled;
+  input('input[name=name]', 'Synthetic name'); input('input[name=email]', 'ui@fixture.invalid');
+  input('textarea[name=message]', 'Synthetic message'); submit(); await call('/api/contact');
+  const calls = (await control()).calls.filter(c => c.path === '/api/contact');
+  const sent = calls.length === 1 && calls[0].body.message === 'Synthetic message' && calls[0].body.company === '';
+  const seen = JSON.stringify({ calls, enabledBeforeConfig });
+  assert(sent && enabledBeforeConfig, `Contact form waited on CMS content: ${seen}`);
+  const thanks = "Thanks, your message is in. We'll reply by email.";
+  await wait(() => text().includes(thanks), 'Contact success not rendered'); await release('contact');
+  return { calls, externalSends: 0 };
 });
 await run('hero-promises', async () => {
   const measureItem = (item, note) => {

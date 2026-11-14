@@ -1,6 +1,17 @@
 import { isProductionBrowser } from "./productionBrowser";
 import { track } from "@vercel/analytics/react";
-import { salesEventProperties, sanitizeSalesAttribution } from "./salesAttribution";
+import { loadSalesAttribution, withMetaPixel, withSalesAttribution } from "./analyticsModules";
+import packagePricing from "./packagePricing";
+
+const { getPackageSlug, toMoney } = packagePricing;
+const DEFAULT_CURRENCY = "USD";
+
+const metaTrack = (event, data, options) => withMetaPixel((pixel) => pixel.metaTrack(event, data, options));
+
+const packageFields = (title, price) => {
+  const name = String(title || "").trim();
+  return name ? { name, slug: getPackageSlug(name), value: toMoney(price) } : null;
+};
 
 const ensureAnalyticsQueue = () => {
   if (typeof window === "undefined" || window.va) return;
@@ -14,43 +25,121 @@ export const trackEvent = (eventName, data = {}, options = {}) => {
   try {
     if (!isProductionBrowser()) return false;
     ensureAnalyticsQueue();
-    const attribution = Object.hasOwn(options, "attribution")
-      ? salesEventProperties(options.attribution)
-      : salesEventProperties();
-    track(eventName, { ...attribution, ...data });
+    const attributed = Object.hasOwn(options, "attribution");
+    withSalesAttribution(({ salesEventProperties }) => {
+      const attribution = attributed ? salesEventProperties(options.attribution) : salesEventProperties();
+      track(eventName, { ...attribution, ...data });
+    });
     return true;
   } catch {
     return false;
   }
 };
 
-const completedPurchases = new Set();
-
-export const trackConfirmedPurchase = (receipt) => {
+export const trackPageView = (path) => {
   try {
-    if (!receipt || !/^[a-f0-9]{40}$/.test(receipt.eventId || "")) return false;
-    if (!["paid", "free"].includes(receipt.paymentType) || !Number.isFinite(receipt.amount) || receipt.amount < 0) return false;
-    const key = `booking_completion_tracked:${receipt.eventId}`;
-    try {
-      if (completedPurchases.has(receipt.eventId) || sessionStorage.getItem(key)) return false;
-    } catch {}
-    const attribution = sanitizeSalesAttribution(receipt.attribution);
-    const tracked = trackEvent("booking_completed", {
-      ...salesEventProperties(attribution),
-      event_id: receipt.eventId,
-      package: receipt.packageTitle,
-      payment_type: receipt.paymentType,
-      payment_provider: receipt.provider,
-      amount: receipt.amount,
-      currency: receipt.currency,
-      referral_code: receipt.referralCode || "",
-    }, { attribution });
-    if (tracked) {
-      completedPurchases.add(receipt.eventId);
-      try { sessionStorage.setItem(key, "1"); } catch {}
-    }
-    return tracked;
+    return Boolean(path) && metaTrack("PageView");
   } catch {
     return false;
   }
 };
+
+export const trackPackageView = ({ title, price, surface } = {}) => {
+  try {
+    const pkg = packageFields(title, price);
+    if (!pkg?.slug) return false;
+    trackEvent("view_item", {
+      package: pkg.name,
+      package_slug: pkg.slug,
+      value: pkg.value,
+      currency: DEFAULT_CURRENCY,
+      surface: String(surface || ""),
+    });
+    metaTrack("ViewContent", {
+      content_name: pkg.name,
+      content_ids: [pkg.slug],
+      content_type: "product",
+      value: pkg.value,
+      currency: DEFAULT_CURRENCY,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+export const trackCheckoutSessionStarted = ({ packageTitle, price, provider, currency } = {}) => {
+  try {
+    const pkg = packageFields(packageTitle, price);
+    if (!pkg) return false;
+    const code = String(currency || DEFAULT_CURRENCY).toUpperCase();
+    trackEvent("checkout_started", {
+      package: pkg.name,
+      package_slug: pkg.slug,
+      provider: String(provider || ""),
+      value: pkg.value,
+      currency: code,
+    });
+    metaTrack("InitiateCheckout", {
+      content_name: pkg.name,
+      content_ids: pkg.slug ? [pkg.slug] : [],
+      content_type: "product",
+      num_items: 1,
+      value: pkg.value,
+      currency: code,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const sentReceipts = new Set();
+
+const sendOnce = (key, send) => {
+  try {
+    if (sentReceipts.has(key) || sessionStorage.getItem(key)) return false;
+  } catch {}
+  if (!send()) return false;
+  sentReceipts.add(key);
+  try { sessionStorage.setItem(key, "1"); } catch {}
+  return true;
+};
+
+const trackPaidPurchaseOnMeta = (receipt) => {
+  const pkg = packageFields(receipt.packageTitle, receipt.amount);
+  return Boolean(pkg) && metaTrack("Purchase", {
+    content_name: pkg.name,
+    content_ids: pkg.slug ? [pkg.slug] : [],
+    content_type: "product",
+    value: receipt.amount,
+    currency: receipt.currency,
+  }, { eventId: receipt.eventId });
+};
+
+const validReceipt = (receipt) => Boolean(receipt) && /^[a-f0-9]{40}$/.test(receipt.eventId || "") &&
+  ["paid", "free"].includes(receipt.paymentType) && Number.isFinite(receipt.amount) && receipt.amount >= 0;
+
+const sendConfirmedPurchase = (receipt) => {
+  try {
+    if (!validReceipt(receipt)) return false;
+    const paid = receipt.paymentType === "paid";
+    const vercel = sendOnce(`booking_completion_tracked:${receipt.eventId}`, () =>
+      trackEvent(paid ? "booking_completed" : "free_booking_completed", {
+        event_id: receipt.eventId,
+        package: receipt.packageTitle,
+        payment_type: receipt.paymentType,
+        payment_provider: receipt.provider,
+        amount: receipt.amount,
+        currency: receipt.currency,
+        referral_code: receipt.referralCode || "",
+      }, { attribution: receipt.attribution ?? null }));
+    const meta = paid && sendOnce(`meta_purchase_tracked:${receipt.eventId}`, () => trackPaidPurchaseOnMeta(receipt));
+    return vercel || meta;
+  } catch {
+    return false;
+  }
+};
+
+export const trackConfirmedPurchase = (receipt) =>
+  loadSalesAttribution().then((module) => Boolean(module) && sendConfirmedPurchase(receipt));

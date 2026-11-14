@@ -159,6 +159,10 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
   let contentMissing = [];
   const changedContent = new Set();
   const emails = [];
+  const contactMessages = [];
+  let contactDelivery = 'captured';
+  let contactRecord = 'ok';
+  const contactInbox = 'serviroo@rooindustries.com';
   const mutate = mutations => {
     if (!Array.isArray(mutations) || !mutations.length) throw new Error('Missing fixture mutations.');
     const next = structuredClone(documents);
@@ -238,6 +242,9 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
             enqueueDelayMs = 0;
             emailDelayMs = 0;
             emails.length = 0;
+            contactMessages.length = 0;
+            contactDelivery = 'captured';
+            contactRecord = 'ok';
           }
           if (body.clockNow !== undefined) setClock(body.clockNow);
           if (body.delivery !== undefined) {
@@ -251,6 +258,18 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
           if (body.failure !== undefined) {
             if (!['', 'limiter', 'settings', 'commerce_control', 'hold_write'].includes(body.failure)) throw new Error('Invalid fixture failure state.');
             failure = body.failure;
+          }
+          if (body.contactDelivery !== undefined) {
+            if (!['captured', 'failed'].includes(body.contactDelivery)) {
+              throw new Error('Invalid fixture contact delivery.');
+            }
+            contactDelivery = body.contactDelivery;
+          }
+          if (body.contactRecord !== undefined) {
+            if (!['ok', 'missing'].includes(body.contactRecord)) {
+              throw new Error('Invalid fixture contact record state.');
+            }
+            contactRecord = body.contactRecord;
           }
           for (const name of ['enqueueDelayMs', 'emailDelayMs']) {
             if (body[name] !== undefined && (!Number.isInteger(body[name]) || body[name] < 0 || body[name] > 2000)) throw new Error('Invalid fixture delay.');
@@ -268,7 +287,9 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
           }
         }
         call.status = 200;
-        json(res, 200, { delivery, session, documents, requests: evidence.requests, emails, clockNow });
+        json(res, 200, {
+          delivery, session, documents, requests: evidence.requests, emails, clockNow, contactMessages, contactDelivery,
+        });
       } else if (req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_read_public_content_revision') {
         if (contentOutage === true) throw Object.assign(new Error('Synthetic content outage.'), { status: 503, code: 'FIXTURE_CONTENT_OUTAGE' });
         call.status = 200; json(res, 200, contentRevision);
@@ -383,6 +404,70 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
       } else if (apiRoutes && req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_refresh_operational_shadow') {
         call.status = 200;
         json(res, 200, {});
+      } else if (apiRoutes && req.method === 'POST' && url.pathname.startsWith('/rest/v1/rpc/roo_') &&
+          url.pathname.includes('contact_') && contactRecord === 'missing') {
+        const message = 'Could not find the function in the schema cache.';
+        throw Object.assign(new Error(message), { status: 404, code: 'PGRST202' });
+      } else if (apiRoutes && req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_record_contact_message') {
+        if (!['pending', 'spam'].includes(body.p_status) || !/^[a-f0-9]{64}$/.test(body.p_client_hash || '')) {
+          throw new Error('Invalid fixture contact message.');
+        }
+        const now = Date.now();
+        const row = {
+          id: globalThis.crypto.randomUUID(), name: body.p_name, email: body.p_email, message: body.p_message,
+          client_hash: body.p_client_hash, status: body.p_status, attempts: 0, last_error_code: null,
+          provider_message_id: null, next_attempt_at: body.p_status === 'pending' ? now + 600000 : null,
+          lease_until: null, created_at: now, sent_at: null,
+        };
+        contactMessages.push(row);
+        call.status = 200;
+        json(res, 200, row.id);
+      } else if (apiRoutes && req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_complete_contact_message') {
+        const row = contactMessages.find(value => value.id === body.p_id);
+        if (!row) throw Object.assign(new Error('contact message not found'), { status: 404, code: 'P0002' });
+        if (['pending', 'failed'].includes(row.status)) {
+          row.attempts += 1;
+          row.lease_until = null;
+          const dead = row.attempts >= 5;
+          if (body.p_sent === true) {
+            Object.assign(row, {
+              status: 'sent', provider_message_id: body.p_provider_message_id, last_error_code: null,
+              next_attempt_at: null, sent_at: Date.now(),
+            });
+          } else {
+            Object.assign(row, {
+              status: dead ? 'dead' : 'failed', last_error_code: body.p_error_code || 'email_send_failed',
+              next_attempt_at: dead ? null : Date.now() + 300000 * 2 ** (row.attempts - 1),
+            });
+          }
+        }
+        call.status = 200;
+        json(res, 200, row.status);
+      } else if (apiRoutes && req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_claim_contact_retries') {
+        const now = Date.now();
+        const limit = Math.max(1, Math.min(Number(body.p_limit) || 20, 100));
+        const due = contactMessages.filter(row => ['pending', 'failed'].includes(row.status) &&
+          row.next_attempt_at <= now && (!row.lease_until || row.lease_until <= now)).slice(0, limit);
+        for (const row of due) row.lease_until = now + 300000;
+        call.status = 200;
+        json(res, 200, due.map(({ id, name, email, message, attempts }) => ({ id, name, email, message, attempts })));
+      } else if (apiRoutes && req.method === 'POST' && url.pathname === '/emails' &&
+          String(req.headers['idempotency-key'] || '').startsWith('contact-message-')) {
+        const idempotencyKey = req.headers['idempotency-key'];
+        const row = contactMessages.find(value => `contact-message-${value.id}` === idempotencyKey);
+        if (req.headers.authorization !== 'Bearer fixture-only-referral-email-key' || !row || row.status === 'spam' ||
+            !Array.isArray(body.to) || body.to.length !== 1 || body.to[0] !== contactInbox ||
+            body.reply_to !== row.email) {
+          throw new Error('Invalid fixture contact email request.');
+        }
+        if (contactDelivery === 'failed') {
+          const error = new Error('Synthetic email provider unavailable.');
+          throw Object.assign(error, { status: 503, code: 'email_provider_unavailable' });
+        }
+        const id = `fixture-email-${emails.length + 1}`;
+        emails.push({ id, idempotencyKey, ...body, sentAt: Date.now() });
+        call.status = 200;
+        json(res, 200, { id });
       } else if (apiRoutes && req.method === 'POST' && url.pathname === '/emails') {
         const idempotencyKey = req.headers['idempotency-key'];
         if (req.headers.authorization !== 'Bearer fixture-only-referral-email-key' || !dispatches.has(idempotencyKey) ||

@@ -261,7 +261,7 @@ jobs:
     needs: tested-tree
     if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-24.04' || vars.TESTS_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       ROO_TEST_HOST: 127.0.0.1
     steps:
@@ -275,9 +275,11 @@ jobs:
           build-dirs: |
             .next-e2e-routes-api/cache/webpack
             .next-e2e-routes-portal/cache/webpack
+            .next-e2e-routes-contact/cache/webpack
+            .next-e2e-pixel/cache/webpack
       - uses: ./.github/actions/hold-ports
         with:
-          playwright-ports: "3231 3241"
+          playwright-ports: "3231 3241 3251 3261"
       - name: Run API route suite
         id: api-routes
         env:
@@ -290,6 +292,17 @@ jobs:
           PW_PORT: "3241"
           PW_SERVER_ID: routes-portal
         run: xvfb-run -a npm run test:creator:portal -- --output=test-results/creator-portal
+      - name: Run contact form suite
+        if: ${{ !cancelled() }}
+        env:
+          PW_PORT: "3251"
+          PW_SERVER_ID: routes-contact
+        run: xvfb-run -a npm run test:contact -- --output=test-results/contact
+      - name: Run consent suite against a build with the Meta pixel set
+        if: ${{ !cancelled() }}
+        env:
+          PW_PORT: "3261"
+        run: xvfb-run -a npm run test:consent:pixel -- --output=test-results/consent-pixel
       - name: Run creator portal against an external fixture server
         if: ${{ !cancelled() }}
         run: npm run test:fixture-ports:browser
@@ -298,6 +311,8 @@ jobs:
           build-dirs: |
             .next-e2e-routes-api/cache/webpack
             .next-e2e-routes-portal/cache/webpack
+            .next-e2e-routes-contact/cache/webpack
+            .next-e2e-pixel/cache/webpack
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

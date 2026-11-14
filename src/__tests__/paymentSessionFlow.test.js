@@ -761,7 +761,7 @@ beforeEach(() => {
 describe("payment session flow", () => {
   test.each(["paypal", "razorpay"])("preserves verified %s attribution when the booking omits optional verification fields", async (provider) => {
     const hold = createHold();
-    const salesAttribution = { version: 1, journeyId: "12345678-1234-4123-8123-123456789abc", capturedAt: "2026-09-11T10:00:00.000Z", landingPath: "/", creatorCode: "winton", campaign: "vertex-max-support" };
+    const salesAttribution = { version: 2, journeyId: "12345678-1234-4123-8123-123456789abc", firstTouch: { capturedAt: "2026-09-11T10:00:00.000Z", landingPath: "/", creatorCode: "winton", campaign: "vertex-max-support" }, lastTouch: { capturedAt: "2026-09-11T10:00:00.000Z", landingPath: "/", creatorCode: "winton", campaign: "vertex-max-support" } };
     const bookingPayload = baseBookingPayload({ slotHoldToken: issueTokenForHold(hold), salesAttribution });
     const createBooking = mockCreateBooking.getMockImplementation();
     mockCreateBooking.mockImplementationOnce(async (req, res) => {
@@ -1765,7 +1765,7 @@ describe("payment session flow", () => {
   });
 
   test("webhooks mirror legacy bookings into terminal payment records when the booking already exists", async () => {
-    const salesAttribution = { version: 1, journeyId: "12345678-1234-4123-8123-123456789abc", capturedAt: "2026-09-11T10:00:00.000Z", landingPath: "/", creatorCode: "winton" };
+    const salesAttribution = { version: 2, journeyId: "12345678-1234-4123-8123-123456789abc", firstTouch: { capturedAt: "2026-09-11T10:00:00.000Z", landingPath: "/", creatorCode: "winton" }, lastTouch: { capturedAt: "2026-09-11T10:00:00.000Z", landingPath: "/", creatorCode: "winton" } };
     store.bookings.push({
       _id: "booking_legacy_paypal",
       salesAttribution,

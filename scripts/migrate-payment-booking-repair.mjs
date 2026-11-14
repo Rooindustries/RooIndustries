@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { createRequire } from "node:module";
 import { createDocumentWriteClient } from "../src/server/data/documentClient.js";
 import operatorEnvironment from "./lib/operator-environment.cjs";
 import { stableSnapshotJson } from "../src/server/archive/snapshotContract.js";
@@ -23,8 +24,11 @@ const explicitEnvPath = valueAfter("--env");
 
 operatorEnvironment.loadOperatorEnvironment(explicitEnvPath);
 
-const readEnv = (...keys) =>
-  keys.map((key) => String(process.env[key] || "").trim()).find(Boolean) || "";
+const { readProcessEnvValue, readFirstProcessEnvValue: readEnv } =
+  createRequire(import.meta.url)("../src/server/supabase/envValue.cjs");
+const payPalApiBase = () => readProcessEnvValue("PAYPAL_ENV").toLowerCase() === "sandbox"
+  ? "https://api-m.sandbox.paypal.com"
+  : "https://api-m.paypal.com";
 
 const selectedSupabaseUrl = readEnv("SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL");
 if (!selectedSupabaseUrl) throw new Error("Supabase URL is required in the selected environment.");
@@ -677,9 +681,7 @@ const getPayPalAccessToken = async () => {
   const id = readEnv("PAYPAL_CLIENT_ID", "NEXT_PUBLIC_PAYPAL_CLIENT_ID");
   const secret = readEnv("PAYPAL_CLIENT_SECRET");
   if (!id || !secret) throw new Error("PayPal credentials are unavailable.");
-  const base = normalizeLower(process.env.PAYPAL_ENV) === "sandbox"
-    ? "https://api-m.sandbox.paypal.com"
-    : "https://api-m.paypal.com";
+  const base = payPalApiBase();
   const response = await fetch(`${base}/v1/oauth2/token`, {
     method: "POST",
     headers: {
@@ -717,9 +719,7 @@ const inspectProviderOrder = async (record) => {
       return "unpaid";
     }
     if (provider === "paypal") {
-      const base = normalizeLower(process.env.PAYPAL_ENV) === "sandbox"
-        ? "https://api-m.sandbox.paypal.com"
-        : "https://api-m.paypal.com";
+      const base = payPalApiBase();
       const response = await fetch(`${base}/v2/checkout/orders/${encodeURIComponent(orderId)}`, {
         headers: { Authorization: `Bearer ${await getPayPalAccessToken()}` },
       });
