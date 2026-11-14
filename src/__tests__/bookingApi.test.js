@@ -1,3 +1,5 @@
+const providerResponse = require("../../tests/fixtures/provider-response.cjs");
+
 let holdSlot;
 let isSameSupabaseOwnedHold;
 let createBooking;
@@ -2821,16 +2823,13 @@ describe("booking reservation API", () => {
       providerPaymentId: "razorpay_payment_webhook",
     });
 
-    global.fetch = jest.fn(async () => ({
-      ok: true,
-      json: async () => ({
+    global.fetch = jest.fn(async () => providerResponse({
         id: "razorpay_payment_webhook",
         order_id: "razorpay_order_webhook",
         captured: true,
         currency: "USD",
         amount: 8499,
         status: "captured",
-      }),
     }));
 
     const utcDate = new Date(startTimeUTC);

@@ -1,13 +1,9 @@
+const response = require("../../tests/fixtures/provider-response.cjs");
+
 const loadProviderClients = () => {
   jest.resetModules();
   return require("../server/api/payment/providerClients.js");
 };
-
-const response = (body) => ({
-  ok: true,
-  status: 200,
-  json: async () => body,
-});
 
 const buildPayPalOrder = ({ captureStatus = "COMPLETED", capture = true } = {}) => ({
   id: "paypal_order_status_check",

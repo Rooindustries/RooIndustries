@@ -1,3 +1,4 @@
+import path from "node:path";
 import globals from "globals";
 import reactHooks from "eslint-plugin-react-hooks";
 import roo, { rules } from "./eslint-rules/index.mjs";
@@ -6,6 +7,21 @@ const emailTextRules = new Set(["no-hand-built-dollars"]);
 const pageOnly = "A file in tests/fixtures/browser is one function the page runs; the fixtures read it as text.";
 const scriptRules = new Set(["no-parent-ipc-disconnect", "no-unchecked-group-signal", "no-linux-only-test-tooling"]);
 const navigationRules = new Set(["no-secure-context-navigation-keys"]);
+const providerImports = {
+  meta: { type: "problem", schema: [], messages: { blocked: "Use requestProvider for provider transport imports." } },
+  create(context) {
+    const allowed = ["src/server/api/payment/providerRequest.js", "src/server/api/payment/providerConfig.js",
+      "src/server/safeErrorLog.js", "src/server/referrals/disputeAccounting.js"]
+      .map(file => path.resolve(context.cwd, file));
+    const check = node => {
+      const name = node.source?.value;
+      if (!name || name === "crypto") return;
+      if (name.startsWith(".") && allowed.includes(path.resolve(path.dirname(context.filename), name))) return;
+      context.report({ node, messageId: "blocked" });
+    };
+    return { ImportDeclaration: check, ExportNamedDeclaration: check, ExportAllDeclaration: check };
+  },
+};
 const testFiles = "src/**/__tests__/**";
 const ruleSet = (names) => Object.fromEntries(names.map((name) => [`roo/${name}`, "error"]));
 
@@ -28,6 +44,29 @@ export default [
   {
     files: ["src/lib/sectionNavigator.jsx"],
     rules: { ...ruleSet([...navigationRules]), "react-hooks/refs": "error" },
+  },
+  {
+    files: [
+      "src/server/api/payment/**/providerClients.{js,mjs,cjs}",
+      "src/server/api/payment/**/{paypal,razorpay,dodo}.{js,mjs,cjs}",
+      "src/server/api/payment/**/*Provider.{js,mjs,cjs}",
+      "src/server/api/payment/providers/**/*.{js,mjs,cjs}",
+    ],
+    plugins: { provider: { rules: { imports: providerImports } } },
+    rules: {
+      "provider/imports": "error",
+      "no-restricted-globals": [
+        "error",
+        ...["fetch", "globalThis", "global", "window", "self", "require"].map(name => ({
+          name,
+          message: "Use requestProvider so the deadline also cancels the response body.",
+        })),
+      ],
+      "no-restricted-syntax": ["error", {
+        selector: "ImportExpression",
+        message: "Use requestProvider for provider transport imports.",
+      }],
+    },
   },
   {
     files: ["scripts/**/*.{js,mjs,cjs}", "tests/**/*.{js,mjs,cjs}"],

@@ -1,3 +1,5 @@
+const providerResponse = require("../../tests/fixtures/provider-response.cjs");
+
 const crypto = require("crypto");
 
 const loadProviderClients = () => {
@@ -89,14 +91,8 @@ describe("payment webhook security", () => {
 
     global.fetch = jest
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ access_token: "paypal_access_token" }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ verification_status: "SUCCESS" }),
-      });
+      .mockResolvedValueOnce(providerResponse({ access_token: "paypal_access_token" }))
+      .mockResolvedValueOnce(providerResponse({ verification_status: "SUCCESS" }));
 
     const { verifyPayPalWebhookSignature } = loadProviderClients();
     const rawBody = JSON.stringify({
@@ -132,14 +128,8 @@ describe("payment webhook security", () => {
 
     global.fetch = jest
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ access_token: "paypal_access_token" }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ verification_status: "FAILURE" }),
-      });
+      .mockResolvedValueOnce(providerResponse({ access_token: "paypal_access_token" }))
+      .mockResolvedValueOnce(providerResponse({ verification_status: "FAILURE" }));
 
     const { verifyPayPalWebhookSignature } = loadProviderClients();
 
@@ -169,14 +159,8 @@ describe("payment webhook security", () => {
     process.env.PAYPAL_CLIENT_SECRET = "paypal_secret";
     global.fetch = jest
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ access_token: "paypal_access_token" }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ id: "paypal_order_1" }),
-      });
+      .mockResolvedValueOnce(providerResponse({ access_token: "paypal_access_token" }))
+      .mockResolvedValueOnce(providerResponse({ id: "paypal_order_1" }));
 
     const { createPayPalOrder } = loadProviderClients();
     await expect(
@@ -203,15 +187,9 @@ describe("payment webhook security", () => {
     };
     global.fetch = jest
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ items: [] }),
-      })
+      .mockResolvedValueOnce(providerResponse({ items: [] }))
       .mockRejectedValueOnce(new Error("connection reset after upstream accepted"))
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ items: [recoveredOrder] }),
-      });
+      .mockResolvedValueOnce(providerResponse({ items: [recoveredOrder] }));
 
     const { createRazorpayOrder } = loadProviderClients();
     await expect(
@@ -244,25 +222,11 @@ describe("payment webhook security", () => {
     };
     global.fetch = jest
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ items: [] }),
-      })
+      .mockResolvedValueOnce(providerResponse({ items: [] }))
       .mockRejectedValueOnce(new Error("connection reset after upstream accepted"))
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 503,
-        json: async () => ({}),
-      })
-      .mockResolvedValueOnce({
-        ok: false,
-        status: 503,
-        json: async () => ({}),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ items: [recoveredOrder] }),
-      });
+      .mockResolvedValueOnce(providerResponse({}, 503))
+      .mockResolvedValueOnce(providerResponse({}, 503))
+      .mockResolvedValueOnce(providerResponse({ items: [recoveredOrder] }));
 
     const { createRazorpayOrder } = loadProviderClients();
     const orderInput = {
@@ -271,9 +235,10 @@ describe("payment webhook security", () => {
       receipt: "roo_ambiguous_receipt",
     };
 
-    await expect(createRazorpayOrder(orderInput)).rejects.toThrow(
-      "connection reset after upstream accepted"
-    );
+    await expect(createRazorpayOrder(orderInput)).rejects.toMatchObject({
+      code: "razorpay_order_create_failed",
+      cause: expect.objectContaining({ message: "connection reset after upstream accepted" }),
+    });
     await expect(
       createRazorpayOrder({ ...orderInput, lookupOnly: true })
     ).rejects.toMatchObject({
