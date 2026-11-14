@@ -64,7 +64,9 @@ const recordedOnPrivatePage = (timestamp) =>
   privateSpans.some(({ start, end }) => timestamp >= start && (!end || timestamp < end));
 
 const scrubSnapshot = (event) => {
-  const items = (event.properties?.$snapshot_data || []).filter((item) => !recordedOnPrivatePage(item.timestamp));
+  const privateSince = cleanUrl(window.location.href) ? Infinity : Math.max(navigatedAt, lastPopstate());
+  const items = (event.properties?.$snapshot_data || [])
+    .filter((item) => item.timestamp < privateSince && !recordedOnPrivatePage(item.timestamp));
   return items.length ? { ...event, properties: { ...cleanProperties(event.properties), $snapshot_data: items } } : null;
 };
 
