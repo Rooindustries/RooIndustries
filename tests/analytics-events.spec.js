@@ -1,6 +1,6 @@
 const {
   test: bookingTest, expect, cookieBanner: banner, settleIdle: settle, bookingEventId, routePaidStart: routeStart,
-  startInTwoTabsAndReload, startPaidThenResume, blockLocalStorage, declineCookies,
+  checkoutStartCases, declineCookies,
 } = require("./fixtures/booking-flow.cjs");
 
 const safety = () => import("../scripts/lib/test-target-safety.mjs");
@@ -191,31 +191,30 @@ test("checkout_started fires once, only after the payment start succeeds", async
   expect(JSON.stringify(vercel.calls)).not.toMatch(personalData);
 });
 
-test("checkout_started fires once per created checkout across tabs and a reload", async ({
-  page, flow, vercel, baseURL,
-}) => {
-  await page.goto("/packages");
-  await declineCookies(page);
-  await routeStart(page, baseURL);
-  await startInTwoTabsAndReload(page, flow);
-  expect(events(vercel, "checkout_started")).toHaveLength(1);
-});
+for (const { name, prepare, run } of checkoutStartCases) {
+  test(`checkout_started fires exactly once when ${name}`, async ({ page, flow, vercel, baseURL }) => {
+    await prepare(page);
+    await page.goto("/packages");
+    await declineCookies(page);
+    await run(page, flow, baseURL);
+    const started = events(vercel, "checkout_started");
+    expect(started).toHaveLength(1);
+    expect(started[0].payload.data).toMatchObject({ package_slug: "overhaul", provider: "dodo", value: 84.99 });
+  });
+}
 
-test("checkout_started fires once when the first start response is lost after the checkout was made", async ({
-  page, flow, vercel, baseURL,
+test("a campaign label with phone numbers reaches neither the event nor the stored attribution", async ({
+  page, vercel,
 }) => {
-  await startPaidThenResume(page, flow, baseURL, { loseFirstResponse: true });
-  const started = events(vercel, "checkout_started");
-  expect(started).toHaveLength(1);
-  expect(started[0].payload.data).toMatchObject({ package_slug: "overhaul", provider: "dodo", value: 84.99 });
-});
-
-test("checkout_started fires once on the created response when browser storage is blocked", async ({
-  page, flow, vercel, baseURL,
-}) => {
-  await blockLocalStorage(page);
-  await startPaidThenResume(page, flow, baseURL);
-  expect(events(vercel, "checkout_started")).toHaveLength(1);
+  const phones = "212-555-0199 212-555-0198";
+  await page.goto(`/packages?${new URLSearchParams({ utm_source: "meta", utm_campaign: phones })}`);
+  await overhaulCard(page).locator(".ri-package-details-button").click();
+  const details = await sentOnce(page, vercel, "view_item");
+  expect(details.payload.data).toMatchObject({ campaign_source: "meta" });
+  expect(details.payload.data).not.toHaveProperty("campaign");
+  const stored = await page.evaluate(() => JSON.parse(sessionStorage.getItem("sales_attribution")));
+  expect(stored.lastTouch.source).toBe("meta");
+  expect(JSON.stringify([vercel.calls, stored])).not.toMatch(/555/);
 });
 
 for (const failure of [500, "unknown", "network"]) {

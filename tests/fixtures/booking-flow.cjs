@@ -230,76 +230,125 @@ const settleIdle = (page) => page.evaluate(() => new Promise((resolve) => {
 const bookingEventId = (paymentRecordId) =>
   createHash("sha256").update(`booking-confirmed:${paymentRecordId}`).digest("hex").slice(0, 40);
 
-const routePaidStart = (page, baseURL, { loseFirstResponse = false } = {}) => {
+const routePaidStart = async (page, baseURL, { lose = 0, hold = 0 } = {}) => {
   const checkouts = new Set();
-  let losing = loseFirstResponse;
-  return page.context().route("**/api/payment/start", (route) => {
+  const gate = { held: [] };
+  let losing = lose;
+  let holding = hold;
+  gate.release = () => Promise.all(gate.held.splice(0).map((answer) => answer()));
+  await page.context().route("**/api/payment/start", (route) => {
     const json = {
       ...startedCheckout(baseURL, checkouts, route.request()),
       quote: { grossAmount: overhaulPrice, netAmount: overhaulPrice, isFree: false },
     };
-    if (!losing) return route.fulfill({ json });
-    losing = false;
-    return route.abort("failed");
+    if (losing > 0) {
+      losing -= 1;
+      return route.abort("failed");
+    }
+    const answer = () => route.fulfill({ json });
+    if (holding < 1) return answer();
+    holding -= 1;
+    gate.held.push(answer);
+    return null;
   });
+  return gate;
 };
 
 const routeStartedStatus = (context) =>
   context.route("**/api/payment/status", (route) => route.fulfill({ json: { ok: true, status: "started" } }));
 
+const payButton = (tab) => tab.getByRole("button", { name: "Pay your way", exact: true });
+
+const handedOff = (tab) => expect(tab).toHaveURL(/\/__test\/checkout-handoff$/);
+
 const resumeCheckout = async (page) => {
   await page.goto("/payment");
   await page.getByRole("button", { name: "Resume checkout", exact: true }).click();
-  await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
+  await handedOff(page);
 };
 
-const startPaidThenResume = async (page, flow, baseURL, { loseFirstResponse = false } = {}) => {
-  await routePaidStart(page, baseURL, { loseFirstResponse });
+const openPayment = async (page, flow, baseURL, options) => {
+  const gate = await routePaidStart(page, baseURL, options);
   await routeStartedStatus(page.context());
   await flow.review("/booking?package=overhaul");
   await flow.payment();
-  const pay = page.getByRole("button", { name: "Pay your way", exact: true });
-  if (loseFirstResponse) {
-    const lost = page.waitForEvent("requestfailed", (request) => request.url().endsWith("/api/payment/start"));
-    await pay.click();
-    await lost;
-    await expect(pay).toBeEnabled();
-  }
-  await pay.click();
-  await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
-  await resumeCheckout(page);
+  return gate;
 };
 
-const blockLocalStorage = (page) => page.addInitScript(() => {
+const secondPaymentTab = async (page) => {
+  const opened = page.context().waitForEvent("page");
+  await page.evaluate(() => { window.open("/payment"); });
+  const second = await opened;
+  await expect(second.getByRole("heading", { name: "Complete Payment", exact: true })).toBeVisible();
+  return second;
+};
+
+const inTwoTabs = (hold, order) => async (page, flow, baseURL) => {
+  const gate = await openPayment(page, flow, baseURL, { hold });
+  const tabs = [page, await secondPaymentTab(page)];
+  await order(tabs, gate);
+  for (const tab of tabs) await settleIdle(tab);
+};
+
+const inOneTab = (options, steps) => async (page, flow, baseURL) => {
+  await openPayment(page, flow, baseURL, options);
+  await steps(page);
+  await settleIdle(page);
+};
+
+const heldStarts = (gate, count) => expect.poll(() => gate.held.length).toBe(count);
+
+const reusedAnswerFirst = inTwoTabs(1, async ([first, second], gate) => {
+  await payButton(first).click();
+  await heldStarts(gate, 1);
+  await payButton(second).click();
+  await handedOff(second);
+  await gate.release();
+  await handedOff(first);
+});
+
+const blockLocalStorage = (page) => page.context().addInitScript(() => {
   Object.defineProperty(window, "localStorage", {
     configurable: true, get: () => { throw new DOMException("Storage is blocked.", "SecurityError"); },
   });
 });
 
-const startInTwoTabsAndReload = async (page, flow) => {
-  const context = page.context();
-  const holds = [];
-  context.on("request", (request) => {
-    if (new URL(request.url()).pathname !== "/api/payment/start") return;
-    holds.push(request.postDataJSON()?.bookingPayload?.slotHoldId);
-  });
-  await routeStartedStatus(context);
-  await flow.review("/booking?package=overhaul");
-  await flow.payment();
-  const opened = context.waitForEvent("page");
-  await page.evaluate(() => { window.open("/payment"); });
-  const second = await opened;
-  await expect(second.getByRole("heading", { name: "Complete Payment", exact: true })).toBeVisible();
-  for (const tab of [page, second]) {
-    await tab.getByRole("button", { name: "Pay your way", exact: true }).click();
-    await expect(tab).toHaveURL(/\/__test\/checkout-handoff$/);
-  }
-  await resumeCheckout(page);
-  await settleIdle(second);
-  expect(holds.length).toBeGreaterThanOrEqual(2);
-  expect(new Set(holds).size).toBe(1);
-};
+const withoutWebLocks = (page) => page.context().addInitScript(() => {
+  Object.defineProperty(Navigator.prototype, "locks", { configurable: true, get: () => undefined });
+});
+
+const checkoutStartCases = [
+  ["created, then reused in another tab", null, inTwoTabs(0, async (tabs) => {
+    for (const tab of tabs) {
+      await payButton(tab).click();
+      await handedOff(tab);
+    }
+  })],
+  ["the reused answer arrives before the created one", null, reusedAnswerFirst],
+  ["the created answer is lost, then a retry reuses it", null, inOneTab({ lose: 1 }, async (page) => {
+    const lost = page.waitForEvent("requestfailed", (request) => request.url().endsWith("/api/payment/start"));
+    await payButton(page).click();
+    await lost;
+    await expect(payButton(page)).toBeEnabled();
+    await payButton(page).click();
+    await handedOff(page);
+  })],
+  ["two tabs race", null, inTwoTabs(2, async (tabs, gate) => {
+    for (const tab of tabs) await payButton(tab).click();
+    await heldStarts(gate, 2);
+    await gate.release();
+    for (const tab of tabs) await handedOff(tab);
+  })],
+  ["created, then reused after a reload", null, inOneTab({}, async (page) => {
+    await payButton(page).click();
+    await handedOff(page);
+    await resumeCheckout(page);
+  })],
+  ["browser storage is blocked", blockLocalStorage, reusedAnswerFirst],
+  ["the Web Locks API is missing", withoutWebLocks, reusedAnswerFirst],
+].map(([name, prepare, run]) => ({ name, prepare: prepare || (() => null), run }));
+
 module.exports = {
   test, expect, overhaulPrice, cookieBanner, declineCookies, settleIdle, bookingEventId, routePaidStart,
-  startInTwoTabsAndReload, startPaidThenResume, blockLocalStorage,
+  checkoutStartCases,
 };

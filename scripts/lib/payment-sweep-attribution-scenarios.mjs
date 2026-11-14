@@ -22,7 +22,7 @@ const v2Input = {
   lastTouch: {
     capturedAt: "2026-11-10T09:00:00Z", landingPath: "/download/private-token", creatorCode: "friend",
     source: "newsletter", campaign: "winter\u0000 deal", content: "buyer@example.invalid",
-    gclid: "Cj0K.fixture-2", fbclid: "not a click id",
+    gclid: "Cj0K.fixture-2", fbclid: "not a click id", term: "212-555-0199 212-555-0198",
   },
 };
 
@@ -49,20 +49,20 @@ const v1Touch = {
   source: "creator", campaign: "vertex-max",
 };
 
-const multibyteExpected = {
+const wide = (offset) => String.fromCodePoint(0x20000 + offset).repeat(100);
+const longestTouch = (capturedAt, offset) => ({
+  capturedAt, landingPath: "/packages", referrerHost: `${"a".repeat(63)}.${"b".repeat(32)}.com`,
+  creatorCode: "friend", source: wide(offset), medium: wide(offset + 1), campaign: wide(offset + 2),
+  content: wide(offset + 3), term: wide(offset + 4), fbclid: `IwAR${"1".repeat(196)}`, gclid: `Cj0K${"2".repeat(196)}`,
+});
+const longestExpected = {
   version: 2,
   journeyId,
-  firstTouch: {
-    capturedAt: "2026-11-01T09:00:00.000Z", landingPath: "/packages", source: "wechat",
-    campaign: "春节特惠广告活动".repeat(5), content: "bf-2026-11-27-v2",
-  },
-  lastTouch: {
-    capturedAt: "2026-11-10T09:00:00.000Z", landingPath: "/packages", source: "wechat",
-    campaign: "夏季新品推广".repeat(17).slice(0, 100),
-  },
+  firstTouch: longestTouch("2026-11-01T09:00:00.000Z", 0),
+  lastTouch: longestTouch("2026-11-10T09:00:00.000Z", 5),
 };
-const multibyteInput = {
-  ...multibyteExpected, lastTouch: { ...multibyteExpected.lastTouch, content: "call 212-555-0199" },
+const longestInput = {
+  ...longestExpected, lastTouch: { ...longestExpected.lastTouch, term: `${wide(9)}${wide(10)}` },
 };
 
 const payWithAttribution = async (ctx, salesAttribution) => {
@@ -108,6 +108,6 @@ export async function registerAttributionScenarios(ctx) {
   await ctx.run("ads-attribution-v1-upgraded", () => assertStoredAttribution(ctx, v1Input, {
     version: 2, journeyId, firstTouch: v1Touch, lastTouch: v1Touch,
   }));
-  await ctx.run("ads-attribution-multibyte-kept-phone-dropped",
-    () => assertStoredAttribution(ctx, multibyteInput, multibyteExpected));
+  await ctx.run("ads-attribution-longest-four-byte-labels-kept",
+    () => assertStoredAttribution(ctx, longestInput, longestExpected));
 }

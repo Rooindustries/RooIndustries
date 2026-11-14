@@ -1,6 +1,6 @@
 const {
-  test, expect, cookieBanner: banner, settleIdle: settle, bookingEventId, routePaidStart, startInTwoTabsAndReload,
-  startPaidThenResume, blockLocalStorage, declineCookies,
+  test, expect, cookieBanner: banner, settleIdle: settle, bookingEventId, routePaidStart, checkoutStartCases,
+  declineCookies,
 } = require("./fixtures/booking-flow.cjs");
 
 const pixelId = String(process.env.TOOLING_META_PIXEL_ID || "").trim();
@@ -594,27 +594,13 @@ if (!pixelId) {
       expect(tracked("PageView").map(({ path }) => path)).toEqual(["/packages", "/reviews", "/packages"]);
     });
 
-    test("InitiateCheckout is sent once per created checkout across tabs and a reload", async ({
-      page, flow, baseURL,
-    }) => {
-      await routePaidStart(page, baseURL);
-      await page.goto("/packages");
-      await banner(page).getByRole("button", { name: "Accept", exact: true }).click();
-      await expect.poll(() => tracked("PageView").length).toBe(1);
-      await startInTwoTabsAndReload(page, flow);
-      expect(tracked("InitiateCheckout")).toHaveLength(1);
-    });
-
-    for (const [name, blocked, options] of [
-      ["when the first start response is lost after the checkout was made", false, { loseFirstResponse: true }],
-      ["on the created response when browser storage is blocked", true, {}],
-    ]) {
-      test(`InitiateCheckout is sent once ${name}`, async ({ page, flow, baseURL }) => {
-        if (blocked) await blockLocalStorage(page);
+    for (const { name, prepare, run } of checkoutStartCases) {
+      test(`InitiateCheckout is sent exactly once when ${name}`, async ({ page, flow, baseURL }) => {
+        await prepare(page);
         await page.goto("/packages");
         await banner(page).getByRole("button", { name: "Accept", exact: true }).click();
         await expect.poll(() => tracked("PageView").length).toBe(1);
-        await startPaidThenResume(page, flow, baseURL, options);
+        await run(page, flow, baseURL);
         expect(tracked("InitiateCheckout")).toHaveLength(1);
       });
     }

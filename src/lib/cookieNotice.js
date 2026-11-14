@@ -8,7 +8,7 @@ const COOKIE_NOTICE = {
     ].join(" "),
     [
       "Always on: in local storage, roo-consent remembers whether you accepted or declined, roo-theme",
-      "remembers light or dark mode, and roo-checkouts-counted marks your last 20 checkouts as already counted.",
+      "remembers light or dark mode, and roo-checkouts-counted marks each checkout you start as counted for 30 days.",
     ].join(" "),
     [
       "Always on: session storage keeps your booking draft, the time slot you are holding, your checkout",

@@ -155,8 +155,49 @@ test("checkout still starts when the browser cannot make a journey id", async ({
   expect(start.bookingPayload.salesAttribution ?? null).toBeNull();
 });
 
-const longestHost = `${["a", "b", "c"].map((letter) => letter.repeat(63)).join(".")}.${"d".repeat(57)}.com`;
-const longestLabel = (offset) => String.fromCodePoint(0x4e00 + offset).repeat(100);
+const LABEL_PARAMS = ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term"];
+const LABEL_FIELDS = ["source", "medium", "campaign", "content", "term"];
+const inFives = (rows) => rows.reduce((groups, row, index) =>
+  (index % 5 ? groups[groups.length - 1].push(row) : groups.push([row])) && groups, []);
+const landLabels = async (page, labels, marker, read) => {
+  const landing = Object.fromEntries(labels.map((text, index) => [LABEL_PARAMS[index], text]));
+  await page.goto(`/?${new URLSearchParams({ ...landing, gclid: marker })}`);
+  await expect.poll(async () => (await read(page))?.lastTouch.gclid).toBe(marker);
+  const { lastTouch } = await read(page);
+  return labels.map((_, index) => lastTouch[LABEL_FIELDS[index]] ?? null);
+};
+const checkoutAttribution = async (page, flow) => {
+  await flow.review();
+  await flow.payment();
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Checkout handoff", exact: true })).toBeVisible();
+  const [start] = flow.startBodies();
+  return start.bookingPayload.salesAttribution;
+};
+
+const SCRIPTS = { "one-byte": "a", "two-byte": "ж", "three-byte": "夏", "four-byte": "𠀀", "combining mark": "q̃" };
+const codePoints = (unit, count) => Array.from(unit.repeat(count)).slice(0, count).join("");
+const lengthRows = Object.entries(SCRIPTS).flatMap(([script, unit]) => [99, 100, 101].map((count) => ({
+  name: `${script} ${count}`, text: codePoints(unit, count), kept: codePoints(unit, Math.min(count, 100)),
+})));
+
+test("labels keep up to 100 code points in every script, in both cookies and the checkout", async ({
+  page, flow,
+}) => {
+  await page.goto("/reviews");
+  await cookieBanner(page).getByRole("button", { name: "Accept", exact: true }).click();
+  const results = [];
+  for (const [index, rows] of inFives(lengthRows).entries()) {
+    const stored = await landLabels(page, rows.map(({ text }) => text), `length-${index}`, cookieAttribution);
+    results.push(...rows.map(({ name, kept }, row) => [name, stored[row] === kept]));
+  }
+  expect(results).toEqual(lengthRows.map(({ name }) => [name, true]));
+  const stored = await cookieAttribution(page);
+  expect(await checkoutAttribution(page, flow)).toEqual(stored);
+});
+
+const longestHost = `${"a".repeat(63)}.${"b".repeat(32)}.com`;
+const longestLabel = (offset) => String.fromCodePoint(0x20000 + offset).repeat(100);
 const longestLanding = (offset, creatorCode) => ({
   utm_source: longestLabel(offset), utm_medium: longestLabel(offset + 1), utm_campaign: longestLabel(offset + 2),
   utm_content: longestLabel(offset + 3), utm_term: longestLabel(offset + 4),
@@ -168,8 +209,9 @@ const longestTouch = (landingPath, landing) => ({
   medium: landing.utm_medium, campaign: landing.utm_campaign, content: landing.utm_content, term: landing.utm_term,
   fbclid: landing.fbclid, gclid: landing.gclid,
 });
+const cookieLine = ({ name, value }) => `${name}=${value}; Path=/; Max-Age=7776000; SameSite=Lax; Secure`;
 
-test("the longest multi-byte values in every field keep both touches in the cookies and the checkout", async ({
+test("ten labels of 100 four-byte characters and the longest ids stay whole in both cookies and checkout", async ({
   page, flow,
 }) => {
   const firstCode = `f${"1".repeat(63)}`;
@@ -186,108 +228,51 @@ test("the longest multi-byte values in every field keep both touches in the cook
   await cookieBanner(page).getByRole("button", { name: "Accept", exact: true }).click();
   await expect.poll(() => cookieAttribution(page)).not.toBeNull();
   await page.goto(`/packages?${new URLSearchParams(last)}`, { referer });
-  await expect.poll(async () => (await cookieAttribution(page)).lastTouch.source).toBe(last.utm_source);
+  await expect.poll(async () => (await cookieAttribution(page))?.lastTouch.source).toBe(last.utm_source);
   const stored = await cookieAttribution(page);
-  const sizes = (await adCookies(page)).map(({ name, value }) => Buffer.byteLength(`${name}=${value}`));
+  const sizes = (await adCookies(page)).map((cookie) => Buffer.byteLength(cookieLine(cookie)));
   await test.info().attach("ad-cookie-sizes", { body: JSON.stringify(sizes), contentType: "application/json" });
   expect(sizes).toHaveLength(2);
-  for (const size of sizes) expect(size).toBeLessThanOrEqual(4096);
+  for (const size of sizes) expect(size).toBeLessThanOrEqual(3840);
   expect(withoutTime(stored.firstTouch)).toEqual(longestTouch("/", first));
   expect(withoutTime(stored.lastTouch)).toEqual(longestTouch("/packages", last));
   expect(await page.evaluate(() => sessionStorage.getItem("sales_attribution"))).toBeNull();
-
-  await flow.review();
-  await flow.payment();
-  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Checkout handoff", exact: true })).toBeVisible();
-  const [start] = flow.startBodies();
-  expect(start.bookingPayload.salesAttribution).toEqual(stored);
+  expect(await checkoutAttribution(page, flow)).toEqual(stored);
 });
 
-test("phone numbers in campaign fields are dropped and numeric ad ids are kept", async ({ page, flow }) => {
-  const phones = {
-    utm_source: "+44 7700 900123", utm_medium: "(555) 123-4567", utm_campaign: "+919876543210",
-    utm_content: "555.123.4567", utm_term: "call +1 555 123 4567", fbclid: "555-123-4567", gclid: "Cj0K.fixture-2",
-  };
-  await page.goto(`/?${new URLSearchParams(phones)}`);
-  await expect.poll(() => storedAttribution(page)).not.toBeNull();
-  const phoneTouch = { landingPath: "/", gclid: "Cj0K.fixture-2" };
-  expect(withoutTime((await storedAttribution(page)).lastTouch)).toEqual(phoneTouch);
+const KEEP = "keep";
+const DROP = "drop";
+const filterRows = [
+  ["+919876543210", DROP], ["+44 7700 900123", DROP], ["+1 (212) 555-0199", DROP], ["+123456", KEEP], ["ad+1", KEEP],
+  ["212 555 0199", DROP], ["212.555.0199", DROP], ["212-555-0199", DROP], ["(212) 555-0199", DROP],
+  ["(212)5550199", DROP], ["call 212-555-0199 today", DROP], ["212-555-0199 212-555-0198", DROP],
+  ["212-555-0199, 212-555-0198", DROP], ["2026-11-27 212-555-0199", DROP], ["212.555.0199 27.11.2026", DROP],
+  ["212-555-0199 120210123456789012", DROP], ["120210123456789012 212 555 0199", DROP], ["123-456", KEEP],
+  ["123-4567", DROP], ["12345-67890-12345", DROP], ["12345678-12345678", KEEP], ["2026-11-27", KEEP],
+  ["2026.11.27", KEEP], ["2026/11/27", KEEP], ["2026 11 27", KEEP], ["27-11-2026", KEEP], ["27.11.2026", KEEP],
+  ["11/27/2026", KEEP], ["27 11 2026", KEEP], ["bf-2026-11-27-v2", KEEP], ["sale 27.11.2026 final", KEEP],
+  ["2026-11-27 to 2026-11-30", KEEP], ["launch 2026 11 27", KEEP], ["2026-13-45", DROP], ["1202101234", KEEP],
+  ["120210123456789012", KEEP], ["brand_12345678901", KEEP], ["meta120210123456789012ad", KEEP],
+  ["120210123456789012 2026-11-27", KEEP], ["spring-sale-2026", KEEP], ["promo 10-20-30", KEEP],
+  ["top 10 2026", KEEP], ["q4 2026 v2", KEEP], ["٢١٢-٥٥٥-٠١٩٩", DROP], ["buyer@example.invalid", DROP],
+  ["https://example.invalid/promo", DROP], ["www.example.invalid", DROP], ["example.invalid/reset/abc", DROP],
+  ["l.facebook.com", KEEP], ["50% off, today!", KEEP],
+];
 
-  const dates = {
-    utm_source: "meta", utm_medium: "27.11.2026", utm_campaign: "2026-11-27", utm_content: "11/27/2026",
-    utm_term: "2026-13-45",
-  };
-  await page.goto(`/contact?${new URLSearchParams(dates)}`);
-  await expect.poll(async () => (await storedAttribution(page)).lastTouch.landingPath).toBe("/contact");
-  expect(withoutTime((await storedAttribution(page)).lastTouch)).toEqual({
-    landingPath: "/contact", source: "meta", medium: "27.11.2026", campaign: "2026-11-27", content: "11/27/2026",
-  });
-
-  const embeddedPhones = {
-    utm_source: "meta", utm_medium: "call 212-555-0199", utm_campaign: "promo +44 20 7946 0958",
-    utm_content: "(212) 555-0199 ext", utm_term: "text 212.555.0199 today",
-  };
-  await page.goto(`/reviews?${new URLSearchParams(embeddedPhones)}`);
-  await expect.poll(async () => (await storedAttribution(page)).lastTouch.landingPath).toBe("/reviews");
-  expect(withoutTime((await storedAttribution(page)).lastTouch)).toEqual({ landingPath: "/reviews", source: "meta" });
-
-  const keptNumbers = {
-    utm_source: "spring-sale-2026", utm_medium: "promo 10-20-30", utm_campaign: "bf-2026-11-27-v2",
-    utm_content: "sale 27.11.2026", utm_term: "2026-11-27 to 2026-11-30",
-  };
-  await page.goto(`/about?${new URLSearchParams(keptNumbers)}`);
-  await expect.poll(async () => (await storedAttribution(page)).lastTouch.landingPath).toBe("/about");
-  expect(withoutTime((await storedAttribution(page)).lastTouch)).toEqual({
-    landingPath: "/about", source: "spring-sale-2026", medium: "promo 10-20-30", campaign: "bf-2026-11-27-v2",
-    content: "sale 27.11.2026", term: "2026-11-27 to 2026-11-30",
-  });
-
-  const ids = {
-    utm_source: "meta", utm_campaign: "120210123456789012", utm_content: "23851234567890123", utm_term: "9876543210",
-  };
-  await page.goto(`/packages?${new URLSearchParams(ids)}`);
-  await expect.poll(async () => (await storedAttribution(page)).lastTouch.landingPath).toBe("/packages");
-  const idTouch = {
-    landingPath: "/packages", source: "meta", campaign: "120210123456789012", content: "23851234567890123",
-    term: "9876543210",
-  };
-  const landed = await storedAttribution(page);
-  expect(withoutTime(landed.firstTouch)).toEqual(phoneTouch);
-  expect(withoutTime(landed.lastTouch)).toEqual(idTouch);
-
-  await flow.review();
-  await flow.payment();
-  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Checkout handoff", exact: true })).toBeVisible();
-  const [start] = flow.startBodies();
-  expect(start.bookingPayload.salesAttribution).toEqual(landed);
-  expect(JSON.stringify(start)).not.toMatch(/900123|123-4567|123\.4567|919876543210|555.0199|7946/);
-});
-
-const chinese40 = "春节特惠广告活动".repeat(5);
-const chinese100 = "夏季新品推广".repeat(17).slice(0, 100);
-const chinese120 = "黑色星期五大促".repeat(18).slice(0, 120);
-
-test("Chinese campaign names up to 100 characters stay whole in both cookies and the checkout", async ({
+test("labels with an email, a URL or a formatted phone number are dropped and every other label is kept", async ({
   page, flow,
 }) => {
-  await page.goto(`/?${new URLSearchParams({ utm_source: "meta", utm_campaign: chinese40 })}`);
-  await cookieBanner(page).getByRole("button", { name: "Accept", exact: true }).click();
-  await expect.poll(() => cookieAttribution(page)).not.toBeNull();
-  const relanding = { utm_source: "meta", utm_campaign: chinese100, utm_content: chinese120 };
-  await page.goto(`/packages?${new URLSearchParams(relanding)}`);
-  await expect.poll(async () => (await cookieAttribution(page)).lastTouch.campaign).toBe(chinese100);
-  const stored = await cookieAttribution(page);
-  expect(stored.firstTouch.campaign).toBe(chinese40);
-  expect(stored.lastTouch.content).toBe(chinese120.slice(0, 100));
-
-  await flow.review();
-  await flow.payment();
-  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Checkout handoff", exact: true })).toBeVisible();
-  const [start] = flow.startBodies();
-  expect(start.bookingPayload.salesAttribution).toEqual(stored);
+  const results = [];
+  for (const [index, rows] of inFives(filterRows).entries()) {
+    const labels = rows.map(([text]) => text);
+    const stored = await landLabels(page, labels, `filter-${index}`, storedAttribution);
+    results.push(...labels.map((text, row) => [text, stored[row] === text ? KEEP : stored[row] ?? DROP]));
+  }
+  expect(results).toEqual(filterRows);
+  const sent = await checkoutAttribution(page, flow);
+  expect(sent).toEqual(await storedAttribution(page));
+  const dropped = filterRows.filter(([, verdict]) => verdict === DROP).map(([text]) => text);
+  for (const text of dropped) expect(JSON.stringify(sent)).not.toContain(text);
 });
 
 test("a missing or damaged attribution cookie is read without errors or invented touches", async ({

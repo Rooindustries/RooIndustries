@@ -25,23 +25,19 @@ export type SalesAttribution = {
 };
 
 const JOURNEY_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
-const LABEL = /^[\p{L}\p{M}\p{N} ._\-+:/|()@!~]+$/u;
-const LABEL_CHARS = 100;
-const LABEL_BYTES = 300;
+const LABEL_CODE_POINTS = 100;
+const REFERRER_HOST_CHARS = 100;
 const PHONE_TEXT = /^[\d\s.()-]+$/;
-const PLUS_RUN = /\+[\s.()-]*\d[\d\s.()-]*/g;
-const GROUPED_RUN = /\d+(?:[\s.()-]+\d+)+/g;
-const DATE = /(^|\D)(\d{1,4})([-./])(\d{1,2})\3(\d{1,4})(?!\d)/g;
+const DATE = /(?<!\d)(?=(\d{4}|\d{1,2})([-./ ])(\d{1,2})\2(\d{4}|\d{1,2})(?!\d))/g;
+const DIGIT_RUN = /(?:\+[\s.()-]*)?\p{Nd}+(?:[\s.()-]+\p{Nd}+)*/gu;
+const DIGIT_GROUP = /\p{Nd}+/gu;
 const EMAIL = /[^\s@]+@[^\s@]+\.[^\s@]+/;
+const URL_TEXT = /:\/\/|(?<![\p{L}\p{N}])www\.|[\p{L}\p{N}-]\.\p{L}{2,63}\//iu;
 const CLICK_ID = /^[A-Za-z0-9_.-]{1,200}$/;
 const HOST = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
 const CAPTURED_AT = /^\d{4}-\d{2}-\d{2}T/;
 const REFERRAL_CODE = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
 
-const phoneDigits = (text: string) => {
-  const digits = text.replace(/\D/g, "").length;
-  return digits >= 7 && digits <= 15;
-};
 const realDate = (year: number, month: number, day: number) => {
   const date = new Date(Date.UTC(year, month - 1, day));
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
@@ -51,37 +47,36 @@ const calendarDate = (start: string, middle: string, end: string) => {
   if (start.length === 4 && end.length <= 2) return realDate(a, b, c);
   return start.length <= 2 && end.length === 4 && (realDate(c, b, a) || realDate(c, a, b));
 };
-const withoutDates = (text: string) => text.replace(DATE, (date, lead, start, _separator, middle, end) =>
-  calendarDate(start, middle, end) ? `${lead}x` : date);
-const containsPhone = (text: string) => {
-  const undated = withoutDates(text);
-  return [...undated.matchAll(PLUS_RUN), ...undated.matchAll(GROUPED_RUN)].some(([run]) => phoneDigits(run));
-};
-
-const utf8Bytes = (char: string) => {
-  const code = char.codePointAt(0) || 0;
-  return code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
-};
-const withinLimits = (text: string) => {
-  let bytes = 0;
-  let chars = 0;
-  let end = 0;
-  for (const char of text) {
-    bytes += utf8Bytes(char);
-    chars += 1;
-    if (chars > LABEL_CHARS || bytes > LABEL_BYTES) break;
-    end += char.length;
+const withoutDates = (text: string) => {
+  let undated = "";
+  let next = 0;
+  for (const { index = 0, 1: start, 2: separator, 3: middle, 4: end } of text.matchAll(DATE)) {
+    if (index < next || !calendarDate(start, middle, end)) continue;
+    undated += `${text.slice(next, index)}x`;
+    next = index + start.length + middle.length + end.length + 2 * separator.length;
   }
-  return text.slice(0, end).trim();
+  return undated + text.slice(next);
 };
+const phoneDigits = (total: number) => total >= 7 && total <= 15;
+const phoneRun = (run: string) => {
+  const groups = [...run.matchAll(DIGIT_GROUP)].map(([group]) => [...group].length);
+  return groups.some((_, first) => {
+    let total = 0;
+    return groups.slice(first).some((digits, joined) => {
+      total += digits;
+      return phoneDigits(total) && (joined > 0 || (first === 0 && run.startsWith("+")));
+    });
+  });
+};
+const containsPhone = (text: string) => [...withoutDates(text).matchAll(DIGIT_RUN)].some(([run]) => phoneRun(run));
 
-const safeLabel = (text: string) => LABEL.test(text) && !EMAIL.test(text) && !containsPhone(text);
+const privateText = (text: string) => EMAIL.test(text) || URL_TEXT.test(text) || containsPhone(text);
 const label = (value: unknown) => {
   if (typeof value !== "string") return "";
-  const text = value.normalize("NFKC").replace(/\s+/g, " ").replace(/[\p{Cc}\p{Cf}<>"'`\\]/gu, "")
+  const text = value.normalize("NFKC").replace(/\s+/g, " ").replace(/[\p{Cc}\p{Cf}\p{Cs}<>"'`]/gu, "")
     .replace(/ {2,}/g, " ").trim();
-  const bounded = withinLimits(text);
-  return safeLabel(text) && safeLabel(bounded) ? bounded : "";
+  const kept = Array.from(text).slice(0, LABEL_CODE_POINTS).join("").trim();
+  return privateText(text) || privateText(kept) ? "" : kept;
 };
 const referralCode = (value: unknown) =>
   typeof value === "string" && REFERRAL_CODE.test(value.trim()) && /[a-z]/i.test(value) ? value.trim() : "";
@@ -121,7 +116,7 @@ const sanitizeTouch = (value: unknown): SalesTouch | null => {
     capturedAt: new Date(capturedAt).toISOString(),
     landingPath: knownPath ? landingPath : "/",
   };
-  if (typeof referrerHost === "string" && referrerHost.length <= 253 && HOST.test(referrerHost)) {
+  if (typeof referrerHost === "string" && referrerHost.length <= REFERRER_HOST_CHARS && HOST.test(referrerHost)) {
     touch.referrerHost = referrerHost.toLowerCase();
   }
   for (const key of FIELD_KEYS) {

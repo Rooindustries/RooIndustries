@@ -1,20 +1,22 @@
 const COUNTED_KEY = "roo-checkouts-counted";
-const KEPT = 20;
+const KEPT_MS = 30 * 24 * 60 * 60 * 1000;
 
-const countedCheckouts = (stored) => {
+const recentMarks = (stored, now) => {
   try {
-    const counted = JSON.parse(stored || "[]");
-    return Array.isArray(counted) ? counted : [];
+    const marks = JSON.parse(stored || "{}");
+    if (!marks || typeof marks !== "object" || Array.isArray(marks)) return {};
+    return Object.fromEntries(Object.entries(marks).filter(([, at]) => Number.isFinite(at) && now - at < KEPT_MS));
   } catch {
-    return [];
+    return {};
   }
 };
 
 const claimCheckout = (key) => {
   try {
-    const counted = countedCheckouts(window.localStorage.getItem(COUNTED_KEY));
-    if (counted.includes(key)) return false;
-    window.localStorage.setItem(COUNTED_KEY, JSON.stringify([...counted, key].slice(-KEPT)));
+    const now = Date.now();
+    const marks = recentMarks(window.localStorage.getItem(COUNTED_KEY), now);
+    if (Object.hasOwn(marks, key)) return false;
+    window.localStorage.setItem(COUNTED_KEY, JSON.stringify({ ...marks, [key]: now }));
     return true;
   } catch {
     return null;
@@ -25,9 +27,7 @@ export const countCheckoutStart = async (data, provider) => {
   const created = data?.checkoutCreated === true;
   const orderId = String(data?.providerPayload?.orderId || "").trim();
   if (!orderId) return created;
-  const key = `${provider}:${orderId}`;
-  const claimed = navigator.locks
-    ? await navigator.locks.request(COUNTED_KEY, () => claimCheckout(key))
-    : claimCheckout(key);
-  return created || claimed === true;
+  const claim = () => claimCheckout(`${provider}:${orderId}`);
+  const claimed = navigator.locks ? await navigator.locks.request(COUNTED_KEY, claim).catch(claim) : claim();
+  return claimed ?? created;
 };
