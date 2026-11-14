@@ -1,7 +1,6 @@
 import { isProductionBrowser } from "./productionBrowser";
 import { track } from "@vercel/analytics/react";
 import { salesEventProperties, sanitizeSalesAttribution } from "./salesAttribution";
-import { capturePostHog } from "./posthog";
 
 const ensureAnalyticsQueue = () => {
   if (typeof window === "undefined" || window.va) return;
@@ -19,7 +18,7 @@ export const trackEvent = (eventName, data = {}, options = {}) => {
       ? salesEventProperties(options.attribution)
       : salesEventProperties();
     track(eventName, { ...attribution, ...data });
-    capturePostHog(eventName, { ...attribution, ...data });
+    import("./posthog").then(({ capturePostHog }) => capturePostHog(eventName, { ...attribution, ...data })).catch(() => {});
     return true;
   } catch {
     return false;

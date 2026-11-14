@@ -234,8 +234,16 @@
       "js": 41984,
       "css": 1024
     },
+    "src/components/PostHogRuntime.jsx -> ../lib/posthog": {
+      "js": 2048,
+      "css": 1024
+    },
     "src/legacyPages/Book.jsx -> ../components/Footer": {
       "js": 4096,
+      "css": 1024
+    },
+    "src/lib/analytics.js -> ./posthog": {
+      "js": 2048,
       "css": 1024
     },
     "src/lib/confirmationPages.js -> ../legacyPages/PaymentSuccess": {
@@ -248,6 +256,10 @@
     },
     "src/lib/monitoring/client.js -> ./browser": {
       "js": 147456,
+      "css": 1024
+    },
+    "src/lib/posthog.js -> ./posthogClient": {
+      "js": 107520,
       "css": 1024
     },
     "src/next/NotFoundEntry.jsx -> ./LegacyRoutePage": {
