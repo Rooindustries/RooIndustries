@@ -12,6 +12,7 @@ import Navbar from "./components/Navbar";
 import JsonLd from "./next/JsonLd";
 import { isProductionBrowser } from "./lib/productionBrowser";
 import SalesTelemetry from "./components/SalesTelemetry";
+import { loadPostHog } from "./lib/loadPostHog";
 import { SpeedInsights } from "@vercel/speed-insights/react";
 import ReservationBanner from "./components/ReservationBanner";
 import { BookingDialogReady } from "./lib/bookingDialogHold";
@@ -100,6 +101,7 @@ const DeferredTelemetry = () => {
   useEffect(() => {
     setEnabled(false);
     if (typeof window === "undefined") return undefined;
+    loadPostHog();
     const protectedPath = [
       "/referrals",
       "/booking",

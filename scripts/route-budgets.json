@@ -234,8 +234,16 @@
       "js": 41984,
       "css": 1024
     },
+    "src/components/SupabaseSocialLogin.jsx -> ../lib/supabaseBrowser": {
+      "js": 68608,
+      "css": 1024
+    },
     "src/legacyPages/Book.jsx -> ../components/Footer": {
       "js": 4096,
+      "css": 1024
+    },
+    "src/lib/analytics.js -> ./posthog": {
+      "js": 2048,
       "css": 1024
     },
     "src/lib/confirmationPages.js -> ../legacyPages/PaymentSuccess": {
@@ -246,16 +254,20 @@
       "js": 6144,
       "css": 1024
     },
+    "src/lib/loadPostHog.js -> ./posthog": {
+      "js": 2048,
+      "css": 1024
+    },
     "src/lib/monitoring/client.js -> ./browser": {
       "js": 147456,
       "css": 1024
     },
-    "src/next/NotFoundEntry.jsx -> ./LegacyRoutePage": {
-      "js": 46080,
+    "src/lib/posthog.js -> ./posthogClient": {
+      "js": 109568,
       "css": 1024
     },
-    "src/components/SupabaseSocialLogin.jsx -> ../lib/supabaseBrowser": {
-      "js": 68608,
+    "src/next/NotFoundEntry.jsx -> ./LegacyRoutePage": {
+      "js": 46080,
       "css": 1024
     }
   }

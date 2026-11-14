@@ -18,6 +18,8 @@ export const trackEvent = (eventName, data = {}, options = {}) => {
       ? salesEventProperties(options.attribution)
       : salesEventProperties();
     track(eventName, { ...attribution, ...data });
+    const origin = { url: window.location.href, timestamp: new Date() };
+    import("./posthog").then(({ capturePostHog }) => capturePostHog(eventName, { ...attribution, ...data }, origin)).catch(() => {});
     return true;
   } catch {
     return false;
