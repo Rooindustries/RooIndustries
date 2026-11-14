@@ -8,7 +8,6 @@ const providers = {
 };
 
 const test = base.extend({
-  siteOrigin: [null, { option: true }],
   cpuThrottling: [async ({ page, browserName }, use, testInfo) => {
     const rate = Number(process.env.PW_CPU_THROTTLING_RATE || 1);
     if (!Number.isFinite(rate) || rate < 1) throw new Error("Invalid CPU throttling rate.");
@@ -25,14 +24,11 @@ const test = base.extend({
       await session.detach();
     }
   }, { auto: true }],
-  flow: async ({ page, context, baseURL, siteOrigin }, use, testInfo) => {
+  flow: async ({ page, context, baseURL }, use, testInfo) => {
     const { guardBrowserContext } = await import("../../scripts/lib/test-target-safety.mjs");
     const contentURL = new URL(baseURL);
     contentURL.port = String(fixturePort("TOOLING_CONTENT_PORT"));
     await guardBrowserContext(context, [baseURL, contentURL.origin]);
-    const localOrigin = new URL(baseURL).origin;
-    const origin = siteOrigin || localOrigin;
-    const site = (path) => new URL(path, origin).href;
     const date = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
     const state = {
       calls: [],
@@ -53,7 +49,7 @@ const test = base.extend({
     await context.route("**/*", async (route) => {
       const request = route.request();
       const url = new URL(request.url());
-      if (url.origin !== origin) return route.fallback();
+      if (url.origin !== new URL(baseURL).origin) return route.fallback();
       const path = url.pathname;
       if (path.startsWith("/api/")) {
         state.calls.push({ path, query: url.search, body: request.postDataJSON() });
@@ -152,16 +148,14 @@ const test = base.extend({
       if (path === "/api/payment/start") {
         return json(route, {
           ok: true, paymentAccessToken: "fixture-payment", status: "started",
-          providerPayload: { checkoutUrl: site("/__test/checkout-handoff") },
+          providerPayload: { checkoutUrl: `${baseURL}/__test/checkout-handoff` },
           sessionExpiresAt: new Date(Date.now() + 20 * 60 * 1000).toISOString(),
         });
       }
-      if (origin === localOrigin) return route.fallback();
-      const response = await route.fetch({ url: new URL(`${path}${url.search}`, localOrigin).href, maxRedirects: 0 });
-      return route.fulfill({ response });
+      return route.fallback();
     });
     const booking = async () => {
-      await page.goto(site("/booking"));
+      await page.goto("/booking");
       await page.getByRole("button", { name: /^Earliest available:/ }).click();
     };
     const reserve = async () => {
@@ -195,13 +189,13 @@ const test = base.extend({
       await page.getByRole("button", { name: "Apply", exact: true }).click();
     };
     const upgrade = async (route = "/upgrade/max") => {
-      await page.goto(site(route));
+      await page.goto(route);
       await expect(page.getByRole("button", { name: "Check eligibility", exact: true })).toBeEnabled();
       await page.locator("input[type=email]").fill("visitor@example.invalid");
       await page.getByPlaceholder("e.g. 1a2b3c4d5e6f7g8h9i", { exact: true }).fill("fixture-order");
     };
     try {
-      await use({ state, site, booking, reserve, details, review, payment, codeInput, upgrade });
+      await use({ state, booking, reserve, details, review, payment, codeInput, upgrade });
     } finally {
       await testInfo.attach("requests", { body: JSON.stringify({ calls: state.calls, aborted: state.aborted }, null, 2), contentType: "application/json" });
       if (!page.isClosed()) {
