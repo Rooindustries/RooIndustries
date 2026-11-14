@@ -20,7 +20,6 @@ const cleanReferrer = (value) => {
 };
 
 const cleanProperties = (properties) => {
-  if (!properties || typeof properties !== "object") return properties;
   const output = {};
   for (const [key, value] of Object.entries(properties)) {
     if (typeof value !== "string") output[key] = value;

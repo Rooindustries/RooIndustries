@@ -24,7 +24,7 @@ const call = (method, ...args) => {
 };
 
 export const startPostHog = () => {
-  if (loading || typeof window === "undefined" || !projectKey()) return loading;
+  if (loading || !projectKey()) return loading;
   loading = import("./posthogClient")
     .then(({ createPostHog, isPublicPage }) => {
       if (!isPublicPage()) return null;
