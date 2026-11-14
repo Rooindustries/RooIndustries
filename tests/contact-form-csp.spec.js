@@ -56,19 +56,45 @@ const fixtureState = async (baseURL) => {
   };
 };
 
-const submitForm = async (page, values = fields, company = "") => {
+const messageBox = (page) =>
+  page.getByPlaceholder("Tell me about your PC and what you'd like to optimize...", { exact: true });
+const sendButton = (page) => page.getByRole("button", { name: "Send Message", exact: true });
+const isContactPost = (request) =>
+  new URL(request.url()).pathname === "/api/contact" && request.method() === "POST";
+
+const fillForm = async (page, values = fields) => {
   await page.getByPlaceholder("Your name", { exact: true }).fill(values.name);
   await page.getByPlaceholder("your.email@example.com", { exact: true }).fill(values.email);
-  await page
-    .getByPlaceholder("Tell me about your PC and what you'd like to optimize...", { exact: true })
-    .fill(values.message);
-  if (company) await page.locator("#contact-company").fill(company, { force: true });
-  const response = page.waitForResponse(
-    (entry) => new URL(entry.url()).pathname === "/api/contact" && entry.request().method() === "POST"
-  );
-  await page.getByRole("button", { name: "Send Message", exact: true }).click();
+  await messageBox(page).fill(values.message);
+};
+
+const send = async (page) => {
+  const response = page.waitForResponse((entry) => isContactPost(entry.request()));
+  await sendButton(page).click();
   return response;
 };
+
+const submitForm = async (page, values = fields) => {
+  await fillForm(page, values);
+  return send(page);
+};
+
+const autofillTargets = [
+  "name", "given-name", "family-name", "nickname", "email", "username", "organization", "company",
+  "organization-title", "tel", "url", "street-address", "address-line1", "postal-code", "country",
+];
+
+const fillFormFields = (page, pick) => page.locator("form").evaluate((form, { targets, values, every }) => {
+  const filled = [];
+  for (const field of form.querySelectorAll("input, textarea, select")) {
+    const tokens = [field.name, ...String(field.autocomplete || "").split(/\s+/)];
+    if (!every && !tokens.some((token) => targets.includes(token))) continue;
+    field.value = values[field.name] ?? "Fixture Company";
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+    filled.push(field.name);
+  }
+  return filled;
+}, { targets: autofillTargets, values: fields, every: pick === "every" });
 
 const finish = async (page, testInfo, baseURL) => {
   expect(await page.evaluate(() => window.__contactCspViolations)).toEqual([]);
@@ -98,20 +124,34 @@ test("a valid message is recorded, sent to the inbox and confirmed", async ({ pa
   await finish(page, testInfo, baseURL);
 });
 
-test("an invalid message shows the field error and stores nothing", async ({ page, baseURL }, testInfo) => {
-  await page.goto("/contact");
-  const response = await submitForm(page, { ...fields, message: "Too short" });
-  expect(response.status()).toBe(400);
-  const message = page.getByPlaceholder("Tell me about your PC and what you'd like to optimize...", { exact: true });
-  await expect(page.getByText("Write a message between 10 and 5,000 characters.", { exact: true })).toBeVisible();
-  await expect(message).toHaveAttribute("aria-invalid", "true");
-  await expect(message).toHaveValue("Too short");
-  await expect(page.getByRole("button", { name: "Send Message", exact: true })).toBeEnabled();
-  expect(await fixtureState(baseURL)).toEqual({ rows: [], emails: [] });
-  await finish(page, testInfo, baseURL);
-});
+for (const [label, message] of [["a short message", "Too short"], ["five emoji", "\u{1F680}".repeat(5)]]) {
+  test(`${label} shows the field error, is refused by the API and stores nothing`, async ({
+    page, baseURL,
+  }, testInfo) => {
+    await page.goto("/contact");
+    const posts = [];
+    page.on("request", (request) => { if (isContactPost(request)) posts.push(request.url()); });
+    await fillForm(page, { ...fields, message });
+    await sendButton(page).click();
+    await expect(page.getByText("Write a message between 10 and 5,000 characters.", { exact: true })).toBeVisible();
+    await expect(messageBox(page)).toHaveAttribute("aria-invalid", "true");
+    await expect(messageBox(page)).toHaveValue(message);
+    await expect(sendButton(page)).toBeEnabled();
+    expect(posts).toEqual([]);
+    const api = await page.evaluate(async (body) => {
+      const response = await fetch("/api/contact", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      return { status: response.status, fields: Object.keys((await response.json()).fields || {}) };
+    }, { ...fields, message });
+    expect(api).toEqual({ status: 400, fields: ["message"] });
+    expect(await fixtureState(baseURL)).toEqual({ rows: [], emails: [] });
+    await finish(page, testInfo, baseURL);
+  });
+}
 
 test("the send button says Sending... while a message is on its way", async ({ page, baseURL }, testInfo) => {
+  await apiFixture.configureApiFixture(baseURL, { contactRecord: "missing" });
   await page.goto("/contact");
   let release;
   const held = new Promise((resolve) => {
@@ -122,14 +162,14 @@ test("the send button says Sending... while a message is on its way", async ({ p
     await route.continue();
   });
   const idle = await page.getByRole("button", { name: "Send Message", exact: true }).boundingBox();
-  const response = submitForm(page, { ...fields, message: "Too short" });
+  const response = submitForm(page);
   const busy = page.getByRole("button", { name: "Sending...", exact: true });
   await expect(busy).toBeDisabled();
   await expect(busy).toHaveAttribute("aria-busy", "true");
   const sending = await busy.boundingBox();
   expect({ width: sending.width, height: sending.height }).toEqual({ width: idle.width, height: idle.height });
   release();
-  expect((await response).status()).toBe(400);
+  expect((await response).status()).toBe(503);
   const ready = page.getByRole("button", { name: "Send Message", exact: true });
   await expect(ready).toBeEnabled();
   await expect(ready).toHaveAttribute("aria-busy", "false");
@@ -224,9 +264,24 @@ test("a slow email provider is queued and the retry delivers once", async ({ pag
   await finish(page, testInfo, baseURL);
 });
 
-test("a filled honeypot is recorded as spam and never sent", async ({ page, baseURL }, testInfo) => {
+test("a form filled the way browser autofill fills it is sent normally", async ({ page, baseURL }, testInfo) => {
   await page.goto("/contact");
-  const response = await submitForm(page, fields, "Fixture Company");
+  expect(await fillFormFields(page, "autofill")).toEqual(["name", "email"]);
+  await messageBox(page).fill(fields.message);
+  const response = await send(page);
+  expect(response.status()).toBe(200);
+  await expect(page.getByText(thanks, { exact: true })).toBeVisible();
+  const { rows, emails } = await fixtureState(baseURL);
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ ...fields, status: "sent", attempts: 1 });
+  expect(emails).toHaveLength(1);
+  await finish(page, testInfo, baseURL);
+});
+
+test("a bot that fills every field is recorded as spam and never sent", async ({ page, baseURL }, testInfo) => {
+  await page.goto("/contact");
+  expect(await fillFormFields(page, "every")).toHaveLength(4);
+  const response = await send(page);
   expect(response.status()).toBe(200);
   await expect(page.getByText(thanks, { exact: true })).toBeVisible();
   const { rows, emails } = await fixtureState(baseURL);

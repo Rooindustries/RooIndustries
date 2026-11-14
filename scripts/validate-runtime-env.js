@@ -2,6 +2,8 @@ const {
   normalizeBackend,
   readEnvValue,
   readFirstEnvValue,
+  readFirstOutsideEnvValue,
+  readOutsideEnvValue,
 } = require("../src/server/supabase/envValue.cjs");
 
 if (
@@ -48,6 +50,7 @@ const shouldFailClosed =
   missing => missing.length > 0 && isReleaseBuild && (isCi || isVercelBuild || isNextProductionBuild || forceStrict);
 
 const getFirstValue = (keys = []) => readFirstEnvValue(process.env, keys);
+const getOutsideValue = (keys = []) => readFirstOutsideEnvValue(process.env, keys);
 const hasAny = (keys = []) => Boolean(getFirstValue(keys));
 const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
 const FALSE_VALUES = new Set(["0", "false", "no", "off"]);
@@ -276,12 +279,12 @@ const requiredChecks = [
   },
 ];
 
-const razorpayKeyId = getFirstValue(["RAZORPAY_KEY_ID"]);
-const razorpayKeySecret = getFirstValue(["RAZORPAY_KEY_SECRET"]);
-const razorpayWebhookSecret = getFirstValue(["RAZORPAY_WEBHOOK_SECRET"]);
-const paypalClientId = getFirstValue(paypalClientIdKeys);
-const paypalClientSecret = getFirstValue(paypalClientSecretKeys);
-const explicitPayPalEnv = getFirstValue([
+const razorpayKeyId = getOutsideValue(["RAZORPAY_KEY_ID"]);
+const razorpayKeySecret = getOutsideValue(["RAZORPAY_KEY_SECRET"]);
+const razorpayWebhookSecret = getOutsideValue(["RAZORPAY_WEBHOOK_SECRET"]);
+const paypalClientId = getOutsideValue(paypalClientIdKeys);
+const paypalClientSecret = getOutsideValue(paypalClientSecretKeys);
+const explicitPayPalEnv = getOutsideValue([
   "PAYPAL_ENV",
   "NEXT_PUBLIC_PAYPAL_ENV",
 ]).toLowerCase();
@@ -294,23 +297,25 @@ const dodoKeys = [
   "DODO_PAYMENTS_WEBHOOK_KEY",
   "DODO_PAYMENTS_RETURN_URL",
 ];
-if ([...dodoKeys, "DODO_PAYMENTS_PRODUCT_ID", "DODO_PAYMENTS_PRODUCT_IDS"].some((key) => getFirstValue([key]))) {
+if ([...dodoKeys, "DODO_PAYMENTS_PRODUCT_ID", "DODO_PAYMENTS_PRODUCT_IDS"].some((key) => getOutsideValue([key]))) {
   for (const key of dodoKeys) {
-    if (!getFirstValue([key])) providerConsistencyFailures.push(`${key} is required when Dodo Payments is configured.`);
+    if (!getOutsideValue([key])) {
+      providerConsistencyFailures.push(`${key} is required when Dodo Payments is configured.`);
+    }
   }
-  if (!getFirstValue(["DODO_PAYMENTS_PRODUCT_ID", "DODO_PAYMENTS_PRODUCT_IDS"])) {
+  if (!getOutsideValue(["DODO_PAYMENTS_PRODUCT_ID", "DODO_PAYMENTS_PRODUCT_IDS"])) {
     providerConsistencyFailures.push("DODO_PAYMENTS_PRODUCT_ID is required when no package product map is configured.");
   }
-  const dodoEnvironment = getFirstValue(["DODO_PAYMENTS_ENVIRONMENT"]);
+  const dodoEnvironment = getOutsideValue(["DODO_PAYMENTS_ENVIRONMENT"]);
   if (!["live_mode", "test_mode"].includes(dodoEnvironment)) {
     providerConsistencyFailures.push("DODO_PAYMENTS_ENVIRONMENT must be live_mode or test_mode.");
-  } else if (getFirstValue(["DODO_PAYMENTS_PRODUCT_IDS"]) && !resolveDodoProductIds()) {
+  } else if (getOutsideValue(["DODO_PAYMENTS_PRODUCT_IDS"]) && !resolveDodoProductIds()) {
     providerConsistencyFailures.push("DODO_PAYMENTS_PRODUCT_IDS must contain valid product IDs for all three packages.");
   } else if (!paymentProviders.dodo.enabled) {
     providerConsistencyFailures.push("Dodo Payments is disabled by the current payment runtime policy or incomplete configuration.");
   }
   try {
-    const returnUrl = new URL(getFirstValue(["DODO_PAYMENTS_RETURN_URL"]));
+    const returnUrl = new URL(getOutsideValue(["DODO_PAYMENTS_RETURN_URL"]));
     if (!["https:", "http:"].includes(returnUrl.protocol) || returnUrl.username || returnUrl.password ||
         (dodoEnvironment === "live_mode" && returnUrl.protocol !== "https:")) throw new Error();
   } catch {
@@ -429,18 +434,18 @@ if (
 }
 
 for (const name of ["DATA_PRIMARY_BACKEND", "COMMERCE_PRIMARY_BACKEND"]) {
-  const value = readEnvValue(process.env, name).toLowerCase();
+  const value = readOutsideEnvValue(process.env, name).toLowerCase();
   if (!["", "supabase", "sanity"].includes(value)) {
     console.error(`${name} must be empty, supabase or sanity.`);
     process.exit(1);
   }
 }
 const primaryBackend = normalizeBackend(
-  getFirstValue(["DATA_PRIMARY_BACKEND"]),
+  getOutsideValue(["DATA_PRIMARY_BACKEND"]),
   "supabase"
 );
 const commercePrimaryBackend = normalizeBackend(
-  getFirstValue(["COMMERCE_PRIMARY_BACKEND"]),
+  getOutsideValue(["COMMERCE_PRIMARY_BACKEND"]),
   primaryBackend
 );
 

@@ -1,5 +1,3 @@
-import envValue from "../../supabase/envValue.cjs";
-const { readProcessEnvValue } = envValue;
 import {
   authorizeCronRequest,
   reconcilePaymentSessions,
@@ -56,7 +54,7 @@ export default async function handler(req, res) {
   if (scope === "mirror-only" || scope === "parity-only") return res.status(200).json({ok:true,skipped:true,reason:"retired"});
   const policy = resolveSupabaseRuntimePolicy();
   const socialAuthEnabled = ["1","true","yes","on"].includes(
-    readProcessEnvValue("SUPABASE_SOCIAL_AUTH_ENABLED").toLowerCase()
+    String(process.env.SUPABASE_SOCIAL_AUTH_ENABLED || "").trim().toLowerCase()
   );
   let client;
   const summary = {};

@@ -25,12 +25,21 @@ export type SalesAttribution = {
 };
 
 const JOURNEY_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
+const JOURNEY_ID_CHARS = 36;
 const LABEL_CODE_POINTS = 100;
+const SCAN_CODE_POINTS = 300;
 const REFERRER_HOST_CHARS = 100;
+const LANDING_PATH_CHARS = 100;
+const CAPTURED_AT_CHARS = 40;
+const REFERRAL_CODE_CHARS = 100;
 const PHONE_TEXT = /^[\d\s.()-]+$/;
-const DATE = /(?<!\p{Nd})(?=(\p{Nd}{4}|\p{Nd}{1,2})([-./ ])(\p{Nd}{1,2})\2(\p{Nd}{4}|\p{Nd}{1,2})(?!\p{Nd}))/gu;
+const DASH = String.raw`\p{Pd}\u2212`;
+const DATE_PART = String.raw`(\p{Nd}{4}|\p{Nd}{1,2})`;
+const DATE = new RegExp(
+  String.raw`(?<!\p{Nd})(?=${DATE_PART}([${DASH}./ ])(\p{Nd}{1,2})\2${DATE_PART}(?!\p{Nd}))`, "gu");
 const DIGIT = /\p{Nd}/u;
-const DIGIT_RUN = /(?:\+[\s.()-]*)?\p{Nd}+(?:[\s.()-]+\p{Nd}+)*/gu;
+const SEPARATOR = String.raw`[\s.()${DASH}]`;
+const DIGIT_RUN = new RegExp(String.raw`(?:\+${SEPARATOR}*)?\p{Nd}+(?:${SEPARATOR}+\p{Nd}+)*`, "gu");
 const DIGIT_GROUP = /\p{Nd}+/gu;
 const UNSAFE = /(?!\p{White_Space})\p{Cc}|[\p{Cs}<>"'`]/gu;
 const HOST_CHAR = String.raw`[\p{L}\p{M}\p{N}_-]`;
@@ -43,11 +52,21 @@ const WWW_TOKEN = new RegExp(String.raw`(?<!${HOST_CHAR}|\.)www\.`, "iu");
 const PROTOCOL_RELATIVE = new RegExp(String.raw`//${DOTTED_HOST}(?!\.?${HOST_CHAR})`, "u");
 const HOST_WITH_PATH = new RegExp(String.raw`${DOTTED_HOST}(?:[/?#]|:\d)`, "u");
 const PRIVATE_TEXT = [EMAIL, URL_SCHEME, WWW_TOKEN, PROTOCOL_RELATIVE, HOST_WITH_PATH];
-const CLICK_ID = /^[A-Za-z0-9_.-]{1,200}$/;
+const CLICK_ID_CHARS = 200;
+const CLICK_ID = /^[A-Za-z0-9_.-]+$/;
 const HOST = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
 const CAPTURED_AT = /^\d{4}-\d{2}-\d{2}T/;
 const REFERRAL_CODE = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
 
+const bounded = (value: unknown, chars: number): value is string =>
+  typeof value === "string" && value.length <= chars;
+const head = (text: string, codePoints: number) => {
+  let end = 0;
+  for (let count = 0; count < codePoints && end < text.length; count += 1) {
+    end += (text.codePointAt(end) ?? 0) > 0xffff ? 2 : 1;
+  }
+  return text.slice(0, end);
+};
 const realDate = (year: number, month: number, day: number) => {
   const date = new Date(Date.UTC(year, month - 1, day));
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
@@ -92,14 +111,18 @@ const privateText = (text: string) => PRIVATE_TEXT.some((rule) => rule.test(text
 const trimSpace = (text: string) => text.replace(/^ | $/g, "");
 const label = (value: unknown) => {
   if (typeof value !== "string") return "";
-  const text = trimSpace(value.replace(UNSAFE, "").replace(/\p{White_Space}+/gu, " "));
-  const kept = trimSpace(Array.from(text).slice(0, LABEL_CODE_POINTS).join(""));
+  const text = trimSpace(head(value, SCAN_CODE_POINTS).replace(UNSAFE, "").replace(/\p{White_Space}+/gu, " "));
+  const kept = trimSpace(head(text, LABEL_CODE_POINTS));
   return privateText(text) || privateText(kept) ? "" : kept;
 };
 const referralCode = (value: unknown) =>
-  typeof value === "string" && REFERRAL_CODE.test(value.trim()) && /[a-z]/i.test(value) ? value.trim() : "";
+  bounded(value, REFERRAL_CODE_CHARS) && REFERRAL_CODE.test(value.trim()) && /[a-z]/i.test(value)
+    ? value.trim()
+    : "";
 const clickId = (value: unknown) =>
-  typeof value === "string" && CLICK_ID.test(value) && !(PHONE_TEXT.test(value) && containsPhone(value)) ? value : "";
+  bounded(value, CLICK_ID_CHARS) && CLICK_ID.test(value) && !(PHONE_TEXT.test(value) && containsPhone(value))
+    ? value
+    : "";
 
 const FIELDS = {
   creatorCode: ["ref", referralCode],
@@ -127,14 +150,15 @@ const newJourneyId = () => {
 const sanitizeTouch = (value: unknown): SalesTouch | null => {
   if (!isRecord(value)) return null;
   const { capturedAt, landingPath, referrerHost } = value;
-  if (typeof capturedAt !== "string" || !CAPTURED_AT.test(capturedAt)) return null;
+  if (!bounded(capturedAt, CAPTURED_AT_CHARS) || !CAPTURED_AT.test(capturedAt)) return null;
   if (!Number.isFinite(Date.parse(capturedAt))) return null;
-  const knownPath = typeof landingPath === "string" && (SALES_PATHS.has(landingPath) || landingPath === "/upgrade");
+  const knownPath =
+    bounded(landingPath, LANDING_PATH_CHARS) && (SALES_PATHS.has(landingPath) || landingPath === "/upgrade");
   const touch: SalesTouch = {
     capturedAt: new Date(capturedAt).toISOString(),
     landingPath: knownPath ? landingPath : "/",
   };
-  if (typeof referrerHost === "string" && referrerHost.length <= REFERRER_HOST_CHARS && HOST.test(referrerHost)) {
+  if (bounded(referrerHost, REFERRER_HOST_CHARS) && HOST.test(referrerHost)) {
     touch.referrerHost = referrerHost.toLowerCase();
   }
   for (const key of FIELD_KEYS) {
@@ -145,7 +169,8 @@ const sanitizeTouch = (value: unknown): SalesTouch | null => {
 };
 
 export function sanitizeSalesAttribution(value: unknown): SalesAttribution | null {
-  if (!isRecord(value) || typeof value.journeyId !== "string" || !JOURNEY_ID.test(value.journeyId)) return null;
+  if (!isRecord(value)) return null;
+  if (!bounded(value.journeyId, JOURNEY_ID_CHARS) || !JOURNEY_ID.test(value.journeyId)) return null;
   const journeyId = value.journeyId.toLowerCase();
   if (value.version === 1) {
     const touch = sanitizeTouch(value);

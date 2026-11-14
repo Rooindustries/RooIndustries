@@ -1,5 +1,3 @@
-import envValue from "./envValue.cjs";
-const { readFirstEnvValue } = envValue;
 import crypto from "node:crypto";
 
 import { resolveSupabaseAccountByUserId } from "./accounts.js";
@@ -42,10 +40,11 @@ const pendingLinkCookieName = (flow, provider = "discord") => {
 
 const pendingLinkSecret = (env = process.env, flow = "referral") => {
   const normalizedFlow = normalizePendingLinkFlow(flow);
-  const configured = readFirstEnvValue(
-    env,
-    normalizedFlow === "tourney" ? ["TOURNEY_SESSION_SECRET", "REF_SESSION_SECRET"] : ["REF_SESSION_SECRET"]
-  );
+  const configured = String(
+    normalizedFlow === "tourney"
+      ? env.TOURNEY_SESSION_SECRET || env.REF_SESSION_SECRET || ""
+      : env.REF_SESSION_SECRET || ""
+  ).trim();
   if (configured) return configured;
   if (env.NODE_ENV !== "production") {
     return normalizedFlow === "tourney"

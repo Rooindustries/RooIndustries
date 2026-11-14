@@ -1,5 +1,5 @@
 import envValue from "./envValue.cjs";
-const { resolveStoreBackend, readEnvValue } = envValue;
+const { resolveStoreBackend, readEnvValue, readOutsideEnvValue } = envValue;
 const readBoolean = (env, key) => ["1", "true", "yes", "on"].includes(readEnvValue(env, key).toLowerCase());
 const parseGeneration = value => {
   const normalized = String(value || "0").trim();
@@ -8,8 +8,8 @@ const parseGeneration = value => {
 };
 export const resolveSupabaseRuntimePolicy = (env = process.env) => {
   const runtime = readEnvValue(env,"VERCEL_ENV").toLowerCase() || (readEnvValue(env,"NODE_ENV").toLowerCase() === "production" ? "production" : "development");
-  const primaryBackend = resolveStoreBackend(readEnvValue(env, "DATA_PRIMARY_BACKEND"));
-  const commercePrimaryBackend = resolveStoreBackend(readEnvValue(env, "COMMERCE_PRIMARY_BACKEND"));
+  const primaryBackend = resolveStoreBackend(readOutsideEnvValue(env, "DATA_PRIMARY_BACKEND"));
+  const commercePrimaryBackend = resolveStoreBackend(readOutsideEnvValue(env, "COMMERCE_PRIMARY_BACKEND"));
   const cutoverEnabled = readBoolean(env,"SUPABASE_CUTOVER_ENABLED");
   const commerceCutoverEnabled = readBoolean(env,"COMMERCE_CUTOVER_ENABLED");
   if(runtime === "production" && !cutoverEnabled) throw new Error("Production Supabase cutover requires SUPABASE_CUTOVER_ENABLED=1.");

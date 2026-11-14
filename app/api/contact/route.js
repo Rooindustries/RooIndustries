@@ -27,7 +27,7 @@ const handler = async (req, res) => {
       name: body.name,
       email: body.email,
       message: body.message,
-      company: body.company,
+      contactCheck: body.contact_check,
       clientAddress,
     });
     if (result.status === "queued") return res.status(202).json({ ok: true, queued: true });

@@ -1,7 +1,7 @@
 const { normalizePackageTitleForMatch } = require("../../../lib/packagePricing");
 const {
-  readProcessEnvValue: env,
-  readFirstProcessEnvValue: firstEnv,
+  outsideSetting: env,
+  firstOutsideSetting: firstEnv,
 } = require("../../supabase/envValue.cjs");
 
 const TRUTHY_ENV_VALUES = ["1", "true", "yes", "on"];
@@ -16,26 +16,32 @@ const normalizeRuntime = (value) => {
 };
 
 const resolveRuntime = () => {
-  const rawVercelEnv = firstEnv("VERCEL_ENV", "NEXT_PUBLIC_VERCEL_ENV", "REACT_APP_VERCEL_ENV");
-  const hasExplicitRuntime = rawVercelEnv.length > 0;
+  const rawVercelEnv =
+    process.env.VERCEL_ENV ||
+    process.env.NEXT_PUBLIC_VERCEL_ENV ||
+    process.env.REACT_APP_VERCEL_ENV ||
+    "";
+  const hasExplicitRuntime = String(rawVercelEnv || "").trim().length > 0;
   const vercelEnv = normalizeRuntime(rawVercelEnv);
 
   if (hasExplicitRuntime) {
     return vercelEnv;
   }
 
-  return env("NODE_ENV") === "production" ? "production" : "development";
+  return process.env.NODE_ENV === "production" ? "production" : "development";
 };
 
 const resolvePreviewPaymentsEnabled = () =>
-  isTruthyEnv(firstEnv("ENABLE_PREVIEW_PAYMENTS", "ALLOW_PREVIEW_PAYMENTS"));
+  isTruthyEnv(
+    process.env.ENABLE_PREVIEW_PAYMENTS || process.env.ALLOW_PREVIEW_PAYMENTS
+  );
 
 const resolveLivePaymentsEnabled = (runtime = resolveRuntime()) => {
   if (runtime === "production") return true;
   if (runtime === "preview") {
-    return isTruthyEnv(env("ALLOW_LIVE_PAYMENTS_IN_PREVIEW"));
+    return isTruthyEnv(process.env.ALLOW_LIVE_PAYMENTS_IN_PREVIEW);
   }
-  return isTruthyEnv(env("ALLOW_LIVE_PAYMENTS_IN_DEVELOPMENT"));
+  return isTruthyEnv(process.env.ALLOW_LIVE_PAYMENTS_IN_DEVELOPMENT);
 };
 
 const buildRuntimePolicy = (
@@ -161,7 +167,9 @@ const resolvePaymentProviders = () => {
   const razorpayKeyId = env("RAZORPAY_KEY_ID");
   const razorpayKeySecret = env("RAZORPAY_KEY_SECRET");
   const razorpayMode = resolveRazorpayMode(razorpayKeyId);
-  const razorpayCheckoutDisabled = isTruthyEnv(env("DISABLE_RAZORPAY_CHECKOUT"));
+  const razorpayCheckoutDisabled = isTruthyEnv(
+    process.env.DISABLE_RAZORPAY_CHECKOUT
+  );
   const razorpayEnabled =
     !razorpayCheckoutDisabled &&
     !!razorpayKeyId &&
@@ -206,7 +214,13 @@ const resolvePaymentProviders = () => {
 };
 
 const resolveServerPaymentSessionsEnabled = () =>
-  env("ENABLE_SERVER_PAYMENT_SESSIONS").toLowerCase() !== "0";
+  String(
+    process.env.ENABLE_SERVER_PAYMENT_SESSIONS === undefined
+      ? "1"
+      : process.env.ENABLE_SERVER_PAYMENT_SESSIONS
+  )
+    .trim()
+    .toLowerCase() !== "0";
 
 module.exports = {
   allowProviderModeInRuntime,

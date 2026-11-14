@@ -4,6 +4,8 @@ type StoredAttribution = Record<string, unknown>;
 
 const FIRST_COOKIE = "roo_attr";
 const LAST_COOKIE = "roo_attr_last";
+const ATTRIBUTION_COOKIES = [FIRST_COOKIE, LAST_COOKIE];
+const META_COOKIES = ["_fbp", "_fbc"];
 const SESSION_KEY = "sales_attribution";
 const MAX_AGE_SECONDS = 7776000;
 
@@ -26,9 +28,10 @@ const readCookie = (name: string) => {
   return entry ? entry.slice(prefix.length) : "";
 };
 
-const setCookie = (name: string, value: string, maxAge: number) => {
+const setCookie = (name: string, value: string, maxAge: number, domain = "") => {
   const secure = window.location.protocol === "https:" ? "; Secure" : "";
-  document.cookie = `${name}=${value}; Path=/; Max-Age=${maxAge}; SameSite=Lax${secure}`;
+  const scope = domain ? `; Domain=${domain}` : "";
+  document.cookie = `${name}=${value}; Path=/; Max-Age=${maxAge}${scope}; SameSite=Lax${secure}`;
 };
 
 const readSession = (): unknown => {
@@ -73,8 +76,15 @@ const writeCookies = ({ lastTouch, ...first }: StoredAttribution) => {
   return cookies.every(([name, encoded]) => readCookie(name) === encoded);
 };
 
-const removeCookies = () => {
-  for (const name of [FIRST_COOKIE, LAST_COOKIE]) if (readCookie(name)) setCookie(name, "", 0);
+const cookieDomains = () => {
+  const labels = window.location.hostname.split(".");
+  return ["", ...labels.slice(0, -1).map((_, index) => labels.slice(index).join("."))];
+};
+
+const removeCookies = (names: string[]) => {
+  for (const name of names) {
+    if (readCookie(name)) for (const domain of cookieDomains()) setCookie(name, "", 0, domain);
+  }
 };
 
 export function readStoredAttribution(): unknown {
@@ -88,7 +98,7 @@ export function writeStoredAttribution(value: StoredAttribution) {
       writeSession(null);
       return;
     }
-    removeCookies();
+    removeCookies(ATTRIBUTION_COOKIES);
   } catch {}
   writeSession(value);
 }
@@ -96,4 +106,5 @@ export function writeStoredAttribution(value: StoredAttribution) {
 export function storeAttributionForConsent() {
   const stored = readStoredAttribution();
   if (isRecord(stored)) writeStoredAttribution(stored);
+  if (readConsent() !== "granted") removeCookies(META_COOKIES);
 }

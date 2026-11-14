@@ -1,5 +1,3 @@
-import envValue from "../supabase/envValue.cjs";
-const { readEnvValue } = envValue;
 import crypto from "node:crypto";
 
 const readAuthorizationHeader = (request) => {
@@ -11,7 +9,7 @@ const readAuthorizationHeader = (request) => {
 };
 
 export const authorizeCronRequest = (request, { env = process.env } = {}) => {
-  const configured = readEnvValue(env, "CRON_SECRET");
+  const configured = String(env.CRON_SECRET || "").trim();
   if (!configured) {
     const error = new Error("CRON_SECRET is required.");
     error.status = 500;

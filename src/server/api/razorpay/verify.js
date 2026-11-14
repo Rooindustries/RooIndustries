@@ -1,5 +1,5 @@
 const crypto = require("crypto");
-const { readProcessEnvValue } = require("../../supabase/envValue.cjs");
+const { outsideSetting } = require("../../supabase/envValue.cjs");
 const { resolvePaymentProviders } = require("../payment/providerConfig.js");
 const { logSafeError } = require("../../safeErrorLog.js");
 
@@ -9,7 +9,9 @@ module.exports = async function handler(req, res) {
     return res.status(405).json({ ok: false, message: "Method not allowed" });
   }
 
-  const compatibilityDeadline = new Date(readProcessEnvValue("PAYMENT_LEGACY_COMPLETION_UNTIL")).getTime();
+  const compatibilityDeadline = new Date(
+    String(process.env.PAYMENT_LEGACY_COMPLETION_UNTIL || "")
+  ).getTime();
   if (
     !Number.isFinite(compatibilityDeadline) ||
     compatibilityDeadline <= Date.now()
@@ -41,7 +43,7 @@ module.exports = async function handler(req, res) {
 
     const body = razorpay_order_id + "|" + razorpay_payment_id;
 
-    const keySecret = readProcessEnvValue("RAZORPAY_KEY_SECRET");
+    const keySecret = outsideSetting("RAZORPAY_KEY_SECRET");
     const expectedSignature = crypto
       .createHmac("sha256", keySecret)
       .update(body.toString())

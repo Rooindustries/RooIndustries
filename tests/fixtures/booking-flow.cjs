@@ -348,7 +348,25 @@ const checkoutStartCases = [
   ["the Web Locks API is missing", withoutWebLocks, reusedAnswerFirst],
 ].map(([name, prepare, run]) => ({ name, prepare: prepare || (() => null), run }));
 
+const productionOnlyScripts = ["https://scripts.seorce.com/api?**", "https://widget.intercom.io/widget/**"];
+const productionHostFixtures = {
+  productionHost: [async ({}, use, workerInfo) => {
+    const { loopbackProductionHost } = await import("../../scripts/lib/test-target-safety.mjs");
+    const { baseURL, launchOptions } = workerInfo.project.use;
+    await use(loopbackProductionHost(baseURL, launchOptions?.args));
+  }, { scope: "worker" }],
+  launchOptions: [async ({ launchOptions, productionHost }, use) =>
+    use({ ...launchOptions, args: productionHost.args }), { scope: "worker" }],
+  baseURL: async ({ productionHost }, use) => use(productionHost.origin),
+  productionOnlyScriptStubs: [async ({ context, flow }, use) => {
+    for (const script of productionOnlyScripts) {
+      await context.route(script, (route) => route.fulfill({ contentType: "application/javascript", body: "" }));
+    }
+    await use(flow);
+  }, { auto: true }],
+};
+
 module.exports = {
   test, expect, overhaulPrice, cookieBanner, declineCookies, settleIdle, bookingEventId, routePaidStart,
-  checkoutStartCases,
+  checkoutStartCases, productionHostFixtures,
 };

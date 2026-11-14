@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
   fixtureMail,
+  fixturePackage,
+  fixtureStart,
   postPayPalCaptureWebhook,
   recordProviderCalls,
   sandboxOrigin,
+  seedFixtureSlot,
   startPayPalCheckout,
   sweepRoot,
   withEnv,
@@ -29,6 +33,7 @@ const paddedDodo = {
   DODO_PAYMENTS_RETURN_URL: "https://example.invalid/checkout\\n",
 };
 const paddedBackend = { DATA_PRIMARY_BACKEND: " supabase\\n", COMMERCE_PRIMARY_BACKEND: "supabase\\n " };
+const paddedSelfIssued = { PAYMENT_SESSION_SECRET: "fixture-session-secret\\n ", CRON_SECRET: "fixture-cron\\n" };
 const releaseSecret = "x".repeat(40);
 const pastCutoff = "2000-01-01T00:00:00.000Z";
 const productionRelease = {
@@ -100,6 +105,25 @@ const assertOneBooking = async (ctx, paymentId) => {
 
 const authorizations = (calls) => [...new Set(calls.map((call) => call.authorization))];
 
+const signedAsMain = (token, stored) => {
+  const [payload, signature] = String(token).split(".");
+  return crypto.createHmac("sha256", stored.trim()).update(payload).digest("base64url") === signature;
+};
+
+const holdThroughRoute = async (ctx) => {
+  await seedFixtureSlot(ctx);
+  const { default: holdSlot } = await import("../../src/server/booking/holdSlot.js");
+  const reply = { status: 200, body: null };
+  const res = {
+    status(code) { reply.status = code; return this; },
+    setHeader() { return this; },
+    json(body) { reply.body = body; return this; },
+  };
+  const body = { startTimeUTC: fixtureStart, packageTitle: fixturePackage };
+  await holdSlot({ method: "POST", headers: {}, body }, res);
+  return reply;
+};
+
 export async function registerEnvScenarios(ctx) {
   await ctx.run("ads-env-razorpay-padded-capture", () => withEnv({
     ...paddedRazorpay, ...paddedBackend, ...fixtureMail,
@@ -154,7 +178,8 @@ export async function registerEnvScenarios(ctx) {
   }));
 
   await ctx.run("ads-env-paypal-padded-webhook", async () => {
-    const { result, calls } = await withEnv({ ...paddedPayPal, ...fixtureMail }, () => recordProviderCalls(async () => {
+    const paypal = { ...paddedPayPal, ...fixtureMail };
+    const { result, calls } = await withEnv(paypal, () => recordProviderCalls(async () => {
       const started = await startPayPalCheckout(ctx);
       assert.equal(started.status, 200, JSON.stringify(started));
       const bookingsBefore = await ctx.sql`select legacy_sanity_id from commerce.bookings`;
@@ -214,4 +239,25 @@ export async function registerEnvScenarios(ctx) {
       unsupportedStore: unsupportedStore.status,
     };
   });
+
+  const selfIssued = { ...paddedSelfIssued, ...fixtureMail };
+  await ctx.run("ads-env-self-issued-secrets-as-main", () => withEnv(selfIssued, async () => {
+    const hold = await holdThroughRoute(ctx);
+    assert.equal(hold.status, 200, JSON.stringify(hold));
+    const slotHold = { slotHoldId: hold.body.holdId, slotHoldToken: hold.body.holdToken };
+    const { result: started } = await recordProviderCalls(() => startPayPalCheckout(ctx, {}, slotHold));
+    assert.equal(started.status, 200, JSON.stringify(started));
+    const status = await ctx.requestFlow("status", { paymentAccessToken: started.body.paymentAccessToken });
+    assert.equal(status.status, 200, JSON.stringify(status));
+    assert.ok(signedAsMain(hold.body.holdToken, process.env.HOLD_TOKEN_SECRET), "hold token differs from main");
+    const sessionToken = started.body.paymentAccessToken;
+    assert.ok(signedAsMain(sessionToken, paddedSelfIssued.PAYMENT_SESSION_SECRET), "session token differs from main");
+    const cron = async (authorization) =>
+      (await fetch(`${ctx.origin}/reconcile-route`, { method: "POST", headers: { authorization } })).status;
+    const storedBearer = await cron(`Bearer ${paddedSelfIssued.CRON_SECRET}`);
+    const strippedBearer = await cron("Bearer fixture-cron");
+    assert.equal(storedBearer, 200);
+    assert.equal(strippedBearer, 403);
+    return { hold: hold.status, start: started.status, status: status.status, storedBearer, strippedBearer };
+  }));
 }

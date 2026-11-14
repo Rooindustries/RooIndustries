@@ -24,13 +24,15 @@ const explicitEnvPath = valueAfter("--env");
 
 operatorEnvironment.loadOperatorEnvironment(explicitEnvPath);
 
-const { readProcessEnvValue, readFirstProcessEnvValue: readEnv } =
+const readEnv = (...keys) =>
+  keys.map((key) => String(process.env[key] || "").trim()).find(Boolean) || "";
+const { outsideSetting, firstOutsideSetting } =
   createRequire(import.meta.url)("../src/server/supabase/envValue.cjs");
-const payPalApiBase = () => readProcessEnvValue("PAYPAL_ENV").toLowerCase() === "sandbox"
+const payPalApiBase = () => outsideSetting("PAYPAL_ENV").toLowerCase() === "sandbox"
   ? "https://api-m.sandbox.paypal.com"
   : "https://api-m.paypal.com";
 
-const selectedSupabaseUrl = readEnv("SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL");
+const selectedSupabaseUrl = firstOutsideSetting("SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL");
 if (!selectedSupabaseUrl) throw new Error("Supabase URL is required in the selected environment.");
 const supabaseOrigin = new URL(selectedSupabaseUrl).origin;
 
@@ -678,8 +680,8 @@ const applyPlan = async (plan) => {
 let payPalAccessToken = "";
 const getPayPalAccessToken = async () => {
   if (payPalAccessToken) return payPalAccessToken;
-  const id = readEnv("PAYPAL_CLIENT_ID", "NEXT_PUBLIC_PAYPAL_CLIENT_ID");
-  const secret = readEnv("PAYPAL_CLIENT_SECRET");
+  const id = firstOutsideSetting("PAYPAL_CLIENT_ID", "NEXT_PUBLIC_PAYPAL_CLIENT_ID");
+  const secret = firstOutsideSetting("PAYPAL_CLIENT_SECRET");
   if (!id || !secret) throw new Error("PayPal credentials are unavailable.");
   const base = payPalApiBase();
   const response = await fetch(`${base}/v1/oauth2/token`, {
@@ -702,8 +704,8 @@ const inspectProviderOrder = async (record) => {
   if (!orderId) return "unavailable";
   try {
     if (provider === "razorpay") {
-      const id = readEnv("RAZORPAY_KEY_ID");
-      const secret = readEnv("RAZORPAY_KEY_SECRET");
+      const id = firstOutsideSetting("RAZORPAY_KEY_ID");
+      const secret = firstOutsideSetting("RAZORPAY_KEY_SECRET");
       if (!id || !secret) return "unavailable";
       const response = await fetch(
         `https://api.razorpay.com/v1/orders/${encodeURIComponent(orderId)}/payments`,

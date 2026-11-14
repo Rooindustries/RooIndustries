@@ -65,13 +65,13 @@ export const recordProviderCalls = async (fn, hostSuffixes = ["paypal.com"]) => 
 export const paypalOrders = (calls) =>
   calls.filter((call) => call.url.pathname === "/v2/checkout/orders").map((call) => JSON.parse(call.body));
 
-export const startPayPalCheckout = async (ctx, bookingFields = {}) => {
+export const fixturePackage = "Fixture Payment";
+export const fixtureStart = "2099-01-01T10:00:00.000Z";
+
+export const seedFixtureSlot = async (ctx) => {
   const { createSupabaseDocumentClient } = await import("../../src/server/supabase/documentClient.js");
-  const { issueHoldToken } = await import("../../src/server/booking/holdToken.js");
-  const { resolvePaymentQuote } = await import("../../src/server/api/ref/pricing.js");
-  const { buildQuoteFingerprint } = await import("../../src/server/api/payment/paymentRecord.js");
   const documents = createSupabaseDocumentClient({ shadowClient: ctx.fixture.client });
-  const packageTitle = "Fixture Payment";
+  const packageTitle = fixturePackage;
   for (const doc of [
     { _id: "package.payment-integration", _type: "package", title: packageTitle, price: "$9.99" },
     { _id: "6d8a3646-0ed2-44b5-ad45-c5c9d578126a", _type: "bookingSettings",
@@ -81,18 +81,33 @@ export const startPayPalCheckout = async (ctx, bookingFields = {}) => {
     if (current) await documents.patch(doc._id).ifRevisionId(current._rev).set(doc).commit();
     else await documents.create(doc);
   }
+};
+
+const fixtureHold = async (ctx) => {
+  const { issueHoldToken } = await import("../../src/server/booking/holdToken.js");
   const expiresAt = new Date(Date.now() + 1_800_000).toISOString();
   const hold = {
     _id: "slotHold.fixture", _type: "slotHold", backendOwner: "supabase", cutoverGeneration: 0,
-    startTimeUTC: "2099-01-01T10:00:00.000Z", packageTitle, phase: "holding", holdNonce: "fixture-hold-owner",
+    startTimeUTC: fixtureStart, packageTitle: fixturePackage, phase: "holding", holdNonce: "fixture-hold-owner",
     expiresAt,
   };
   await ctx.commerce.create(hold);
+  return {
+    slotHoldId: hold._id,
+    slotHoldToken: issueHoldToken({ holdId: hold._id, startTimeUTC: fixtureStart, expiresAt,
+      holdNonce: hold.holdNonce, backend: "supabase", cutoverGeneration: 0 }),
+  };
+};
+
+export const startPayPalCheckout = async (ctx, bookingFields = {}, slotHold = null) => {
+  const { resolvePaymentQuote } = await import("../../src/server/api/ref/pricing.js");
+  const { buildQuoteFingerprint } = await import("../../src/server/api/payment/paymentRecord.js");
+  const packageTitle = fixturePackage;
+  await seedFixtureSlot(ctx);
   const bookingPayload = {
     packageTitle, email: "customer@example.invalid", discord: "fixture", specs: "synthetic computer",
-    mainGame: "fixture game", localTimeZone: "Asia/Kolkata", startTimeUTC: hold.startTimeUTC, slotHoldId: hold._id,
-    slotHoldToken: issueHoldToken({ holdId: hold._id, startTimeUTC: hold.startTimeUTC, expiresAt,
-      holdNonce: hold.holdNonce, backend: "supabase", cutoverGeneration: 0 }),
+    mainGame: "fixture game", localTimeZone: "Asia/Kolkata", startTimeUTC: fixtureStart,
+    ...(slotHold || await fixtureHold(ctx)),
     ...bookingFields,
   };
   const quote = await resolvePaymentQuote({ packageTitle, client: ctx.commerce });

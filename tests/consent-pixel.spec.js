@@ -1,6 +1,6 @@
 const {
   test, expect, cookieBanner: banner, settleIdle: settle, bookingEventId, routePaidStart, checkoutStartCases,
-  declineCookies,
+  declineCookies, productionHostFixtures,
 } = require("./fixtures/booking-flow.cjs");
 
 const pixelId = String(process.env.TOOLING_META_PIXEL_ID || "").trim();
@@ -11,6 +11,10 @@ const fakeFbevents = `(function () {
     (window.__metaCalls = window.__metaCalls || []).push(copy);
     if (window.__recordMeta) window.__recordMeta(copy);
   };
+  var domain = "; path=/; max-age=7776000; domain=." + location.hostname.split(".").slice(-2).join(".");
+  var click = new URLSearchParams(location.search).get("fbclid");
+  document.cookie = "_fbp=fb.1." + Date.now() + ".1234567890" + domain;
+  if (click) document.cookie = "_fbc=fb.1." + Date.now() + "." + click + domain;
   fbq.callMethod = function () { record(Array.prototype.slice.call(arguments)); };
   fbq.queue.splice(0).forEach(record);
 })();`;
@@ -631,6 +635,38 @@ if (!pixelId) {
       expect(fromFirstTab().slice(before)).toEqual([]);
       expect(await adCookies(context)).toEqual({});
       await expect(banner(page)).toHaveCount(0);
+    });
+
+    const productionTest = test.extend(productionHostFixtures);
+    const metaCookies = async (context) => (await context.cookies())
+      .filter(({ name }) => name === "_fbp" || name === "_fbc").map(({ name, domain }) => `${name} ${domain}`).sort();
+    const metaSet = ["_fbc .rooindustries.com", "_fbp .rooindustries.com"];
+
+    productionTest("Decline, Cookie settings and a Decline in another tab remove Meta's own cookies", async ({
+      page, context,
+    }) => {
+      const cookieSettings = (target) => target.getByRole("button", { name: "Cookie settings", exact: true }).click();
+      const acceptOn = async (target) => {
+        await target.goto("/packages?fbclid=FixtureClickId");
+        await banner(target).getByRole("button", { name: "Accept", exact: true }).click();
+        await expect.poll(() => metaCookies(context)).toEqual(metaSet);
+      };
+      await acceptOn(page);
+      await cookieSettings(page);
+      await expect.poll(() => metaCookies(context)).toEqual([]);
+      await context.addCookies(["_fbp", "_fbc"].map((name) => ({
+        name, value: `fb.1.1.${name}`, domain: ".rooindustries.com", path: "/",
+      })));
+      expect(await metaCookies(context)).toEqual(metaSet);
+      await declineCookies(page);
+      await expect.poll(() => metaCookies(context)).toEqual([]);
+      await cookieSettings(page);
+      await acceptOn(page);
+      const other = await context.newPage();
+      await other.goto("/reviews");
+      await cookieSettings(other);
+      await declineCookies(other);
+      await expect.poll(() => metaCookies(context)).toEqual([]);
     });
 
     test("an Accept in another tab starts the pixel here", async ({ page, context }) => {

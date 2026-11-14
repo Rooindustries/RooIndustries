@@ -1,5 +1,3 @@
-import envValue from "./envValue.cjs";
-const { readEnvValue } = envValue;
 import crypto from "node:crypto";
 
 import { createSupabaseAdminClient } from "./adminClient.js";
@@ -14,7 +12,7 @@ const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const reclaimSecret = (env = process.env) => {
-  const secret = readEnvValue(env, "REF_SESSION_SECRET");
+  const secret = String(env.REF_SESSION_SECRET || "").trim();
   if (secret) return secret;
   if (env.NODE_ENV !== "production") return "dev_ref_session_secret";
   throw new Error("REF_SESSION_SECRET is required for identity recovery.");

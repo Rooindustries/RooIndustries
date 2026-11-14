@@ -1,5 +1,5 @@
 import envValue from "../../supabase/envValue.cjs";
-const { readProcessEnvValue } = envValue;
+const { outsideSetting } = envValue;
 import { createDataClient as createClient } from "../../data/documentClient.js";
 import { Resend } from "resend";
 import crypto from "crypto";
@@ -40,11 +40,11 @@ export const OWNER_TZ_NAME = "Asia/Kolkata";
 const DEFAULT_LOGO_URL = "https://www.rooindustries.com/embed_logo.png";
 
 const hasEmailDeliveryConfig = () =>
-  !!readProcessEnvValue("FROM_EMAIL") &&
-  !!readProcessEnvValue("RESEND_API_KEY");
+  !!String(process.env.FROM_EMAIL || "").trim() &&
+  !!outsideSetting("RESEND_API_KEY");
 
 const createResendClient = () => {
-  const apiKey = readProcessEnvValue("RESEND_API_KEY");
+  const apiKey = outsideSetting("RESEND_API_KEY");
   return apiKey ? new Resend(apiKey) : null;
 };
 
@@ -193,7 +193,7 @@ const emailHtml = ({
 `;
 
 const resolveLogoUrl = () =>
-  readProcessEnvValue("LOGO_URL") || DEFAULT_LOGO_URL;
+  String(process.env.LOGO_URL || DEFAULT_LOGO_URL).trim() || DEFAULT_LOGO_URL;
 
 const buildEmailDispatchState = () => ({
   deliveryEnabled: false,
@@ -237,7 +237,7 @@ export const formatRequestedTimeFields = (booking = {}) => {
 };
 
 const resolveBookingOwnerEmail = async (client) => {
-  let owner = readProcessEnvValue("OWNER_EMAIL");
+  let owner = String(process.env.OWNER_EMAIL || "").trim();
 
   try {
     const settings = await client.fetch(
@@ -368,7 +368,7 @@ export const buildDeferredEmailDispatch = ({ booking = {} }) => {
 };
 
 const buildBookingFieldGroups = (booking = {}) => {
-  const siteName = readProcessEnvValue("SITE_NAME") || "Roo Industries";
+  const siteName = process.env.SITE_NAME || "Roo Industries";
   const logoUrl = resolveLogoUrl();
   const appointment = formatAppointmentTime(booking.startTimeUTC, booking.localTimeZone);
   const hostAppointment = formatAppointmentTime(booking.startTimeUTC, OWNER_TZ_NAME);
@@ -554,7 +554,7 @@ export const sendBookingEmailsForBooking = async ({ bookingId, client = writeCli
   }
 
   const dispatch = buildEmailDispatchState();
-  dispatch.deliveryEnabled = !!readProcessEnvValue("FROM_EMAIL") && !!resend;
+  dispatch.deliveryEnabled = !!String(process.env.FROM_EMAIL || "").trim() && !!resend;
   const nowMs = Date.now();
   const now = new Date(nowMs).toISOString();
   const existingLeaseExpiresAt = new Date(
@@ -675,7 +675,7 @@ export const sendBookingEmailsForBooking = async ({ bookingId, client = writeCli
   const owner = await resolveBookingOwnerEmail(client);
   const { siteName, logoUrl, bookingRef, clientFields, ownerFields, ownerScheduleLabel } =
     buildBookingFieldGroups(resolvedBooking);
-  const from = readProcessEnvValue("FROM_EMAIL");
+  const from = process.env.FROM_EMAIL;
   const clientRecipient = String(
     resolvedBooking.email || resolvedBooking.payerEmail || ""
   ).trim();
@@ -1154,8 +1154,8 @@ export const dispatchRescheduleNotifications = async ({
   const customer = String(
     recoveryBooking.email || recoveryBooking.payerEmail || ""
   ).trim();
-  const siteName = readProcessEnvValue("SITE_NAME") || "Roo Industries";
-  const from = readProcessEnvValue("FROM_EMAIL");
+  const siteName = process.env.SITE_NAME || "Roo Industries";
+  const from = String(process.env.FROM_EMAIL || "").trim();
   const deliveryEnabled = !!from && !!resend;
   const amount = formatMoney(
     recoveryBooking.dodoTotalAmount ?? recoveryBooking.netAmount ?? recoveryBooking.grossAmount,

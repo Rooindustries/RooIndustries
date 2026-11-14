@@ -1,6 +1,6 @@
 const {
   test: bookingTest, expect, cookieBanner: banner, settleIdle: settle, bookingEventId, routePaidStart: routeStart,
-  checkoutStartCases, declineCookies,
+  checkoutStartCases, declineCookies, productionHostFixtures,
 } = require("./fixtures/booking-flow.cjs");
 
 const safety = () => import("../scripts/lib/test-target-safety.mjs");
@@ -25,18 +25,10 @@ const confirmed = (analyticsReceipt) => ({
 });
 const personalData = /visitor@example\.invalid|fixture_visitor|Ryzen|RTX 4070|FbRawClickId123|GRawClickId456/;
 const insightsScript = "/_vercel/insights/script.js";
-const productionOnlyScripts = ["https://scripts.seorce.com/api?**", "https://widget.intercom.io/widget/**"];
 
 const test = bookingTest.extend({
   analyticsThrows: [false, { option: true }],
-  productionHost: [async ({}, use, workerInfo) => {
-    const { loopbackProductionHost } = await safety();
-    const { baseURL, launchOptions } = workerInfo.project.use;
-    await use(loopbackProductionHost(baseURL, launchOptions?.args));
-  }, { scope: "worker" }],
-  launchOptions: [async ({ launchOptions, productionHost }, use) =>
-    use({ ...launchOptions, args: productionHost.args }), { scope: "worker" }],
-  baseURL: async ({ productionHost }, use) => use(productionHost.origin),
+  ...productionHostFixtures,
   vercel: [async ({ context, flow, baseURL, analyticsThrows }, use) => {
     const vercel = { calls: [], scripts: [], served: [] };
     await context.exposeFunction("__recordVercel", (path, method, payload) =>
@@ -55,9 +47,6 @@ const test = bookingTest.extend({
         body: analyticsThrows ? 'throw new Error("Analytics script failure");' : "",
       });
     });
-    for (const script of productionOnlyScripts) {
-      await context.route(script, (route) => route.fulfill({ contentType: "application/javascript", body: "" }));
-    }
     context.on("response", (response) => {
       const type = response.request().resourceType();
       if (!["document", "fetch", "xhr", "script"].includes(type)) return;

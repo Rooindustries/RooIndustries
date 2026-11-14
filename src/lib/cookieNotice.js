@@ -37,15 +37,15 @@ const COOKIE_NOTICE = {
       "Only after Accept: the roo_attr and roo_attr_last cookies keep the first and the latest ad, campaign or",
       "referral link that brought you here for 90 days. When our Meta pixel is turned on, it tells Meta which",
       "pages and packages you viewed and when you start checkout or book, so we can measure our ads. It never",
-      "sends your name, email or phone, and Meta sets its own _fbp cookie.",
+      "sends your name, email or phone, and Meta sets its own _fbp and _fbc cookies.",
     ].join(" "),
     [
       "Contact messages: messages sent through the contact form are stored so we can reply. Delivered",
       "messages are deleted after 30 days.",
     ].join(" "),
     [
-      "Changing your choice: use Cookie settings at the bottom of any page. Declining removes the roo_attr and",
-      "roo_attr_last cookies and stops the Meta pixel.",
+      "Changing your choice: use Cookie settings at the bottom of any page. Declining removes the roo_attr,",
+      "roo_attr_last, _fbp and _fbc cookies and stops the Meta pixel.",
     ].join(" "),
   ],
 };

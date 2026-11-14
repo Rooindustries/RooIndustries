@@ -1,8 +1,10 @@
 import envValue from "../../supabase/envValue.cjs";
-const { resolveStoreBackend, readProcessEnvValue: readSecret } = envValue;
+const { resolveStoreBackend } = envValue;
 import crypto from "crypto";
 
 export const REF_SESSION_COOKIE = "ref_session";
+
+const readSecret = (key) => String(process.env[key] || "").trim();
 
 const REF_SESSION_SECRET =
   readSecret("REF_SESSION_SECRET") ||
@@ -245,7 +247,7 @@ export const requireAdminKey = (req, res) => {
 
 export const requireSecret = (res, secretName, errorMessage) => {
   const keys = Array.isArray(secretName) ? secretName : [secretName];
-  const hasSecret = keys.some((key) => readSecret(key));
+  const hasSecret = keys.some((key) => String(process.env[key] || "").trim());
   if (hasSecret) return true;
 
   res.status(500).json({

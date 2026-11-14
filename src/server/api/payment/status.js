@@ -1,5 +1,3 @@
-import envValue from "../../supabase/envValue.cjs";
-const { readProcessEnvValue } = envValue;
 import { getPaymentStatus } from "./flow.js";
 
 export default async function handler(req, res) {
@@ -13,7 +11,9 @@ export default async function handler(req, res) {
   const bearerToken = String(req?.headers?.authorization || "")
     .replace(/^Bearer\s+/i, "")
     .trim();
-  const legacyDeadline = new Date(readProcessEnvValue("PAYMENT_LEGACY_STATUS_GET_UNTIL")).getTime();
+  const legacyDeadline = new Date(
+    String(process.env.PAYMENT_LEGACY_STATUS_GET_UNTIL || "")
+  ).getTime();
   const legacyOpen = Number.isFinite(legacyDeadline) && legacyDeadline > Date.now();
   if (req.method === "GET" && !legacyOpen) {
     res.setHeader("Allow", ["POST"]);

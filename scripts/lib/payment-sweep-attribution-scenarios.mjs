@@ -3,6 +3,7 @@ import {
   fixtureMail,
   paypalOrders,
   postPayPalCaptureWebhook,
+  readRollback,
   recordProviderCalls,
   startPayPalCheckout,
   withEnv,
@@ -66,10 +67,33 @@ const longestInput = {
   ...longestExpected, lastTouch: { ...longestExpected.lastTouch, term: `${wide(9)}${wide(10)}` },
 };
 
+const flood = (unit) => unit.repeat(100_000);
+const floodedTouch = (capturedAt) => ({
+  capturedAt, landingPath: `/packages${flood("p")}`, referrerHost: `${flood("h")}.com`, creatorCode: flood("c"),
+  source: flood("s"), medium: flood("m"), campaign: flood("n"), content: flood("o"), term: flood("t"),
+  fbclid: flood("f"), gclid: flood("g"),
+});
+const cutTouch = (capturedAt) => ({
+  capturedAt, landingPath: "/", source: "s".repeat(100), medium: "m".repeat(100), campaign: "n".repeat(100),
+  content: "o".repeat(100), term: "t".repeat(100),
+});
+const floodedInput = {
+  version: 2, journeyId,
+  firstTouch: floodedTouch("2026-11-01T09:00:00.000Z"), lastTouch: floodedTouch("2026-11-10T09:00:00.000Z"),
+};
+const floodedExpected = {
+  version: 2, journeyId,
+  firstTouch: cutTouch("2026-11-01T09:00:00.000Z"), lastTouch: cutTouch("2026-11-10T09:00:00.000Z"),
+};
+const FLOODED_START_MS = 1500;
+const attributionMigration = "20261114002000_expose_booking_sales_attribution.sql";
+
 const payWithAttribution = async (ctx, salesAttribution) => {
-  const { result: [started, restarted], calls } = await recordProviderCalls(async () => {
+  const { result: [started, restarted, startMs], calls } = await recordProviderCalls(async () => {
+    const began = performance.now();
     const first = await startPayPalCheckout(ctx, { salesAttribution });
-    return [first, await first.restart()];
+    const elapsed = Math.round(performance.now() - began);
+    return [first, await first.restart(), elapsed];
   });
   assert.equal(started.status, 200, JSON.stringify(started));
   assert.equal(started.body.checkoutCreated, true, JSON.stringify(started.body));
@@ -79,6 +103,10 @@ const payWithAttribution = async (ctx, salesAttribution) => {
   assert.equal(orders.length, 1, JSON.stringify(started));
   const webhook = await postPayPalCaptureWebhook(ctx);
   assert.equal(webhook.status, 200, JSON.stringify(webhook));
+  const finalized = await ctx.requestFlow("finalize", {
+    paymentAccessToken: started.body.paymentAccessToken, body: { paypalOrderId: "order-fixture" },
+  });
+  assert.equal(finalized.status, 200, JSON.stringify(finalized));
   const paymentId = orders[0].purchase_units[0].custom_id;
   const payment = (await ctx.row(paymentId)).payload;
   assert.equal(payment.status, "booked", JSON.stringify(payment));
@@ -88,19 +116,20 @@ const payWithAttribution = async (ctx, salesAttribution) => {
     join commerce.payment_records p on p.id = b.payment_record_id
     where p.legacy_sanity_id = ${paymentId} and b.legacy_sanity_id = ${payment.bookingId}`;
   assert.ok(booking, `No booking row is linked to ${paymentId}`);
-  return { payment, booking };
+  return { payment, booking, startMs, receipt: finalized.body.analyticsReceipt };
 };
 
 const assertStoredAttribution = async (ctx, input, expected) => {
-  const { payment, booking } = await withEnv(fixtureMail, () => payWithAttribution(ctx, input));
+  const { payment, booking, startMs, receipt } = await withEnv(fixtureMail, () => payWithAttribution(ctx, input));
   assert.deepEqual(payment.bookingPayload.salesAttribution, expected);
+  assert.deepEqual(receipt?.attribution, expected, JSON.stringify(receipt));
   assert.deepEqual(booking.sales_attribution, expected);
   assert.deepEqual(booking.payload_attribution, expected);
   const [projected] = await ctx.sql`
     select count(*)::int as matches from commerce.bookings
     where sales_attribution @> ${ctx.sql.json({ journeyId: expected.journeyId })}`;
   assert.equal(projected.matches, 1);
-  return { bookingId: booking.legacy_sanity_id, salesAttribution: booking.sales_attribution };
+  return { bookingId: booking.legacy_sanity_id, salesAttribution: booking.sales_attribution, startMs };
 };
 
 export async function registerAttributionScenarios(ctx) {
@@ -111,4 +140,28 @@ export async function registerAttributionScenarios(ctx) {
   }));
   await ctx.run("ads-attribution-longest-four-byte-labels-kept",
     () => assertStoredAttribution(ctx, longestInput, longestExpected));
+  await ctx.run("ads-attribution-flooded-labels-bounded", async () => {
+    const stored = await assertStoredAttribution(ctx, floodedInput, floodedExpected);
+    assert.ok(stored.startMs < FLOODED_START_MS, `start took ${stored.startMs} ms`);
+    return { startMs: stored.startMs, bookingId: stored.bookingId };
+  });
+  await ctx.run("ads-attribution-rollback-cycle", async () => {
+    const salesAttribution = v2Expected;
+    await ctx.seed("paypal", "booked", { booking: { salesAttribution } });
+    const booking = async () => (await ctx.sql`
+      select to_jsonb(b) -> 'sales_attribution' as projected, b.booking_payload -> 'salesAttribution' as payload
+      from commerce.bookings b where legacy_sanity_id = 'booking.fixture'`)[0];
+    const before = await booking();
+    assert.deepEqual(before, { projected: salesAttribution, payload: salesAttribution });
+    await ctx.sql.unsafe(readRollback(attributionMigration));
+    let rolledBack;
+    try {
+      rolledBack = await booking();
+    } finally {
+      if ((await booking())?.projected === null) await ctx.fixture.apply(attributionMigration);
+    }
+    assert.deepEqual(rolledBack, { projected: null, payload: salesAttribution });
+    assert.deepEqual(await booking(), before);
+    return { before, rolledBack };
+  });
 }

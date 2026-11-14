@@ -9,7 +9,7 @@ const {
   resolvePaymentRuntimePolicy,
   resolveRazorpayMode,
 } = providerConfig;
-const { readProcessEnvValue: env, readFirstProcessEnvValue: firstEnv } = envValue;
+const { outsideSetting: env, firstOutsideSetting: firstEnv } = envValue;
 
 const getPayPalBaseUrl = (runtimePolicy = resolvePaymentRuntimePolicy()) =>
   resolvePayPalMode(runtimePolicy) === "live"

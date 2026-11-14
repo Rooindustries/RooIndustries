@@ -288,6 +288,12 @@ const filterRows = [
   ["promo//10.0.0.1", DROP], ["promo//host", KEEP], ["summer//sale", KEEP], ["a//b.c", KEEP],
   ["promo//1.2.3.4.5", KEEP], ["ver 1.2.3.4.5#a", KEEP], ["x@1.2.3.4.5", KEEP], ["build 1.2.3.45/x", DROP],
   ["deal//shop.com5", KEEP], ["promo//cdn.example.com/a", DROP],
+  ...["\u2010", "\u2011", "\u2012", "\u2013", "\u2014", "\uFF0D", "\u2212"].flatMap((dash, index) => [
+    [`ring 415${dash}555${dash}020${index}`, DROP], [`2025${dash}0${index + 1}${dash}1${index}`, KEEP],
+  ]),
+  ["\uFF10\uFF13\uFF0D\uFF11\uFF12\uFF13\uFF14\uFF0D\uFF15\uFF16\uFF17\uFF18", DROP],
+  ["\uFF10\uFF13\uFF0E\uFF11\uFF12\uFF13\uFF14\uFF0E\uFF15\uFF16\uFF17\uFF18", KEEP],
+  [`${"a".repeat(99)} b`, "a".repeat(99)],
 ];
 
 test("labels with an email, a URL or a formatted phone number are dropped and every other label is kept", async ({

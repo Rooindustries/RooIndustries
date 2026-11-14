@@ -1,5 +1,5 @@
 import envValue from "../../supabase/envValue.cjs";
-const { normalizeBackend, readProcessEnvValue } = envValue;
+const { normalizeBackend } = envValue;
 import {
   createDocumentReadClient,
   createDocumentWriteClient,
@@ -10,7 +10,7 @@ import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
 
 
 export const requireEnvValue = (key, message = "") => {
-  const value = readProcessEnvValue(key);
+  const value = String(process.env[key] || "").trim();
   if (!value) {
     throw new Error(message || `Missing required environment variable: ${key}`);
   }

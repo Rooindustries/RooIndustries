@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { Resend } from "resend";
-import { isValidEmail } from "../../lib/emailValidation.js";
+import { contactFieldErrors, contactMessageValues } from "../../lib/contactMessageRules.js";
 import contactEmail from "../../lib/contactEmail.js";
 import { isIdempotencyPayloadConflict } from "../email/resendOutcome.js";
 import { getHashSecret } from "../api/ref/rateLimit.js";
@@ -9,12 +9,8 @@ import { createSupabaseAdminClient } from "../supabase/adminClient.js";
 import envValue from "../supabase/envValue.cjs";
 
 const { CONTACT_EMAIL } = contactEmail;
-const { readEnvValue } = envValue;
+const { readEnvValue, readOutsideEnvValue } = envValue;
 
-const NAME_LIMIT = 100;
-const MESSAGE_MIN = 10;
-const MESSAGE_MAX = 5000;
-const CONTROL_CHARACTERS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/;
 const SEND_TIMEOUT_MS = 8000;
 
 const contactError = (code, status, extra = {}) =>
@@ -31,24 +27,9 @@ const contactClientHash = (clientAddress, env) => {
     .digest("hex");
 };
 
-const validate = ({ name, email, message }) => {
-  const values = {
-    name: text(name).replace(/\s+/g, " "),
-    email: text(email),
-    message: text(message),
-  };
-  const fields = {};
-  if (!values.name || values.name.length > NAME_LIMIT || CONTROL_CHARACTERS.test(values.name)) {
-    fields.name = "Enter your name, up to 100 characters.";
-  }
-  if (!isValidEmail(values.email)) fields.email = "Enter a valid email address.";
-  if (
-    values.message.length < MESSAGE_MIN ||
-    values.message.length > MESSAGE_MAX ||
-    CONTROL_CHARACTERS.test(values.message)
-  ) {
-    fields.message = "Write a message between 10 and 5,000 characters.";
-  }
+const validate = (input) => {
+  const values = contactMessageValues(input);
+  const fields = contactFieldErrors(values);
   if (Object.keys(fields).length) throw contactError("contact_invalid", 400, { fields });
   return values;
 };
@@ -57,7 +38,7 @@ const rpcError = (operation, error) =>
   contactError(String(error?.code || `contact_${operation}_failed`), Number(error?.status) || 503);
 
 const deliveryConfig = (env) => ({
-  apiKey: readEnvValue(env, "RESEND_API_KEY"),
+  apiKey: readOutsideEnvValue(env, "RESEND_API_KEY"),
   from: readEnvValue(env, "FROM_EMAIL"),
   to: readEnvValue(env, "OWNER_EMAIL") || CONTACT_EMAIL,
 });
@@ -112,11 +93,11 @@ const deliver = async (row, adminClient, env) => {
 };
 
 export async function submitContactMessage(
-  { name, email, message, company, clientAddress } = {},
+  { name, email, message, contactCheck, clientAddress } = {},
   { adminClient = createSupabaseAdminClient(), env = process.env } = {}
 ) {
   const values = validate({ name, email, message });
-  const status = text(company) ? "spam" : "pending";
+  const status = text(contactCheck) ? "spam" : "pending";
   const { data: id, error } = await adminClient.rpc("roo_record_contact_message", {
     p_name: values.name,
     p_email: values.email,

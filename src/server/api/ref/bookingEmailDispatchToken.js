@@ -1,5 +1,5 @@
 import envValue from "../../supabase/envValue.cjs";
-const { resolveStoreBackend, readProcessEnvValue } = envValue;
+const { resolveStoreBackend } = envValue;
 import crypto from "crypto";
 
 const DEV_BOOKING_EMAIL_DISPATCH_SECRET =
@@ -8,7 +8,10 @@ const DEV_BOOKING_EMAIL_DISPATCH_SECRET =
     : "dev_booking_email_dispatch_secret";
 
 const resolveTokenSecret = () =>
-  readProcessEnvValue("BOOKING_EMAIL_TOKEN_SECRET") || DEV_BOOKING_EMAIL_DISPATCH_SECRET;
+  String(
+    process.env.BOOKING_EMAIL_TOKEN_SECRET ||
+      DEV_BOOKING_EMAIL_DISPATCH_SECRET
+  ).trim();
 
 const base64UrlEncode = (value) => Buffer.from(String(value || "")).toString("base64url");
 

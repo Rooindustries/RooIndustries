@@ -1,5 +1,5 @@
 import envValue from "../supabase/envValue.cjs";
-const { readFirstEnvValue } = envValue;
+const { readFirstOutsideEnvValue } = envValue;
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import crypto from "node:crypto";
@@ -424,7 +424,7 @@ export const createSignedSupabaseDownloadUrl = async (
     throw unavailableDownloadError("DOWNLOAD_SUPABASE_SIGNING_FAILED");
   }
 
-  const configuredUrl = new URL(readFirstEnvValue(env, ["SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL"]));
+  const configuredUrl = new URL(readFirstOutsideEnvValue(env, ["SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL"]));
   const signedUrl = new URL(data.signedUrl);
   const expectedPath = `/storage/v1/object/sign/${metadata.bucket}/${pathname}`;
   let decodedPath = "";

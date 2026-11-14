@@ -53,10 +53,6 @@ const loadPackage = (title, apply) =>
   getPublicContent("package", { title })
     .then((data) => apply(preparePackage(data)))
     .catch(reportRequestError);
-const DEFAULT_VERTEX_PACKAGE = preparePackage({
-  title: "Performance Vertex Overhaul",
-  price: "$79.95",
-});
 
 const IST_OFFSET_MINUTES = 330;
 const FORM_PREFILL_KEY = "booking_form_prefill";
@@ -908,7 +904,7 @@ export default function BookingForm() {
 
   const displayPackage = modalPackage || vertexPackage;
   const displayFeatureItems = getPackageFeatureItems(
-    displayPackage || DEFAULT_VERTEX_PACKAGE
+    displayPackage || {}
   );
   const isStep2Complete = useMemo(() => {
     return Boolean(
@@ -3390,7 +3386,7 @@ export default function BookingForm() {
                     variants={itemVariants}
                     className="text-2xl font-bold text-info-text"
                   >
-                    {displayPackage?.title || DEFAULT_VERTEX_PACKAGE.title}
+                    {displayPackage.title}
                   </motion.h3>
 
                   <motion.div
@@ -3398,7 +3394,7 @@ export default function BookingForm() {
                     className="mt-2"
                   >
                     <PriceDisplay
-                      pkg={displayPackage || DEFAULT_VERTEX_PACKAGE}
+                      pkg={displayPackage}
                       size="modal"
                     />
                   </motion.div>
@@ -3441,11 +3437,9 @@ export default function BookingForm() {
                           try {
                             const nextPackage = {
                               title:
-                                displayPackage?.title ||
-                                DEFAULT_VERTEX_PACKAGE.title,
+                                displayPackage.title,
                               price:
-                                displayPackage?.price ||
-                                DEFAULT_VERTEX_PACKAGE.price,
+                                displayPackage.price,
                               tag: displayPackage?.tag || "",
                             };
                             persistDraft({
@@ -3457,7 +3451,7 @@ export default function BookingForm() {
                             console.error("Failed to store booking form draft");
                           }
                           navigate(
-                            bookingPackagePath(displayPackage?.title || DEFAULT_VERTEX_PACKAGE.title),
+                            bookingPackagePath(displayPackage.title),
                             location.state?.backgroundLocation
                               ? {
                                   state: {
@@ -3465,11 +3459,9 @@ export default function BookingForm() {
                                       location.state.backgroundLocation,
                                     bookingPackage: {
                                       title:
-                                        displayPackage?.title ||
-                                        DEFAULT_VERTEX_PACKAGE.title,
+                                        displayPackage.title,
                                       price:
-                                        displayPackage?.price ||
-                                        DEFAULT_VERTEX_PACKAGE.price,
+                                        displayPackage.price,
                                       tag: displayPackage?.tag || "",
                                     },
                                   },
@@ -3478,11 +3470,9 @@ export default function BookingForm() {
                                   state: {
                                     bookingPackage: {
                                       title:
-                                        displayPackage?.title ||
-                                        DEFAULT_VERTEX_PACKAGE.title,
+                                        displayPackage.title,
                                       price:
-                                        displayPackage?.price ||
-                                        DEFAULT_VERTEX_PACKAGE.price,
+                                        displayPackage.price,
                                       tag: displayPackage?.tag || "",
                                     },
                                   },

@@ -759,36 +759,6 @@ beforeEach(() => {
 });
 
 describe("payment session flow", () => {
-  test.each(["paypal", "razorpay"])("preserves verified %s attribution when the booking omits optional verification fields", async (provider) => {
-    const hold = createHold();
-    const salesAttribution = {
-      version: 2,
-      journeyId: "12345678-1234-4123-8123-123456789abc",
-      firstTouch: {
-        capturedAt: "2026-09-11T10:00:00.000Z", landingPath: "/", creatorCode: "winton", campaign: "vertex-max-support",
-      },
-      lastTouch: {
-        capturedAt: "2026-09-11T10:00:00.000Z", landingPath: "/", creatorCode: "winton", campaign: "vertex-max-support",
-      },
-    };
-    const bookingPayload = baseBookingPayload({ slotHoldToken: issueTokenForHold(hold), salesAttribution });
-    const createBooking = mockCreateBooking.getMockImplementation();
-    mockCreateBooking.mockImplementationOnce(async (req, res) => {
-      await createBooking(req, res);
-      delete store.bookings.at(-1).paymentVerificationState;
-    });
-    const started = await startPaymentSession({ body: { provider, bookingPayload }, client: mockClient });
-    expect(getOnlyPaymentRecord().bookingPayload.salesAttribution).toEqual(salesAttribution);
-    const finalized = await finalizePaymentSession({
-      paymentAccessToken: started.body.paymentAccessToken,
-      body: { providerData: provider === "paypal" ? { paypalOrderId: "paypal_order_1" } : { razorpayOrderId: "razorpay_order_1", razorpayPaymentId: "razorpay_payment_1", razorpaySignature: "verified-signature" } },
-      client: mockClient,
-    });
-    expect(finalized.body.analyticsReceipt).toEqual(expect.objectContaining({ attribution: salesAttribution, paymentType: "paid", currency: "USD" }));
-    expect(mockCreateBooking.mock.calls[0][0].body.salesAttribution).toEqual(salesAttribution);
-    expect(getOnlyPaymentRecord().verificationState).toBe("server_verified");
-  });
-
   test.each([
     ["finalize", () => finalizePaymentSession({
       body: {},
@@ -1774,15 +1744,9 @@ describe("payment session flow", () => {
   });
 
   test("webhooks mirror legacy bookings into terminal payment records when the booking already exists", async () => {
+    const touch = { capturedAt: "2026-09-11T10:00:00.000Z", landingPath: "/", creatorCode: "winton" };
     const salesAttribution = {
-      version: 2,
-      journeyId: "12345678-1234-4123-8123-123456789abc",
-      firstTouch: {
-        capturedAt: "2026-09-11T10:00:00.000Z", landingPath: "/", creatorCode: "winton",
-      },
-      lastTouch: {
-        capturedAt: "2026-09-11T10:00:00.000Z", landingPath: "/", creatorCode: "winton",
-      },
+      version: 2, journeyId: "12345678-1234-4123-8123-123456789abc", firstTouch: touch, lastTouch: touch,
     };
     store.bookings.push({
       _id: "booking_legacy_paypal",

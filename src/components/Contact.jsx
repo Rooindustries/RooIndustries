@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { getPublicContent } from "../lib/publicContentClient";
 import companyContent from "../lib/companyContent";
+import { requestDeadline } from "../lib/clientRequest";
+import { contactFieldErrors, contactMessageValues } from "../lib/contactMessageRules";
 
 const { CONTACT_GUIDANCE, CONTACT_EMAIL } = companyContent;
 
@@ -35,15 +37,20 @@ export default function Contact({ initialData = null }) {
     if (sending) return;
     const form = new FormData(event.currentTarget);
     const payload = Object.fromEntries(
-      ["name", "email", "message", "company"].map((field) => [field, String(form.get(field) || "")])
+      ["name", "email", "message", "contact_check"].map((field) => [field, String(form.get(field) || "")])
     );
+    const fields = contactFieldErrors(contactMessageValues(payload));
+    if (Object.keys(fields).length) {
+      setSubmission({ state: "invalid", fields, error: "" });
+      return;
+    }
     setSubmission({ state: "sending", fields: {}, error: "" });
     try {
       const response = await fetch("/api/contact", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(20000),
+        signal: requestDeadline(20000),
       });
       const result = await response.json().catch(() => ({}));
       if ((response.status === 200 || response.status === 202) && result?.ok) {
@@ -176,7 +183,6 @@ export default function Contact({ initialData = null }) {
               name="name"
               placeholder="Your name"
               required
-              maxLength={100}
               className={INPUT_CLASS}
               {...fieldProps("name")}
             />
@@ -203,15 +209,14 @@ export default function Contact({ initialData = null }) {
               placeholder="Tell me about your PC and what you'd like to optimize..."
               rows="5"
               required
-              maxLength={5000}
               className={INPUT_CLASS}
               {...fieldProps("message")}
             ></textarea>
             <FieldError id="contact-message-error" message={submission.fields.message} />
           </div>
           <div className="sr-only" aria-hidden="true">
-            <label htmlFor="contact-company">Company</label>
-            <input type="text" id="contact-company" name="company" tabIndex={-1} autoComplete="off" />
+            <label htmlFor="contact-check">Leave this field empty</label>
+            <input type="text" id="contact-check" name="contact_check" tabIndex={-1} autoComplete="off" />
           </div>
 
           {submission.state === "failed" ? (

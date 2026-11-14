@@ -1,5 +1,5 @@
 import envValue from "../../supabase/envValue.cjs";
-const { resolveStoreBackend, readProcessEnvValue } = envValue;
+const { resolveStoreBackend } = envValue;
 import crypto from "crypto";
 
 export const PAYMENT_ACCESS_TOKEN_PURPOSE = "payment-session";
@@ -8,7 +8,7 @@ export const PAYMENT_ACCESS_TOKEN_HARD_CAP_SECONDS = 24 * 60 * 60;
 const normalizeValue = (value) => String(value || "").trim();
 
 const getSecret = () => {
-  const secret = readProcessEnvValue("PAYMENT_SESSION_SECRET");
+  const secret = normalizeValue(process.env.PAYMENT_SESSION_SECRET);
   if (!secret) {
     const error = new Error("PAYMENT_SESSION_SECRET is required.");
     error.code = "payment_session_secret_missing";

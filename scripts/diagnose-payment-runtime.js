@@ -5,8 +5,8 @@ const {
   resolvePaymentRuntimePolicy,
 } = require("../src/server/api/payment/providerConfig.js");
 const {
-  readProcessEnvValue: env,
-  readFirstProcessEnvValue: firstEnv,
+  outsideSetting: env,
+  firstOutsideSetting: firstEnv,
 } = require("../src/server/supabase/envValue.cjs");
 
 const runtimePolicy = resolvePaymentRuntimePolicy();
@@ -20,8 +20,10 @@ const report = {
     previewPaymentsEnabled: runtimePolicy.previewPaymentsEnabled === true,
     livePaymentsEnabled: runtimePolicy.livePaymentsEnabled === true,
     explicitPayPalEnv: explicitPayPalEnv || "default",
-    allowLivePaymentsInDevelopment: env("ALLOW_LIVE_PAYMENTS_IN_DEVELOPMENT") !== "",
-    allowLivePaymentsInPreview: env("ALLOW_LIVE_PAYMENTS_IN_PREVIEW") !== "",
+    allowLivePaymentsInDevelopment:
+      String(process.env.ALLOW_LIVE_PAYMENTS_IN_DEVELOPMENT || "").trim() !== "",
+    allowLivePaymentsInPreview:
+      String(process.env.ALLOW_LIVE_PAYMENTS_IN_PREVIEW || "").trim() !== "",
   },
   providers: {
     dodo: {

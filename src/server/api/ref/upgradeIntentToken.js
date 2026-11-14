@@ -1,10 +1,12 @@
 import envValue from "../../supabase/envValue.cjs";
-const { resolveStoreBackend, readProcessEnvValue } = envValue;
+const { resolveStoreBackend } = envValue;
 import crypto from "crypto";
 
 const secret = () =>
-  readProcessEnvValue("UPGRADE_INTENT_SECRET") ||
-  (process.env.NODE_ENV === "production" ? "" : "dev_upgrade_intent_secret");
+  String(
+    process.env.UPGRADE_INTENT_SECRET ||
+      (process.env.NODE_ENV === "production" ? "" : "dev_upgrade_intent_secret")
+  ).trim();
 
 const normalize = (value) => String(value || "").trim().toLowerCase();
 const normalizePackageTitle = (value) =>

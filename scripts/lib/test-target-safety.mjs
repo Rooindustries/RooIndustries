@@ -9,7 +9,7 @@ import { promisify } from "node:util";
 import { getGlobalDispatcher, setGlobalDispatcher } from "undici";
 import { withNodeOption } from "./node-options.mjs";
 
-const { readEnvValue } = createRequire(import.meta.url)("../../src/server/supabase/envValue.cjs");
+const { readOutsideEnvValue } = createRequire(import.meta.url)("../../src/server/supabase/envValue.cjs");
 
 const connect = net.createConnection;
 const isPrivateTestHost = value => {
@@ -337,7 +337,7 @@ export function prepareTestTarget({ browser = false } = {}) {
     if (/(?:KEY_ID|CLIENT_ID|SERVICE_ROLE_KEY|SECRET_KEY|PUBLISHABLE_KEY|ANON_KEY)$/.test(name) && value !== token) fail(`Non-fixture credentials in ${name}.`);
     if (/^(?:NODE_ENV|VERCEL_ENV|NEXT_PUBLIC_VERCEL_ENV|REACT_APP_VERCEL_ENV)$/.test(name) && !["test", "development"].includes(value)) fail("Live runtime refused.");
     if (/ALLOW_LIVE|ENABLE_LIVE|LIVE_PAYMENTS/.test(name) && !["0", "false"].includes(value)) fail("Live payment overrides refused.");
-    if (/^(?:NEXT_PUBLIC_)?PAYPAL_ENV$/.test(name) && readEnvValue(process.env, name) !== "sandbox") {
+    if (/^(?:NEXT_PUBLIC_)?PAYPAL_ENV$/.test(name) && readOutsideEnvValue(process.env, name) !== "sandbox") {
       fail("Live PayPal mode refused.");
     }
     if (name === "DODO_PAYMENTS_ENVIRONMENT" && value !== "test_mode") fail("Live Dodo mode refused.");

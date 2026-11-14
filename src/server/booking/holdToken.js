@@ -1,9 +1,9 @@
 import envValue from "../supabase/envValue.cjs";
-const { resolveStoreBackend, readProcessEnvValue } = envValue;
+const { resolveStoreBackend } = envValue;
 import crypto from "crypto";
 
 const HOLD_TOKEN_SECRET =
-  readProcessEnvValue("HOLD_TOKEN_SECRET") ||
+  String(process.env.HOLD_TOKEN_SECRET || "").trim() ||
   (process.env.NODE_ENV === "production" ? "" : "dev_hold_token_secret");
 
 const base64UrlEncode = (value) =>

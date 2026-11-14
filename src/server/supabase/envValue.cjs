@@ -1,17 +1,20 @@
-const ENV_VALUE_PADDING = /^(?:\s|\\[nrt])+|(?:\s|\\[nrt])+$/g;
+const OUTSIDE_VALUE_PADDING = /^(?:\s|\\[nrt])+|(?:\s|\\[nrt])+$/g;
 const readEnvValue = (env, key) => {
   const value = env?.[key];
-  return value === undefined || value === null ? "" : String(value).replace(ENV_VALUE_PADDING, "");
+  return value === undefined || value === null ? "" : String(value).trim();
 };
-const readFirstEnvValue = (env, keys = []) => {
+const firstValue = (read) => (env, keys = []) => {
   for (const key of keys) {
-    const value = readEnvValue(env, key);
+    const value = read(env, key);
     if (value) return value;
   }
   return "";
 };
-const readProcessEnvValue = key => readEnvValue(process.env, key);
-const readFirstProcessEnvValue = (...keys) => readFirstEnvValue(process.env, keys);
+const readFirstEnvValue = firstValue(readEnvValue);
+const readOutsideEnvValue = (env, key) => readEnvValue(env, key).replace(OUTSIDE_VALUE_PADDING, "");
+const readFirstOutsideEnvValue = firstValue(readOutsideEnvValue);
+const outsideSetting = key => readOutsideEnvValue(process.env, key);
+const firstOutsideSetting = (...keys) => readFirstOutsideEnvValue(process.env, keys);
 const resolveStoreBackend = value => {
   if (value === undefined || value === null || value === "") return "supabase";
   if (typeof value === "string" && ["", "sanity", "supabase"].includes(value.trim().toLowerCase())) return "supabase";
@@ -25,6 +28,8 @@ module.exports = {
   normalizeBackend: resolveStoreBackend,
   readEnvValue,
   readFirstEnvValue,
-  readProcessEnvValue,
-  readFirstProcessEnvValue,
+  readOutsideEnvValue,
+  readFirstOutsideEnvValue,
+  outsideSetting,
+  firstOutsideSetting,
 };
