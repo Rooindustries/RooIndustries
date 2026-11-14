@@ -59,6 +59,7 @@
     "test:smoke:production": "node --test tests/production-smoke.test.mjs",
     "test:contact:csp": "playwright test tests/contact-form-csp.spec.js --project=chromium",
     "test:booking-flow": "playwright test tests/booking-flow.spec.js --project=chromium",
+    "test:creator-credit": "cross-env ROO_CREATOR_CREDIT_NATIVE=1 playwright test tests/creator-credit-payment.spec.js --project=chromium",
     "test:claims": "playwright test tests/backed-claims.spec.js --project=chromium",
     "test:booking-initial-slot": "playwright test tests/booking-initial-slot.spec.js --project=chromium",
     "test:booking-hold": "node --test tests/booking-hold.test.mjs",
@@ -146,7 +147,7 @@
     "audit:lighthouse:mobile": "lhci autorun --config=lighthouserc.mobile.json --collect.url=http://${ROO_TEST_HOST:-127.0.0.1}:3001/",
     "test:e2e:admin": "playwright test --config=playwright.admin.config.js",
     "test:sourcemaps": "node scripts/sourcemaps-e2e.mjs",
-    "lint": "node scripts/check-repository-files.mjs && eslint src app middleware.js scripts tests",
+    "lint": "node scripts/check-repository-files.mjs && eslint src app middleware.js scripts tests public/checkout-state.js public/BIOSGuide/referral.js",
     "test:lint-rules": "node --test tests/lint-*.test.mjs tests/no-scripting-media.test.mjs",
     "test:playwright-groups": "node --test tests/playwright-groups.test.mjs",
     "test:tested-tree": "node --test tests/tested-tree.test.mjs",
@@ -180,6 +181,7 @@
   "devDependencies": {
     "@lhci/cli": "0.15.1",
     "@playwright/test": "^1.55.0",
+    "@typescript-eslint/parser": "8.72.1",
     "autoprefixer": "^10.4.21",
     "cross-env": "^7.0.3",
     "eslint": "9.39.5",
@@ -190,7 +192,8 @@
     "js-yaml": "4.3.2",
     "postcss": "8.5.23",
     "tailwindcss": "^3.4.18",
-    "tus-js-client": "^4.3.1"
+    "tus-js-client": "^4.3.1",
+    "typescript": "5.9.3"
   },
   "overrides": {
     "brace-expansion": "1.1.21",

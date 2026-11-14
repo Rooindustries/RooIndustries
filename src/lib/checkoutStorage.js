@@ -1,9 +1,7 @@
-export const BOOKING_DRAFT_STORAGE_KEY = "booking_draft";
-export const CHECKOUT_BOOKING_STORAGE_KEY = "checkout_booking_state";
+import { bookingDraft, checkoutBooking, referralSession, migrateBookingDraft } from "../../public/checkout-state.js";
 
 const LEGACY_CHECKOUT_KEYS = [
   "my_slot_hold",
-  BOOKING_DRAFT_STORAGE_KEY,
   "booking_modal_state",
   "booking_form_prefill",
   "referral_prefill_email",
@@ -28,10 +26,7 @@ export const persistBookingPackageSelection = (pkg) => {
   const selectedPackage = normalizePackage(pkg);
   if (!selectedPackage) return null;
   try {
-    const raw = window.sessionStorage.getItem(BOOKING_DRAFT_STORAGE_KEY);
-    const parsed = raw
-      ? { lastTitle: null, packages: {}, ...JSON.parse(raw) }
-      : { lastTitle: null, packages: {} };
+    const parsed = { lastTitle: null, packages: {}, ...bookingDraft.read() };
     const current = parsed.packages?.[selectedPackage.title] || {};
     parsed.packages = {
       ...(parsed.packages || {}),
@@ -41,10 +36,7 @@ export const persistBookingPackageSelection = (pkg) => {
       },
     };
     parsed.lastTitle = selectedPackage.title;
-    window.sessionStorage.setItem(
-      BOOKING_DRAFT_STORAGE_KEY,
-      JSON.stringify(parsed)
-    );
+    bookingDraft.write(parsed);
   } catch {}
   return selectedPackage;
 };
@@ -52,9 +44,7 @@ export const persistBookingPackageSelection = (pkg) => {
 export const readBookingPackageSelection = () => {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.sessionStorage.getItem(BOOKING_DRAFT_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
+    const parsed = bookingDraft.read();
     const selected = parsed?.packages?.[parsed?.lastTitle]?.selectedPackage;
     return normalizePackage(selected);
   } catch {
@@ -65,9 +55,7 @@ export const readBookingPackageSelection = () => {
 export const readStoredCheckoutBooking = () => {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.sessionStorage.getItem(CHECKOUT_BOOKING_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
+    const parsed = checkoutBooking.read();
     return parsed && typeof parsed === "object" && !Array.isArray(parsed)
       ? parsed
       : null;
@@ -82,11 +70,7 @@ export const writeStoredCheckoutBooking = (bookingData) => {
     return null;
   }
   try {
-    window.sessionStorage.setItem(
-      CHECKOUT_BOOKING_STORAGE_KEY,
-      JSON.stringify(bookingData)
-    );
-    return bookingData;
+    return checkoutBooking.write(bookingData) ? bookingData : null;
   } catch {
     return null;
   }
@@ -111,6 +95,7 @@ export const updateStoredCheckoutHold = (hold = {}) => {
 
 export const migrateCheckoutStorageToSession = () => {
   if (typeof window === "undefined") return;
+  migrateBookingDraft();
   LEGACY_CHECKOUT_KEYS.forEach((key) => {
     try {
       const legacyValue = window.localStorage.getItem(key);
@@ -122,13 +107,9 @@ export const migrateCheckoutStorageToSession = () => {
   });
 };
 
-const REFERRAL_SESSION_STORAGE_KEY = "referral_session";
-
 export const rememberReferralFromSearch = (search) => {
   if (typeof window === "undefined") return;
   const code = String(new URLSearchParams(search || "").get("ref") || "").trim();
   if (!code) return;
-  try {
-    window.sessionStorage.setItem(REFERRAL_SESSION_STORAGE_KEY, code);
-  } catch {}
+  referralSession.write(code);
 };

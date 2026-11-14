@@ -19,10 +19,10 @@ import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 import packageContent from "../lib/packageContent";
 import packagePricing from "../lib/packagePricing";
 import PriceDisplay from "./PriceDisplay";
+import CheckoutSaveNotice from "./CheckoutSaveNotice";
+import { bookingDraft, checkoutBooking as checkoutBookingStore, referralSession } from "../../public/checkout-state.js";
 import { getWarrantyCallout } from "../lib/packageWarranty";
 import {
-  BOOKING_DRAFT_STORAGE_KEY,
-  CHECKOUT_BOOKING_STORAGE_KEY,
   persistBookingPackageSelection,
   readStoredCheckoutBooking,
   updateStoredCheckoutHold,
@@ -40,6 +40,7 @@ import { trackEvent } from "../lib/analytics";
 import { captureSalesAttribution } from "../lib/salesAttribution";
 import { isValidEmail } from "../lib/emailValidation";
 import { classifyHoldResponse } from "../lib/holdResponse";
+import { readHoldPaymentSession, clearStoredPaymentSession } from "../lib/paymentSessionStorage";
 
 const { applyPackageContentOverrides, getPackageFeatureItems } = packageContent;
 const {
@@ -61,10 +62,7 @@ const DEFAULT_VERTEX_PACKAGE = preparePackage({
 const IST_OFFSET_MINUTES = 330;
 const FORM_PREFILL_KEY = "booking_form_prefill";
 const HOLD_STORAGE_KEY = "my_slot_hold";
-const BOOKING_DRAFT_KEY = BOOKING_DRAFT_STORAGE_KEY;
-const PAYMENT_SESSION_STORAGE_KEY = "payment_session_state";
 const SESSION_STATE_KEY = "booking_modal_state";
-const REFERRAL_STORAGE_KEY = "referral_session";
 const INVALID_CHECKOUT_CODE_MESSAGE = "Invalid referral or coupon code.";
 const BOOKING_FETCH_TIMEOUT_MS = CLIENT_REQUEST_TIMEOUT_MS;
 const AVAILABILITY_REFRESH_INTERVAL_MS = 60_000;
@@ -104,7 +102,7 @@ const normalizeForm = (value = {}) => ({
 });
 const readReferralFromSession = () => {
   try {
-    return sessionStorage.getItem(REFERRAL_STORAGE_KEY) || "";
+    return referralSession.read() || "";
   } catch {
     return "";
   }
@@ -637,9 +635,9 @@ export default function BookingForm() {
         referralQuery.code &&
         referralQuery.code.toLowerCase() !== normalizedDismissed
       ) {
-        sessionStorage.setItem(REFERRAL_STORAGE_KEY, referralQuery.code);
+        referralSession.write(referralQuery.code);
       } else if (referralQuery.present || normalizedDismissed) {
-        sessionStorage.removeItem(REFERRAL_STORAGE_KEY);
+        referralSession.remove();
       }
     } catch {
       console.error("Failed to persist referral session");
@@ -1222,9 +1220,8 @@ export default function BookingForm() {
       setCodeInput("");
       setCodeError("");
       setRestoredCodeCandidates(null);
-      const storedDraft = sessionStorage.getItem(BOOKING_DRAFT_KEY);
-      if (storedDraft) {
-        const parsed = JSON.parse(storedDraft);
+      const parsed = bookingDraft.read();
+      if (parsed) {
         setDrafts(parsed.packages || {});
         const key = getDraftKey(selectedPackage);
         const draftForPkg =
@@ -1268,11 +1265,7 @@ export default function BookingForm() {
 
   const persistDraft = (payload) => {
     try {
-      const current = sessionStorage.getItem(BOOKING_DRAFT_KEY);
-      let parsed = { packages: {}, lastTitle: null };
-      if (current) {
-        parsed = { lastTitle: null, packages: {}, ...JSON.parse(current) };
-      }
+      const parsed = { lastTitle: null, packages: {}, ...bookingDraft.read() };
       const key = getDraftKey(payload.selectedPackage);
       parsed.packages[key] = {
         ...(parsed.packages[key] || {}),
@@ -1280,7 +1273,7 @@ export default function BookingForm() {
       };
       parsed.lastTitle = key;
       setDrafts(parsed.packages);
-      sessionStorage.setItem(BOOKING_DRAFT_KEY, JSON.stringify(parsed));
+      bookingDraft.write(parsed);
     } catch {
       console.error("Failed to persist booking draft");
     }
@@ -1302,9 +1295,9 @@ export default function BookingForm() {
 
   const clearDraftForPackage = (pkgKey) => {
     try {
-      const current = sessionStorage.getItem(BOOKING_DRAFT_KEY);
+      const current = bookingDraft.read();
       if (!current) return;
-      const parsed = { lastTitle: null, packages: {}, ...JSON.parse(current) };
+      const parsed = { lastTitle: null, packages: {}, ...current };
       if (parsed.packages && parsed.packages[pkgKey]) {
         const selectedPackage = parsed.packages[pkgKey]?.selectedPackage;
         if (selectedPackage?.title) {
@@ -1315,7 +1308,7 @@ export default function BookingForm() {
           if (parsed.lastTitle === pkgKey) parsed.lastTitle = null;
         }
         setDrafts(parsed.packages);
-        sessionStorage.setItem(BOOKING_DRAFT_KEY, JSON.stringify(parsed));
+        bookingDraft.write(parsed);
       }
     } catch {
       console.error("Failed to clear booking draft");
@@ -1671,17 +1664,7 @@ export default function BookingForm() {
     setCodeError("");
   };
 
-  const storeReferralSession = (code) => {
-    try {
-      if (code) {
-        sessionStorage.setItem(REFERRAL_STORAGE_KEY, code);
-      } else {
-        sessionStorage.removeItem(REFERRAL_STORAGE_KEY);
-      }
-    } catch {
-      console.error("Failed to persist referral session");
-    }
-  };
+  const storeReferralSession = referralSession.write;
 
   const applyResolvedReferral = (referral) => {
     const safeReferral = sanitizeReferralForCheckout(referral);
@@ -2047,8 +2030,8 @@ export default function BookingForm() {
 
     const bookingConfirmation = createBookingConfirmation(data);
     try {
-      sessionStorage.removeItem(PAYMENT_SESSION_STORAGE_KEY);
-      sessionStorage.removeItem(CHECKOUT_BOOKING_STORAGE_KEY);
+      clearStoredPaymentSession(readHoldPaymentSession(myHold));
+      checkoutBookingStore.remove();
     } catch {
       console.error("Failed to persist booking confirmation");
     }
@@ -2131,9 +2114,7 @@ export default function BookingForm() {
     setErrorStep2("");
     setPaymentReleaseStatus("");
     try {
-      const stored = JSON.parse(
-        sessionStorage.getItem(PAYMENT_SESSION_STORAGE_KEY) || "null"
-      );
+      const stored = readHoldPaymentSession(myHold);
       const paymentAccessToken = String(stored?.paymentAccessToken || "").trim();
       if (!paymentAccessToken) {
         throw new Error("Return to payment once so the active session can be checked.");
@@ -2171,7 +2152,7 @@ export default function BookingForm() {
       setMyHold(nextHold);
       writeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY, JSON.stringify(nextHold));
       const checkoutUpdated = updateStoredCheckoutHold(refreshed);
-      removeBrowserStorage("sessionStorage", PAYMENT_SESSION_STORAGE_KEY);
+      clearStoredPaymentSession(stored);
       broadcastHold(nextHold);
       setPaymentReleaseStatus(
         checkoutUpdated
@@ -2363,6 +2344,11 @@ export default function BookingForm() {
 
     const finalReferralCode = String(appliedReferral?.code || "").trim();
     const finalCouponCode = String(appliedCoupon?.code || "").trim();
+    const checkoutCodes = {
+      referral: sanitizeReferralForCheckout(appliedReferral),
+      coupon: sanitizeCouponForCheckout(appliedCoupon),
+      dismissedReferralCode,
+    };
 
     const payload = {
       salesAttribution: captureSalesAttribution(),
@@ -2391,17 +2377,15 @@ export default function BookingForm() {
 
       ...(finalReferralCode ? { referralCode: finalReferralCode } : {}),
       ...(finalCouponCode ? { couponCode: finalCouponCode } : {}),
+      checkoutCodes,
     };
 
     try {
       persistDraft({
         form: { ...form },
         selectedPackage: { ...selectedPackage },
-        checkoutCodes: {
-          referral: sanitizeReferralForCheckout(appliedReferral),
-          coupon: sanitizeCouponForCheckout(appliedCoupon),
-          dismissedReferralCode,
-        },
+        startTimeUTC: selectedSlot.utcStart.toISOString(),
+        checkoutCodes,
       });
     } catch {
       console.error("Failed to persist booking draft");
@@ -2411,10 +2395,7 @@ export default function BookingForm() {
     const backgroundLocation =
       location.state?.backgroundLocation || location.state || null;
     try {
-      sessionStorage.setItem(
-        CHECKOUT_BOOKING_STORAGE_KEY,
-        JSON.stringify(payload)
-      );
+      checkoutBookingStore.write(payload);
     } catch {
       console.error("Failed to persist checkout state");
     }
@@ -2509,6 +2490,7 @@ export default function BookingForm() {
           pageFadeIn ? "opacity-100" : "opacity-0"
         }`}
       >
+        <CheckoutSaveNotice />
         {!settings || (step === 1 && !availabilityReady && !earliestAvailableSlot) ? (
           <div className="mt-20 flex flex-col items-center gap-3 text-center">
             <div className="text-accent">
