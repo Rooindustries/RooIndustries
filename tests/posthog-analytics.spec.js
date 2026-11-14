@@ -211,24 +211,42 @@ test.describe("production host", () => {
     expect((await page.context().cookies()).filter((cookie) => cookie.name.startsWith("ph_"))).toEqual([]);
   });
 
-  for (const landing of ["/referrals/login", "/meet-the-team"]) {
-    test(`landing on ${landing} waits for the sales journey, then follows in-app navigation`, async ({ page }) => {
-      const seen = await stubPostHog(page);
-      await page.goto(site(landing));
-      await expect(page.locator("main")).toBeVisible();
-      await page.waitForTimeout(6000);
-      expect(seen.requests).toEqual([]);
-      expect(seen.posthogHosts).toEqual([]);
+  test("a private landing waits, then starts with the journey after in-app navigation", async ({ page }) => {
+    const seen = await stubPostHog(page);
+    await page.goto(site("/referrals/login"));
+    await expect(page.locator("main")).toBeVisible();
+    await page.waitForTimeout(6000);
+    expect(seen.requests).toEqual([]);
+    expect(seen.posthogHosts).toEqual([]);
 
-      await page.getByRole("link", { name: "Packages", exact: true }).first().click();
-      await expect(page).not.toHaveURL(site(landing));
-      const pathname = new URL(page.url()).pathname;
-      await expect.poll(() => pageviews(seen)).toEqual([`${siteOrigin}${pathname}`]);
-      const journeyId = await page.evaluate(() => JSON.parse(sessionStorage.getItem("sales_attribution")).journeyId);
-      expect(new Set(seen.events.map((event) => event.properties.distinct_id))).toEqual(new Set([journeyId]));
-      expect(seen.posthogHosts).toEqual([]);
-    });
-  }
+    await page.getByRole("link", { name: "Packages", exact: true }).first().click();
+    await expect(page).not.toHaveURL(site("/referrals/login"));
+    const pathname = new URL(page.url()).pathname;
+    await expect.poll(() => pageviews(seen)).toEqual([`${siteOrigin}${pathname}`]);
+    const journeyId = await page.evaluate(() => JSON.parse(sessionStorage.getItem("sales_attribution")).journeyId);
+    expect(new Set(seen.events.map((event) => event.properties.distinct_id))).toEqual(new Set([journeyId]));
+    expect(seen.posthogHosts).toEqual([]);
+  });
+
+  test("a non-sales landing is counted and the journey id carries across reloads", async ({ page }) => {
+    const seen = await stubPostHog(page);
+    await page.goto(site("/meet-the-team"));
+    await expect.poll(() => pageviews(seen)).toEqual([`${siteOrigin}/meet-the-team`]);
+    const landingId = named(seen, "$pageview")[0].properties.distinct_id;
+
+    await page.getByRole("link", { name: "Packages", exact: true }).first().click();
+    await expect(page).not.toHaveURL(site("/meet-the-team"));
+    const journey = () => page.evaluate(() => JSON.parse(sessionStorage.getItem("sales_attribution") || "null")?.journeyId);
+    await expect.poll(journey).toBeTruthy();
+    const journeyId = await journey();
+    expect(journeyId).not.toBe(landingId);
+    await expect.poll(() => named(seen, "service_visit").map((event) => event.properties.distinct_id)).toEqual([journeyId]);
+
+    await page.reload();
+    await expect.poll(() => named(seen, "$pageview").length).toBe(3);
+    expect(named(seen, "$pageview").at(-1).properties.distinct_id).toBe(journeyId);
+    expect(seen.posthogHosts).toEqual([]);
+  });
 });
 
 test("PostHog stays off on local hosts", async ({ page, baseURL }) => {

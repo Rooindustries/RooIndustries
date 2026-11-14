@@ -51,15 +51,17 @@ const maskNetworkRequest = (request) => {
   return { ...request, name: url, requestHeaders: undefined, responseHeaders: undefined, requestBody: undefined, responseBody: undefined };
 };
 
+const journeyIdentity = (journeyId) => ({ distinctID: journeyId, isIdentifiedID: false });
+
 export const createPostHog = (key, apiHost) => {
+  if (!cleanUrl(window.location.href)) return null;
   const journeyId = captureSalesAttribution()?.journeyId;
-  if (!journeyId) return null;
   posthog.init(key, {
     api_host: apiHost,
     ui_host: UI_HOST,
     persistence: "memory",
     person_profiles: "identified_only",
-    bootstrap: { distinctID: journeyId, isIdentifiedID: false },
+    ...(journeyId ? { bootstrap: journeyIdentity(journeyId) } : {}),
     capture_pageview: "history_change",
     capture_pageleave: "if_capture_pageview",
     autocapture: false,
@@ -84,5 +86,12 @@ export const createPostHog = (key, apiHost) => {
     },
     before_send: scrubEvent,
   });
-  return posthog;
+  return {
+    capture: (...args) => posthog.capture(...args),
+    identify: (id) => posthog.identify(id),
+    useJourney: (journeyId) => {
+      if (posthog.get_distinct_id() === journeyId || posthog.get_property("$user_state") === "identified") return;
+      posthog.reset({ bootstrap: journeyIdentity(journeyId) });
+    },
+  };
 };
