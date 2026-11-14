@@ -1,5 +1,6 @@
 import { loadSalesAttribution, withMetaPixel } from "./analyticsModules";
 import { DEFAULT_CURRENCY, metaTrack, packageFields, trackEvent } from "./analytics";
+import { keepPostHogEvent } from "./loadPostHog";
 
 export const trackCheckoutSessionStarted = ({ packageTitle, price, provider } = {}) => {
   try {
@@ -33,7 +34,7 @@ const sendOnce = (key, send) => {
     if (receipts.has(key) || sessionStorage.getItem(key)) return;
   } catch {}
   receipts.add(key);
-  Promise.resolve().then(send).catch(() => false).then((sent) => {
+  new Promise((resolve) => resolve(send())).catch(() => false).then((sent) => {
     if (!sent) {
       receipts.delete(key);
       return;
@@ -53,8 +54,9 @@ const trackPaidPurchaseOnMeta = (receipt) => {
   }, { eventId: receipt.eventId }));
 };
 
-const trackCompletedBooking = async (receipt) => Boolean(await loadSalesAttribution()) &&
-  trackEvent(receipt.paymentType === "paid" ? "booking_completed" : "free_booking_completed", {
+const completedBooking = (receipt) => [
+  receipt.paymentType === "paid" ? "booking_completed" : "free_booking_completed",
+  {
     event_id: receipt.eventId,
     package: receipt.packageTitle,
     payment_type: receipt.paymentType,
@@ -62,13 +64,23 @@ const trackCompletedBooking = async (receipt) => Boolean(await loadSalesAttribut
     amount: receipt.amount,
     currency: receipt.currency,
     referral_code: receipt.referralCode || "",
-  }, { attribution: receipt.attribution ?? null });
+  },
+];
+
+const keepCompletedBooking = (receipt) => {
+  keepPostHogEvent(...completedBooking(receipt));
+  return true;
+};
+
+const trackCompletedBooking = async (receipt) => Boolean(await loadSalesAttribution()) &&
+  trackEvent(...completedBooking(receipt), { attribution: receipt.attribution ?? null, postHog: false });
 
 const validReceipt = (receipt) => Boolean(receipt) && /^[a-f0-9]{40}$/.test(receipt.eventId || "") &&
   ["paid", "free"].includes(receipt.paymentType) && Number.isFinite(receipt.amount) && receipt.amount >= 0;
 
 export const trackConfirmedPurchase = (receipt) => {
   if (!validReceipt(receipt)) return;
+  sendOnce(`posthog_booking_tracked:${receipt.eventId}`, () => keepCompletedBooking(receipt));
   sendOnce(`booking_completion_tracked:${receipt.eventId}`, () => trackCompletedBooking(receipt));
   if (receipt.paymentType === "paid") {
     sendOnce(`meta_purchase_tracked:${receipt.eventId}`, () => trackPaidPurchaseOnMeta(receipt));

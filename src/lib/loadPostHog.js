@@ -1,33 +1,45 @@
 import { isProductionBrowser } from "./productionBrowser";
+import { readConsent } from "./consentChoice";
 import { withPostHogOutbox } from "./analyticsModules";
-import { CONSENT_EVENT, CONSENT_KEY, CONSENT_RESET_EVENT } from "./consentSignals";
+import { followChoices } from "./consentSignals";
 
 let poppedAt = 0;
-let choices = 0;
-const chosen = () => { choices += 1; };
-if (typeof window !== "undefined") {
-  window.addEventListener("popstate", () => { poppedAt = Date.now(); });
-  window.addEventListener(CONSENT_EVENT, chosen);
-  window.addEventListener(CONSENT_RESET_EVENT, chosen);
-  window.addEventListener("storage", ({ key }) => (key === CONSENT_KEY || key === null) && chosen());
-}
+let countedPath = null;
+const made = [];
+
+const granted = () => readConsent() === "granted";
+
+const newId = () => "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (digit) =>
+  (digit ^ (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (digit / 4)))).toString(16));
 
 export const lastPopstate = () => poppedAt;
 
-export const consentChoices = () => choices;
-
-export const postHogMoment = (event) => {
-  const moment = { event, href: window.location.href, at: Date.now(), choices };
-  withPostHogOutbox((outbox) => outbox.decide(moment));
-  return moment;
+export const keepPostHogEvent = (event, properties = {}) => {
+  if (!isProductionBrowser() || !granted()) return;
+  made.push({ id: newId(), event, properties, path: window.location.pathname, at: Date.now() });
+  withPostHogOutbox((outbox) => outbox.store(made.splice(0)));
 };
 
 const follow = (change) => {
   if (!isProductionBrowser()) return;
-  const moment = postHogMoment("$pageview");
-  withPostHogOutbox((outbox) => outbox.follow(moment, change));
+  if (!change) countedPath = null;
+  if (granted() && countedPath !== window.location.pathname) {
+    countedPath = window.location.pathname;
+    keepPostHogEvent("$pageview");
+  }
+  withPostHogOutbox((outbox) => outbox.follow());
 };
 
 export const loadPostHog = () => follow(false);
 
 export const followPostHogChoice = () => follow(true);
+
+if (typeof window !== "undefined") {
+  window.addEventListener("popstate", () => { poppedAt = Date.now(); });
+  window.addEventListener("pageshow", ({ persisted }) => persisted && loadPostHog());
+  followChoices(() => {
+    if (granted()) return;
+    countedPath = null;
+    made.length = 0;
+  });
+}

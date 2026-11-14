@@ -1,38 +1,14 @@
 import { CONSENT_EVENT, CONSENT_KEY, CONSENT_RESET_EVENT } from "./consentSignals";
+import { CHOICES, keepUnsaved, readConsent } from "./consentChoice";
 
-const CHOICES = new Set(["granted", "denied"]);
+export { readConsent };
 
-let pageChoice = null;
 let followingOtherTabs = false;
-
-const storedChoice = (storage) => {
-  try {
-    const value = window[storage].getItem(CONSENT_KEY);
-    return CHOICES.has(value) ? value : "";
-  } catch {
-    return "";
-  }
-};
 
 const forgetChoice = (storage) => {
   try {
     window[storage].removeItem(CONSENT_KEY);
   } catch {}
-};
-
-const unsavedChoice = () => {
-  if (pageChoice && storedChoice("localStorage") !== pageChoice.over) pageChoice = null;
-  return pageChoice?.value || "";
-};
-
-export const readConsent = () => {
-  if (typeof window === "undefined") return "unset";
-  return unsavedChoice() || storedChoice("sessionStorage") || storedChoice("localStorage") || "unset";
-};
-
-const keepUnsaved = (value) => {
-  pageChoice = null;
-  if (readConsent() !== value) pageChoice = { value, over: storedChoice("localStorage") };
 };
 
 const announce = (value) => {
@@ -43,7 +19,7 @@ const announce = (value) => {
 
 const followOtherTab = (event) => {
   if (event.key !== CONSENT_KEY && event.key !== null) return;
-  pageChoice = null;
+  keepUnsaved("");
   forgetChoice("sessionStorage");
   announce(readConsent());
 };

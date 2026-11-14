@@ -1,39 +1,37 @@
 import { readConsent } from "./consent";
 import { sanitizeAnalyticsEvent } from "./salesPaths";
-import { consentChoices } from "./loadPostHog";
+import { followChoices } from "./consentSignals";
 
 const OUTBOX_KEY = "roo-posthog-outbox";
 const OUTBOX_LIMIT = 100;
-const CAMPAIGN = /^utm_(?:source|medium|campaign|content|term)$/;
 
 let posthog = null;
-let outbox = null;
-let declines = 0;
-let countedPath = null;
+let unstored = null;
 
 const granted = () => readConsent() === "granted";
 
-const queue = () => {
-  if (outbox) return outbox;
+const read = () => {
+  if (unstored) return unstored;
   try {
-    outbox = JSON.parse(sessionStorage.getItem(OUTBOX_KEY));
-  } catch {}
-  if (!Array.isArray(outbox)) outbox = [];
-  return outbox;
+    const items = JSON.parse(sessionStorage.getItem(OUTBOX_KEY));
+    return Array.isArray(items) ? items : [];
+  } catch {
+    return [];
+  }
 };
 
-const save = () => {
+const write = (items) => {
   try {
-    if (outbox.length) sessionStorage.setItem(OUTBOX_KEY, JSON.stringify(outbox));
+    if (items.length) sessionStorage.setItem(OUTBOX_KEY, JSON.stringify(items));
     else sessionStorage.removeItem(OUTBOX_KEY);
-  } catch {}
+    unstored = null;
+  } catch {
+    unstored = items;
+  }
 };
 
-const forget = () => {
-  declines += 1;
-  countedPath = null;
-  outbox = [];
-  save();
+const followChoice = () => {
+  if (!granted()) write([]);
 };
 
 const withPostHog = (action) => {
@@ -46,48 +44,40 @@ const withPostHog = (action) => {
     .catch(() => {});
 };
 
-export const decide = (moment) => {
-  moment.ticket = moment.choices === consentChoices() && granted() ? declines : -1;
+const cleanPath = (path) => {
+  const url = sanitizeAnalyticsEvent({ url: new URL(path, window.location.origin).href, type: "pageview" })?.url;
+  return url && new URL(url).pathname;
 };
 
-export const record = (moment, properties) => {
-  if (moment.ticket !== declines) return;
+export const store = (entries) => {
   if (!granted()) {
-    forget();
+    write([]);
     return;
   }
-  const url = sanitizeAnalyticsEvent({ url: moment.href, type: "pageview" })?.url;
-  if (!url) return;
-  const items = queue();
-  items.push({ event: moment.event, properties, url, at: moment.at });
-  items.splice(0, items.length - OUTBOX_LIMIT);
-  save();
-  withPostHog(({ sendPostHog }) => sendPostHog(moment.event));
-};
-
-export const follow = (moment, change) => {
-  const { pathname, search } = new URL(moment.href);
-  if (!change) countedPath = null;
-  if (moment.ticket !== declines) {
-    if (!granted()) forget();
-  } else if (countedPath !== pathname) {
-    countedPath = pathname;
-    record(moment, Object.fromEntries([...new URLSearchParams(search)].filter(([key]) => CAMPAIGN.test(key))));
-  }
-  withPostHog(({ syncPostHogPage, startPostHogWhenIdle }) => {
-    syncPostHogPage();
-    startPostHogWhenIdle();
+  const kept = entries.flatMap(({ path, ...entry }) => {
+    const cleaned = cleanPath(path);
+    return cleaned ? [{ ...entry, path: cleaned }] : [];
   });
+  if (!kept.length) return;
+  write([...read(), ...kept].slice(-OUTBOX_LIMIT));
+  withPostHog(({ sendPostHog }) => sendPostHog(kept.map(({ event }) => event)));
 };
 
-export const postHogQueued = () => granted() && queue().length > 0;
+export const follow = () => withPostHog(({ syncPostHogPage, startPostHogWhenIdle }) => {
+  syncPostHogPage();
+  startPostHogWhenIdle();
+});
+
+export const postHogQueued = () => granted() && read().length > 0;
 
 export const takePostHogQueue = () => {
-  if (!granted()) {
-    forget();
-    return [];
-  }
-  const items = queue().splice(0);
-  save();
+  followChoice();
+  const items = granted() ? read() : [];
+  if (items.length) write([]);
   return items;
 };
+
+if (typeof window !== "undefined") {
+  followChoice();
+  followChoices(followChoice);
+}

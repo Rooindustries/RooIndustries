@@ -286,8 +286,12 @@
       "js": 4096,
       "css": 1024
     },
+    "src/next/AppClientRuntime.jsx -> ../lib/postHogOutbox": {
+      "js": 2048,
+      "css": 1024
+    },
     "src/next/AppClientRuntime.jsx -> ./ConsentRuntime": {
-      "js": 3072,
+      "js": 4096,
       "css": 1024
     },
     "src/next/NotFoundEntry.jsx -> ./LegacyRoutePage": {

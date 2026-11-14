@@ -78,7 +78,9 @@ export default function AppClientRuntime() {
   const staffPage = onRoutes(usePathname() ?? "", STAFF_PREFIXES);
 
   useEffect(() => {
-    setAnalyticsEnabled(isProductionBrowser());
+    const production = isProductionBrowser();
+    setAnalyticsEnabled(production);
+    if (production) import("../lib/postHogOutbox").catch(reportRequestError);
   }, []);
   useEffect(() => {
     initializePerformanceProfile();

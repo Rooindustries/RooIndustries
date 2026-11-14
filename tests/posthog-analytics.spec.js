@@ -8,6 +8,11 @@ const desktopChrome = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537
 const customer = ["visitor@example.invalid", "fixture_visitor", "Ryzen 7700", "RTX 4070"];
 
 const test = bookingTest.extend({ ...productionHostFixtures, ...posthogFixtures });
+const cachedTest = test.extend({
+  launchOptions: [async ({ launchOptions }, use) => use({
+    ...launchOptions, ignoreDefaultArgs: ["--disable-back-forward-cache"],
+  }), { scope: "worker" }],
+});
 
 test.use({
   javaScriptEnabled: true,
@@ -38,10 +43,18 @@ const sentBetween = (seen, from, to) => [
   ...seen.snapshots.filter((item) => item.timestamp > from && item.timestamp < to),
 ];
 const sentAt = (event) => Date.parse(event.timestamp);
-const outbox = (page) => page.evaluate(() => {
-  const stored = sessionStorage.getItem("roo-posthog-outbox");
-  return stored === null ? null : JSON.parse(stored).map((item) => item.event);
-});
+const storedOutbox = (page) => page.evaluate(() => sessionStorage.getItem("roo-posthog-outbox"));
+const outboxEntries = async (page) => JSON.parse(await storedOutbox(page));
+const outbox = async (page) => (await outboxEntries(page))?.map((item) => item.event) ?? null;
+const confirmedBooking = {
+  ok: true, status: "booked", provider: "dodo", bookingId: "fixture-posthog-booking",
+  emailDispatch: { allSent: true, client: { sent: true }, owner: { sent: true } },
+  emailDispatchToken: "",
+  analyticsReceipt: {
+    eventId, packageTitle: "Performance Vertex Overhaul", paymentType: "paid",
+    provider: "dodo", amount: 84.99, currency: "USD", referralCode: "", attribution: null,
+  },
+};
 const idleStart = (page) => page.evaluate(() => new Promise((resolve) => {
   window.requestIdleCallback(() => resolve(), { timeout: 4000 });
 }));
@@ -122,15 +135,7 @@ test.describe("production host", () => {
     await expect.poll(() => named(seen, "checkout_started").length).toBe(1);
     await page.goto("/payment?dodo_return=1", { waitUntil: "domcontentloaded" });
     await expect.poll(() => Boolean(finalizeRoute)).toBe(true);
-    await finalizeRoute.fulfill({ json: {
-      ok: true, status: "booked", provider: "dodo", bookingId: "fixture-posthog-booking",
-      emailDispatch: { allSent: true, client: { sent: true }, owner: { sent: true } },
-      emailDispatchToken: "",
-      analyticsReceipt: {
-        eventId, packageTitle: "Performance Vertex Overhaul", paymentType: "paid",
-        provider: "dodo", amount: 84.99, currency: "USD", referralCode: "", attribution: null,
-      },
-    } });
+    await finalizeRoute.fulfill({ json: confirmedBooking });
     await expect(page).toHaveURL(`${baseURL}/payment-success`);
     await expect.poll(() => named(seen, "booking_completed").length).toBe(1);
     await expect.poll(() => named(seen, "$identify").length).toBe(1);
@@ -562,6 +567,203 @@ test.describe("cookie choice", () => {
     await expect.poll(() => named(seen, "view_item").length).toBe(1);
     expect(named(seen, "view_item")[0].properties.$current_url).toBe(`${baseURL}/packages`);
     expect(sentBetween(seen, declinedAt, acceptedAt)).toEqual([]);
+    await other.close();
+  });
+});
+
+test.describe("waiting list", () => {
+  const leaked = [
+    "buyer@example.com", "buyer%40example.com", "evil.example", "555-0199", "fbclid-value-1234", "creatorref",
+  ];
+
+  test("nothing from the landing address is stored, and PostHog gets only cleaned labels", async ({
+    page, posthog: seen, productionHost,
+  }) => {
+    const hold = await holdPostHog(page, productionHost);
+    await page.goto("/packages?utm_source=buyer%40example.com&utm_medium=https%3A%2F%2Fevil.example%2Fad" +
+      "&utm_campaign=call%20(212)%20555-0199&utm_term=spring&fbclid=fbclid-value-1234&ref=creatorref");
+    await acceptCookies(page);
+    await expect.poll(() => hold.held, { timeout: 20000 }).toBe(true);
+    await seeDetails(page);
+    await expect.poll(() => outbox(page)).toEqual(["$pageview", "view_item"]);
+    const text = await storedOutbox(page);
+    for (const value of [...leaked, "utm_", "spring", "?", "fbclid"]) expect(text).not.toContain(value);
+
+    hold.release();
+    await expect.poll(() => named(seen, "view_item").length).toBe(1);
+    const sent = JSON.stringify(seen.events);
+    for (const value of leaked.slice(0, -1)) expect(sent).not.toContain(value);
+    for (const event of [named(seen, "$pageview")[0], named(seen, "view_item")[0]]) {
+      expect(event.properties).toMatchObject({ has_fbclid: true, campaign_term: "spring" });
+      expect(event.properties.$current_url).not.toMatch(/[?#]/);
+      for (const label of ["campaign_source", "campaign_medium", "campaign", "fbclid"]) {
+        expect(event.properties).not.toHaveProperty(label);
+      }
+    }
+  });
+
+  test("a booking confirmed before Accept is never stored or sent, however long attribution took", async ({
+    page, context, posthog: seen, baseURL, productionHost,
+  }) => {
+    test.setTimeout(180000);
+    await page.goto("/packages");
+    await page.getByRole("link", { name: /Book Now/ }).first().click();
+    await expect(page).toHaveURL((url) => url.pathname === "/booking");
+    await reachPayment(page);
+    let finalizeRoute;
+    await page.route("**/api/payment/finalize", (route) => { finalizeRoute = route; });
+    await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+    await expect(page).toHaveURL(`${baseURL}/__test/checkout-handoff`);
+    const hold = await holdChunk(page, productionHost, "first_campaign");
+    await page.goto("/payment?dodo_return=1", { waitUntil: "domcontentloaded" });
+    await expect.poll(() => Boolean(finalizeRoute)).toBe(true);
+    await finalizeRoute.fulfill({ json: confirmedBooking });
+    await expect(page).toHaveURL(`${baseURL}/payment-success`);
+    await expect.poll(() => hold.held, { timeout: 20000 }).toBe(true);
+    const other = await context.newPage();
+    await other.goto("/about");
+    await acceptCookies(other);
+    await expect.poll(() => outbox(page)).toEqual(["$pageview"]);
+    hold.release();
+
+    await page.goto("/packages");
+    await expect.poll(() => pageviews(seen)).toContain(`${baseURL}/packages`);
+    await pastPostHogStart(page, seen);
+    await settleIdle(page);
+    expect(named(seen, "booking_completed")).toEqual([]);
+    expect(await outbox(page)).toBeNull();
+    await other.close();
+  });
+
+  test("events made while attribution loads are stored and sent in the order they happened", async ({
+    page, posthog: seen, productionHost,
+  }) => {
+    const hold = await holdChunk(page, productionHost, "first_campaign");
+    await page.goto("/packages");
+    await expect.poll(() => hold.held, { timeout: 20000 }).toBe(true);
+    await acceptCookies(page);
+    await seeDetails(page);
+    await page.getByRole("link", { name: /Book Now/ }).first().click();
+    await expect(page).toHaveURL((url) => url.pathname === "/booking");
+    await expect.poll(async () => (await outbox(page))?.filter((name) => name === "$pageview").length).toBe(2);
+    const stored = await outboxEntries(page);
+    const names = stored.map(({ event }) => event);
+    expect(names).toContain("view_item");
+    expect(names.indexOf("view_item")).toBeLessThan(names.lastIndexOf("$pageview"));
+    expect(stored.map(({ at }) => at)).toEqual(stored.map(({ at }) => at).sort((a, b) => a - b));
+
+    hold.release();
+    const ids = stored.map(({ id }) => id);
+    const received = () => seen.events.filter((event) => ids.includes(event.uuid));
+    await expect.poll(() => received().length).toBe(ids.length);
+    expect(received().map((event) => event.uuid)).toEqual(ids);
+    expect(received().map(sentAt)).toEqual(stored.map(({ at }) => at));
+  });
+
+  test("an event made while attribution loads survives leaving the page", async ({
+    page, posthog: seen, baseURL, productionHost,
+  }) => {
+    const hold = await holdChunk(page, productionHost, "first_campaign");
+    await page.goto("/packages");
+    await expect.poll(() => hold.held, { timeout: 20000 }).toBe(true);
+    await acceptCookies(page);
+    await seeDetails(page);
+    await page.goto("/about");
+    hold.release();
+    await page.goto("/packages");
+
+    await expect.poll(() => named(seen, "view_item").length).toBe(1);
+    await pastPostHogStart(page, seen);
+    await settleIdle(page);
+    expect(named(seen, "view_item")).toHaveLength(1);
+    expect(named(seen, "view_item")[0].properties.$current_url).toBe(`${baseURL}/packages`);
+  });
+
+  cachedTest("a payment page restored by Back sends nothing twice, and every event carries its entry's id", async ({
+    page, posthog: seen, baseURL, productionHost,
+  }) => {
+    test.setTimeout(180000);
+    await page.addInitScript(() => window.addEventListener("pageshow", (event) => {
+      if (event.persisted) window.restoredFromCache = true;
+    }));
+    const hold = await holdPostHog(page, productionHost);
+    await page.goto("/packages");
+    await acceptCookies(page);
+    await page.getByRole("link", { name: /Book Now/ }).first().click();
+    await expect(page).toHaveURL((url) => url.pathname === "/booking");
+    await reachPayment(page);
+    const paymentPath = new URL(page.url()).pathname;
+    await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+    await expect(page).toHaveURL(`${baseURL}/__test/checkout-handoff`);
+    const stored = await outboxEntries(page);
+    expect(stored.map(({ event }) => event)).toContain("checkout_started");
+    hold.release();
+
+    await page.goto("/packages");
+    await expect.poll(() => named(seen, "checkout_started").length).toBe(1);
+    await expect.poll(() => pageviews(seen).at(-1)).toBe(`${baseURL}/packages`);
+    expect(await outbox(page)).toBeNull();
+    await page.goBack({ waitUntil: "commit" });
+    await page.goBack({ waitUntil: "commit" });
+    await expect(page).toHaveURL(`${baseURL}${paymentPath}`);
+    await expect.poll(() => page.evaluate(() => window.restoredFromCache === true)).toBe(true);
+    await page.goBack({ waitUntil: "commit" });
+    await expect.poll(() => new URL(page.url()).pathname).toBe("/booking");
+    await expect.poll(() => pageviews(seen).slice(-3))
+      .toEqual([`${baseURL}/packages`, `${baseURL}${paymentPath}`, `${baseURL}/booking`]);
+    await pastPostHogStart(page, seen);
+    await settleIdle(page);
+
+    expect(named(seen, "checkout_started")).toHaveLength(1);
+    const uuids = seen.events.map((event) => event.uuid);
+    expect(new Set(uuids).size).toBe(uuids.length);
+    for (const { id, event } of stored) {
+      expect(seen.events.filter((sent) => sent.uuid === id).map((sent) => sent.event)).toEqual([event]);
+    }
+  });
+
+  test("a tab copied before the hand-over sends the same event ids", async ({
+    page, context, posthog: seen, productionHost,
+  }) => {
+    const hold = await holdPostHog(page, productionHost);
+    await page.goto("/packages");
+    await acceptCookies(page);
+    await expect.poll(() => hold.held, { timeout: 20000 }).toBe(true);
+    await seeDetails(page);
+    await expect.poll(() => outbox(page)).toEqual(["$pageview", "view_item"]);
+    const stored = await outboxEntries(page);
+    const copied = await page.evaluate(() => Object.entries(sessionStorage));
+    const copy = await context.newPage();
+    await copy.addInitScript((items) => {
+      if (!sessionStorage.length) for (const [key, value] of items) sessionStorage.setItem(key, value);
+    }, copied);
+    await copy.goto("/packages");
+    hold.release();
+
+    const ids = stored.map(({ id }) => id);
+    await expect.poll(() => seen.events.filter((event) => ids.includes(event.uuid)).length).toBe(ids.length * 2);
+    for (const { id, event } of stored) {
+      expect(seen.events.filter((sent) => sent.uuid === id).map((sent) => sent.event)).toEqual([event, event]);
+    }
+    await copy.close();
+  });
+
+  test("Decline in another tab clears the waiting list of a tab on a staff page at once", async ({
+    page, context, productionHost,
+  }) => {
+    await holdPostHog(page, productionHost);
+    await page.goto("/packages");
+    await acceptCookies(page);
+    await expect.poll(() => outbox(page)).toEqual(["$pageview"]);
+    await page.goto("/admin/content");
+    await settleIdle(page);
+    expect(await outbox(page)).toEqual(["$pageview"]);
+
+    const other = await context.newPage();
+    await other.goto("/about");
+    await openCookieSettings(other);
+    await declineCookies(other);
+    await expect.poll(() => outbox(page)).toBeNull();
     await other.close();
   });
 });
