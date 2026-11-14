@@ -1,10 +1,8 @@
 import envValue from "../../supabase/envValue.cjs";
-const { resolveStoreBackend, readProcessEnvValue } = envValue;
+const { resolveStoreBackend, readProcessEnvValue: readSecret } = envValue;
 import crypto from "crypto";
 
 export const REF_SESSION_COOKIE = "ref_session";
-
-const readSecret = readProcessEnvValue;
 
 const REF_SESSION_SECRET =
   readSecret("REF_SESSION_SECRET") ||

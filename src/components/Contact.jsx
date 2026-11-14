@@ -96,14 +96,13 @@ export default function Contact({ initialData = null }) {
   };
 
   const handleCopy = async () => {
-    const email = contactEmail;
     setCopyStatus("copying");
 
     try {
       if (!navigator.clipboard?.writeText) {
         throw new Error("Clipboard API unavailable");
       }
-      await navigator.clipboard.writeText(email);
+      await navigator.clipboard.writeText(contactEmail);
       setCopyStatus("copied");
     } catch {
       setCopyStatus("failed");
@@ -161,10 +160,7 @@ export default function Contact({ initialData = null }) {
       ) : null}
 
       {submission.state === "sent" ? (
-        <div
-          className={SENT_NOTICE}
-          role="status"
-        >
+        <div className={SENT_NOTICE} role="status">
           Thanks, your message is in. We'll reply by email.
         </div>
       ) : (

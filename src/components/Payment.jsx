@@ -1296,7 +1296,7 @@ export default function Payment({ hideFooter = false }) {
       }
 
       if (data.status === "started") trackCheckoutSessionStarted({ packageTitle: bookingData.packageTitle,
-        price: data.quote?.netAmount, provider, currency: "USD" });
+        price: data.quote?.netAmount, provider });
       if (data.quote) setServerQuote(data.quote);
       if (data.quoteFingerprint || data.fingerprint) {
         setQuoteFingerprint(

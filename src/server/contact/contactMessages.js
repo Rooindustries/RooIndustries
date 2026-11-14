@@ -3,6 +3,7 @@ import { Resend } from "resend";
 import { isValidEmail } from "../../lib/emailValidation.js";
 import contactEmail from "../../lib/contactEmail.js";
 import { isIdempotencyPayloadConflict } from "../email/resendOutcome.js";
+import { getHashSecret } from "../api/ref/rateLimit.js";
 import { getSafeErrorCode, logSafeError } from "../safeErrorLog.js";
 import { createSupabaseAdminClient } from "../supabase/adminClient.js";
 import envValue from "../supabase/envValue.cjs";
@@ -21,12 +22,8 @@ const contactError = (code, status, extra = {}) =>
 
 const text = (value) => (typeof value === "string" ? value.trim() : "");
 
-const hashSecret = (env) =>
-  readEnvValue(env, "RATE_LIMIT_HASH_SECRET") ||
-  (env.NODE_ENV === "test" ? "test-rate-limit-secret" : "");
-
-const contactClientHash = (clientAddress, env = process.env) => {
-  const secret = hashSecret(env);
+const contactClientHash = (clientAddress, env) => {
+  const secret = getHashSecret(env);
   if (!secret) throw contactError("contact_hash_unconfigured", 503);
   return crypto
     .createHmac("sha256", secret)
@@ -57,9 +54,7 @@ const validate = ({ name, email, message }) => {
 };
 
 const rpcError = (operation, error) =>
-  contactError(String(error?.code || `contact_${operation}_failed`), 503, {
-    status: Number(error?.status) || 503,
-  });
+  contactError(String(error?.code || `contact_${operation}_failed`), Number(error?.status) || 503);
 
 const deliveryConfig = (env) => ({
   apiKey: readEnvValue(env, "RESEND_API_KEY"),

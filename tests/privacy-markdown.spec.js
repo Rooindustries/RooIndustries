@@ -71,4 +71,3 @@ test("privacy HTML and Markdown share the same cookie notice", async ({ page, re
   expect(await cookieSection.locator("p").allTextContents()).toEqual(markdownSection);
   await expect(sections.filter({ has: page.getByRole("heading", { name: "Synthetic line breaks" }) })).toHaveCount(1);
 });
-

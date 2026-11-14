@@ -50,14 +50,14 @@ export const resetConsent = () => {
 };
 
 export const onConsentChange = (callback) => {
-  if (typeof window === "undefined" || typeof callback !== "function") return () => {};
+  if (typeof window === "undefined") return () => {};
   const listener = (event) => callback(event.detail);
   window.addEventListener(CONSENT_EVENT, listener);
   return () => window.removeEventListener(CONSENT_EVENT, listener);
 };
 
 export const onConsentReset = (callback) => {
-  if (typeof window === "undefined" || typeof callback !== "function") return () => {};
+  if (typeof window === "undefined") return () => {};
   window.addEventListener(CONSENT_RESET_EVENT, callback);
   return () => window.removeEventListener(CONSENT_RESET_EVENT, callback);
 };

@@ -1,5 +1,6 @@
-const { createHash } = require("node:crypto");
-const { test, expect } = require("./fixtures/booking-flow.cjs");
+const {
+  test, expect, cookieBanner: banner, settleIdle: settle, bookingEventId, routePaidStart,
+} = require("./fixtures/booking-flow.cjs");
 
 const pixelId = String(process.env.TOOLING_META_PIXEL_ID || "").trim();
 const fakeFbevents = `(function () {
@@ -12,8 +13,6 @@ const fakeFbevents = `(function () {
   fbq.callMethod = function () { record(Array.prototype.slice.call(arguments)); };
   fbq.queue.splice(0).forEach(record);
 })();`;
-const bookingEventId = (record) =>
-  createHash("sha256").update(`booking-confirmed:${record}`).digest("hex").slice(0, 40);
 const paidEventId = bookingEventId("fixture-consent-paid-record");
 const freeEventId = bookingEventId("fixture-consent-free-record");
 const overhaul = "Performance Vertex Overhaul";
@@ -53,13 +52,6 @@ test.beforeEach(async ({ page, flow }) => {
   });
 });
 
-const metaOf = () => meta;
-const banner = (page) => page.getByRole("region", { name: "Cookie choice", exact: true });
-const settle = (page) => page.evaluate(() => new Promise((resolve) => {
-  const done = () => setTimeout(resolve, 400);
-  if ("requestIdleCallback" in window) window.requestIdleCallback(done, { timeout: 5000 });
-  else setTimeout(done, 1500);
-}));
 const overhaulCard = (page) => page.locator(".ri-package-card")
   .filter({ has: page.getByRole("heading", { name: overhaul, exact: true }) });
 const overhaulDetails = (page) => overhaulCard(page).locator(".ri-package-details-button");
@@ -69,7 +61,7 @@ const closeDetails = async (page) => {
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
 };
-const tracked = (name) => metaOf().calls.filter(({ args }) => args[0] === "track" && args[1] === name);
+const tracked = (name) => meta.calls.filter(({ args }) => args[0] === "track" && args[1] === name);
 
 async function expectBannerPlacement(page) {
   const box = await banner(page).locator("> div").boundingBox();
@@ -143,13 +135,6 @@ const routeFreeQuote = async (page, startResponse) => {
   await page.route("**/api/payment/start", (route) => route.fulfill({ json: { ...startResponse, quote } }));
 };
 
-const routePaidStart = (page, baseURL) => page.route("**/api/payment/start", (route) => route.fulfill({ json: {
-  ok: true, paymentAccessToken: "fixture-payment", status: "started",
-  providerPayload: { checkoutUrl: `${baseURL}/__test/checkout-handoff` },
-  sessionExpiresAt: new Date(Date.now() + 20 * 60 * 1000).toISOString(),
-  quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
-} }));
-
 const payAndReturn = async (page, flow) => {
   await flow.review();
   await flow.payment();
@@ -219,8 +204,8 @@ if (!pixelId) {
         await page.waitForLoadState("networkidle");
         await expect(banner(page)).toHaveCount(0);
         expect(await page.evaluate(() => typeof window.fbq)).toBe("undefined");
-        expect(metaOf().scripts).toEqual([]);
-        expect(metaOf().beacons).toEqual([]);
+        expect(meta.scripts).toEqual([]);
+        expect(meta.beacons).toEqual([]);
       });
 
       test("persists Decline and Cookie settings reopens the choice", async ({ page }) => {
@@ -241,8 +226,8 @@ if (!pixelId) {
         expect(await page.evaluate(() => localStorage.getItem("roo-consent"))).toBeNull();
         await banner(page).getByRole("button", { name: "Accept", exact: true }).click();
         await expect(banner(page)).toHaveCount(0);
-        expect(metaOf().scripts).toEqual([]);
-        expect(metaOf().beacons).toEqual([]);
+        expect(meta.scripts).toEqual([]);
+        expect(meta.beacons).toEqual([]);
       });
 
       test("leaves while the booking dialog is open and comes back by keyboard after it closes", async ({ page }) => {
@@ -375,9 +360,9 @@ if (!pixelId) {
       await settle(page);
       await page.waitForLoadState("networkidle");
       expect(await page.evaluate(() => typeof window.fbq)).toBe("undefined");
-      expect(metaOf().scripts).toEqual([]);
-      expect(metaOf().beacons).toEqual([]);
-      expect(metaOf().calls).toEqual([]);
+      expect(meta.scripts).toEqual([]);
+      expect(meta.beacons).toEqual([]);
+      expect(meta.calls).toEqual([]);
     });
 
     test("after Accept the pixel sends PageView, ViewContent, InitiateCheckout and Purchase", async ({
@@ -388,11 +373,11 @@ if (!pixelId) {
       await page.route("**/api/payment/finalize", (route) => { finalizeRoute = route; });
       await page.goto("/packages");
       await expect(banner(page)).toBeVisible();
-      expect(metaOf().scripts).toEqual([]);
+      expect(meta.scripts).toEqual([]);
       await banner(page).getByRole("button", { name: "Accept", exact: true }).click();
-      await expect.poll(() => metaOf().scripts).toEqual(["https://connect.facebook.net/en_US/fbevents.js"]);
+      await expect.poll(() => meta.scripts).toEqual(["https://connect.facebook.net/en_US/fbevents.js"]);
       await expect.poll(() => tracked("PageView").length).toBe(1);
-      expect(metaOf().calls.slice(0, 4).map(({ args }) => args)).toEqual([
+      expect(meta.calls.slice(0, 4).map(({ args }) => args)).toEqual([
         ["consent", "grant"], ["set", "autoConfig", false, pixelId], ["init", pixelId], ["track", "PageView"],
       ]);
 
@@ -424,10 +409,10 @@ if (!pixelId) {
       const [, , data, options] = tracked("Purchase")[0].args;
       expect(options).toEqual({ eventID: paidEventId });
       expect(data).toMatchObject({ value: 84.99, currency: "USD", content_name: overhaul, content_ids: ["overhaul"] });
-      expect(JSON.stringify(metaOf().calls)).not.toMatch(/visitor@example\.invalid|fixture_visitor|Ryzen|em=|ph=/);
-      const inits = metaOf().calls.filter(({ args }) => args[0] === "init");
+      expect(JSON.stringify(meta.calls)).not.toMatch(/visitor@example\.invalid|fixture_visitor|Ryzen|em=|ph=/);
+      const inits = meta.calls.filter(({ args }) => args[0] === "init");
       expect(inits.every(({ args }) => args.length === 2)).toBe(true);
-      expect(metaOf().beacons).toEqual([]);
+      expect(meta.beacons).toEqual([]);
     });
 
     test("a free booking sends no Purchase", async ({ page, flow }) => {
@@ -462,7 +447,7 @@ if (!pixelId) {
       await expect(page).toHaveURL(/\/payment-success$/);
       await settle(page);
       await expect(banner(page)).toHaveCount(0);
-      expect(metaOf().calls).toEqual([]);
+      expect(meta.calls).toEqual([]);
       const purchaseKey = `meta_purchase_tracked:${paidEventId}`;
       expect(await page.evaluate((key) => sessionStorage.getItem(key), purchaseKey)).toBeNull();
       await closeBooking(page);
@@ -493,8 +478,8 @@ if (!pixelId) {
       await page.getByRole("button", { name: "Cookie settings", exact: true }).click();
       await banner(page).getByRole("button", { name: "Decline", exact: true }).click();
       await expect(banner(page)).toHaveCount(0);
-      expect(metaOf().calls.at(-1).args).toEqual(["consent", "revoke"]);
-      const before = metaOf().calls.length;
+      expect(meta.calls.at(-1).args).toEqual(["consent", "revoke"]);
+      const before = meta.calls.length;
       await overhaulDetails(page).click();
       await closeDetails(page);
       expect(await page.evaluate(() => localStorage.getItem("roo-consent"))).toBe("granted");
@@ -503,7 +488,7 @@ if (!pixelId) {
       await settle(page);
       await page.waitForLoadState("networkidle");
       await expect(banner(page)).toHaveCount(0);
-      expect(metaOf().calls.slice(before)).toEqual([]);
+      expect(meta.calls.slice(before)).toEqual([]);
     });
 
     test("a saved Accept sends one PageView per page view whichever module loads first", async ({ page }) => {
@@ -526,7 +511,7 @@ if (!pixelId) {
       expect(delayed).toBeGreaterThan(0);
       await expect.poll(() => tracked("PageView").length).toBe(1);
       await page.locator('main a[href="/reviews"], footer a[href="/reviews"]').first().click();
-      await expect(page).toHaveURL(/\/tools$/);
+      await expect(page).toHaveURL(/\/reviews$/);
       await expect.poll(() => tracked("PageView").length).toBe(2);
       await page.goBack();
       await expect(page).toHaveURL(/\/packages$/);

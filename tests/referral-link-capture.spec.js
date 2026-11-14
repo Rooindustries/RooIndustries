@@ -1,4 +1,4 @@
-const { test, expect } = require("./fixtures/booking-flow.cjs");
+const { test, expect, cookieBanner, settleIdle } = require("./fixtures/booking-flow.cjs");
 
 test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata", viewport: { width: 390, height: 844 } });
 
@@ -53,8 +53,7 @@ test("an ad landing keeps first and last touch through checkout, in a cookie onl
   expect(withoutTime(landing.lastTouch)).toEqual(firstTouch);
   expect(await attributionCookie(page)).toBeUndefined();
 
-  const consent = page.getByRole("region", { name: "Cookie choice", exact: true });
-  await consent.getByRole("button", { name: "Accept", exact: true }).click();
+  await cookieBanner(page).getByRole("button", { name: "Accept", exact: true }).click();
   await expect.poll(() => attributionCookie(page)).toBeDefined();
   const cookie = await attributionCookie(page);
   expect(Math.abs(cookie.expires - (Date.now() / 1000 + 90 * 86400))).toBeLessThan(300);
@@ -81,9 +80,7 @@ test("an ad landing keeps first and last touch through checkout, in a cookie onl
 const storedAttribution = (page) => page.evaluate(() => JSON.parse(sessionStorage.getItem("sales_attribution")));
 const settle = async (page) => {
   await page.waitForLoadState("networkidle");
-  await page.evaluate(() => new Promise((resolve) => {
-    window.requestIdleCallback(() => setTimeout(resolve, 400), { timeout: 5000 });
-  }));
+  await settleIdle(page);
 };
 
 test("a tagged landing that drops a campaign field starts a new last touch with only its own fields", async ({

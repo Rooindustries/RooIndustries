@@ -43,9 +43,8 @@ export const registerBookingPaidScenarios = async (ctx) => {
       assert.equal((await fixture.client.rpc(rpc)).error, null);
     }
   };
-  const indexExists = async (name) =>
-    (await sql`select to_regclass(${`commerce.${name}`}) is not null as present`)[0].present;
   const tableExists = async (name) => (await sql`select to_regclass(${name}) is not null as present`)[0].present;
+  const indexExists = (name) => tableExists(`commerce.${name}`);
   const eventsTableExists = () => tableExists("ops.booking_paid_events");
   const rpcMissing = async (name, args) => (await fixture.client.rpc(name, args)).error?.code === missingFunctionCode;
   const awaitSchemaCache = async (missing) => {

@@ -55,8 +55,8 @@ const packageFromState = (state) => {
 };
 
 export function useBookingPackage(location, storedPackage) {
-  const statePackage = useMemo(() => packageFromState(location?.state), [location?.state]);
-  const slug = statePackage ? "" : slugFromSearch(location?.search);
+  const statePackage = useMemo(() => packageFromState(location.state), [location.state]);
+  const slug = statePackage ? "" : slugFromSearch(location.search);
   const packages = usePackagesOfRecord(!statePackage);
   return useMemo(() => {
     if (statePackage) return { navigationPackage: statePackage, bookingPackage: statePackage };

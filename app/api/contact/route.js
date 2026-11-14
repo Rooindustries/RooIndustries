@@ -9,14 +9,9 @@ export const dynamic = "force-dynamic";
 const BODY_LIMIT = 16 * 1024;
 const UNAVAILABLE = "We couldn't save your message right now.";
 
-const reply = (res, status, payload) => {
-  res.setHeader("Cache-Control", "no-store");
-  return res.status(status).json(payload);
-};
-
 const handler = async (req, res) => {
   if (Buffer.byteLength(req.rawBody || "") > BODY_LIMIT) {
-    return reply(res, 413, { ok: false, error: "Your message is too long." });
+    return res.status(413).json({ ok: false, error: "Your message is too long." });
   }
   const body = req.body || {};
   const clientAddress = getClientAddress(req);
@@ -35,12 +30,12 @@ const handler = async (req, res) => {
       company: body.company,
       clientAddress,
     });
-    if (result.status === "queued") return reply(res, 202, { ok: true, queued: true });
-    return reply(res, 200, { ok: true });
+    if (result.status === "queued") return res.status(202).json({ ok: true, queued: true });
+    return res.status(200).json({ ok: true });
   } catch (error) {
-    if (error?.code === "contact_invalid") return reply(res, 400, { ok: false, fields: error.fields });
+    if (error?.code === "contact_invalid") return res.status(400).json({ ok: false, fields: error.fields });
     logSafeError("contact_message_record_failed", error);
-    return reply(res, 503, { ok: false, error: UNAVAILABLE });
+    return res.status(503).json({ ok: false, error: UNAVAILABLE });
   }
 };
 

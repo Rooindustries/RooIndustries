@@ -9,7 +9,7 @@ const touchLabel = (attribution, field) => {
 const paidEventsError = (step, fallbackCode, error) =>
   Object.assign(new Error(`Booking paid events could not be ${step}.`), {
     code: String(error?.code || fallbackCode),
-    status: Number(error?.status || 0) || 0,
+    status: Number(error?.status) || 0,
   });
 
 export async function reportBookingPaidEvents(

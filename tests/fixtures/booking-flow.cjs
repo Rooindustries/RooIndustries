@@ -1,3 +1,4 @@
+const { createHash } = require("node:crypto");
 const { test: base, expect } = require("@playwright/test");
 const { fixturePort } = require("./fixture-ports.cjs");
 
@@ -209,4 +210,20 @@ const test = base.extend({
   },
 });
 
-module.exports = { test, expect };
+const cookieBanner = (page) => page.getByRole("region", { name: "Cookie choice", exact: true });
+
+const settleIdle = (page) => page.evaluate(() => new Promise((resolve) => {
+  window.requestIdleCallback(() => setTimeout(resolve, 400), { timeout: 5000 });
+}));
+
+const bookingEventId = (paymentRecordId) =>
+  createHash("sha256").update(`booking-confirmed:${paymentRecordId}`).digest("hex").slice(0, 40);
+
+const routePaidStart = (page, baseURL) => page.route("**/api/payment/start", (route) => route.fulfill({ json: {
+  ok: true, paymentAccessToken: "fixture-payment", status: "started",
+  providerPayload: { checkoutUrl: `${baseURL}/__test/checkout-handoff` },
+  sessionExpiresAt: new Date(Date.now() + 20 * 60 * 1000).toISOString(),
+  quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
+} }));
+
+module.exports = { test, expect, cookieBanner, settleIdle, bookingEventId, routePaidStart };

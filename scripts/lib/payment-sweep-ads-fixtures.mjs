@@ -5,7 +5,6 @@ import { fileURLToPath } from "node:url";
 export const sweepRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const sandboxOrigin = "https://api-m.sandbox.paypal.com";
 export const fixtureMail = { FROM_EMAIL: "noreply@example.invalid", OWNER_EMAIL: "owner@example.invalid" };
-const fixturePackageTitle = "Fixture Payment";
 
 export const readRollback = (name) => fs.readFileSync(path.join(sweepRoot, "supabase/rollbacks", name), "utf8");
 
@@ -64,7 +63,7 @@ export const startPayPalCheckout = async (ctx, bookingFields = {}) => {
   const { resolvePaymentQuote } = await import("../../src/server/api/ref/pricing.js");
   const { buildQuoteFingerprint } = await import("../../src/server/api/payment/paymentRecord.js");
   const documents = createSupabaseDocumentClient({ shadowClient: ctx.fixture.client });
-  const packageTitle = fixturePackageTitle;
+  const packageTitle = "Fixture Payment";
   for (const doc of [
     { _id: "package.payment-integration", _type: "package", title: packageTitle, price: "$9.99" },
     { _id: "6d8a3646-0ed2-44b5-ad45-c5c9d578126a", _type: "bookingSettings",

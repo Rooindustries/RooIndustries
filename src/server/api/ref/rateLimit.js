@@ -1,5 +1,5 @@
 import envValue from "../../supabase/envValue.cjs";
-const { readProcessEnvValue } = envValue;
+const { readEnvValue } = envValue;
 import crypto from "crypto";
 import { getClientAddressFromRequestHeaders } from "../../request/clientAddress.js";
 import { logSafeError } from "../../safeErrorLog.js";
@@ -34,9 +34,9 @@ const loadWriteClient = async () => {
   return createRefWriteClient();
 };
 
-const getHashSecret = () =>
-  readProcessEnvValue("RATE_LIMIT_HASH_SECRET") ||
-  (process.env.NODE_ENV === "test" ? "test-rate-limit-secret" : "");
+export const getHashSecret = (env = process.env) =>
+  readEnvValue(env, "RATE_LIMIT_HASH_SECRET") ||
+  (env.NODE_ENV === "test" ? "test-rate-limit-secret" : "");
 
 const buildBucketId = ({ key, windowStart }) => {
   const secret = getHashSecret();

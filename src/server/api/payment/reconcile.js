@@ -88,7 +88,7 @@ export default async function handler(req, res) {
     duty("referralEmailRecovery",() => reconcileReferralEmailDispatches({limit:10})),
     duty("credentialRecovery",() => reconcileCredentialOperations({limit:10})),
     duty("rateLimitBucketsCleaned",() => cleanupExpiredRateLimitBuckets()),
-    duty("bookingPaidEvents",() => reportBookingPaidEvents({})),
+    duty("bookingPaidEvents",() => reportBookingPaidEvents()),
     duty("contactMessages",(deadline) => retryContactMessages({limit:20,deadline})),
     duty("emailOnlyRecovery",async () => ({supabase:await reconcileBookingEmailDispatches({client:client || createPaymentBackendClient("supabase")})})),
     duty("commerceMetricsCleaned",async () => {

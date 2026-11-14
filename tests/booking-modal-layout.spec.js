@@ -1,14 +1,10 @@
 const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
 const { waitForRouteCommitted } = require("./fixtures/react-hydration.cjs");
-const { test, expect } = require("./fixtures/booking-flow.cjs");
+const { test, expect, cookieBanner, settleIdle } = require("./fixtures/booking-flow.cjs");
 const fs = require("node:fs/promises");
 
 const bookingUrl = /\/booking(\?package=[a-z-]+)?$/;
 const firstBookingLink = page => page.locator('a[href^="/booking"]').first();
-const cookieBanner = page => page.getByRole("region", { name: "Cookie choice", exact: true });
-const settleIdle = page => page.evaluate(() => new Promise(resolve => {
-  window.requestIdleCallback(() => setTimeout(resolve, 400), { timeout: 5000 });
-}));
 const expectPackage = (page, title) => expect(page.locator(".ri-booking-package-title")).toHaveText(title);
 
 test.use({
@@ -213,7 +209,6 @@ async function openMaxSlot(page) {
   await page.goto("/packages");
   const link = page.locator(".ri-package-card", { hasText: "Performance Vertex Max" }).getByRole("link", { name: "Book Now" });
   await link.click();
-  await expect(page).toHaveURL(bookingUrl);
   await expect(page).toHaveURL(/\/booking\?package=max$/);
   await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
   await expect(page.locator(".ri-booking-package-title")).toHaveText("Performance Vertex Max");

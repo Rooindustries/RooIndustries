@@ -30,6 +30,7 @@ const EMAIL = /[^\s@]+@[^\s@]+\.[^\s@]+/;
 const CLICK_ID = /^[A-Za-z0-9_.-]{1,200}$/;
 const HOST = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
 const CAPTURED_AT = /^\d{4}-\d{2}-\d{2}T/;
+const REFERRAL_CODE = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
 
 const label = (value: unknown) => {
   if (typeof value !== "string") return "";
@@ -37,7 +38,6 @@ const label = (value: unknown) => {
     .replace(/ {2,}/g, " ").trim();
   return LABEL.test(text) && !EMAIL.test(text) ? text : "";
 };
-const REFERRAL_CODE = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
 const referralCode = (value: unknown) =>
   typeof value === "string" && REFERRAL_CODE.test(value.trim()) && /[a-z]/i.test(value) ? value.trim() : "";
 const clickId = (value: unknown) => typeof value === "string" && CLICK_ID.test(value) ? value : "";
@@ -176,5 +176,3 @@ export function salesEventProperties(attribution: unknown = captureSalesAttribut
   properties.has_gclid = Boolean(last.gclid || first.gclid);
   return properties;
 }
-
-export { salesPath, sanitizeAnalyticsEvent } from "./salesPaths";

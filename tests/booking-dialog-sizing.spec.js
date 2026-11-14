@@ -1,6 +1,6 @@
 const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
 const { waitForRouteCommitted } = require("./fixtures/react-hydration.cjs");
-const { test, expect } = require("./fixtures/booking-flow.cjs");
+const { test, expect, cookieBanner } = require("./fixtures/booking-flow.cjs");
 const fs = require("node:fs/promises");
 
 test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata", reducedMotion: "reduce", actionTimeout: 10000, navigationTimeout: 30000, trace: "off", video: "off" });
@@ -8,7 +8,6 @@ test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata", reducedMotion: "
 const dialogSelector = '[role="dialog"].ri-booking';
 const bookingUrl = /\/booking(\?package=[a-z-]+)?$/;
 const overhaul = "Performance Vertex Overhaul";
-const cookieBanner = page => page.getByRole("region", { name: "Cookie choice", exact: true });
 const fields = [
   ["discord", "Discord username"],
   ["email", "Booking email"],

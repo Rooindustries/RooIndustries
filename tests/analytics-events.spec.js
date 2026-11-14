@@ -1,10 +1,9 @@
-const { createHash } = require("node:crypto");
-const { test: bookingTest, expect } = require("./fixtures/booking-flow.cjs");
+const {
+  test: bookingTest, expect, cookieBanner: banner, settleIdle: settle, bookingEventId, routePaidStart: routeStart,
+} = require("./fixtures/booking-flow.cjs");
 
 const safety = () => import("../scripts/lib/test-target-safety.mjs");
 const overhaul = "Performance Vertex Overhaul";
-const bookingEventId = (record) =>
-  createHash("sha256").update(`booking-confirmed:${record}`).digest("hex").slice(0, 40);
 const paidEventId = bookingEventId("fixture-analytics-paid-record");
 const freeEventId = bookingEventId("fixture-analytics-free-record");
 const journeyId = "8f0c6a52-7d1e-4b3a-9c2d-1e5f6a7b8c9d";
@@ -80,24 +79,14 @@ test.use({
 
 const events = (vercel, name) =>
   vercel.calls.filter(({ method, payload }) => method === "event" && payload?.name === name);
-const settle = (page) => page.evaluate(() => new Promise((resolve) => {
-  window.requestIdleCallback(() => setTimeout(resolve, 400), { timeout: 5000 });
-}));
 const sentOnce = async (page, vercel, name) => {
   await expect.poll(() => events(vercel, name).length).toBe(1);
   await settle(page);
   expect(events(vercel, name)).toHaveLength(1);
   return events(vercel, name)[0];
 };
-const banner = (page) => page.getByRole("region", { name: "Cookie choice", exact: true });
 const overhaulCard = (page) => page.locator(".ri-package-card")
   .filter({ has: page.getByRole("heading", { name: overhaul, exact: true }) });
-const routeStart = (page, baseURL) => page.route("**/api/payment/start", (route) => route.fulfill({ json: {
-  ok: true, paymentAccessToken: "fixture-payment", status: "started",
-  providerPayload: { checkoutUrl: `${baseURL}/__test/checkout-handoff` },
-  sessionExpiresAt: new Date(Date.now() + 20 * 60 * 1000).toISOString(),
-  quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
-} }));
 const routeFinalize = async (page, receipt) => {
   const finalize = { calls: 0 };
   await page.route("**/api/payment/finalize", (route) => {

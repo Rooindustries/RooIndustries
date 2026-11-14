@@ -63,17 +63,16 @@ export const trackPackageView = ({ title, price, surface } = {}) => {
   }
 };
 
-export const trackCheckoutSessionStarted = ({ packageTitle, price, provider, currency } = {}) => {
+export const trackCheckoutSessionStarted = ({ packageTitle, price, provider } = {}) => {
   try {
     const pkg = packageFields(packageTitle, price);
     if (!pkg) return false;
-    const code = String(currency || DEFAULT_CURRENCY).toUpperCase();
     trackEvent("checkout_started", {
       package: pkg.name,
       package_slug: pkg.slug,
       provider: String(provider || ""),
       value: pkg.value,
-      currency: code,
+      currency: DEFAULT_CURRENCY,
     });
     metaTrack("InitiateCheckout", {
       content_name: pkg.name,
@@ -81,7 +80,7 @@ export const trackCheckoutSessionStarted = ({ packageTitle, price, provider, cur
       content_type: "product",
       num_items: 1,
       value: pkg.value,
-      currency: code,
+      currency: DEFAULT_CURRENCY,
     });
     return true;
   } catch {
