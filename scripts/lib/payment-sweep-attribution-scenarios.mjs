@@ -23,6 +23,7 @@ const v2Input = {
     capturedAt: "2026-11-10T09:00:00Z", landingPath: "/download/private-token", creatorCode: "friend",
     source: "newsletter", campaign: "winter\u0000 deal", content: "buyer@example.invalid",
     gclid: "Cj0K.fixture-2", fbclid: "not a click id", term: "212-555-0199 212-555-0198",
+    medium: "example.com?token=sample",
   },
 };
 

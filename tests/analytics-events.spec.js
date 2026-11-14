@@ -203,18 +203,21 @@ for (const { name, prepare, run } of checkoutStartCases) {
   });
 }
 
-test("a campaign label with phone numbers reaches neither the event nor the stored attribution", async ({
+test("campaign labels with phone numbers or a URL reach neither the event nor the stored attribution", async ({
   page, vercel,
 }) => {
   const phones = "212-555-0199 212-555-0198";
-  await page.goto(`/packages?${new URLSearchParams({ utm_source: "meta", utm_campaign: phones })}`);
+  const link = "example.com?token=sample";
+  await page.goto(`/packages?${new URLSearchParams({ utm_source: "meta", utm_campaign: phones, utm_content: link })}`);
   await overhaulCard(page).locator(".ri-package-details-button").click();
   const details = await sentOnce(page, vercel, "view_item");
   expect(details.payload.data).toMatchObject({ campaign_source: "meta" });
   expect(details.payload.data).not.toHaveProperty("campaign");
+  expect(details.payload.data).not.toHaveProperty("campaign_content");
   const stored = await page.evaluate(() => JSON.parse(sessionStorage.getItem("sales_attribution")));
   expect(stored.lastTouch.source).toBe("meta");
-  expect(JSON.stringify([vercel.calls, stored])).not.toMatch(/555/);
+  expect(stored.lastTouch).not.toHaveProperty("content");
+  expect(JSON.stringify([vercel.calls, stored])).not.toMatch(/555|token=sample/);
 });
 
 for (const failure of [500, "unknown", "network"]) {

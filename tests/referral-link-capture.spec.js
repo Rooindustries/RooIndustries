@@ -257,6 +257,20 @@ const filterRows = [
   ["top 10 2026", KEEP], ["q4 2026 v2", KEEP], ["٢١٢-٥٥٥-٠١٩٩", DROP], ["buyer@example.invalid", DROP],
   ["https://example.invalid/promo", DROP], ["www.example.invalid", DROP], ["example.invalid/reset/abc", DROP],
   ["l.facebook.com", KEEP], ["50% off, today!", KEEP],
+  ["https://example.com", DROP], ["sale HTTP://EXAMPLE.COM now", DROP], ["open android-app://com.example", DROP],
+  ["visit WWW.EXAMPLE.COM today", DROP], ["find us at www.example", DROP], ["//cdn.example.com", DROP],
+  ["see //CDN.example.com/a now", DROP], ["assets //static.example", DROP], ["example.com?token=sample", DROP],
+  ["a EXAMPLE.COM?x b", DROP], ["ref example.com?", DROP], ["example.com#top", DROP], ["x Example.Com#Top y", DROP],
+  ["go example.com#", DROP], ["Example.com/Sale now", DROP], ["visit example.com/", DROP],
+  ["example.com:8080", DROP], ["dev localhost.test:3000 build", DROP], ["staging EXAMPLE.COM:443", DROP],
+  ["10.0.0.1/admin", DROP], ["server 192.168.1.1:8080 live", DROP], ["ip 127.0.0.1?x", DROP],
+  ["1.2.3.4#a", DROP], ["google.com", KEEP], ["Meta.Ads", KEEP], ["newsletter.example.com", KEEP],
+  ["google.com spring sale", KEEP], ["10.0.0.1", KEEP], ["v2.1", KEEP], ["release V2.1 beta", KEEP],
+  ["1.5x", KEEP], ["boost 1.5x faster", KEEP], ["Spring sale.", KEEP], ["Big sale. Ends soon.", KEEP],
+  ["first+tag@example.com", DROP], ["mail first.last@example.co.uk now", DROP], ["Contact US@EXAMPLE.COM", DROP],
+  ["a\uFF20example.com", KEEP], ["@handle", KEEP], ["hi@there", KEEP], ["\uFF21\uFF22\uFF23", KEEP],
+  ["cafe\u0301", KEEP],
+  ["\uFB01nal \u2460", KEEP], ["MiXeD Case", KEEP], ["spring   sale  \u3000 2026", "spring sale 2026"],
 ];
 
 test("labels with an email, a URL or a formatted phone number are dropped and every other label is kept", async ({

@@ -31,8 +31,14 @@ const PHONE_TEXT = /^[\d\s.()-]+$/;
 const DATE = /(?<!\d)(?=(\d{4}|\d{1,2})([-./ ])(\d{1,2})\2(\d{4}|\d{1,2})(?!\d))/g;
 const DIGIT_RUN = /(?:\+[\s.()-]*)?\p{Nd}+(?:[\s.()-]+\p{Nd}+)*/gu;
 const DIGIT_GROUP = /\p{Nd}+/gu;
-const EMAIL = /[^\s@]+@[^\s@]+\.[^\s@]+/;
-const URL_TEXT = /:\/\/|(?<![\p{L}\p{N}])www\.|[\p{L}\p{N}-]\.\p{L}{2,63}\//iu;
+const HOST_CHAR = String.raw`[\p{L}\p{M}\p{N}_-]`;
+const DOTTED_HOST = String.raw`${HOST_CHAR}+(?:\.${HOST_CHAR}+)+`;
+const EMAIL = new RegExp(String.raw`[^\s@]+@${DOTTED_HOST}`, "u");
+const URL_SCHEME = /[a-z][a-z\d+.-]*:\/\//i;
+const WWW_TOKEN = new RegExp(String.raw`(?<!${HOST_CHAR}|\.)www\.`, "iu");
+const PROTOCOL_RELATIVE = new RegExp(String.raw`(?<!${HOST_CHAR})//${HOST_CHAR}`, "u");
+const HOST_WITH_PATH = new RegExp(String.raw`${DOTTED_HOST}(?:[/?#]|:\d)`, "u");
+const PRIVATE_TEXT = [EMAIL, URL_SCHEME, WWW_TOKEN, PROTOCOL_RELATIVE, HOST_WITH_PATH];
 const CLICK_ID = /^[A-Za-z0-9_.-]{1,200}$/;
 const HOST = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
 const CAPTURED_AT = /^\d{4}-\d{2}-\d{2}T/;
@@ -70,10 +76,10 @@ const phoneRun = (run: string) => {
 };
 const containsPhone = (text: string) => [...withoutDates(text).matchAll(DIGIT_RUN)].some(([run]) => phoneRun(run));
 
-const privateText = (text: string) => EMAIL.test(text) || URL_TEXT.test(text) || containsPhone(text);
+const privateText = (text: string) => PRIVATE_TEXT.some((rule) => rule.test(text)) || containsPhone(text);
 const label = (value: unknown) => {
   if (typeof value !== "string") return "";
-  const text = value.normalize("NFKC").replace(/\s+/g, " ").replace(/[\p{Cc}\p{Cf}\p{Cs}<>"'`]/gu, "")
+  const text = value.replace(/\s+/g, " ").replace(/[\p{Cc}\p{Cf}\p{Cs}<>"'`]/gu, "")
     .replace(/ {2,}/g, " ").trim();
   const kept = Array.from(text).slice(0, LABEL_CODE_POINTS).join("").trim();
   return privateText(text) || privateText(kept) ? "" : kept;
