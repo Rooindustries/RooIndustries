@@ -43,4 +43,5 @@ export const capturePostHog = (eventName, properties = {}) => {
     call("identify", properties.event_id);
   }
   call("capture", eventName, properties, { timestamp: new Date() });
+  if (COMPLETED_BOOKING.test(eventName)) startPostHog();
 };
