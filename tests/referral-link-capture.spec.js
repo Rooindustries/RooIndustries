@@ -287,7 +287,7 @@ const filterRows = [
   ["buyer@example.com_campaign", DROP], ["list buyer@example.com.au-sale", DROP], ["promo//host.com", DROP],
   ["promo//10.0.0.1", DROP], ["promo//host", KEEP], ["summer//sale", KEEP], ["a//b.c", KEEP],
   ["promo//1.2.3.4.5", KEEP], ["ver 1.2.3.4.5#a", KEEP], ["x@1.2.3.4.5", KEEP], ["build 1.2.3.45/x", DROP],
-  ["promo//host.com5", KEEP], ["promo//cdn.example.com/a", DROP],
+  ["deal//shop.com5", KEEP], ["promo//cdn.example.com/a", DROP],
 ];
 
 test("labels with an email, a URL or a formatted phone number are dropped and every other label is kept", async ({
