@@ -37,9 +37,10 @@ const COOKIE_NOTICE = {
       "Only after Accept: the roo_attr and roo_attr_last cookies keep the first and the latest ad, campaign",
       "or referral link that brought you here for 90 days. PostHog counts page views and booking steps",
       "without cookies, and records how public pages are used with every input and all page text hidden.",
-      "When our Meta pixel is turned on, it tells Meta which pages and packages you viewed and when you",
-      "start checkout or book, so we can measure our ads. It never sends your name, email or phone, and",
-      "Meta sets its own _fbp and _fbc cookies.",
+      "Page views and booking steps that have not reached PostHog yet wait in this tab's session storage",
+      "(roo-posthog-outbox) until they are sent. When our Meta pixel is turned on, it tells Meta which pages",
+      "and packages you viewed and when you start checkout or book, so we can measure our ads. It never sends",
+      "your name, email or phone, and Meta sets its own _fbp and _fbc cookies.",
     ].join(" "),
     [
       "Contact messages: messages sent through the contact form are stored so we can reply. Delivered",
@@ -47,7 +48,7 @@ const COOKIE_NOTICE = {
     ].join(" "),
     [
       "Changing your choice: use Cookie settings at the bottom of any page. Declining removes the roo_attr,",
-      "roo_attr_last, _fbp and _fbc cookies and stops PostHog and the Meta pixel.",
+      "roo_attr_last, _fbp and _fbc cookies, clears roo-posthog-outbox and stops PostHog and the Meta pixel.",
     ].join(" "),
   ],
 };

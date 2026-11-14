@@ -1,31 +1,31 @@
 import { readConsent } from "./consent";
+import { cleanOutsideValue } from "./outsideValue.cjs";
+import { postHogQueued, takePostHogQueue } from "./postHogOutbox";
 
 const DEFAULT_KEY = "phc_AqgCN7TfCu5fVECnkPCVjWAStC3grX4MmA3AmKXWu9qe";
 const PROXY_PATH = "/ingest";
 const COMPLETED_BOOKING = /^(?:free_)?booking_completed$/;
 const INTERNAL_ID = /^[a-f0-9]{40}$/;
 const JOURNEY_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
-const QUEUE_LIMIT = 100;
 
 let client = null;
 let loading = null;
-const pending = [];
 
 const granted = () => readConsent() === "granted";
 
-const projectKey = () => (process.env.NEXT_PUBLIC_POSTHOG_KEY || DEFAULT_KEY).trim();
+const projectKey = () => cleanOutsideValue(process.env.NEXT_PUBLIC_POSTHOG_KEY || DEFAULT_KEY);
 
-const flush = () => {
-  while (client && pending.length) {
-    const [method, ...args] = pending.shift();
-    client[method](...args);
+const deliver = ({ event, properties, url, at }) => {
+  if (JOURNEY_ID.test(properties.journey_id || "")) client.useJourney(properties.journey_id);
+  if (COMPLETED_BOOKING.test(event) && INTERNAL_ID.test(properties.event_id || "")) {
+    client.identify(properties.event_id);
   }
+  const page = { $current_url: url, $pathname: new URL(url).pathname };
+  client.capture(event, { ...properties, ...page }, { timestamp: new Date(at), transport: "sendBeacon" });
 };
 
-const call = (method, ...args) => {
-  if (pending.length >= QUEUE_LIMIT) pending.shift();
-  pending.push([method, ...args]);
-  flush();
+const flush = () => {
+  if (client) takePostHogQueue().forEach(deliver);
 };
 
 export const startPostHog = () => {
@@ -33,7 +33,7 @@ export const startPostHog = () => {
   loading = Promise.all([import("./posthogClient"), import("./salesAttribution")])
     .then(([{ createPostHog }, sales]) => {
       if (!granted()) return;
-      client = createPostHog(projectKey(), PROXY_PATH, pending.length > 0, sales);
+      client = createPostHog(projectKey(), PROXY_PATH, postHogQueued(), sales);
       flush();
     })
     .catch(() => {})
@@ -47,18 +47,9 @@ export const startPostHogWhenIdle = () => {
   else window.setTimeout(startPostHog, 1200);
 };
 
-export const syncPostHogPage = () => {
-  if (!granted()) pending.length = 0;
-  client?.syncPage();
-};
+export const syncPostHogPage = () => client?.syncPage();
 
-export const capturePostHog = (eventName, properties, { url, timestamp }) => {
-  if (!granted()) return;
-  if (JOURNEY_ID.test(properties.journey_id || "")) call("useJourney", properties.journey_id);
-  if (COMPLETED_BOOKING.test(eventName) && INTERNAL_ID.test(properties.event_id || "")) {
-    call("identify", properties.event_id);
-  }
-  const page = { $current_url: url, $pathname: new URL(url).pathname };
-  call("capture", eventName, { ...properties, ...page }, { timestamp, transport: "sendBeacon" });
-  if (COMPLETED_BOOKING.test(eventName)) startPostHog();
+export const sendPostHog = (event) => {
+  if (client) flush();
+  else if (COMPLETED_BOOKING.test(event)) startPostHog();
 };

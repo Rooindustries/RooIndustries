@@ -37,6 +37,50 @@ const sentBetween = (seen, from, to) => [
   ...seen.events.filter((event) => Date.parse(event.timestamp) > from && Date.parse(event.timestamp) < to),
   ...seen.snapshots.filter((item) => item.timestamp > from && item.timestamp < to),
 ];
+const sentAt = (event) => Date.parse(event.timestamp);
+const outbox = (page) => page.evaluate(() => {
+  const stored = sessionStorage.getItem("roo-posthog-outbox");
+  return stored === null ? null : JSON.parse(stored).map((item) => item.event);
+});
+const idleStart = (page) => page.evaluate(() => new Promise((resolve) => {
+  window.requestIdleCallback(() => resolve(), { timeout: 4000 });
+}));
+const pastPostHogStart = async (page, seen) => {
+  for (const round of ["start", "first send"]) {
+    await idleStart(page);
+    await expect.poll(() => seen.loading.size, { message: round }).toBe(0);
+  }
+};
+const reachPayment = async (page) => {
+  await page.getByRole("button", { name: /^Earliest available:/ }).click();
+  await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).last().click();
+  await page.getByRole("textbox", { name: "Discord username", exact: true }).fill("fixture_visitor");
+  await page.getByRole("textbox", { name: "Booking email", exact: true }).fill("visitor@example.invalid");
+  await page.getByRole("textbox", { name: "PC specifications", exact: true }).fill("Ryzen 7700 / RTX 4070");
+  await page.getByRole("textbox", { name: "Main game or application", exact: true }).fill("CS2");
+  await page.getByRole("button", { name: "Review before payment", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Continue to payment", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Complete Payment", exact: true })).toBeVisible();
+};
+const holdChunk = async (page, { origin, loopback }, marker) => {
+  const hold = { held: false };
+  const gate = new Promise((resolve) => { hold.release = resolve; });
+  await page.route(`${origin}/_next/static/chunks/**`, async (route) => {
+    const response = await route.fetch({ url: route.request().url().replace(origin, loopback) });
+    const body = await response.body();
+    if (body.includes(marker)) {
+      hold.held = true;
+      await gate;
+    }
+    return route.fulfill({ response, body });
+  });
+  return hold;
+};
+const holdPostHog = (page, productionHost) => holdChunk(page, productionHost, "[PostHog.js]");
+
+test.afterEach(({ page }) => page.unrouteAll({ behavior: "ignoreErrors" }));
 
 test.describe("production host", () => {
   test("PostHog records the booking funnel without customer details", async ({ page, posthog: seen, baseURL }) => {
@@ -68,17 +112,7 @@ test.describe("production host", () => {
 
     let finalizeRoute;
     await page.route("**/api/payment/finalize", (route) => { finalizeRoute = route; });
-    await page.getByRole("button", { name: /^Earliest available:/ }).click();
-    await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
-    await page.getByRole("button", { name: "Next", exact: true }).last().click();
-    await page.getByRole("textbox", { name: "Discord username", exact: true }).fill("fixture_visitor");
-    await page.getByRole("textbox", { name: "Booking email", exact: true }).fill("visitor@example.invalid");
-    await page.getByRole("textbox", { name: "PC specifications", exact: true }).fill("Ryzen 7700 / RTX 4070");
-    await page.getByRole("textbox", { name: "Main game or application", exact: true }).fill("CS2");
-    await page.getByRole("button", { name: "Review before payment", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Continue to payment", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Complete Payment", exact: true })).toBeVisible();
+    await reachPayment(page);
     await expect.poll(() => seen.snapshots.some((item) => item.type === 2)).toBe(true);
     await settleIdle(page);
     expect(named(seen, "checkout_started")).toEqual([]);
@@ -125,7 +159,7 @@ test.describe("production host", () => {
     for (const value of customer) expect(sent).not.toContain(value);
     const replay = JSON.stringify(seen.snapshots);
     expect(seen.snapshots.filter((item) => item.type === 3 && item.data.adds?.length).length).toBeGreaterThan(0);
-    expect(replay).toContain("rooindustries.com");
+    expect(replay).toContain(`${baseURL}/packages`);
     expect(replay).not.toContain("Review your booking");
     expect(replay).not.toContain("utm_source");
 
@@ -140,7 +174,7 @@ test.describe("production host", () => {
     await page.goto("/referrals/login");
     await expect(page.locator("main")).toBeVisible();
     await acceptCookies(page);
-    await settleIdle(page);
+    await pastPostHogStart(page, seen);
     expect(seen.requests).toEqual([]);
     expect(seen.posthogHosts).toEqual([]);
 
@@ -152,21 +186,6 @@ test.describe("production host", () => {
     expect(new Set(seen.events.map((event) => event.properties.distinct_id))).toEqual(new Set([journeyId]));
     expect(seen.posthogHosts).toEqual([]);
   });
-
-  const holdPostHog = async (page, { origin, loopback }) => {
-    const hold = { held: false };
-    const gate = new Promise((resolve) => { hold.release = resolve; });
-    await page.route(`${origin}/_next/static/chunks/**`, async (route) => {
-      const response = await route.fetch({ url: route.request().url().replace(origin, loopback) });
-      const body = await response.body();
-      if (body.includes("[PostHog.js]")) {
-        hold.held = true;
-        await gate;
-      }
-      return route.fulfill({ response, body });
-    });
-    return hold;
-  };
 
   test("each public page view is sent once, from Accept after load through Back and Forward", async ({
     page, posthog: seen, baseURL, productionHost,
@@ -240,7 +259,9 @@ test.describe("production host", () => {
 
     await expect.poll(() => named(seen, "view_item").length, { timeout: 20000 }).toBe(1);
     expect(named(seen, "view_item")[0].properties.$current_url).toBe(`${baseURL}/packages`);
-    await settleIdle(page);
+    await pastPostHogStart(page, seen);
+    await page.goBack();
+    await expect.poll(() => pageviews(seen)).toEqual([`${baseURL}/packages`, `${baseURL}/packages`]);
     expect(seen.events.filter((event) => !event.properties.$current_url.startsWith(`${baseURL}/packages`)))
       .toEqual([]);
     expect(JSON.stringify(seen.snapshots)).not.toContain("ref-login-identifier");
@@ -284,6 +305,89 @@ test.describe("production host", () => {
       .toEqual([]);
   });
 
+  test("one page view when Accept is clicked, and one when Accept is already stored at load", async ({
+    page, posthog: seen, baseURL,
+  }) => {
+    await page.goto("/packages");
+    await settleIdle(page);
+    await acceptCookies(page);
+    await expect.poll(() => pageviews(seen)).toEqual([`${baseURL}/packages`]);
+    await page.goto("/about");
+    await expect.poll(() => pageviews(seen)).toEqual([`${baseURL}/packages`, `${baseURL}/about`]);
+    await page.goto("/packages");
+    await settleIdle(page);
+    await seeDetails(page);
+    await expect.poll(() => named(seen, "view_item").length).toBe(1);
+    expect(pageviews(seen)).toEqual([`${baseURL}/packages`, `${baseURL}/about`, `${baseURL}/packages`]);
+  });
+
+  test("Accept and a navigation before PostHog has downloaded keep both page views, in order", async ({
+    page, posthog: seen, baseURL, productionHost,
+  }) => {
+    const hold = await holdPostHog(page, productionHost);
+    await page.goto("/packages");
+    const acceptedAt = await browserNow(page);
+    await acceptCookies(page);
+    await expect.poll(() => hold.held, { timeout: 20000 }).toBe(true);
+    const navigatedAt = await browserNow(page);
+    await page.getByRole("link", { name: /Book Now/ }).first().click();
+    await expect(page).toHaveURL((url) => url.pathname === "/booking");
+    hold.release();
+
+    await expect.poll(() => pageviews(seen)).toEqual([`${baseURL}/packages`, `${baseURL}/booking`]);
+    const [landing, booking] = named(seen, "$pageview");
+    expect(landing.properties.$pathname).toBe("/packages");
+    expect(booking.properties.$pathname).toBe("/booking");
+    expect(sentAt(landing)).toBeGreaterThanOrEqual(acceptedAt);
+    expect(sentAt(landing)).toBeLessThan(navigatedAt);
+    expect(sentAt(booking)).toBeGreaterThanOrEqual(navigatedAt);
+  });
+
+  test("a tab that is never visible still sends its page view", async ({ page, posthog: seen, baseURL }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(Document.prototype, "visibilityState", { get: () => "hidden" });
+      Object.defineProperty(Document.prototype, "hidden", { get: () => true });
+    });
+    await page.goto("/packages");
+    expect(await page.evaluate(() => document.visibilityState)).toBe("hidden");
+    await acceptCookies(page);
+    await expect.poll(() => pageviews(seen)).toEqual([`${baseURL}/packages`]);
+  });
+
+  test("checkout_started survives the redirect to the provider before PostHog has started", async ({
+    page, posthog: seen, baseURL, productionHost,
+  }) => {
+    test.setTimeout(180000);
+    const hold = await holdPostHog(page, productionHost);
+    await page.goto("/packages");
+    await acceptCookies(page);
+    await page.getByRole("link", { name: /Book Now/ }).first().click();
+    await expect(page).toHaveURL((url) => url.pathname === "/booking");
+    await reachPayment(page);
+    const paymentPath = new URL(page.url()).pathname;
+    const clickedAt = await browserNow(page);
+    await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+    await expect(page).toHaveURL(`${baseURL}/__test/checkout-handoff`);
+    const leftAt = await browserNow(page);
+    expect(hold.held).toBe(true);
+    expect(seen.events).toEqual([]);
+    hold.release();
+
+    await page.goto("/packages");
+    await expect.poll(() => named(seen, "checkout_started").length).toBe(1);
+    const started = named(seen, "checkout_started")[0];
+    expect(started.properties.$current_url).toBe(`${baseURL}${paymentPath}`);
+    expect(sentAt(started)).toBeGreaterThanOrEqual(clickedAt);
+    expect(sentAt(started)).toBeLessThanOrEqual(leftAt);
+    await expect.poll(() => pageviews(seen).at(-1)).toBe(`${baseURL}/packages`);
+    const views = pageviews(seen).length;
+
+    await page.reload();
+    await expect.poll(() => pageviews(seen).length).toBe(views + 1);
+    expect(named(seen, "checkout_started")).toHaveLength(1);
+    expect(await outbox(page)).toBeNull();
+  });
+
   test("a standalone public page is counted", async ({ page, posthog: seen, baseURL }) => {
     await page.goto("/tourney");
     await acceptCookies(page);
@@ -323,7 +427,7 @@ test.describe("cookie choice", () => {
       await expect(cookieBanner(page)).toBeVisible();
       if (choice === "Decline") await declineCookies(page);
       await seeDetails(page);
-      await settleIdle(page);
+      await pastPostHogStart(page, seen);
       expect(await postHogCode(seen)).toEqual([]);
       expect(seen.requests).toEqual([]);
 
@@ -368,6 +472,72 @@ test.describe("cookie choice", () => {
     expect(Date.parse(named(seen, "view_item")[0].timestamp)).toBeGreaterThan(acceptedAt);
   });
 
+  test("an event fired before Accept is never sent, however long its module took to load", async ({
+    page, posthog: seen, baseURL, productionHost,
+  }) => {
+    const hold = await holdChunk(page, productionHost, "first_campaign");
+    await page.goto("/packages");
+    await expect.poll(() => hold.held, { timeout: 20000 }).toBe(true);
+    await seeDetails(page);
+    const acceptedAt = await browserNow(page);
+    await acceptCookies(page);
+    hold.release();
+
+    await expect.poll(() => pageviews(seen)).toEqual([`${baseURL}/packages`]);
+    await seeDetails(page);
+    await expect.poll(() => named(seen, "view_item").length).toBe(1);
+    expect(sentAt(named(seen, "view_item")[0])).toBeGreaterThan(acceptedAt);
+    expect(seen.events.filter((event) => sentAt(event) < acceptedAt)).toEqual([]);
+  });
+
+  test("Decline after Accept clears the waiting list and sends none of it", async ({
+    page, posthog: seen, baseURL, productionHost,
+  }) => {
+    const hold = await holdPostHog(page, productionHost);
+    await page.goto("/packages");
+    await acceptCookies(page);
+    await seeDetails(page);
+    await expect.poll(() => outbox(page)).toEqual(["$pageview", "view_item"]);
+    await openCookieSettings(page);
+    await declineCookies(page);
+    expect(await outbox(page)).toBeNull();
+    hold.release();
+    await seeDetails(page);
+    expect(await outbox(page)).toBeNull();
+
+    const acceptedAt = await browserNow(page);
+    await openCookieSettings(page);
+    await acceptCookies(page);
+    await expect.poll(() => pageviews(seen)).toEqual([`${baseURL}/packages`]);
+    expect(seen.events.filter((event) => sentAt(event) < acceptedAt)).toEqual([]);
+    expect(named(seen, "view_item")).toEqual([]);
+  });
+
+  test("Decline in another tab clears this tab's waiting list and its next event", async ({
+    page, context, posthog: seen, baseURL, productionHost,
+  }) => {
+    const hold = await holdPostHog(page, productionHost);
+    const here = () => seen.events.filter((event) => event.properties.$current_url === `${baseURL}/packages`);
+    await page.goto("/packages");
+    await acceptCookies(page);
+    await expect.poll(() => outbox(page)).toEqual(["$pageview"]);
+    const other = await context.newPage();
+    await other.goto("/about");
+    await openCookieSettings(other);
+    await declineCookies(other);
+    await expect.poll(() => outbox(page)).toBeNull();
+    await seeDetails(page);
+    expect(await outbox(page)).toBeNull();
+    hold.release();
+
+    const acceptedAt = await browserNow(page);
+    await openCookieSettings(other);
+    await acceptCookies(other);
+    await expect.poll(() => here().map((event) => event.event)).toEqual(["$pageview"]);
+    expect(sentAt(here()[0])).toBeGreaterThan(acceptedAt);
+    await other.close();
+  });
+
   test("a choice made in another tab starts and stops PostHog here", async ({
     page, context, posthog: seen, baseURL,
   }) => {
@@ -402,7 +572,7 @@ localTest("PostHog stays off on local hosts", async ({ page, flow, posthog: seen
   await page.goto("/packages");
   await acceptCookies(page);
   await seeDetails(page);
-  await settleIdle(page);
+  await pastPostHogStart(page, seen);
   expect(seen.requests).toEqual([]);
   expect(await postHogCode(seen)).toEqual([]);
 });

@@ -1,4 +1,5 @@
 import { reportRequestError } from "./clientRequest";
+import { cleanOutsideValue } from "./outsideValue.cjs";
 
 const lazyModule = (importModule) => {
   let loaded = null;
@@ -22,10 +23,13 @@ const lazyModule = (importModule) => {
 
 const salesAttribution = lazyModule(() => import("./salesAttribution"));
 const metaPixel = lazyModule(() => import("./metaPixel"));
+const postHogOutbox = lazyModule(() => import("./postHogOutbox"));
 
-export const metaPixelId = () => String(process.env.NEXT_PUBLIC_META_PIXEL_ID || "").trim();
+export const metaPixelId = () => cleanOutsideValue(process.env.NEXT_PUBLIC_META_PIXEL_ID);
 
 export const withSalesAttribution = salesAttribution.use;
+
+export const withPostHogOutbox = postHogOutbox.use;
 
 export const loadSalesAttribution = () => salesAttribution.load().catch((error) => {
   reportRequestError(error);

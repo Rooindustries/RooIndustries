@@ -8,7 +8,7 @@ import { WalletCards } from "lucide-react";
 import packagePricing from "../lib/packagePricing";
 import { preloadMetaPixel } from "../lib/analyticsModules";
 import { checkoutStartCounted, paymentStartBody } from "../lib/paymentStartBody";
-import { trackCheckoutSessionStarted, trackConfirmedPurchase } from "../lib/analytics";
+import { trackCheckoutSessionStarted, trackConfirmedPurchase } from "../lib/checkoutAnalytics";
 import { preloadConfirmationPage, preloadConfirmationPages } from "../lib/confirmationPages";
 import { useBookingDialogPending } from "../lib/bookingDialogHold";
 import { beginCheckoutConfirmation } from "../lib/checkoutConfirmation";

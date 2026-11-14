@@ -67,13 +67,20 @@ const ingest = async (route, seen) => {
 };
 
 const stubPostHog = async (context, origin) => {
-  const seen = { events: [], snapshots: [], requests: [], posthogHosts: [], scripts: [] };
+  const seen = { events: [], snapshots: [], requests: [], posthogHosts: [], scripts: [], loading: new Set() };
   await context.addInitScript(() => Object.defineProperty(Navigator.prototype, "webdriver", { get: () => false }));
   await context.route((url) => url.hostname.endsWith("posthog.com"), (route) => {
     seen.posthogHosts.push(route.request().url());
     return route.abort("blockedbyclient");
   });
   await context.route(`${origin}/ingest/**`, (route) => ingest(route, seen));
+  context.on("request", (request) => {
+    if (request.resourceType() === "script" || new URL(request.url()).pathname.startsWith("/ingest/")) {
+      seen.loading.add(request);
+    }
+  });
+  const settle = (request) => seen.loading.delete(request);
+  for (const settled of ["requestfinished", "requestfailed"]) context.on(settled, settle);
   context.on("response", (response) => {
     if (response.request().resourceType() !== "script") return;
     seen.scripts.push(response.text().then((body) => (POSTHOG_CODE.test(body) ? response.url() : ""), () => ""));

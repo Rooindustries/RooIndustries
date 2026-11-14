@@ -85,9 +85,7 @@ const granted = () => readConsent() === "granted";
 const scrubEvent = (event) => {
   if (!event || !granted()) return null;
   if (event.event === "$snapshot") return scrubSnapshot(event);
-  const publicPage = Boolean(cleanUrl(event.properties?.$current_url || window.location.href));
-  if (event.event === "$pageview") markPage(publicPage);
-  if (!publicPage) return null;
+  if (!cleanUrl(event.properties?.$current_url || window.location.href)) return null;
   return {
     ...event,
     properties: cleanProperties(event.properties || {}),
@@ -130,8 +128,8 @@ export const createPostHog = (key, apiHost, queued, salesAttribution) => {
     person_profiles: "identified_only",
     request_batching: false,
     ...(journeyId ? { bootstrap: journeyIdentity(journeyId) } : {}),
-    capture_pageview: "history_change",
-    capture_pageleave: "if_capture_pageview",
+    capture_pageview: false,
+    capture_pageleave: true,
     autocapture: false,
     rageclick: false,
     capture_dead_clicks: false,
@@ -160,7 +158,9 @@ export const createPostHog = (key, apiHost, queued, salesAttribution) => {
   let recording = publicPage;
   return {
     syncPage: () => {
-      const recordable = granted() && Boolean(cleanUrl(window.location.href));
+      const shown = Boolean(cleanUrl(window.location.href));
+      markPage(shown);
+      const recordable = granted() && shown;
       if (recordable === recording) return;
       recording = recordable;
       if (recordable) posthog.startSessionRecording();

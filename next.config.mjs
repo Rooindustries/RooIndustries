@@ -20,7 +20,7 @@ export function getSupabaseAssetOrigin(env = process.env) {
 }
 
 export function getPostHogProxyRewrites(env = process.env) {
-  const ingest = new URL(env.NEXT_PUBLIC_POSTHOG_HOST || "https://us.i.posthog.com");
+  const ingest = new URL(cleanOutsideValue(env.NEXT_PUBLIC_POSTHOG_HOST) || "https://us.i.posthog.com");
   const assets = new URL(ingest.origin);
   assets.hostname = ingest.hostname.replace(/^([a-z]+)\.i\.posthog\.com$/, "$1-assets.i.posthog.com");
   return [

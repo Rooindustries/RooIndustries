@@ -1,6 +1,4 @@
-const CONSENT_KEY = "roo-consent";
-const CONSENT_EVENT = "roo-consent-change";
-const CONSENT_RESET_EVENT = "roo-consent-reset";
+import { CONSENT_EVENT, CONSENT_KEY, CONSENT_RESET_EVENT } from "./consentSignals";
 
 const CHOICES = new Set(["granted", "denied"]);
 

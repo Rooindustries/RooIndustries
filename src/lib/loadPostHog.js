@@ -1,27 +1,33 @@
 import { isProductionBrowser } from "./productionBrowser";
+import { withPostHogOutbox } from "./analyticsModules";
+import { CONSENT_EVENT, CONSENT_KEY, CONSENT_RESET_EVENT } from "./consentSignals";
 
 let poppedAt = 0;
-let postHogLoaded = false;
-if (typeof window !== "undefined") window.addEventListener("popstate", () => { poppedAt = Date.now(); });
+let choices = 0;
+const chosen = () => { choices += 1; };
+if (typeof window !== "undefined") {
+  window.addEventListener("popstate", () => { poppedAt = Date.now(); });
+  window.addEventListener(CONSENT_EVENT, chosen);
+  window.addEventListener(CONSENT_RESET_EVENT, chosen);
+  window.addEventListener("storage", ({ key }) => (key === CONSENT_KEY || key === null) && chosen());
+}
 
 export const lastPopstate = () => poppedAt;
 
-const withPostHog = (action) => {
-  if (!isProductionBrowser()) return;
-  import("./consent")
-    .then(({ readConsent }) => (postHogLoaded || readConsent() === "granted") && import("./posthog"))
-    .then((posthog) => {
-      if (!posthog) return;
-      postHogLoaded = true;
-      action(posthog);
-    })
-    .catch(() => {});
+export const consentChoices = () => choices;
+
+export const postHogMoment = (event) => {
+  const moment = { event, href: window.location.href, at: Date.now(), choices };
+  withPostHogOutbox((outbox) => outbox.decide(moment));
+  return moment;
 };
 
-export const loadPostHog = () => withPostHog(({ syncPostHogPage, startPostHogWhenIdle }) => {
-  syncPostHogPage();
-  startPostHogWhenIdle();
-});
+const follow = (change) => {
+  if (!isProductionBrowser()) return;
+  const moment = postHogMoment("$pageview");
+  withPostHogOutbox((outbox) => outbox.follow(moment, change));
+};
 
-export const capturePostHogEvent = (eventName, properties, origin) =>
-  withPostHog(({ capturePostHog }) => capturePostHog(eventName, properties, origin));
+export const loadPostHog = () => follow(false);
+
+export const followPostHogChoice = () => follow(true);
