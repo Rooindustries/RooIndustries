@@ -1,6 +1,7 @@
 import { isProductionBrowser } from "./productionBrowser";
 import { track } from "@vercel/analytics/react";
 import { salesEventProperties, sanitizeSalesAttribution } from "./salesAttribution";
+import { capturePostHog, identifyPostHogBooking } from "./posthog";
 
 const ensureAnalyticsQueue = () => {
   if (typeof window === "undefined" || window.va) return;
@@ -17,7 +18,9 @@ export const trackEvent = (eventName, data = {}, options = {}) => {
     const attribution = Object.hasOwn(options, "attribution")
       ? salesEventProperties(options.attribution)
       : salesEventProperties();
-    track(eventName, { ...attribution, ...data });
+    const properties = { ...attribution, ...data };
+    track(eventName, properties);
+    capturePostHog(eventName, properties);
     return true;
   } catch {
     return false;
@@ -26,7 +29,7 @@ export const trackEvent = (eventName, data = {}, options = {}) => {
 
 const completedPurchases = new Set();
 
-export const trackConfirmedPurchase = (receipt) => {
+export const trackConfirmedPurchase = (receipt, bookingId = "") => {
   try {
     if (!receipt || !/^[a-f0-9]{40}$/.test(receipt.eventId || "")) return false;
     if (!["paid", "free"].includes(receipt.paymentType) || !Number.isFinite(receipt.amount) || receipt.amount < 0) return false;
@@ -35,6 +38,7 @@ export const trackConfirmedPurchase = (receipt) => {
       if (completedPurchases.has(receipt.eventId) || sessionStorage.getItem(key)) return false;
     } catch {}
     const attribution = sanitizeSalesAttribution(receipt.attribution);
+    if (isProductionBrowser()) identifyPostHogBooking(bookingId);
     const tracked = trackEvent("booking_completed", {
       ...salesEventProperties(attribution),
       event_id: receipt.eventId,

@@ -18,6 +18,21 @@ Run `npm run test:monitoring:deployments` on Linux with Node 24, `unshare` (util
 
 The host must allow unprivileged user and network namespaces. On GitHub-hosted Ubuntu runners, the monitoring job loads an AppArmor profile permitting user namespaces only for `/usr/bin/unshare`, without changing the system-wide restriction. Self-hosted runners keep their existing security settings.
 
+## Product analytics
+
+PostHog (US Cloud) records pageviews and the booking funnel: `package_viewed`, `package_selected`, `checkout_started` and `booking_completed`, plus the other events sent through `trackEvent`. It loads after the page is idle, and only on `www.rooindustries.com` production builds, the same check Vercel Analytics uses. Local runs, CI and Vercel previews send nothing.
+
+| Variable | Default | Use |
+| --- | --- | --- |
+| `NEXT_PUBLIC_POSTHOG_KEY` | `phc_AqgCN7TfCu5fVECnkPCVjWAStC3grX4MmA3AmKXWu9qe` | Public project key, sent by the browser. |
+| `NEXT_PUBLIC_POSTHOG_HOST` | `https://us.i.posthog.com` | Where `/ingest` forwards events. `/ingest/static` and `/ingest/array` go to the matching `-assets` host. |
+
+The browser sends everything to `/ingest` on the site's own origin, and `next.config.mjs` forwards it to PostHog. Next.js normally removes trailing slashes with a redirect, and PostHog's endpoints end in one, so the config turns that redirect off and adds the same redirect back for every path outside `/ingest/`. Both variables are read at build time, so rebuild after changing them.
+
+There is no consent banner yet, so PostHog keeps its state in memory and sets no cookies or storage. The visitor id is the existing per-tab sales journey id, which already lives in `sessionStorage`. A paid or free booking identifies the visitor by its booking id. URLs are cut down to the page path, pages outside the public list (admin, creator portal, sign-in) send nothing, and autocapture is off. Session replay, when it is turned on in PostHog, masks every input and all page text and drops request and response headers and bodies. Names, emails and other customer details are never sent.
+
+`npx playwright test tests/posthog-analytics.spec.js --project=chromium` runs the funnel on a local build served as `www.rooindustries.com` and checks every PostHog request, the replay masking and the trailing slash redirects. Nothing leaves the machine.
+
 ## Code of Conduct
 
 Please read and follow our [Code of Conduct](CODE_OF_CONDUCT.md) when participating in this project.

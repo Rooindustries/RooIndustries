@@ -31,6 +31,8 @@ const newJourneyId = () => {
 
 export const salesPath = (pathname: string) => PUBLIC_PATHS.has(pathname) ? pathname : pathname === "/upgrade-xoc" || pathname.startsWith("/upgrade/") ? "/upgrade" : "";
 
+export const publicAnalyticsPath = (pathname: string) => salesPath(pathname) || (INDEXABLE_ROUTES.includes(pathname) || pathname === "/downloads/utilities" ? pathname : "");
+
 export function sanitizeSalesAttribution(value: unknown): SalesAttribution | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const input = value as Record<string, unknown>;
@@ -81,7 +83,7 @@ export function salesEventProperties(attribution: unknown = captureSalesAttribut
 export function sanitizeAnalyticsEvent<T extends { url: string; type: string }>(event: T): T | null {
   try {
     const url = new URL(event.url);
-    const path = salesPath(url.pathname) || (INDEXABLE_ROUTES.includes(url.pathname) || url.pathname === "/downloads/utilities" ? url.pathname : "");
+    const path = publicAnalyticsPath(url.pathname);
     if (!path) return null;
     return { ...event, url: `${url.origin}${path}` };
   } catch { return null; }

@@ -6,6 +6,7 @@ import { Analytics } from "@vercel/analytics/react";
 import { sanitizeAnalyticsEvent } from "../lib/salesAttribution";
 import { initializePerformanceProfile } from "../lib/performanceProfile";
 import { rememberReferralFromSearch } from "../lib/checkoutStorage";
+import { startPostHog } from "../lib/posthog";
 
 const CHECKOUT_PATHS = ["/booking", "/payment", "/payment-success", "/thank-you"];
 const SEORCE_PROJECT_ID = "6a2e76bf3f9dac8c30e27b89";
@@ -80,6 +81,13 @@ export default function AppClientRuntime() {
   }, []);
   useEffect(() => {
     if (!CHECKOUT_PATHS.includes(window.location.pathname)) rememberReferralFromSearch(window.location.search);
+  }, []);
+
+  useEffect(() => {
+    if (!isProductionBrowser()) return undefined;
+    return runWhenIdle(() => {
+      startPostHog();
+    });
   }, []);
 
   useEffect(() => {

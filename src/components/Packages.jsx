@@ -58,6 +58,7 @@ export default function Packages({
   const UPGRADE_FAQ_HASH = "upgrade-path";
 
   const openDetails = (pkg) => {
+    trackEvent("package_viewed", { package: pkg.title, surface: "details" });
     startTransition(() => {
       setDetailsLoaded(true);
       setDetailsPkg(pkg);

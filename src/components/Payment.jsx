@@ -229,7 +229,7 @@ export default function Payment({ hideFooter = false }) {
   };
 
   const buildConfirmationNavigationState = (responseBody = {}) => {
-    trackConfirmedPurchase(responseBody.analyticsReceipt);
+    trackConfirmedPurchase(responseBody.analyticsReceipt, responseBody.bookingId);
     const baseState = getModalFlowState();
     const bookingId = String(responseBody?.bookingId || "").trim();
 
