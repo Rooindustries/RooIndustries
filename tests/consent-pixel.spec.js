@@ -1,6 +1,6 @@
 const {
   test, expect, cookieBanner: banner, settleIdle: settle, bookingEventId, routePaidStart, startInTwoTabsAndReload,
-  startPaidThenResume, blockLocalStorage,
+  startPaidThenResume, blockLocalStorage, declineCookies,
 } = require("./fixtures/booking-flow.cjs");
 
 const pixelId = String(process.env.TOOLING_META_PIXEL_ID || "").trim();
@@ -250,7 +250,7 @@ if (!pixelId) {
         await scrollToEnd(page);
         await expectBannerPlacement(page);
         await shot(page, `home-footer-banner-${width}`);
-        await banner(page).getByRole("button", { name: "Decline", exact: true }).click();
+        await declineCookies(page);
         await expect(banner(page)).toHaveCount(0);
         await page.reload();
         await settle(page);
@@ -337,7 +337,7 @@ if (!pixelId) {
     await expect.poll(() => adCookies(context)).toEqual({});
     expect(await sessionJourney(page)).toBe(journeyId);
     await setAdCookies(context, baseURL);
-    await banner(page).getByRole("button", { name: "Decline", exact: true }).click();
+    await declineCookies(page);
     await expect(banner(page)).toHaveCount(0);
     await expect.poll(() => adCookies(context)).toEqual({});
 
@@ -350,6 +350,23 @@ if (!pixelId) {
     await settle(page);
     expect(await adCookies(context)).toEqual(adCookieValues);
     await page.getByRole("button", { name: "Cookie settings", exact: true }).click();
+    await expect(banner(page)).toBeVisible();
+    await expect.poll(() => adCookies(context)).toEqual({});
+    expect(await sessionJourney(page)).toBe(journeyId);
+  });
+
+  test("staff pages run no cookie choice or attribution while public pages still ask", async ({
+    page, context, baseURL,
+  }) => {
+    await setAdCookies(context, baseURL);
+    await page.goto("/admin/content");
+    await expect(page.getByRole("heading", { name: "Site content", exact: true })).toBeVisible();
+    await settle(page);
+    await page.waitForLoadState("networkidle");
+    await expect(banner(page)).toHaveCount(0);
+    expect(await adCookies(context)).toEqual(adCookieValues);
+    expect(await sessionJourney(page)).toBeUndefined();
+    await page.goto("/referrals/login");
     await expect(banner(page)).toBeVisible();
     await expect.poll(() => adCookies(context)).toEqual({});
     expect(await sessionJourney(page)).toBe(journeyId);
@@ -390,7 +407,7 @@ if (!pixelId) {
       expect(await page.evaluate(() => typeof window.fbq)).toBe("undefined");
       await overhaulDetails(page).click();
       await closeDetails(page);
-      await banner(page).getByRole("button", { name: "Decline", exact: true }).click();
+      await declineCookies(page);
       await page.goto("/booking?package=overhaul");
       await expect(page.locator(".ri-booking-package-title")).toHaveText(overhaul);
       await settle(page);
@@ -399,6 +416,27 @@ if (!pixelId) {
       expect(meta.scripts).toEqual([]);
       expect(meta.beacons).toEqual([]);
       expect(meta.calls).toEqual([]);
+    });
+
+    test("staff pages load nothing from Meta before a choice or after a saved Accept", async ({ page }) => {
+      const staffPageQuiet = async () => {
+        await expect(page.getByRole("heading", { name: "Site content", exact: true })).toBeVisible();
+        await settle(page);
+        await page.waitForLoadState("networkidle");
+        await expect(banner(page)).toHaveCount(0);
+        expect(await page.evaluate(() => typeof window.fbq)).toBe("undefined");
+      };
+      await page.goto("/admin/content");
+      await staffPageQuiet();
+      await page.evaluate(() => localStorage.setItem("roo-consent", "granted"));
+      await page.reload();
+      await staffPageQuiet();
+      expect(meta.scripts).toEqual([]);
+      expect(meta.calls).toEqual([]);
+      await page.goto("/packages");
+      await expect(banner(page)).toHaveCount(0);
+      await expect.poll(() => meta.scripts).toEqual(["https://connect.facebook.net/en_US/fbevents.js"]);
+      await expect.poll(() => tracked("PageView").length).toBe(1);
     });
 
     test("after Accept the pixel sends PageView, ViewContent, InitiateCheckout and Purchase", async ({
@@ -512,7 +550,7 @@ if (!pixelId) {
         Storage.prototype.removeItem = failOnLocal(Storage.prototype.removeItem);
       });
       await page.getByRole("button", { name: "Cookie settings", exact: true }).click();
-      await banner(page).getByRole("button", { name: "Decline", exact: true }).click();
+      await declineCookies(page);
       await expect(banner(page)).toHaveCount(0);
       expect(meta.calls.at(-1).args).toEqual(["consent", "revoke"]);
       const before = meta.calls.length;
@@ -593,7 +631,7 @@ if (!pixelId) {
       const other = await context.newPage();
       await other.goto("/reviews");
       await other.getByRole("button", { name: "Cookie settings", exact: true }).click();
-      await banner(other).getByRole("button", { name: "Decline", exact: true }).click();
+      await declineCookies(other);
       await expect.poll(() => adCookies(context)).toEqual({});
       const revokes = () => fromFirstTab().filter(({ args }) => args.join() === "consent,revoke").length;
       await expect.poll(revokes).toBe(2);

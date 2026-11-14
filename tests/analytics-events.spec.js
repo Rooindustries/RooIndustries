@@ -1,6 +1,6 @@
 const {
   test: bookingTest, expect, cookieBanner: banner, settleIdle: settle, bookingEventId, routePaidStart: routeStart,
-  startInTwoTabsAndReload, startPaidThenResume, blockLocalStorage,
+  startInTwoTabsAndReload, startPaidThenResume, blockLocalStorage, declineCookies,
 } = require("./fixtures/booking-flow.cjs");
 
 const safety = () => import("../scripts/lib/test-target-safety.mjs");
@@ -175,7 +175,7 @@ test("view_item fires once per package view on the packages page and the booking
 
 test("checkout_started fires once, only after the payment start succeeds", async ({ page, flow, vercel, baseURL }) => {
   await page.goto("/packages");
-  await banner(page).getByRole("button", { name: "Decline", exact: true }).click();
+  await declineCookies(page);
   await routeStart(page, baseURL);
   await flow.review("/booking?package=overhaul");
   await flow.payment();
@@ -195,7 +195,7 @@ test("checkout_started fires once per created checkout across tabs and a reload"
   page, flow, vercel, baseURL,
 }) => {
   await page.goto("/packages");
-  await banner(page).getByRole("button", { name: "Decline", exact: true }).click();
+  await declineCookies(page);
   await routeStart(page, baseURL);
   await startInTwoTabsAndReload(page, flow);
   expect(events(vercel, "checkout_started")).toHaveLength(1);

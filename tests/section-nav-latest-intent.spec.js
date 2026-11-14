@@ -1,5 +1,6 @@
 const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
 const { test, expect } = require("@playwright/test");
+const { declineCookies } = require("./fixtures/booking-flow.cjs");
 const { navLink } = require("./fixtures/nav-link.cjs");
 const { clickAtHomeArrival } = require("./fixtures/home-arrival-click.cjs");
 const { clickAtRouteCommit: clickAtCommit } = require("./fixtures/route-commit-click.cjs");
@@ -867,7 +868,7 @@ test("homepage section replacements keep Back and Forward in the same document",
     const startLength = await historyLength(page);
     const documentStartedAt = await page.evaluate(() => performance.timeOrigin);
     if (surface === "desktop") {
-      await page.getByRole("region", { name: "Cookie choice" }).getByRole("button", { name: "Decline" }).click();
+      await declineCookies(page);
     }
     await page.locator(FOOTER("/").selector).click();
     await expect.poll(() => readRoute(page)).toEqual({ path: "/", hash: "", top: true });

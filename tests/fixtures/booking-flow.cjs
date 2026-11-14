@@ -8,6 +8,8 @@ const providers = {
   paypal: { enabled: false, mode: "disabled" },
 };
 
+const overhaulPrice = 84.99;
+
 const startedCheckout = (baseURL, checkouts, request) => {
   const holdId = request.postDataJSON()?.bookingPayload?.slotHoldId || "";
   const checkoutCreated = !checkouts.has(holdId);
@@ -149,12 +151,13 @@ const test = base.extend({
         const referralCode = String(body.referralCode || "").toLowerCase();
         const cents = (value) => Math.round(value * 100) / 100;
         const couponDiscountAmount =
-          couponCode === "save20" || (couponCode === "friend" && state.collision) ? cents(84.99 * 0.2) : 0;
+          couponCode === "save20" || (couponCode === "friend" && state.collision) ? cents(overhaulPrice * 0.2) : 0;
         const referralDiscountPercent =
           referralCode === "friend" || (referralCode === "save20" && state.collision) ? 10 : 0;
-        const referralDiscountAmount = cents((84.99 - couponDiscountAmount) * referralDiscountPercent / 100);
+        const referralDiscountAmount = cents((overhaulPrice - couponDiscountAmount) * referralDiscountPercent / 100);
+        const netAmount = cents(overhaulPrice - couponDiscountAmount - referralDiscountAmount);
         return json(route, { ok: true, quoteFingerprint: "fixture-quote", providers, quote: {
-          grossAmount: 84.99, netAmount: cents(84.99 - couponDiscountAmount - referralDiscountAmount), isFree: false,
+          grossAmount: overhaulPrice, netAmount, isFree: false,
           couponDiscountAmount, referralDiscountAmount, referralDiscountPercent,
         } });
       }
@@ -218,6 +221,8 @@ const test = base.extend({
 
 const cookieBanner = (page) => page.getByRole("region", { name: "Cookie choice", exact: true });
 
+const declineCookies = (page) => cookieBanner(page).getByRole("button", { name: "Decline", exact: true }).click();
+
 const settleIdle = (page) => page.evaluate(() => new Promise((resolve) => {
   window.requestIdleCallback(() => setTimeout(resolve, 400), { timeout: 5000 });
 }));
@@ -231,7 +236,7 @@ const routePaidStart = (page, baseURL, { loseFirstResponse = false } = {}) => {
   return page.context().route("**/api/payment/start", (route) => {
     const json = {
       ...startedCheckout(baseURL, checkouts, route.request()),
-      quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
+      quote: { grossAmount: overhaulPrice, netAmount: overhaulPrice, isFree: false },
     };
     if (!losing) return route.fulfill({ json });
     losing = false;
@@ -295,6 +300,6 @@ const startInTwoTabsAndReload = async (page, flow) => {
   expect(new Set(holds).size).toBe(1);
 };
 module.exports = {
-  test, expect, cookieBanner, settleIdle, bookingEventId, routePaidStart, startInTwoTabsAndReload, startPaidThenResume,
-  blockLocalStorage,
+  test, expect, overhaulPrice, cookieBanner, declineCookies, settleIdle, bookingEventId, routePaidStart,
+  startInTwoTabsAndReload, startPaidThenResume, blockLocalStorage,
 };

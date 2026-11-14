@@ -1,4 +1,4 @@
-const { test, expect } = require("./fixtures/booking-flow.cjs");
+const { test, expect, declineCookies } = require("./fixtures/booking-flow.cjs");
 const fs = require("node:fs/promises");
 
 test.use({
@@ -197,6 +197,7 @@ test("a rejected download offers help without losing the entered order", async (
     ok: false, error: "Could not verify this order. Check the Order ID and booking email.",
   } }));
   await page.goto("/downloads/optimizer-pack-v1");
+  await declineCookies(page);
   await page.evaluate(() => { window.__downloadGateMarker = "retained"; });
   await page.getByLabel("Booking email", { exact: true }).fill("visitor@example.invalid");
   await page.getByLabel("Order ID", { exact: true }).fill("booking.example");
