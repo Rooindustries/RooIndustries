@@ -218,6 +218,7 @@ test.describe("production host", () => {
       await expect(page.locator("main")).toBeVisible();
       await page.waitForTimeout(6000);
       expect(seen.requests).toEqual([]);
+      expect(seen.posthogHosts).toEqual([]);
 
       await page.getByRole("link", { name: "Packages", exact: true }).first().click();
       await expect(page).not.toHaveURL(site(landing));
