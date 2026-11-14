@@ -49,6 +49,22 @@ const v1Touch = {
   source: "creator", campaign: "vertex-max",
 };
 
+const multibyteExpected = {
+  version: 2,
+  journeyId,
+  firstTouch: {
+    capturedAt: "2026-11-01T09:00:00.000Z", landingPath: "/packages", source: "wechat",
+    campaign: "春节特惠广告活动".repeat(5), content: "bf-2026-11-27-v2",
+  },
+  lastTouch: {
+    capturedAt: "2026-11-10T09:00:00.000Z", landingPath: "/packages", source: "wechat",
+    campaign: "夏季新品推广".repeat(17).slice(0, 100),
+  },
+};
+const multibyteInput = {
+  ...multibyteExpected, lastTouch: { ...multibyteExpected.lastTouch, content: "call 212-555-0199" },
+};
+
 const payWithAttribution = async (ctx, salesAttribution) => {
   const { result: [started, restarted], calls } = await recordProviderCalls(async () => {
     const first = await startPayPalCheckout(ctx, { salesAttribution });
@@ -92,4 +108,6 @@ export async function registerAttributionScenarios(ctx) {
   await ctx.run("ads-attribution-v1-upgraded", () => assertStoredAttribution(ctx, v1Input, {
     version: 2, journeyId, firstTouch: v1Touch, lastTouch: v1Touch,
   }));
+  await ctx.run("ads-attribution-multibyte-kept-phone-dropped",
+    () => assertStoredAttribution(ctx, multibyteInput, multibyteExpected));
 }

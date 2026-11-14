@@ -1,6 +1,6 @@
 const {
   test: bookingTest, expect, cookieBanner: banner, settleIdle: settle, bookingEventId, routePaidStart: routeStart,
-  startInTwoTabsAndReload,
+  startInTwoTabsAndReload, startPaidThenResume, blockLocalStorage,
 } = require("./fixtures/booking-flow.cjs");
 
 const safety = () => import("../scripts/lib/test-target-safety.mjs");
@@ -198,6 +198,23 @@ test("checkout_started fires once per created checkout across tabs and a reload"
   await banner(page).getByRole("button", { name: "Decline", exact: true }).click();
   await routeStart(page, baseURL);
   await startInTwoTabsAndReload(page, flow);
+  expect(events(vercel, "checkout_started")).toHaveLength(1);
+});
+
+test("checkout_started fires once when the first start response is lost after the checkout was made", async ({
+  page, flow, vercel, baseURL,
+}) => {
+  await startPaidThenResume(page, flow, baseURL, { loseFirstResponse: true });
+  const started = events(vercel, "checkout_started");
+  expect(started).toHaveLength(1);
+  expect(started[0].payload.data).toMatchObject({ package_slug: "overhaul", provider: "dodo", value: 84.99 });
+});
+
+test("checkout_started fires once on the created response when browser storage is blocked", async ({
+  page, flow, vercel, baseURL,
+}) => {
+  await blockLocalStorage(page);
+  await startPaidThenResume(page, flow, baseURL);
   expect(events(vercel, "checkout_started")).toHaveLength(1);
 });
 

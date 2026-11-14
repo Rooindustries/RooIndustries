@@ -7,7 +7,7 @@ import { motion } from "framer-motion";
 import { WalletCards } from "lucide-react";
 import packagePricing from "../lib/packagePricing";
 import { preloadMetaPixel } from "../lib/analyticsModules";
-import { paymentStartBody } from "../lib/paymentStartBody";
+import { checkoutStartCounted, paymentStartBody } from "../lib/paymentStartBody";
 import { trackCheckoutSessionStarted, trackConfirmedPurchase } from "../lib/analytics";
 import { preloadConfirmationPage, preloadConfirmationPages } from "../lib/confirmationPages";
 import { useBookingDialogPending } from "../lib/bookingDialogHold";
@@ -1272,6 +1272,10 @@ export default function Payment({ hideFooter = false }) {
         headers: { "Content-Type": "application/json" },
         body,
       });
+      if (response.ok && data?.ok && await checkoutStartCounted(data, provider)) {
+        const price = data.quote?.netAmount;
+        trackCheckoutSessionStarted({ packageTitle: bookingData.packageTitle, price, provider });
+      }
 
       if (!operation.current()) return { terminal: true, stale: true };
 
@@ -1295,8 +1299,6 @@ export default function Payment({ hideFooter = false }) {
         throw new Error(data?.error || "Unable to start payment.");
       }
 
-      if (data.checkoutCreated === true) trackCheckoutSessionStarted({ packageTitle: bookingData.packageTitle,
-        price: data.quote?.netAmount, provider });
       if (data.quote) setServerQuote(data.quote);
       if (data.quoteFingerprint || data.fingerprint) {
         setQuoteFingerprint(

@@ -1,5 +1,6 @@
 const {
   test, expect, cookieBanner: banner, settleIdle: settle, bookingEventId, routePaidStart, startInTwoTabsAndReload,
+  startPaidThenResume, blockLocalStorage,
 } = require("./fixtures/booking-flow.cjs");
 
 const pixelId = String(process.env.TOOLING_META_PIXEL_ID || "").trim();
@@ -141,10 +142,15 @@ async function tabToBanner(page) {
 
 const journeyId = "12345678-1234-4123-8123-123456789abc";
 const touch = { capturedAt: "2026-09-11T10:00:00.000Z", landingPath: "/", source: "meta" };
-const adCookieValue = Buffer.from(JSON.stringify({ version: 2, journeyId, firstTouch: touch, lastTouch: touch }))
-  .toString("base64url");
-const adCookie = async (context) => (await context.cookies()).find(({ name }) => name === "roo_attr");
-const setAdCookie = (context, url) => context.addCookies([{ name: "roo_attr", value: adCookieValue, url }]);
+const encodeCookie = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
+const adCookieValues = {
+  roo_attr: encodeCookie({ version: 2, journeyId, firstTouch: touch }),
+  roo_attr_last: encodeCookie({ journeyId, lastTouch: touch }),
+};
+const adCookies = async (context) => Object.fromEntries((await context.cookies())
+  .filter(({ name }) => Object.hasOwn(adCookieValues, name)).map(({ name, value }) => [name, value]));
+const setAdCookies = (context, url) =>
+  context.addCookies(Object.entries(adCookieValues).map(([name, value]) => ({ name, value, url })));
 const sessionJourney = (page) =>
   page.evaluate(() => JSON.parse(sessionStorage.getItem("sales_attribution"))?.journeyId);
 const shot = (page, name) => page.screenshot({ path: test.info().outputPath(`${name}.png`) });
@@ -322,30 +328,30 @@ if (!pixelId) {
     });
   });
 
-  test("Decline and Cookie settings remove the ad cookie on pages without sales tracking", async ({
+  test("Decline and Cookie settings remove both ad cookies on pages without sales tracking", async ({
     page, context, baseURL,
   }) => {
-    await setAdCookie(context, baseURL);
+    await setAdCookies(context, baseURL);
     await page.goto("/referrals/login");
     await expect(banner(page)).toBeVisible();
-    await expect.poll(() => adCookie(context)).toBeUndefined();
+    await expect.poll(() => adCookies(context)).toEqual({});
     expect(await sessionJourney(page)).toBe(journeyId);
-    await setAdCookie(context, baseURL);
+    await setAdCookies(context, baseURL);
     await banner(page).getByRole("button", { name: "Decline", exact: true }).click();
     await expect(banner(page)).toHaveCount(0);
-    await expect.poll(() => adCookie(context)).toBeUndefined();
+    await expect.poll(() => adCookies(context)).toEqual({});
 
     await page.evaluate(() => {
       localStorage.setItem("roo-consent", "granted");
       sessionStorage.clear();
     });
-    await setAdCookie(context, baseURL);
+    await setAdCookies(context, baseURL);
     await page.goto("/meet-the-team");
     await settle(page);
-    expect((await adCookie(context))?.value).toBe(adCookieValue);
+    expect(await adCookies(context)).toEqual(adCookieValues);
     await page.getByRole("button", { name: "Cookie settings", exact: true }).click();
     await expect(banner(page)).toBeVisible();
-    await expect.poll(() => adCookie(context)).toBeUndefined();
+    await expect.poll(() => adCookies(context)).toEqual({});
     expect(await sessionJourney(page)).toBe(journeyId);
   });
 
@@ -354,7 +360,7 @@ if (!pixelId) {
   }) => {
     const markdown = await (await page.request.get("/markdown?path=/privacy")).text();
     expect(markdown).toContain("## Cookies and browser storage");
-    expect(markdown).toContain("roo\\_attr cookie keeps the ad");
+    expect(markdown).toContain("roo\\_attr and roo\\_attr\\_last cookies keep the first and the latest ad");
     const csp = (await page.request.get("/privacy")).headers()["content-security-policy"];
     expect(csp).toContain("form-action 'self';");
     expect(csp).not.toContain("formspree");
@@ -561,19 +567,34 @@ if (!pixelId) {
       expect(tracked("InitiateCheckout")).toHaveLength(1);
     });
 
+    for (const [name, blocked, options] of [
+      ["when the first start response is lost after the checkout was made", false, { loseFirstResponse: true }],
+      ["on the created response when browser storage is blocked", true, {}],
+    ]) {
+      test(`InitiateCheckout is sent once ${name}`, async ({ page, flow, baseURL }) => {
+        if (blocked) await blockLocalStorage(page);
+        await page.goto("/packages");
+        await banner(page).getByRole("button", { name: "Accept", exact: true }).click();
+        await expect.poll(() => tracked("PageView").length).toBe(1);
+        await startPaidThenResume(page, flow, baseURL, options);
+        expect(tracked("InitiateCheckout")).toHaveLength(1);
+      });
+    }
+
     const fromFirstTab = () => meta.calls.filter(({ tab }) => tab === "first");
     const reviewsLink = (page) => page.locator('main a[href="/reviews"], footer a[href="/reviews"]').first();
 
-    test("a Decline in another tab stops the pixel and removes the ad cookie here", async ({ page, context }) => {
+    test("a Decline in another tab stops the pixel and removes both ad cookies here", async ({ page, context }) => {
       await page.goto("/packages?utm_source=meta&utm_campaign=spring");
       await banner(page).getByRole("button", { name: "Accept", exact: true }).click();
       await expect.poll(() => tracked("PageView").length).toBe(1);
-      await expect.poll(() => adCookie(context)).toBeDefined();
+      await expect.poll(async () => Object.keys(await adCookies(context)).sort())
+        .toEqual(["roo_attr", "roo_attr_last"]);
       const other = await context.newPage();
       await other.goto("/reviews");
       await other.getByRole("button", { name: "Cookie settings", exact: true }).click();
       await banner(other).getByRole("button", { name: "Decline", exact: true }).click();
-      await expect.poll(() => adCookie(context)).toBeUndefined();
+      await expect.poll(() => adCookies(context)).toEqual({});
       const revokes = () => fromFirstTab().filter(({ args }) => args.join() === "consent,revoke").length;
       await expect.poll(revokes).toBe(2);
       const before = fromFirstTab().length;
@@ -584,7 +605,7 @@ if (!pixelId) {
       await settle(page);
       await page.waitForLoadState("networkidle");
       expect(fromFirstTab().slice(before)).toEqual([]);
-      expect(await adCookie(context)).toBeUndefined();
+      expect(await adCookies(context)).toEqual({});
       await expect(banner(page)).toHaveCount(0);
     });
 

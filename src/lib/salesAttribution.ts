@@ -1,5 +1,5 @@
 import { SALES_PATHS, salesPath } from "./salesPaths";
-import { readStoredAttribution, writeStoredAttribution } from "./attributionStore";
+import { isRecord, readStoredAttribution, writeStoredAttribution } from "./attributionStore";
 
 export type SalesTouch = {
   capturedAt: string;
@@ -26,12 +26,12 @@ export type SalesAttribution = {
 
 const JOURNEY_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const LABEL = /^[\p{L}\p{M}\p{N} ._\-+:/|()@!~]+$/u;
-const LABEL_BYTES = 100;
-const PHONE_SEPARATOR = /[\s.()-]/;
+const LABEL_CHARS = 100;
+const LABEL_BYTES = 300;
 const PHONE_TEXT = /^[\d\s.()-]+$/;
-const PHONE_AFTER_PLUS = /(?:^|[^\p{L}\p{N}])\+[\d\s.()-]+/gu;
-const DATE_YEAR_FIRST = /^(\d{4})([-./])(\d{1,2})\2(\d{1,2})$/;
-const DATE_YEAR_LAST = /^(\d{1,2})([-./])(\d{1,2})\2(\d{4})$/;
+const PLUS_RUN = /\+[\s.()-]*\d[\d\s.()-]*/g;
+const GROUPED_RUN = /\d+(?:[\s.()-]+\d+)+/g;
+const DATE = /(^|\D)(\d{1,4})([-./])(\d{1,2})\3(\d{1,4})(?!\d)/g;
 const EMAIL = /[^\s@]+@[^\s@]+\.[^\s@]+/;
 const CLICK_ID = /^[A-Za-z0-9_.-]{1,200}$/;
 const HOST = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
@@ -46,45 +46,47 @@ const realDate = (year: number, month: number, day: number) => {
   const date = new Date(Date.UTC(year, month - 1, day));
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 };
-const calendarDate = (text: string) => {
-  const first = DATE_YEAR_FIRST.exec(text);
-  if (first) return realDate(Number(first[1]), Number(first[3]), Number(first[4]));
-  const last = DATE_YEAR_LAST.exec(text);
-  if (!last) return false;
-  const [, a, , b, year] = last.map(Number);
-  return realDate(year, b, a) || realDate(year, a, b);
+const calendarDate = (start: string, middle: string, end: string) => {
+  const [a, b, c] = [start, middle, end].map(Number);
+  if (start.length === 4 && end.length <= 2) return realDate(a, b, c);
+  return start.length <= 2 && end.length === 4 && (realDate(c, b, a) || realDate(c, a, b));
 };
-const looksLikePhone = (text: string) =>
-  [...text.matchAll(PHONE_AFTER_PLUS)].some(([run]) => phoneDigits(run)) ||
-  (PHONE_TEXT.test(text) && PHONE_SEPARATOR.test(text) && phoneDigits(text) && !calendarDate(text));
+const withoutDates = (text: string) => text.replace(DATE, (date, lead, start, _separator, middle, end) =>
+  calendarDate(start, middle, end) ? `${lead}x` : date);
+const containsPhone = (text: string) => {
+  const undated = withoutDates(text);
+  return [...undated.matchAll(PLUS_RUN), ...undated.matchAll(GROUPED_RUN)].some(([run]) => phoneDigits(run));
+};
 
 const utf8Bytes = (char: string) => {
   const code = char.codePointAt(0) || 0;
   return code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
 };
-const withinBytes = (text: string, limit: number) => {
-  let used = 0;
+const withinLimits = (text: string) => {
+  let bytes = 0;
+  let chars = 0;
   let end = 0;
   for (const char of text) {
-    used += utf8Bytes(char);
-    if (used > limit) break;
+    bytes += utf8Bytes(char);
+    chars += 1;
+    if (chars > LABEL_CHARS || bytes > LABEL_BYTES) break;
     end += char.length;
   }
   return text.slice(0, end).trim();
 };
 
-const safeLabel = (text: string) => LABEL.test(text) && !EMAIL.test(text) && !looksLikePhone(text);
+const safeLabel = (text: string) => LABEL.test(text) && !EMAIL.test(text) && !containsPhone(text);
 const label = (value: unknown) => {
   if (typeof value !== "string") return "";
   const text = value.normalize("NFKC").replace(/\s+/g, " ").replace(/[\p{Cc}\p{Cf}<>"'`\\]/gu, "")
     .replace(/ {2,}/g, " ").trim();
-  const bounded = withinBytes(text, LABEL_BYTES);
+  const bounded = withinLimits(text);
   return safeLabel(text) && safeLabel(bounded) ? bounded : "";
 };
 const referralCode = (value: unknown) =>
   typeof value === "string" && REFERRAL_CODE.test(value.trim()) && /[a-z]/i.test(value) ? value.trim() : "";
 const clickId = (value: unknown) =>
-  typeof value === "string" && CLICK_ID.test(value) && !looksLikePhone(value) ? value : "";
+  typeof value === "string" && CLICK_ID.test(value) && !(PHONE_TEXT.test(value) && containsPhone(value)) ? value : "";
 
 const FIELDS = {
   creatorCode: ["ref", referralCode],
@@ -98,9 +100,6 @@ const FIELDS = {
 } as const;
 type Field = keyof typeof FIELDS;
 const FIELD_KEYS = Object.keys(FIELDS) as Field[];
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
 const newJourneyId = () => {
   if (window.crypto?.randomUUID) return window.crypto.randomUUID();

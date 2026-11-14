@@ -14,7 +14,7 @@ const startedCheckout = (baseURL, checkouts, request) => {
   checkouts.add(holdId);
   return {
     ok: true, paymentAccessToken: "fixture-payment", status: "started", checkoutCreated,
-    providerPayload: { checkoutUrl: `${baseURL}/__test/checkout-handoff` },
+    providerPayload: { checkoutUrl: `${baseURL}/__test/checkout-handoff`, orderId: `fixture-order-${holdId}` },
     sessionExpiresAt: new Date(Date.now() + 20 * 60 * 1000).toISOString(),
   };
 };
@@ -225,14 +225,51 @@ const settleIdle = (page) => page.evaluate(() => new Promise((resolve) => {
 const bookingEventId = (paymentRecordId) =>
   createHash("sha256").update(`booking-confirmed:${paymentRecordId}`).digest("hex").slice(0, 40);
 
-const routePaidStart = (page, baseURL) => {
+const routePaidStart = (page, baseURL, { loseFirstResponse = false } = {}) => {
   const checkouts = new Set();
-  return page.context().route("**/api/payment/start", (route) => route.fulfill({ json: {
-    ...startedCheckout(baseURL, checkouts, route.request()),
-    quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
-  } }));
+  let losing = loseFirstResponse;
+  return page.context().route("**/api/payment/start", (route) => {
+    const json = {
+      ...startedCheckout(baseURL, checkouts, route.request()),
+      quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
+    };
+    if (!losing) return route.fulfill({ json });
+    losing = false;
+    return route.abort("failed");
+  });
 };
 
+const routeStartedStatus = (context) =>
+  context.route("**/api/payment/status", (route) => route.fulfill({ json: { ok: true, status: "started" } }));
+
+const resumeCheckout = async (page) => {
+  await page.goto("/payment");
+  await page.getByRole("button", { name: "Resume checkout", exact: true }).click();
+  await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
+};
+
+const startPaidThenResume = async (page, flow, baseURL, { loseFirstResponse = false } = {}) => {
+  await routePaidStart(page, baseURL, { loseFirstResponse });
+  await routeStartedStatus(page.context());
+  await flow.review("/booking?package=overhaul");
+  await flow.payment();
+  const pay = page.getByRole("button", { name: "Pay your way", exact: true });
+  if (loseFirstResponse) {
+    const lost = page.waitForEvent("requestfailed", (request) => request.url().endsWith("/api/payment/start"));
+    await pay.click();
+    await lost;
+    await expect(pay).toBeEnabled();
+  }
+  await pay.click();
+  await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
+  await resumeCheckout(page);
+};
+
+const blockLocalStorage = (page) => page.addInitScript(() => {
+  Object.defineProperty(window, "localStorage", {
+    configurable: true, get: () => { throw new DOMException("Storage is blocked.", "SecurityError"); },
+  });
+});
 
 const startInTwoTabsAndReload = async (page, flow) => {
   const context = page.context();
@@ -241,7 +278,7 @@ const startInTwoTabsAndReload = async (page, flow) => {
     if (new URL(request.url()).pathname !== "/api/payment/start") return;
     holds.push(request.postDataJSON()?.bookingPayload?.slotHoldId);
   });
-  await context.route("**/api/payment/status", (route) => route.fulfill({ json: { ok: true, status: "started" } }));
+  await routeStartedStatus(context);
   await flow.review("/booking?package=overhaul");
   await flow.payment();
   const opened = context.waitForEvent("page");
@@ -252,13 +289,12 @@ const startInTwoTabsAndReload = async (page, flow) => {
     await tab.getByRole("button", { name: "Pay your way", exact: true }).click();
     await expect(tab).toHaveURL(/\/__test\/checkout-handoff$/);
   }
-  await page.goto("/payment");
-  await page.getByRole("button", { name: "Resume checkout", exact: true }).click();
-  await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
+  await resumeCheckout(page);
   await settleIdle(second);
   expect(holds.length).toBeGreaterThanOrEqual(2);
   expect(new Set(holds).size).toBe(1);
 };
 module.exports = {
-  test, expect, cookieBanner, settleIdle, bookingEventId, routePaidStart, startInTwoTabsAndReload,
+  test, expect, cookieBanner, settleIdle, bookingEventId, routePaidStart, startInTwoTabsAndReload, startPaidThenResume,
+  blockLocalStorage,
 };

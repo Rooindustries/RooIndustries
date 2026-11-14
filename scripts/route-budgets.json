@@ -266,6 +266,10 @@
       "js": 147456,
       "css": 1024
     },
+    "src/lib/paymentStartBody.js -> ./checkoutStartCount": {
+      "js": 2048,
+      "css": 1024
+    },
     "src/next/AppClientRuntime.jsx -> ./ConsentRuntime": {
       "js": 3072,
       "css": 1024

@@ -3,11 +3,12 @@ const COOKIE_NOTICE = {
   paragraphs: [
     [
       "Roo Industries keeps a little data in your browser so the site works. Some measurement works without",
-      "cookies. The roo_attr cookie and the Meta pixel only start after you click Accept on the cookie banner.",
+      "cookies. The roo_attr and roo_attr_last cookies and the Meta pixel only start after you click Accept on",
+      "the cookie banner.",
     ].join(" "),
     [
-      "Always on: roo-consent in local storage remembers whether you accepted or declined, and roo-theme",
-      "remembers light or dark mode.",
+      "Always on: in local storage, roo-consent remembers whether you accepted or declined, roo-theme",
+      "remembers light or dark mode, and roo-checkouts-counted marks your last 20 checkouts as already counted.",
     ].join(" "),
     [
       "Always on: session storage keeps your booking draft, the time slot you are holding, your checkout",
@@ -33,18 +34,18 @@ const COOKIE_NOTICE = {
       "accept, because it is how you reach support.",
     ].join(" "),
     [
-      "Only after Accept: the roo_attr cookie keeps the ad, campaign or referral link that brought you here",
-      "for 90 days. When our Meta pixel is turned on, it tells Meta which pages and packages you viewed and",
-      "when you start checkout or book, so we can measure our ads. It never sends your name, email or phone,",
-      "and Meta sets its own _fbp cookie.",
+      "Only after Accept: the roo_attr and roo_attr_last cookies keep the first and the latest ad, campaign or",
+      "referral link that brought you here for 90 days. When our Meta pixel is turned on, it tells Meta which",
+      "pages and packages you viewed and when you start checkout or book, so we can measure our ads. It never",
+      "sends your name, email or phone, and Meta sets its own _fbp cookie.",
     ].join(" "),
     [
       "Contact messages: messages sent through the contact form are stored so we can reply. Delivered",
       "messages are deleted after 30 days.",
     ].join(" "),
     [
-      "Changing your choice: use Cookie settings at the bottom of any page. Declining removes the roo_attr",
-      "cookie and stops the Meta pixel.",
+      "Changing your choice: use Cookie settings at the bottom of any page. Declining removes the roo_attr and",
+      "roo_attr_last cookies and stops the Meta pixel.",
     ].join(" "),
   ],
 };

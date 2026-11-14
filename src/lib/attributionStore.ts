@@ -1,11 +1,9 @@
 import { readConsent } from "./consent";
 
-type StoredAttribution = Record<string, unknown> & {
-  firstTouch?: Record<string, unknown>;
-  lastTouch?: Record<string, unknown>;
-};
+type StoredAttribution = Record<string, unknown>;
 
-const COOKIE = "roo_attr";
+const FIRST_COOKIE = "roo_attr";
+const LAST_COOKIE = "roo_attr_last";
 const SESSION_KEY = "sales_attribution";
 const MAX_AGE_SECONDS = 7776000;
 
@@ -22,15 +20,15 @@ const decode = (text: string): unknown => {
   return JSON.parse(new TextDecoder().decode(Uint8Array.from(binary, (char) => char.charCodeAt(0))));
 };
 
-const readCookie = () => {
-  const prefix = `${COOKIE}=`;
+const readCookie = (name: string) => {
+  const prefix = `${name}=`;
   const entry = document.cookie.split(/;\s*/).find((part) => part.startsWith(prefix));
   return entry ? entry.slice(prefix.length) : "";
 };
 
-const setCookie = (value: string, maxAge: number) => {
+const setCookie = (name: string, value: string, maxAge: number) => {
   const secure = window.location.protocol === "https:" ? "; Secure" : "";
-  document.cookie = `${COOKIE}=${value}; Path=/; Max-Age=${maxAge}; SameSite=Lax${secure}`;
+  document.cookie = `${name}=${value}; Path=/; Max-Age=${maxAge}; SameSite=Lax${secure}`;
 };
 
 const readSession = (): unknown => {
@@ -50,34 +48,52 @@ const writeSession = (value: StoredAttribution | null) => {
   } catch {}
 };
 
-const writeCookie = (value: StoredAttribution) => {
-  const encoded = encode(value);
-  if (readCookie() !== encoded) setCookie(encoded, MAX_AGE_SECONDS);
-  return readCookie() === encoded;
+export const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+const readCookieValue = (name: string): unknown => {
+  try {
+    const cookie = readCookie(name);
+    return cookie ? decode(cookie) : null;
+  } catch {
+    return null;
+  }
+};
+
+const readCookies = () => {
+  const first = readCookieValue(FIRST_COOKIE);
+  if (!isRecord(first)) return null;
+  const last = readCookieValue(LAST_COOKIE);
+  return isRecord(last) && last.journeyId === first.journeyId ? { ...first, lastTouch: last.lastTouch } : first;
+};
+
+const writeCookies = ({ lastTouch, ...first }: StoredAttribution) => {
+  const cookies = [[FIRST_COOKIE, encode(first)], [LAST_COOKIE, encode({ journeyId: first.journeyId, lastTouch })]];
+  for (const [name, encoded] of cookies) if (readCookie(name) !== encoded) setCookie(name, encoded, MAX_AGE_SECONDS);
+  return cookies.every(([name, encoded]) => readCookie(name) === encoded);
+};
+
+const removeCookies = () => {
+  for (const name of [FIRST_COOKIE, LAST_COOKIE]) if (readCookie(name)) setCookie(name, "", 0);
 };
 
 export function readStoredAttribution(): unknown {
-  try {
-    const cookie = readCookie();
-    if (cookie) return decode(cookie);
-  } catch {}
-  return readSession() || memory;
+  return readCookies() || readSession() || memory;
 }
 
 export function writeStoredAttribution(value: StoredAttribution) {
   memory = value;
   try {
-    if (readConsent() === "granted" && writeCookie(value)) {
+    if (readConsent() === "granted" && writeCookies(value)) {
       writeSession(null);
       return;
     }
-    if (readCookie()) setCookie("", 0);
+    removeCookies();
   } catch {}
   writeSession(value);
 }
 
 export function storeAttributionForConsent() {
   const stored = readStoredAttribution();
-  if (!stored || typeof stored !== "object" || Array.isArray(stored)) return;
-  writeStoredAttribution(stored as StoredAttribution);
+  if (isRecord(stored)) writeStoredAttribution(stored);
 }
