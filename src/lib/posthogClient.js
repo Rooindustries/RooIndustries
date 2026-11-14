@@ -1,5 +1,6 @@
 import posthog from "posthog-js";
 import { captureSalesAttribution, sanitizeAnalyticsEvent } from "./salesAttribution";
+import { lastPopstate } from "./loadPostHog";
 
 const UI_HOST = "https://us.posthog.com";
 
@@ -54,7 +55,8 @@ const noteHistoryChanges = () => {
 const markPage = (publicPage) => {
   const open = privateSpans.at(-1);
   const now = Date.now();
-  if (!publicPage && (!open || open.end)) privateSpans.push({ start: navigatedAt > (open?.end || 0) ? navigatedAt : now });
+  const changedAt = Math.max(navigatedAt, lastPopstate());
+  if (!publicPage && (!open || open.end)) privateSpans.push({ start: changedAt > (open?.end || 0) ? changedAt : now });
   if (publicPage && open && !open.end) open.end = now;
 };
 

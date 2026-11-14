@@ -307,6 +307,12 @@ test.describe("production host", () => {
     await page.waitForTimeout(500);
     await page.goBack();
     await expect(page).toHaveURL(site("/packages"));
+    await page.waitForTimeout(300);
+    await page.goForward();
+    await expect(page.locator("#ref-login-identifier")).toBeVisible();
+    await page.waitForTimeout(300);
+    await page.goBack();
+    await expect(page).toHaveURL(site("/packages"));
     const returned = Date.now();
     for (let step = 0; step < 5; step += 1) {
       await page.mouse.move(300 + step * 60, 400);
