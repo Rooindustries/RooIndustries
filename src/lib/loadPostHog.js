@@ -1,7 +1,7 @@
 import { isProductionBrowser } from "./productionBrowser";
 import { readConsent } from "./consentChoice";
 import { withPostHogOutbox } from "./analyticsModules";
-import { CONSENT_EVENT, CONSENT_RESET_EVENT, followChoices } from "./consentSignals";
+import { CONSENT_EVENT, CONSENT_RESET_EVENT, followChoices, lastDecline } from "./consentSignals";
 
 let poppedAt = 0;
 let countedPath = null;
@@ -14,10 +14,14 @@ const newId = () => "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (di
 
 export const lastPopstate = () => poppedAt;
 
-export const keepPostHogEvent = (event, properties = {}) => {
-  if (!isProductionBrowser() || !granted()) return;
-  made.push({ id: newId(), event, properties, path: window.location.pathname, at: Date.now() });
+export const eventMoment = () =>
+  isProductionBrowser() && granted() ? { path: window.location.pathname, at: Date.now() } : null;
+
+export const keepPostHogEvent = (event, properties = {}, moment = eventMoment()) => {
+  if (!moment || moment.at < lastDecline() || !granted()) return false;
+  made.push({ id: newId(), event, properties, ...moment });
   withPostHogOutbox((outbox) => outbox.store(made.splice(0)));
+  return true;
 };
 
 const follow = (change) => {
@@ -34,11 +38,11 @@ export const loadPostHog = () => follow(false);
 
 if (typeof window !== "undefined") {
   window.addEventListener("popstate", () => { poppedAt = Date.now(); });
-  window.addEventListener("pageshow", ({ persisted }) => persisted && loadPostHog());
-  followChoices(() => {
-    if (granted()) return;
+  followChoices((declined) => {
+    if (!declined && granted()) return;
     countedPath = null;
     made.length = 0;
   });
+  window.addEventListener("pageshow", ({ persisted }) => persisted && loadPostHog());
   for (const name of [CONSENT_EVENT, CONSENT_RESET_EVENT]) window.addEventListener(name, () => follow(true));
 }

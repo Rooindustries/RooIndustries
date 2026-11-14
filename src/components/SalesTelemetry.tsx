@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useLocation } from "react-router-dom";
 import { salesPath } from "../lib/salesPaths";
-import { trackEvent, trackPageView } from "../lib/analytics";
+import { eventMoment, trackEvent, trackPageView } from "../lib/analytics";
 import { withSalesAttribution } from "../lib/analyticsModules";
 
 export default function SalesTelemetry() {
@@ -16,13 +16,14 @@ export default function SalesTelemetry() {
   useEffect(() => {
     if (!path) return;
     const landing = { pathname: window.location.pathname, search: window.location.search };
+    const moment = eventMoment();
     withSalesAttribution(({ captureSalesAttribution }) => {
       const attribution = captureSalesAttribution(landing);
       if (!attribution) return;
       const key = `sales_visit:${attribution.journeyId}:${path}`;
       try {
         if (sessionStorage.getItem(key)) return;
-        if (trackEvent("service_visit", { page: path }, { attribution })) sessionStorage.setItem(key, "1");
+        if (trackEvent("service_visit", { page: path }, { attribution, moment })) sessionStorage.setItem(key, "1");
       } catch {}
     });
   }, [path, location.search]);

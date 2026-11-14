@@ -35,9 +35,9 @@ const COOKIE_NOTICE = {
     ].join(" "),
     [
       "Only after Accept: the roo_attr and roo_attr_last cookies keep the first and the latest ad, campaign",
-      "or referral link that brought you here for 90 days. PostHog counts page views and booking steps",
-      "without cookies, and records how public pages are used with every input and all page text hidden.",
-      "Page views and booking steps that have not reached PostHog yet wait in this tab's session storage",
+      "or referral link that brought you here for 90 days. PostHog counts page views, booking steps and",
+      "clicks without cookies, and records how public pages are used with every input and all page text hidden.",
+      "Page views and other events that have not reached PostHog yet wait in this tab's session storage",
       "(roo-posthog-outbox) until they are sent. When our Meta pixel is turned on, it tells Meta which pages",
       "and packages you viewed and when you start checkout or book, so we can measure our ads. It never sends",
       "your name, email or phone, and Meta sets its own _fbp and _fbc cookies.",

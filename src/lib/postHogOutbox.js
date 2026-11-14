@@ -1,6 +1,6 @@
 import { readConsent } from "./consent";
 import { sanitizeAnalyticsEvent } from "./salesPaths";
-import { followChoices } from "./consentSignals";
+import { followChoices, lastDecline } from "./consentSignals";
 
 const OUTBOX_KEY = "roo-posthog-outbox";
 const OUTBOX_LIMIT = 100;
@@ -19,6 +19,8 @@ const read = () => {
     return [];
   }
 };
+
+const current = (items) => items.filter(({ at }) => at >= lastDecline());
 
 const write = (items) => {
   try {
@@ -59,7 +61,7 @@ export const store = (entries) => {
     return cleaned ? [{ ...entry, path: cleaned }] : [];
   });
   if (!kept.length) return;
-  write([...read(), ...kept].slice(-OUTBOX_LIMIT));
+  write(current([...read(), ...kept]).sort((a, b) => a.at - b.at).slice(-OUTBOX_LIMIT));
   withPostHog(({ sendPostHog }) => sendPostHog(kept.map(({ event }) => event)));
 };
 
@@ -68,11 +70,11 @@ export const follow = () => withPostHog(({ syncPostHogPage, startPostHogWhenIdle
   startPostHogWhenIdle();
 });
 
-export const postHogQueued = () => granted() && read().length > 0;
+export const postHogQueued = () => granted() && current(read()).length > 0;
 
 export const takePostHogQueue = () => {
   followChoice();
-  const items = granted() ? read() : [];
+  const items = granted() ? current(read()) : [];
   if (items.length) write([]);
   return items;
 };

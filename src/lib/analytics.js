@@ -4,6 +4,8 @@ import { withMetaPixel, withSalesAttribution } from "./analyticsModules";
 import packagePricing from "./packagePricing";
 import { keepPostHogEvent } from "./loadPostHog";
 
+export { eventMoment } from "./loadPostHog";
+
 const { getPackageSlug, toMoney } = packagePricing;
 export const DEFAULT_CURRENCY = "USD";
 
@@ -25,7 +27,7 @@ const ensureAnalyticsQueue = () => {
 export const trackEvent = (eventName, data = {}, options = {}) => {
   try {
     if (!isProductionBrowser()) return false;
-    if (options.postHog !== false) keepPostHogEvent(eventName, data);
+    if (options.postHog !== false) keepPostHogEvent(eventName, data, options.moment);
     ensureAnalyticsQueue();
     const attributed = Object.hasOwn(options, "attribution");
     withSalesAttribution(({ salesEventProperties }) => {

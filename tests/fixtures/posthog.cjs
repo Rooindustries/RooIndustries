@@ -73,9 +73,16 @@ const stubPostHog = async (context, origin) => {
     seen.posthogHosts.push(route.request().url());
     return route.abort("blockedbyclient");
   });
-  await context.route(`${origin}/ingest/**`, (route) => ingest(route, seen));
+  await context.route(`${origin}/ingest/**`, async (route) => {
+    seen.loading.add(route);
+    try {
+      return await ingest(route, seen);
+    } finally {
+      seen.loading.delete(route);
+    }
+  });
   context.on("request", (request) => {
-    if (request.resourceType() === "script" || new URL(request.url()).pathname.startsWith("/ingest/")) {
+    if (request.resourceType() === "script" && !new URL(request.url()).pathname.startsWith("/ingest/")) {
       seen.loading.add(request);
     }
   });

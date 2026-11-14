@@ -16,19 +16,19 @@ const granted = () => readConsent() === "granted";
 const projectKey = () => cleanOutsideValue(process.env.NEXT_PUBLIC_POSTHOG_KEY || DEFAULT_KEY);
 
 const deliver = (attribution) => ({ id, event, properties, path, at }) => {
-  if (COMPLETED_BOOKING.test(event) && INTERNAL_ID.test(properties.event_id || "")) {
-    client.identify(properties.event_id);
-  }
+  const booking = COMPLETED_BOOKING.test(event);
+  if (booking && INTERNAL_ID.test(properties.event_id || "")) client.identify(properties.event_id);
+  const creator = booking ? { referral_code: attribution.creator_code || "" } : {};
   const page = { $current_url: `${window.location.origin}${path}`, $pathname: path };
   const options = { uuid: id, timestamp: new Date(at), transport: "sendBeacon" };
-  client.capture(event, { ...attribution, ...properties, ...page }, options);
+  client.capture(event, { ...attribution, ...creator, ...properties, ...page }, options);
 };
 
 const flush = () => {
   if (!client) return;
   const items = takePostHogQueue();
   if (!items.length) return;
-  const attribution = sales.salesEventProperties();
+  const attribution = sales.salesEventProperties(sales.journeySalesAttribution());
   if (attribution.journey_id) client.useJourney(attribution.journey_id);
   items.forEach(deliver(attribution));
 };

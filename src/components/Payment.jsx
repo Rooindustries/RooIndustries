@@ -9,6 +9,7 @@ import packagePricing from "../lib/packagePricing";
 import { preloadMetaPixel } from "../lib/analyticsModules";
 import { checkoutStartCounted, paymentStartBody } from "../lib/paymentStartBody";
 import { trackCheckoutSessionStarted, trackConfirmedPurchase } from "../lib/checkoutAnalytics";
+import { eventMoment } from "../lib/analytics";
 import { preloadConfirmationPage, preloadConfirmationPages } from "../lib/confirmationPages";
 import { useBookingDialogPending } from "../lib/bookingDialogHold";
 import { beginCheckoutConfirmation } from "../lib/checkoutConfirmation";
@@ -1199,6 +1200,7 @@ export default function Payment({ hideFooter = false }) {
   };
 
   const startSessionCheckout = async (provider, operation = createPaymentOperation()) => {
+    const moment = eventMoment();
     if (!operation.current()) return { terminal: true, stale: true };
     if (
       paymentSession?.provider === provider &&
@@ -1272,7 +1274,7 @@ export default function Payment({ hideFooter = false }) {
       });
       if (response.ok && data?.ok && await checkoutStartCounted(data, provider)) {
         const price = data.quote?.netAmount;
-        trackCheckoutSessionStarted({ packageTitle: bookingData.packageTitle, price, provider });
+        trackCheckoutSessionStarted({ packageTitle: bookingData.packageTitle, price, provider, moment });
       }
 
       if (!operation.current()) return { terminal: true, stale: true };

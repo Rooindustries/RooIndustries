@@ -30,14 +30,27 @@ const journeyOf = async (page) => {
   const cookie = (await page.context().cookies()).find(({ name }) => name === "roo_attr");
   return cookie ? JSON.parse(Buffer.from(cookie.value, "base64url").toString("utf8")).journeyId : undefined;
 };
-const openCookieSettings = (page) => page.getByRole("button", { name: "Cookie settings", exact: true }).click();
+const openCookieSettings = async (page) => {
+  await settleIdle(page);
+  await page.getByRole("button", { name: "Cookie settings", exact: true }).click();
+};
 const seeDetails = async (page) => {
   await page.getByRole("button", { name: "See What's Included" }).first().click();
-  await expect(page.getByRole("dialog")).toBeVisible();
+  const dialog = page.getByRole("dialog");
+  await expect.poll(() => dialog.evaluate((node) => node.contains(document.activeElement))).toBe(true);
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);
 };
 const browserNow = (page) => page.evaluate(() => Date.now());
+const interactUntilReplay = (page, seen, found) => {
+  let step = 0;
+  return expect.poll(async () => {
+    step += 1;
+    await page.mouse.move(300 + (step % 6) * 60, 380 + (step % 2) * 80);
+    return seen.snapshots.some(found);
+  }, { timeout: 20000 }).toBe(true);
+};
+const fullSnapshot = (item) => item.type === 2;
 const sentBetween = (seen, from, to) => [
   ...seen.events.filter((event) => Date.parse(event.timestamp) > from && Date.parse(event.timestamp) < to),
   ...seen.snapshots.filter((item) => item.timestamp > from && item.timestamp < to),
@@ -77,6 +90,22 @@ const reachPayment = async (page) => {
   await page.getByRole("button", { name: "Continue to payment", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Complete Payment", exact: true })).toBeVisible();
 };
+const confirmBooking = async (page, baseURL, { receipt, beforeReturn } = {}) => {
+  await page.getByRole("link", { name: /Book Now/ }).first().click();
+  await expect(page).toHaveURL((url) => url.pathname === "/booking");
+  await reachPayment(page);
+  let finalizeRoute;
+  await page.route("**/api/payment/finalize", (route) => { finalizeRoute = route; });
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  await expect(page).toHaveURL(`${baseURL}/__test/checkout-handoff`);
+  await beforeReturn?.();
+  await page.goto("/payment?dodo_return=1", { waitUntil: "domcontentloaded" });
+  await expect.poll(() => Boolean(finalizeRoute)).toBe(true);
+  const analyticsReceipt = { ...confirmedBooking.analyticsReceipt, ...receipt };
+  await finalizeRoute.fulfill({ json: { ...confirmedBooking, analyticsReceipt } });
+  await expect(page).toHaveURL(`${baseURL}/payment-success`);
+};
+const sessionKeys = (page) => page.evaluate(() => Object.keys(sessionStorage));
 const holdChunk = async (page, { origin, loopback }, marker) => {
   const hold = { held: false };
   const gate = new Promise((resolve) => { hold.release = resolve; });
@@ -92,6 +121,7 @@ const holdChunk = async (page, { origin, loopback }, marker) => {
   return hold;
 };
 const holdPostHog = (page, productionHost) => holdChunk(page, productionHost, "[PostHog.js]");
+const holdOutbox = (page, productionHost) => holdChunk(page, productionHost, "roo-posthog-outbox");
 
 test.afterEach(({ page }) => page.unrouteAll({ behavior: "ignoreErrors" }));
 
@@ -126,7 +156,7 @@ test.describe("production host", () => {
     let finalizeRoute;
     await page.route("**/api/payment/finalize", (route) => { finalizeRoute = route; });
     await reachPayment(page);
-    await expect.poll(() => seen.snapshots.some((item) => item.type === 2)).toBe(true);
+    await interactUntilReplay(page, seen, fullSnapshot);
     await settleIdle(page);
     expect(named(seen, "checkout_started")).toEqual([]);
 
@@ -279,9 +309,7 @@ test.describe("production host", () => {
     await expect.poll(() => seen.requests.some((pathname) => pathname.startsWith("/ingest/static/")), {
       timeout: 20000,
     }).toBe(true);
-    await page.mouse.move(400, 300);
-    await page.mouse.move(600, 500);
-    await expect.poll(() => seen.snapshots.some((item) => item.type === 2), { timeout: 20000 }).toBe(true);
+    await interactUntilReplay(page, seen, fullSnapshot);
 
     await page.getByRole("button", { name: "Referrals", exact: true }).click();
     await page.getByRole("link", { name: "Dashboard", exact: true }).click();
@@ -297,12 +325,7 @@ test.describe("production host", () => {
     await page.goBack();
     await expect(page).toHaveURL(`${baseURL}/packages`);
     const returned = await browserNow(page);
-    for (let step = 0; step < 5; step += 1) {
-      await page.mouse.move(300 + step * 60, 400);
-      await page.waitForTimeout(800);
-    }
-    await expect.poll(() => seen.snapshots.some((item) => item.timestamp > returned + 3000), { timeout: 20000 })
-      .toBe(true);
+    await interactUntilReplay(page, seen, (item) => item.timestamp > returned + 3000);
 
     expect(JSON.stringify(seen.snapshots)).not.toContain("ref-login-identifier");
     expect(seen.snapshots.some((item) => item.type === 2 && item.timestamp >= finalBack)).toBe(true);
@@ -454,8 +477,7 @@ test.describe("cookie choice", () => {
     await page.goto("/packages");
     await acceptCookies(page);
     await expect.poll(() => pageviews(seen)).toEqual([`${baseURL}/packages`]);
-    await page.mouse.move(400, 300);
-    await expect.poll(() => seen.snapshots.some((item) => item.type === 2), { timeout: 20000 }).toBe(true);
+    await interactUntilReplay(page, seen, fullSnapshot);
 
     await openCookieSettings(page);
     await declineCookies(page);
@@ -470,9 +492,7 @@ test.describe("cookie choice", () => {
     await acceptCookies(page);
     await seeDetails(page);
     await expect.poll(() => named(seen, "view_item").length).toBe(1);
-    for (let step = 0; step < 4; step += 1) await page.mouse.move(320 + step * 80, 460);
-    await expect.poll(() => seen.snapshots.some((item) => item.timestamp > acceptedAt), { timeout: 20000 })
-      .toBe(true);
+    await interactUntilReplay(page, seen, (item) => item.timestamp > acceptedAt);
     expect(sentBetween(seen, declinedAt, acceptedAt)).toEqual([]);
     expect(Date.parse(named(seen, "view_item")[0].timestamp)).toBeGreaterThan(acceptedAt);
   });
@@ -569,12 +589,175 @@ test.describe("cookie choice", () => {
     expect(sentBetween(seen, declinedAt, acceptedAt)).toEqual([]);
     await other.close();
   });
+  for (const choice of ["no choice", "Decline"]) {
+    test(`a booking confirmed with ${choice} keeps no PostHog mark and is not sent after Accept`, async ({
+      page, posthog: seen, baseURL,
+    }) => {
+      test.setTimeout(180000);
+      const marks = async () => (await sessionKeys(page)).filter((key) => /^(roo-)?posthog/.test(key));
+      await page.goto("/packages");
+      if (choice === "Decline") await declineCookies(page);
+      await confirmBooking(page, baseURL);
+      await expect.poll(() => sessionKeys(page)).toContain(`booking_completion_tracked:${eventId}`);
+      expect(await marks()).toEqual([]);
+
+      await page.goto("/packages");
+      if (choice === "Decline") await openCookieSettings(page);
+      await acceptCookies(page);
+      await expect.poll(() => pageviews(seen)).toEqual([`${baseURL}/packages`]);
+      await pastPostHogStart(page, seen);
+      await settleIdle(page);
+      expect(named(seen, "booking_completed")).toEqual([]);
+      expect(await marks()).toEqual([]);
+    });
+  }
+
+  test("a service visit made before Accept is never stored or sent, however long attribution took", async ({
+    page, posthog: seen, baseURL, productionHost,
+  }) => {
+    const hold = await holdChunk(page, productionHost, "first_campaign");
+    await page.goto("/packages");
+    await expect.poll(() => hold.held, { timeout: 20000 }).toBe(true);
+    await acceptCookies(page);
+    await expect.poll(() => outbox(page)).toEqual(["$pageview"]);
+    hold.release();
+
+    const visited = async () => (await sessionKeys(page)).some((key) => key.startsWith("sales_visit:"));
+    await expect.poll(visited).toBe(true);
+    expect(await outbox(page) ?? []).not.toContain("service_visit");
+    await expect.poll(() => pageviews(seen)).toEqual([`${baseURL}/packages`]);
+    await pastPostHogStart(page, seen);
+    await settleIdle(page);
+    expect(named(seen, "service_visit")).toEqual([]);
+  });
+
+  for (const where of ["this tab", "another tab"]) {
+    test(`Decline then Accept in ${where} before the waiting list loads drops what the first Accept kept`, async ({
+      page, context, posthog: seen, baseURL, productionHost,
+    }) => {
+      await holdPostHog(page, productionHost);
+      await page.goto("/packages");
+      await acceptCookies(page);
+      await seeDetails(page);
+      await expect.poll(() => outbox(page)).toEqual(["$pageview", "view_item"]);
+      const hold = await holdOutbox(page, productionHost);
+      await page.goto("/about", { waitUntil: "commit" });
+      await expect.poll(() => hold.held, { timeout: 20000 }).toBe(true);
+
+      const chooser = where === "this tab" ? page : await context.newPage();
+      if (chooser !== page) await chooser.goto("/about");
+      await openCookieSettings(chooser);
+      await declineCookies(chooser);
+      await openCookieSettings(chooser);
+      await acceptCookies(chooser);
+      if (chooser !== page) await chooser.close();
+      hold.release();
+
+      await expect.poll(() => pageviews(seen)).toContain(`${baseURL}/about`);
+      await pastPostHogStart(page, seen);
+      await settleIdle(page);
+      expect(seen.events.filter((event) => event.properties.$pathname === "/packages")).toEqual([]);
+      expect(named(seen, "view_item")).toEqual([]);
+    });
+  }
+
+  for (const choices of [["Decline"], ["Decline", "Accept"]]) {
+    const title = `a page restored by Back after ${choices.join(" then ")} in another tab drops its waiting list`;
+    cachedTest(title, async ({
+      page, context, posthog: seen, baseURL, productionHost,
+    }) => {
+      await page.addInitScript(() => window.addEventListener("pageshow", (event) => {
+        if (event.persisted) window.restoredFromCache = true;
+      }));
+      const hold = await holdPostHog(page, productionHost);
+      await page.goto("/packages");
+      await acceptCookies(page);
+      await seeDetails(page);
+      await expect.poll(() => outbox(page)).toEqual(["$pageview", "view_item"]);
+      const leftAt = await browserNow(page);
+      await page.goto(`${productionHost.loopback}/about`);
+      const other = await context.newPage();
+      await other.goto("/about");
+      for (const choice of choices) {
+        await openCookieSettings(other);
+        await (choice === "Decline" ? declineCookies : acceptCookies)(other);
+      }
+      await other.close();
+
+      await page.goBack({ waitUntil: "commit" });
+      await expect.poll(() => page.evaluate(() => window.restoredFromCache === true)).toBe(true);
+      if (choices.length === 1) {
+        expect(await outbox(page)).toBeNull();
+        await openCookieSettings(page);
+        await acceptCookies(page);
+      }
+      hold.release();
+      await expect.poll(() => pageviews(seen)).toContain(`${baseURL}/packages`);
+      await pastPostHogStart(page, seen);
+      await settleIdle(page);
+      const here = seen.events.filter((event) => event.properties.$pathname === "/packages");
+      expect(here.filter((event) => sentAt(event) < leftAt)).toEqual([]);
+      expect(named(seen, "view_item")).toEqual([]);
+    });
+  }
 });
 
 test.describe("waiting list", () => {
   const leaked = [
     "buyer@example.com", "buyer%40example.com", "evil.example", "555-0199", "fbclid-value-1234", "creatorref",
   ];
+
+  test("a creator code is never stored, and the booking still reaches PostHog with it", async ({
+    page, posthog: seen, baseURL, productionHost,
+  }) => {
+    test.setTimeout(180000);
+    const hold = await holdPostHog(page, productionHost);
+    await page.goto("/packages?ref=creatorref");
+    await acceptCookies(page);
+    await confirmBooking(page, baseURL, { receipt: { referralCode: "creatorref" } });
+    await expect.poll(() => outbox(page)).toContain("booking_completed");
+    expect(await storedOutbox(page)).not.toContain("creatorref");
+
+    hold.release();
+    await expect.poll(() => named(seen, "booking_completed").length).toBe(1);
+    expect(named(seen, "booking_completed")[0].properties)
+      .toMatchObject({ creator_code: "creatorref", referral_code: "creatorref", event_id: eventId });
+  });
+
+  test("an event handed over on a page outside the sales pages keeps its labels and journey", async ({
+    page, context, posthog: seen, baseURL, productionHost,
+  }) => {
+    const hold = await holdPostHog(page, productionHost);
+    await page.goto("/packages?utm_source=launch&utm_campaign=spring");
+    await acceptCookies(page);
+    await seeDetails(page);
+    await expect.poll(() => outbox(page)).toEqual(["$pageview", "view_item"]);
+    await page.goto("/meet-the-team");
+    hold.release();
+
+    await expect.poll(() => named(seen, "view_item").length).toBe(1);
+    const journeyId = await journeyOf(page);
+    expect(journeyId).toBeTruthy();
+    expect(named(seen, "view_item")[0].properties).toMatchObject({
+      campaign_source: "launch", campaign: "spring", journey_id: journeyId, distinct_id: journeyId,
+      $current_url: `${baseURL}/packages`,
+    });
+
+    const landing = await context.newPage();
+    await context.clearCookies({ name: "roo_attr" });
+    await context.clearCookies({ name: "roo_attr_last" });
+    await landing.goto("/meet-the-team?utm_source=elsewhere");
+    await expect.poll(() => pageviews(seen)).toContain(`${baseURL}/meet-the-team`);
+    await settleIdle(landing);
+    expect(await journeyOf(landing)).toBeUndefined();
+    expect(await landing.evaluate(() => sessionStorage.getItem("sales_attribution"))).toBeNull();
+    const landed = named(seen, "$pageview").filter((event) => event.properties.distinct_id !== journeyId);
+    expect(landed).toHaveLength(1);
+    for (const label of ["journey_id", "campaign_source", "landing_path"]) {
+      expect(landed[0].properties).not.toHaveProperty(label);
+    }
+    await landing.close();
+  });
 
   test("nothing from the landing address is stored, and PostHog gets only cleaned labels", async ({
     page, posthog: seen, productionHost,
@@ -607,18 +790,10 @@ test.describe("waiting list", () => {
   }) => {
     test.setTimeout(180000);
     await page.goto("/packages");
-    await page.getByRole("link", { name: /Book Now/ }).first().click();
-    await expect(page).toHaveURL((url) => url.pathname === "/booking");
-    await reachPayment(page);
-    let finalizeRoute;
-    await page.route("**/api/payment/finalize", (route) => { finalizeRoute = route; });
-    await page.getByRole("button", { name: "Pay your way", exact: true }).click();
-    await expect(page).toHaveURL(`${baseURL}/__test/checkout-handoff`);
-    const hold = await holdChunk(page, productionHost, "first_campaign");
-    await page.goto("/payment?dodo_return=1", { waitUntil: "domcontentloaded" });
-    await expect.poll(() => Boolean(finalizeRoute)).toBe(true);
-    await finalizeRoute.fulfill({ json: confirmedBooking });
-    await expect(page).toHaveURL(`${baseURL}/payment-success`);
+    let hold;
+    await confirmBooking(page, baseURL, {
+      beforeReturn: async () => { hold = await holdChunk(page, productionHost, "first_campaign"); },
+    });
     await expect.poll(() => hold.held, { timeout: 20000 }).toBe(true);
     const other = await context.newPage();
     await other.goto("/about");

@@ -120,7 +120,7 @@ export const createPostHog = (key, apiHost, queued, salesAttribution) => {
   if (!publicPage && !queued) return null;
   sales = salesAttribution;
   markPage(publicPage);
-  const journeyId = sales.captureSalesAttribution()?.journeyId;
+  const journeyId = sales.journeySalesAttribution()?.journeyId;
   posthog.init(key, {
     api_host: apiHost,
     ui_host: UI_HOST,

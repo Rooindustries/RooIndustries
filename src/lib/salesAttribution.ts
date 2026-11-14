@@ -257,3 +257,6 @@ export function salesEventProperties(attribution: unknown = captureSalesAttribut
   properties.has_gclid = Boolean(last.gclid || first.gclid);
   return properties;
 }
+
+export const journeySalesAttribution = () =>
+  captureSalesAttribution() || sanitizeSalesAttribution(readStoredAttribution());
