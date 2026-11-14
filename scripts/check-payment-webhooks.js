@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
+const { readOutsideEnvValue } = require("../src/server/supabase/envValue.cjs");
 
 const execFileAsync = promisify(execFile);
 
@@ -113,7 +114,8 @@ const main = async () => {
   }
 
   printSection("Local credential presence");
-  printLine("required vars present", REQUIRED_PROD_ENV.filter(name => Boolean(process.env[name])).join(", ") || "none");
+  const present = REQUIRED_PROD_ENV.filter(name => Boolean(readOutsideEnvValue(process.env, name)));
+  printLine("required vars present", present.join(", ") || "none");
   printSection("Explicit local endpoints");
   let probesPass = true;
   for (const endpoint of endpoints) {

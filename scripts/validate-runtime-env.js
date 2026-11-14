@@ -246,6 +246,7 @@ const requiredChecks = [
   {
     keys: ["RAZORPAY_WEBHOOK_SECRET"],
     label: "RAZORPAY_WEBHOOK_SECRET",
+    read: getOutsideValue,
   },
   {
     keys: ["RATE_LIMIT_HASH_SECRET"],
@@ -256,6 +257,7 @@ const requiredChecks = [
   {
     keys: ["RESEND_API_KEY"],
     label: "RESEND_API_KEY",
+    read: getOutsideValue,
   },
   {
     keys: ["FROM_EMAIL"],
@@ -467,7 +469,7 @@ const socialAuthEnabled = isEnabled("SUPABASE_SOCIAL_AUTH_ENABLED");
 const publicSocialAuthEnabled = isEnabled(
   "NEXT_PUBLIC_SUPABASE_SOCIAL_AUTH_ENABLED"
 );
-const downloadStorageBackend = getFirstValue([
+const downloadStorageBackend = getOutsideValue([
   "DOWNLOAD_STORAGE_BACKEND",
 ]).toLowerCase();
 const downloadCatalogValue = readEnvValue(
@@ -505,7 +507,7 @@ if (
   );
 }
 const missing = requiredChecks
-  .filter((check) => !hasAny(check.keys))
+  .filter((check) => !(check.read || getFirstValue)(check.keys))
   .map((check) => check.label);
 
 if (
@@ -543,12 +545,12 @@ if (!/^[0-9]+$/.test(commerceFailoverGeneration)) {
 
 
 if (anySupabaseRuntimeEnabled) {
-  const url = getFirstValue(["SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL"]);
-  const secret = getFirstValue([
+  const url = getOutsideValue(["SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL"]);
+  const secret = getOutsideValue([
     "SUPABASE_SECRET_KEY",
     "SUPABASE_SERVICE_ROLE_KEY",
   ]);
-  const publishable = getFirstValue([
+  const publishable = getOutsideValue([
     "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
     "SUPABASE_PUBLISHABLE_KEY",
     "NEXT_PUBLIC_SUPABASE_ANON_KEY",

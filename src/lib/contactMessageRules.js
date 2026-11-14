@@ -3,10 +3,15 @@ import { isValidEmail } from "./emailValidation.js";
 const NAME_LIMIT = 100;
 const MESSAGE_MIN = 10;
 const MESSAGE_MAX = 5000;
+const EMAIL_MAX_BYTES = 254 * 3;
+const UTF8_MAX_BYTES = 4;
+const JSON_FRAME_BYTES = 2048;
 const CONTROL_CHARACTERS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/;
 
 const text = (value) => (typeof value === "string" ? value.trim() : "");
 const codePoints = (value) => Array.from(value).length;
+
+export const CONTACT_BODY_LIMIT = (NAME_LIMIT + MESSAGE_MAX) * UTF8_MAX_BYTES + EMAIL_MAX_BYTES + JSON_FRAME_BYTES;
 
 export const contactMessageValues = ({ name, email, message }) => ({
   name: text(name).replace(/\s+/g, " "),

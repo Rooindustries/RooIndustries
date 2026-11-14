@@ -1,5 +1,5 @@
 import envValue from "../supabase/envValue.cjs";
-const { readFirstOutsideEnvValue } = envValue;
+const { readFirstOutsideEnvValue, readOutsideEnvValue } = envValue;
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import crypto from "node:crypto";
@@ -65,7 +65,7 @@ const getSupabaseDownloadBucket = (download = {}, env = process.env) =>
 
 export const getDownloadStorageBackend = (download = {}, env = process.env) => {
   const configured = normalizeValue(
-    download.storageBackend || env.DOWNLOAD_STORAGE_BACKEND
+    download.storageBackend || readOutsideEnvValue(env, "DOWNLOAD_STORAGE_BACKEND")
   ).toLowerCase();
 
   if (configured === DOWNLOAD_STORAGE_BLOB) return DOWNLOAD_STORAGE_BLOB;

@@ -124,7 +124,24 @@ test("a valid message is recorded, sent to the inbox and confirmed", async ({ pa
   await finish(page, testInfo, baseURL);
 });
 
-for (const [label, message] of [["a short message", "Too short"], ["five emoji", "\u{1F680}".repeat(5)]]) {
+const longest = "\u{20000}".repeat(5000);
+
+test("a 5,000 character message in a four-byte script is sent and stored whole", async ({
+  page, baseURL,
+}, testInfo) => {
+  await page.goto("/contact");
+  const response = await submitForm(page, { ...fields, message: longest });
+  expect(response.status()).toBe(200);
+  await expect(page.getByText(thanks, { exact: true })).toBeVisible();
+  const { rows, emails } = await fixtureState(baseURL);
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ ...fields, message: longest, status: "sent" });
+  expect(emails).toHaveLength(1);
+  await finish(page, testInfo, baseURL);
+});
+
+const tooLong = ["5,001 four-byte characters", `${longest}\u{20000}`];
+for (const [label, message] of [["a short message", "Too short"], ["five emoji", "\u{1F680}".repeat(5)], tooLong]) {
   test(`${label} shows the field error, is refused by the API and stores nothing`, async ({
     page, baseURL,
   }, testInfo) => {

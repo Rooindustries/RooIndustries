@@ -22,6 +22,7 @@ import {
   toMoney,
 } from "../lib/checkoutCodes";
 import { requestDeadline } from "../lib/clientRequest";
+import { cleanOutsideValue } from "../lib/outsideValue.cjs";
 
 const { applyPackagePricing } = packagePricing;
 const PAYMENT_FETCH_TIMEOUT_MS = 15_000;
@@ -524,11 +525,8 @@ export default function Payment({ hideFooter = false }) {
     : !lockedProvider && providerConfig.dodo?.enabled;
   const providerIsAvailableForSession = (provider) =>
     !lockedProvider || lockedProvider === provider;
-  const paypalClientIdFromEnv = (
-    process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID ||
-    process.env.REACT_APP_PAYPAL_CLIENT_ID ||
-    ""
-  ).trim();
+  const paypalClientIdFromEnv = cleanOutsideValue(process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID) ||
+    cleanOutsideValue(process.env.REACT_APP_PAYPAL_CLIENT_ID);
   const paypalClientId = (
     providerConfig?.paypal?.clientId || paypalClientIdFromEnv
   ).trim();

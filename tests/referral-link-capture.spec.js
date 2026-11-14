@@ -293,7 +293,8 @@ const filterRows = [
   ]),
   ["\uFF10\uFF13\uFF0D\uFF11\uFF12\uFF13\uFF14\uFF0D\uFF15\uFF16\uFF17\uFF18", DROP],
   ["\uFF10\uFF13\uFF0E\uFF11\uFF12\uFF13\uFF14\uFF0E\uFF15\uFF16\uFF17\uFF18", KEEP],
-  [`${"a".repeat(99)} b`, "a".repeat(99)],
+  [`${"a".repeat(99)} b`, "a".repeat(99)], [`${" ".repeat(300)}spring`, "spring"],
+  [`${"\u0001".repeat(400)}summer`, "summer"],
 ];
 
 test("labels with an email, a URL or a formatted phone number are dropped and every other label is kept", async ({

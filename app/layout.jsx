@@ -10,10 +10,10 @@ import envValue from "@/src/server/supabase/envValue.cjs";
 
 export const metadata = seo.getMetadataForPath("/");
 const SUPABASE_ASSET_ORIGIN = getSupabaseAssetOrigin();
-const { normalizeBackend, readEnvValue } = envValue;
+const { normalizeBackend, readEnvValue, readOutsideEnvValue } = envValue;
 const shouldPreconnectSupabase = Boolean(SUPABASE_ASSET_ORIGIN) && (
   normalizeBackend(
-    readEnvValue(process.env, "DATA_PRIMARY_BACKEND"),
+    readOutsideEnvValue(process.env, "DATA_PRIMARY_BACKEND"),
     "supabase"
   ) === "supabase" ||
   Number(readEnvValue(process.env, "SUPABASE_CONTENT_CANARY_PERCENT") || 0) > 0);

@@ -111,9 +111,9 @@ const privateText = (text: string) => PRIVATE_TEXT.some((rule) => rule.test(text
 const trimSpace = (text: string) => text.replace(/^ | $/g, "");
 const label = (value: unknown) => {
   if (typeof value !== "string") return "";
-  const text = trimSpace(head(value, SCAN_CODE_POINTS).replace(UNSAFE, "").replace(/\p{White_Space}+/gu, " "));
+  const text = trimSpace(value.replace(UNSAFE, "").replace(/\p{White_Space}+/gu, " "));
   const kept = trimSpace(head(text, LABEL_CODE_POINTS));
-  return privateText(text) || privateText(kept) ? "" : kept;
+  return privateText(head(text, SCAN_CODE_POINTS)) || privateText(kept) ? "" : kept;
 };
 const referralCode = (value: unknown) =>
   bounded(value, REFERRAL_CODE_CHARS) && REFERRAL_CODE.test(value.trim()) && /[a-z]/i.test(value)

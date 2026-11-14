@@ -40,6 +40,8 @@ const monitoringStartup = process.env.TOOLING_MONITORING_STARTUP === "1";
 if (monitoringStartup && (process.env.NEXT_PUBLIC_SENTRY_DSN !== "false" || process.env.TOOLING_DEV_SERVER === "1")) {
   throw new Error("Production monitoring startup requires the malformed DSN fixture and next start.");
 }
+const paddedSettings = process.env.TOOLING_PADDED_SETTINGS === "1";
+const outside = value => paddedSettings ? ` ${value}\\n ` : value;
 const clockFile = apiRoutes ? path.resolve(`${dist}-clock.json`) : undefined;
 if (clockFile) fs.writeFileSync(clockFile, "null");
 const env = withNodeOption({
@@ -49,15 +51,15 @@ const env = withNodeOption({
   VERCEL_ENV: "preview",
   TZ: "UTC",
   TOURNEY_DATABASE_MODE: "memory",
-  DATA_PRIMARY_BACKEND: "supabase",
-  COMMERCE_PRIMARY_BACKEND: "supabase",
+  DATA_PRIMARY_BACKEND: outside("supabase"),
+  COMMERCE_PRIMARY_BACKEND: outside("supabase"),
   SUPABASE_CUTOVER_ENABLED: "1",
   COMMERCE_CUTOVER_ENABLED: "1",
-  SUPABASE_URL: contentURL,
-  NEXT_PUBLIC_SUPABASE_URL: contentURL,
-  NEXT_PUBLIC_SUPABASE_ASSET_URL: contentURL,
-  SUPABASE_SECRET_KEY: "fixture-only-tooling-server-secret-key",
-  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "fixture-only-tooling-browser-publishable-key",
+  SUPABASE_URL: outside(contentURL),
+  NEXT_PUBLIC_SUPABASE_URL: outside(contentURL),
+  NEXT_PUBLIC_SUPABASE_ASSET_URL: outside(contentURL),
+  SUPABASE_SECRET_KEY: outside("fixture-only-tooling-server-secret-key"),
+  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: outside("fixture-only-tooling-browser-publishable-key"),
   ALLOW_LIVE_PAYMENTS: "0",
   SALES_PREVIEW_READ_ONLY: apiRoutes ? "0" : "1",
   ...(apiRoutes ? {
@@ -93,6 +95,7 @@ fingerprint.update(fs.readFileSync(fileURLToPath(new URL("./lib/test-target-safe
 fingerprint.update(env.NEXT_PUBLIC_SENTRY_DSN);
 fingerprint.update(`meta-pixel:${env.NEXT_PUBLIC_META_PIXEL_ID}`);
 fingerprint.update(String(monitoringStartup));
+fingerprint.update(`padded-settings:${paddedSettings}`);
 const sourceHash = fingerprint.digest("hex");
 let active;
 let stopping = false;

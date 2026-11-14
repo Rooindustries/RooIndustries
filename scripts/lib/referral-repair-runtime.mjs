@@ -1,6 +1,7 @@
 import { createDocumentWriteClient } from "../../src/server/data/documentClient.js";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import operatorEnvironment from "./operator-environment.cjs";
+import envValue from "../../src/server/supabase/envValue.cjs";
 import { sha256 } from "./supabase-shadow-migration.mjs";
 
 export const argument = (name) => {
@@ -30,8 +31,8 @@ export const parseExpectedGeneration = (value) => {
 };
 
 export const createRepairSupabaseClient = (clientInfo) => {
-  const url = readEnv("SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL");
-  const secret = readEnv("SUPABASE_SECRET_KEY", "SUPABASE_SERVICE_ROLE_KEY");
+  const url = envValue.firstOutsideSetting("SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL");
+  const secret = envValue.firstOutsideSetting("SUPABASE_SECRET_KEY", "SUPABASE_SERVICE_ROLE_KEY");
   if (!url || !secret) throw new Error("Supabase server credentials are required.");
   return createSupabaseClient(url, secret, {
     auth: {

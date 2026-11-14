@@ -2,15 +2,15 @@ import { runLegacyApiHandler } from "../../../src/lib/nextApiAdapter";
 import { getClientAddress, requireRateLimit } from "../../../src/server/api/ref/rateLimit";
 import { submitContactMessage } from "../../../src/server/contact/contactMessages";
 import { logSafeError } from "../../../src/server/safeErrorLog";
+import { CONTACT_BODY_LIMIT } from "../../../src/lib/contactMessageRules";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const BODY_LIMIT = 16 * 1024;
 const UNAVAILABLE = "We couldn't save your message right now.";
 
 const handler = async (req, res) => {
-  if (Buffer.byteLength(req.rawBody || "") > BODY_LIMIT) {
+  if (Buffer.byteLength(req.rawBody || "") > CONTACT_BODY_LIMIT) {
     return res.status(413).json({ ok: false, error: "Your message is too long." });
   }
   const body = req.body || {};

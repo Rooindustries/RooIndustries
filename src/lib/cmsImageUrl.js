@@ -1,3 +1,4 @@
+import { cleanOutsideValue } from "./outsideValue.cjs";
 const SUPABASE_PUBLIC_IMAGE_PATH = "/storage/v1/object/public/";
 const SUPABASE_RENDER_IMAGE_PATH = "/storage/v1/render/image/public/";
 const TRANSFORMABLE_IMAGE_PATH = /\.(?:gif|jpe?g|png)$/i;
@@ -97,7 +98,7 @@ class DirectAssetUrlBuilder {
 }
 
 const loggedMissing = new Set();
-const publicSupabaseOrigin = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const publicSupabaseOrigin = cleanOutsideValue(process.env.NEXT_PUBLIC_SUPABASE_URL);
 const safeImageUrl = (value) => {
   if (typeof value !== "string" || !value) return null;
   if (/^\/(?!\/)/.test(value) && !value.includes("..")) return value;

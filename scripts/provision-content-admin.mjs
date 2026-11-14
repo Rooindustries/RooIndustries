@@ -8,7 +8,7 @@ registerHooks({ resolve(specifier, context, next) {
     throw error;
   }
 } });
-const { createSupabaseAdminClient } = await import("../src/server/supabase/adminClient.js");
+const { createSupabaseAdminClient, resolveSupabaseAdminEnv } = await import("../src/server/supabase/adminClient.js");
 const { bootstrapSupabaseNativeAccount, resolveSupabaseAccountByUserId } = await import("../src/server/supabase/accounts.js");
 const { isValidNewPassword, NEW_PASSWORD_REQUIREMENT } = await import("../src/lib/passwordPolicy.js");
 const { isContentAdministrator } = await import("../src/server/cms/adminSession.js");
@@ -73,7 +73,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const email = args.find(arg => arg.startsWith("--email="))?.slice(8);
     const target = args.find(arg => arg.startsWith("--target="))?.slice(9) || "local";
     if (!["local", "production"].includes(target)) throw new Error("Target must be local or production.");
-    const host = new URL(process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL).hostname;
+    const host = new URL(resolveSupabaseAdminEnv().url).hostname;
     if (target === "local" && !["localhost", "127.0.0.1", "[::1]"].includes(host)) throw new Error("Local provisioning requires a local Supabase URL. Production requires --target=production.");
     if (target === "production") {
       const prompt = readline.createInterface({ input: process.stdin, output: process.stdout });

@@ -77,13 +77,21 @@ const cutTouch = (capturedAt) => ({
   capturedAt, landingPath: "/", source: "s".repeat(100), medium: "m".repeat(100), campaign: "n".repeat(100),
   content: "o".repeat(100), term: "t".repeat(100),
 });
+const paddedTouch = (capturedAt) => ({
+  ...floodedTouch(capturedAt), source: `${flood(" ")}spring`, medium: `${flood("\u0000")}summer`,
+  campaign: `${flood("<")}autumn`, content: `north${" ".repeat(99_990)}south`, term: `${flood("\u2028")}winter`,
+});
+const cleanedTouch = (capturedAt) => ({
+  capturedAt, landingPath: "/", source: "spring", medium: "summer", campaign: "autumn", content: "north south",
+  term: "winter",
+});
 const floodedInput = {
   version: 2, journeyId,
-  firstTouch: floodedTouch("2026-11-01T09:00:00.000Z"), lastTouch: floodedTouch("2026-11-10T09:00:00.000Z"),
+  firstTouch: floodedTouch("2026-11-01T09:00:00.000Z"), lastTouch: paddedTouch("2026-11-10T09:00:00.000Z"),
 };
 const floodedExpected = {
   version: 2, journeyId,
-  firstTouch: cutTouch("2026-11-01T09:00:00.000Z"), lastTouch: cutTouch("2026-11-10T09:00:00.000Z"),
+  firstTouch: cutTouch("2026-11-01T09:00:00.000Z"), lastTouch: cleanedTouch("2026-11-10T09:00:00.000Z"),
 };
 const FLOODED_START_MS = 1500;
 const attributionMigration = "20261114002000_expose_booking_sales_attribution.sql";
@@ -132,9 +140,28 @@ const assertStoredAttribution = async (ctx, input, expected) => {
   return { bookingId: booking.legacy_sanity_id, salesAttribution: booking.sales_attribution, startMs };
 };
 
+const assertReceiptAttribution = async (ctx, provider) => {
+  const checkout = await ctx.a1Start(provider, "normal", { salesAttribution: v2Input });
+  const webhook = await ctx.a1Hook(provider);
+  assert.equal(webhook.status, 200, JSON.stringify(webhook));
+  const finalized = await ctx.requestFlow("finalize", {
+    paymentAccessToken: checkout.started.body.paymentAccessToken, body: checkout.proof,
+  });
+  assert.equal(finalized.status, 200, JSON.stringify(finalized));
+  const payment = (await ctx.row(checkout.id)).payload;
+  assert.equal(payment.status, "booked", JSON.stringify(payment));
+  assert.deepEqual(payment.bookingPayload.salesAttribution, v2Expected);
+  assert.deepEqual(finalized.body.analyticsReceipt?.attribution, v2Expected, JSON.stringify(finalized.body));
+  return { provider, bookingId: payment.bookingId, receiptAttribution: finalized.body.analyticsReceipt.attribution };
+};
+
 export async function registerAttributionScenarios(ctx) {
   if (!process.argv.includes("--full-chain")) return;
   await ctx.run("ads-attribution-persisted", () => assertStoredAttribution(ctx, v2Input, v2Expected));
+  for (const provider of ["razorpay", "dodo"]) {
+    await ctx.run(`ads-attribution-${provider}-receipt`,
+      () => withEnv(fixtureMail, () => assertReceiptAttribution(ctx, provider)));
+  }
   await ctx.run("ads-attribution-v1-upgraded", () => assertStoredAttribution(ctx, v1Input, {
     version: 2, journeyId, firstTouch: v1Touch, lastTouch: v1Touch,
   }));

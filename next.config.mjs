@@ -3,6 +3,9 @@ import { readdirSync, lstatSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { isProductionDeployment } from "./src/lib/monitoring/deployment.mjs";
 import { makeBuildReproducible } from "./scripts/lib/reproducible-build.mjs";
+import outsideValue from "./src/lib/outsideValue.cjs";
+
+const { cleanOutsideValue } = outsideValue;
 
 export function validateDistDir(value, { isolated = false } = {}) {
   if (typeof value !== "string" || !/^\.next(?:-[a-zA-Z0-9_-]+)?$/.test(value) ||
@@ -12,7 +15,8 @@ export function validateDistDir(value, { isolated = false } = {}) {
 }
 
 export function getSupabaseAssetOrigin(env = process.env) {
-  return new URL(env.NEXT_PUBLIC_SUPABASE_ASSET_URL || "https://ntezmxzaibrrsgtujgxu.supabase.co").origin;
+  const configured = cleanOutsideValue(env.NEXT_PUBLIC_SUPABASE_ASSET_URL);
+  return new URL(configured || "https://ntezmxzaibrrsgtujgxu.supabase.co").origin;
 }
 
 /** @type {import('next').NextConfig} */
@@ -20,8 +24,8 @@ const isProduction = process.env.NODE_ENV === "production";
 const DEFAULT_SUPABASE_ASSET_ORIGIN =
   "https://ntezmxzaibrrsgtujgxu.supabase.co";
 const configuredSupabaseAuthUrl =
-  process.env.NEXT_PUBLIC_SUPABASE_URL ||
-  process.env.SUPABASE_URL ||
+  cleanOutsideValue(process.env.NEXT_PUBLIC_SUPABASE_URL) ||
+  cleanOutsideValue(process.env.SUPABASE_URL) ||
   DEFAULT_SUPABASE_ASSET_ORIGIN;
 const supabaseAuthOrigin = new URL(configuredSupabaseAuthUrl).origin;
 const supabaseAssetOrigin = getSupabaseAssetOrigin();

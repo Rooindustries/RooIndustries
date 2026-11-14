@@ -61,7 +61,8 @@ await run('contact-config', async () => {
   input('input[name=name]', 'Synthetic name'); input('input[name=email]', 'ui@fixture.invalid');
   input('textarea[name=message]', 'Synthetic message'); submit(); await call('/api/contact');
   const calls = (await control()).calls.filter(c => c.path === '/api/contact');
-  const sent = calls.length === 1 && calls[0].body.message === 'Synthetic message' && calls[0].body.company === '';
+  const sent = calls.length === 1 && calls[0].body.message === 'Synthetic message' &&
+    calls[0].body.contact_check === '';
   const seen = JSON.stringify({ calls, enabledBeforeConfig });
   assert(sent && enabledBeforeConfig, `Contact form waited on CMS content: ${seen}`);
   const thanks = "Thanks, your message is in. We'll reply by email.";

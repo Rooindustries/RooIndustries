@@ -311,9 +311,10 @@ try{
     const bookingPayload={packageTitle,email:'customer@example.invalid',discord:'fixture',specs:'synthetic computer',mainGame:'fixture game',localTimeZone:'Asia/Kolkata',startTimeUTC:hold.startTimeUTC,slotHoldId:hold._id,slotHoldToken:issueHoldToken({holdId:hold._id,startTimeUTC:hold.startTimeUTC,expiresAt,holdNonce:hold.holdNonce,backend:'supabase',cutoverGeneration:0})};
     const {resolvePaymentQuote}=await import('../src/server/api/ref/pricing.js');const quote=await resolvePaymentQuote({packageTitle,client:commerce});const {buildQuoteFingerprint}=await import('../src/server/api/payment/paymentRecord.js');return{provider:'paypal',bookingPayload,quoteFingerprint:buildQuoteFingerprint({bookingPayload,quote})};
   };
-  const a1Start=async(provider='paypal',variant='normal')=>{
+  const a1Start=async(provider='paypal',variant='normal',bookingFields={})=>{
     fixture.setRequestHook(async(phase,request)=>{if(phase==='after'&&(request.status>=400||request.response?.ok===false||request.response?.error)){evidence.databaseErrors||=[];evidence.databaseErrors.push({scenario:scenarioNumber,response:request.response});}});
     const input=await startInput();input.provider=provider;input.bookingPayload.message='Original note';emailFailure=variant==='email-failure';
+    Object.assign(input.bookingPayload,bookingFields);
     if (variant === 'upgrade') {
       const original = { ...input.bookingPayload, _id: 'booking.original', _type: 'booking',
         backendOwner: 'supabase', cutoverGeneration: 0, status: 'captured',

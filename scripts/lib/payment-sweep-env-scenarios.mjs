@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import fs from "node:fs";
+import http from "node:http";
+import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { freeTcpPort } from "./free-tcp-port.mjs";
+import { spawnContained, stopChild } from "./start-on-port.mjs";
 import {
   fixtureMail,
   fixturePackage,
@@ -33,6 +38,14 @@ const paddedDodo = {
   DODO_PAYMENTS_RETURN_URL: "https://example.invalid/checkout\\n",
 };
 const paddedBackend = { DATA_PRIMARY_BACKEND: " supabase\\n", COMMERCE_PRIMARY_BACKEND: "supabase\\n " };
+const supabaseOrigin = "https://ntezmxzaibrrsgtujgxu.supabase.co";
+const paddedSupabase = {
+  SUPABASE_URL: `${supabaseOrigin}\\n `,
+  NEXT_PUBLIC_SUPABASE_URL: ` ${supabaseOrigin}\\n`,
+  SUPABASE_SECRET_KEY: `${"s".repeat(40)}\\n`,
+  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ` ${"p".repeat(24)}\\n `,
+};
+const toolingPublishableKey = "fixture-only-tooling-browser-publishable-key";
 const paddedSelfIssued = { PAYMENT_SESSION_SECRET: "fixture-session-secret\\n ", CRON_SECRET: "fixture-cron\\n" };
 const releaseSecret = "x".repeat(40);
 const pastCutoff = "2000-01-01T00:00:00.000Z";
@@ -87,6 +100,58 @@ const runValidateRuntimeEnv = (values) => {
   });
   const runtimeLine = String(result.stdout || "").match(/^\[env\] Payment runtime: .*$/m)?.[0] || "";
   return { status: result.status, runtimeLine, stderr: String(result.stderr || "").slice(-2000) };
+};
+
+const servePaddedSite = async (check) => {
+  const port = await freeTcpPort("127.0.0.1");
+  const baseURL = `http://127.0.0.1:${port}`;
+  const dist = `.next-e2e-padded-${process.pid}`;
+  const child = spawnContained(process.execPath, ["scripts/test-tooling-sweep-server.mjs"], {
+    cwd: sweepRoot,
+    stdio: ["ignore", "pipe", "pipe"],
+    env: {
+      PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR, ROO_TEST_HOST: "127.0.0.1",
+      BASE_URL: baseURL, PW_PORT: String(port), NEXT_DIST_DIR: dist, TOOLING_PADDED_SETTINGS: "1",
+    },
+  });
+  let log = "";
+  const ready = new Promise((resolve, reject) => {
+    child.stdout.on("data", (chunk) => { log += chunk; if (log.includes("Ready in")) resolve(); });
+    child.stderr.on("data", (chunk) => { log += chunk; });
+    child.once("close", (code) => reject(new Error(`The padded site stopped (${code}): ${log.slice(-4000)}`)));
+  });
+  try {
+    await ready;
+    const { contentURL } = JSON.parse(fs.readFileSync(path.join(sweepRoot, dist, "tooling-build.json"), "utf8"));
+    return await check(baseURL, contentURL);
+  } finally {
+    await stopChild(child);
+    const output = path.join(sweepRoot, dist);
+    for (const leftover of [output, `${output}.build-lock`]) fs.rmSync(leftover, { recursive: true, force: true });
+  }
+};
+
+const localGet = (url) => new Promise((resolve, reject) => {
+  http.get(url, (response) => {
+    let body = "";
+    response.setEncoding("utf8");
+    response.on("data", (chunk) => { body += chunk; });
+    response.on("end", () => resolve({ status: response.statusCode, body }));
+  }).on("error", reject);
+});
+
+const browserRecoveryRequest = async (baseURL, contentURL) => {
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    const request = page.waitForRequest((entry) => entry.url().startsWith(`${contentURL}/`));
+    await page.goto(`${baseURL}/referrals/reset?token_hash=fixture-recovery&type=recovery`);
+    const sent = await request;
+    return { path: new URL(sent.url()).pathname, apikey: (await sent.allHeaders()).apikey };
+  } finally {
+    await browser.close();
+  }
 };
 
 const assertOneBooking = async (ctx, paymentId) => {
@@ -238,6 +303,23 @@ export async function registerEnvScenarios(ctx) {
       paddedStore: { prebuild: paddedStore.status, runtime: runtimePolicy.primaryBackend },
       unsupportedStore: unsupportedStore.status,
     };
+  });
+
+  await ctx.run("ads-env-padded-supabase-site", async () => {
+    const release = runValidateRuntimeEnv({ ...productionRelease, ...paddedBackend, ...paddedSupabase });
+    assert.equal(release.status, 0, JSON.stringify(release));
+    return servePaddedSite(async (baseURL, contentURL) => {
+      const home = await localGet(`${baseURL}/`);
+      assert.equal(home.status, 200, home.body.slice(0, 2000));
+      assert.match(home.body, new RegExp(`<link rel="preconnect" href="${contentURL}"`));
+      const content = await localGet(`${baseURL}/api/content/reviews`);
+      const body = JSON.parse(content.body);
+      assert.equal(content.status, 200, JSON.stringify(body));
+      assert.equal(body.ok, true, JSON.stringify(body));
+      const recovery = await browserRecoveryRequest(baseURL, contentURL);
+      assert.deepEqual(recovery, { path: "/auth/v1/verify", apikey: toolingPublishableKey });
+      return { release: release.status, home: home.status, content: content.status, recovery };
+    });
   });
 
   const selfIssued = { ...paddedSelfIssued, ...fixtureMail };
