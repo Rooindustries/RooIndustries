@@ -9,7 +9,7 @@ let client = null;
 let loading = null;
 const pending = [];
 
-const projectKey = () => String(process.env.NEXT_PUBLIC_POSTHOG_KEY || DEFAULT_KEY).trim();
+const projectKey = () => (process.env.NEXT_PUBLIC_POSTHOG_KEY || DEFAULT_KEY).trim();
 
 const flush = () => {
   while (client && pending.length) {
@@ -46,7 +46,7 @@ export const syncPostHogPage = () => {
   client?.syncPage();
 };
 
-export const capturePostHog = (eventName, properties = {}, { url = window.location.href, timestamp = new Date() } = {}) => {
+export const capturePostHog = (eventName, properties, { url, timestamp }) => {
   if (JOURNEY_ID.test(properties.journey_id || "")) call("useJourney", properties.journey_id);
   if (COMPLETED_BOOKING.test(eventName) && INTERNAL_ID.test(properties.event_id || "")) {
     call("identify", properties.event_id);
