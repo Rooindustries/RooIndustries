@@ -1,7 +1,8 @@
 const {
   test: bookingTest, expect, cookieBanner: banner, settleIdle: settle, bookingEventId, routePaidStart: routeStart,
-  checkoutStartCases, declineCookies, productionHostFixtures,
+  checkoutStartCases, declineCookies, acceptCookies, productionHostFixtures,
 } = require("./fixtures/booking-flow.cjs");
+const { posthogFixtures, named, pageviews } = require("./fixtures/posthog.cjs");
 
 const safety = () => import("../scripts/lib/test-target-safety.mjs");
 const overhaul = "Performance Vertex Overhaul";
@@ -29,6 +30,7 @@ const insightsScript = "/_vercel/insights/script.js";
 const test = bookingTest.extend({
   analyticsThrows: [false, { option: true }],
   ...productionHostFixtures,
+  ...posthogFixtures,
   vercel: [async ({ context, flow, baseURL, analyticsThrows }, use) => {
     const vercel = { calls: [], scripts: [], served: [] };
     await context.exposeFunction("__recordVercel", (path, method, payload) =>
@@ -162,6 +164,27 @@ test("view_item fires once per package view on the packages page and the booking
   expect(JSON.stringify(vercel.calls)).not.toMatch(personalData);
 });
 
+test("with cookies accepted, Vercel and PostHog each get one view_item per package view", async ({
+  page, vercel, posthog,
+}) => {
+  await page.goto("/packages");
+  await acceptCookies(page);
+  await overhaulCard(page).locator(".ri-package-details-button").click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await sentOnce(page, vercel, "view_item");
+  await expect.poll(() => named(posthog, "view_item").length).toBe(1);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+
+  await page.goto("/booking?package=overhaul");
+  await expect(page.locator(".ri-booking-package-title")).toHaveText(overhaul);
+  await expect.poll(() => named(posthog, "view_item").length).toBe(2);
+  await settle(page);
+  expect(events(vercel, "view_item").map(({ payload }) => payload.data.surface)).toEqual(["packages", "booking"]);
+  expect(named(posthog, "view_item").map(({ properties }) => [properties.surface, properties.package_slug]))
+    .toEqual([["packages", "overhaul"], ["booking", "overhaul"]]);
+});
+
 test("checkout_started fires once, only after the payment start succeeds", async ({ page, flow, vercel, baseURL }) => {
   await page.goto("/packages");
   await declineCookies(page);
@@ -180,16 +203,28 @@ test("checkout_started fires once, only after the payment start succeeds", async
   expect(JSON.stringify(vercel.calls)).not.toMatch(personalData);
 });
 
-for (const { name, prepare, run } of checkoutStartCases) {
-  test(`checkout_started fires exactly once when ${name}`, async ({ page, flow, vercel, baseURL }) => {
-    await prepare(page);
-    await page.goto("/packages");
-    await declineCookies(page);
-    await run(page, flow, baseURL);
-    const started = events(vercel, "checkout_started");
-    expect(started).toHaveLength(1);
-    expect(started[0].payload.data).toMatchObject({ package_slug: "overhaul", provider: "dodo", value: 84.99 });
-  });
+for (const [choice, chooseCookies] of [["declined", declineCookies], ["accepted", acceptCookies]]) {
+  for (const { name, prepare, run } of checkoutStartCases) {
+    test(`checkout_started fires exactly once when ${name}, cookies ${choice}`, async ({
+      page, flow, vercel, baseURL, posthog,
+    }) => {
+      await prepare(page);
+      await page.goto("/packages");
+      await chooseCookies(page);
+      await run(page, flow, baseURL);
+      const started = events(vercel, "checkout_started");
+      expect(started).toHaveLength(1);
+      expect(started[0].payload.data).toMatchObject({ package_slug: "overhaul", provider: "dodo", value: 84.99 });
+      if (choice === "declined") {
+        expect(posthog.requests).toEqual([]);
+        return;
+      }
+      await expect.poll(() => named(posthog, "checkout_started").length).toBe(1);
+      for (const tab of page.context().pages()) await settle(tab);
+      expect(named(posthog, "checkout_started").map(({ properties }) => properties.package_slug))
+        .toEqual(["overhaul"]);
+    });
+  }
 }
 
 test("campaign labels with phone numbers or a URL reach neither the event nor the stored attribution", async ({
@@ -207,6 +242,32 @@ test("campaign labels with phone numbers or a URL reach neither the event nor th
   expect(stored.lastTouch.source).toBe("meta");
   expect(stored.lastTouch).not.toHaveProperty("content");
   expect(JSON.stringify([vercel.calls, stored])).not.toMatch(/555|token=sample/);
+});
+
+test("campaign labels with an email, a phone number or a URL never reach PostHog", async ({ page, posthog }) => {
+  const campaign = {
+    utm_source: "meta", utm_medium: "buyer@example.com", utm_campaign: "call (212) 555-0199",
+    utm_content: "example.com/promo?token=sample", utm_term: "+44 20 7946 0958",
+    fbclid: "FbRawClickId123", gclid: "GRawClickId456",
+  };
+  await page.goto(`/packages?${new URLSearchParams(campaign)}`);
+  await acceptCookies(page);
+  await expect.poll(() => pageviews(posthog).length).toBe(1);
+  await overhaulCard(page).locator(".ri-package-details-button").click();
+  await expect.poll(() => named(posthog, "view_item").length).toBe(1);
+  await settle(page);
+  const [landing] = named(posthog, "$pageview");
+  expect(landing.properties.utm_source).toBe("meta");
+  for (const key of ["utm_medium", "utm_campaign", "utm_content", "utm_term"]) {
+    expect(landing.properties).not.toHaveProperty(key);
+  }
+  const viewed = named(posthog, "view_item")[0].properties;
+  expect(viewed).toMatchObject({ campaign_source: "meta", has_fbclid: true, has_gclid: true });
+  for (const key of ["campaign_medium", "campaign", "campaign_content", "campaign_term", "fbclid", "gclid"]) {
+    expect(viewed).not.toHaveProperty(key);
+  }
+  expect(JSON.stringify([posthog.events, posthog.snapshots]))
+    .not.toMatch(/buyer(@|%40)example|555-0199|7946[ +]0958|token(=|%3D)sample|FbRawClickId123|GRawClickId456/);
 });
 
 for (const failure of [500, "unknown", "network"]) {
@@ -244,7 +305,9 @@ test("booking_completed fires once for a paid receipt, with no personal data", a
   expect(JSON.stringify(vercel.calls)).not.toMatch(personalData);
 });
 
-test("a free receipt sends free_booking_completed and no booking_completed", async ({ page, flow, vercel }) => {
+test("a free receipt sends free_booking_completed and no booking_completed", async ({
+  page, flow, vercel, posthog,
+}) => {
   await page.route("**/api/payment/quote", (route) => route.fulfill({ json: {
     ok: true, quoteFingerprint: "fixture-free-quote",
     providers: { dodo: { enabled: true, mode: "test" }, paypal: { enabled: false }, razorpay: { enabled: false } },
@@ -253,6 +316,8 @@ test("a free receipt sends free_booking_completed and no booking_completed", asy
   await page.route("**/api/payment/start", (route) => route.fulfill({ json: {
     ...confirmed(freeReceipt), quote: { grossAmount: 84.99, netAmount: 0, isFree: true },
   } }));
+  await page.goto("/packages");
+  await acceptCookies(page);
   await flow.review("/booking?package=overhaul");
   await flow.payment();
   await page.getByRole("button", { name: "Confirm Free Booking", exact: true }).click();
@@ -265,6 +330,12 @@ test("a free receipt sends free_booking_completed and no booking_completed", asy
   expect(events(vercel, "booking_completed")).toEqual([]);
   expect(events(vercel, "checkout_started")).toEqual([]);
   expect(JSON.stringify(vercel.calls)).not.toMatch(personalData);
+  await expect.poll(() => named(posthog, "$identify").map(({ properties }) => properties.distinct_id))
+    .toEqual([freeEventId]);
+  expect(named(posthog, "free_booking_completed").map(({ properties }) => properties.event_id)).toEqual([freeEventId]);
+  expect(named(posthog, "booking_completed")).toEqual([]);
+  expect(named(posthog, "checkout_started")).toEqual([]);
+  expect(JSON.stringify(posthog.events)).not.toMatch(personalData);
 });
 
 const malformed = {

@@ -246,10 +246,6 @@
       "js": 4096,
       "css": 1024
     },
-    "src/lib/analytics.js -> ./posthog": {
-      "js": 2048,
-      "css": 1024
-    },
     "src/lib/analyticsModules.js -> ./metaPixel": {
       "js": 3072,
       "css": 1024
@@ -266,6 +262,10 @@
       "js": 6144,
       "css": 1024
     },
+    "src/lib/loadPostHog.js -> ./consent": {
+      "js": 1024,
+      "css": 1024
+    },
     "src/lib/loadPostHog.js -> ./posthog": {
       "js": 2048,
       "css": 1024
@@ -280,6 +280,10 @@
     },
     "src/lib/posthog.js -> ./posthogClient": {
       "js": 109568,
+      "css": 1024
+    },
+    "src/lib/posthog.js -> ./salesAttribution": {
+      "js": 4096,
       "css": 1024
     },
     "src/next/AppClientRuntime.jsx -> ./ConsentRuntime": {

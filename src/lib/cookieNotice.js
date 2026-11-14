@@ -3,8 +3,8 @@ const COOKIE_NOTICE = {
   paragraphs: [
     [
       "Roo Industries keeps a little data in your browser so the site works. Some measurement works without",
-      "cookies. The roo_attr and roo_attr_last cookies and the Meta pixel only start after you click Accept on",
-      "the cookie banner.",
+      "cookies. The roo_attr and roo_attr_last cookies, PostHog and the Meta pixel only start after you click",
+      "Accept on the cookie banner.",
     ].join(" "),
     [
       "Always on: in local storage, roo-consent remembers whether you accepted or declined, roo-theme",
@@ -34,10 +34,12 @@ const COOKIE_NOTICE = {
       "accept, because it is how you reach support.",
     ].join(" "),
     [
-      "Only after Accept: the roo_attr and roo_attr_last cookies keep the first and the latest ad, campaign or",
-      "referral link that brought you here for 90 days. When our Meta pixel is turned on, it tells Meta which",
-      "pages and packages you viewed and when you start checkout or book, so we can measure our ads. It never",
-      "sends your name, email or phone, and Meta sets its own _fbp and _fbc cookies.",
+      "Only after Accept: the roo_attr and roo_attr_last cookies keep the first and the latest ad, campaign",
+      "or referral link that brought you here for 90 days. PostHog counts page views and booking steps",
+      "without cookies, and records how public pages are used with every input and all page text hidden.",
+      "When our Meta pixel is turned on, it tells Meta which pages and packages you viewed and when you",
+      "start checkout or book, so we can measure our ads. It never sends your name, email or phone, and",
+      "Meta sets its own _fbp and _fbc cookies.",
     ].join(" "),
     [
       "Contact messages: messages sent through the contact form are stored so we can reply. Delivered",
@@ -45,7 +47,7 @@ const COOKIE_NOTICE = {
     ].join(" "),
     [
       "Changing your choice: use Cookie settings at the bottom of any page. Declining removes the roo_attr,",
-      "roo_attr_last, _fbp and _fbc cookies and stops the Meta pixel.",
+      "roo_attr_last, _fbp and _fbc cookies and stops PostHog and the Meta pixel.",
     ].join(" "),
   ],
 };

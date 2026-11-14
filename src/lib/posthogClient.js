@@ -1,9 +1,13 @@
 import posthog from "posthog-js";
-import { captureSalesAttribution } from "./salesAttribution";
+import { readConsent } from "./consent";
 import { sanitizeAnalyticsEvent } from "./salesPaths";
 import { lastPopstate } from "./loadPostHog";
 
 const UI_HOST = "https://us.posthog.com";
+const CAMPAIGN_LABEL = /utm_(?:source|medium|campaign|content|term)$/;
+const MASKED = "<masked>";
+
+let sales = null;
 
 const cleanUrl = (value) => {
   try {
@@ -25,6 +29,11 @@ const cleanProperties = (properties) => {
   const output = {};
   for (const [key, value] of Object.entries(properties)) {
     if (typeof value !== "string") output[key] = value;
+    else if (value === MASKED) continue;
+    else if (CAMPAIGN_LABEL.test(key)) {
+      const label = sales.campaignLabel(value);
+      if (label) output[key] = label;
+    }
     else if (/referrer$/i.test(key)) output[key] = cleanReferrer(value);
     else if (/(url|href)$/i.test(key)) {
       const url = cleanUrl(value);
@@ -71,8 +80,10 @@ const scrubSnapshot = (event) => {
   return items.length ? { ...event, properties: { ...cleanProperties(event.properties), $snapshot_data: items } } : null;
 };
 
+const granted = () => readConsent() === "granted";
+
 const scrubEvent = (event) => {
-  if (!event) return null;
+  if (!event || !granted()) return null;
   if (event.event === "$snapshot") return scrubSnapshot(event);
   const publicPage = Boolean(cleanUrl(event.properties?.$current_url || window.location.href));
   if (event.event === "$pageview") markPage(publicPage);
@@ -106,16 +117,18 @@ const maskNetworkRequest = (request) => {
 
 const journeyIdentity = (journeyId) => ({ distinctID: journeyId, isIdentifiedID: false });
 
-export const createPostHog = (key, apiHost, queued) => {
+export const createPostHog = (key, apiHost, queued, salesAttribution) => {
   const publicPage = Boolean(cleanUrl(window.location.href));
   if (!publicPage && !queued) return null;
+  sales = salesAttribution;
   markPage(publicPage);
-  const journeyId = captureSalesAttribution()?.journeyId;
+  const journeyId = sales.captureSalesAttribution()?.journeyId;
   posthog.init(key, {
     api_host: apiHost,
     ui_host: UI_HOST,
     persistence: "memory",
     person_profiles: "identified_only",
+    request_batching: false,
     ...(journeyId ? { bootstrap: journeyIdentity(journeyId) } : {}),
     capture_pageview: "history_change",
     capture_pageleave: "if_capture_pageview",
@@ -147,10 +160,10 @@ export const createPostHog = (key, apiHost, queued) => {
   let recording = publicPage;
   return {
     syncPage: () => {
-      const publicPage = Boolean(cleanUrl(window.location.href));
-      if (publicPage === recording) return;
-      recording = publicPage;
-      if (publicPage) posthog.startSessionRecording();
+      const recordable = granted() && Boolean(cleanUrl(window.location.href));
+      if (recordable === recording) return;
+      recording = recordable;
+      if (recordable) posthog.startSessionRecording();
       else posthog.stopSessionRecording();
     },
     capture: (...args) => posthog.capture(...args),

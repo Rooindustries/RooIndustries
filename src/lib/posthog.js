@@ -1,3 +1,5 @@
+import { readConsent } from "./consent";
+
 const DEFAULT_KEY = "phc_AqgCN7TfCu5fVECnkPCVjWAStC3grX4MmA3AmKXWu9qe";
 const PROXY_PATH = "/ingest";
 const COMPLETED_BOOKING = /^(?:free_)?booking_completed$/;
@@ -8,6 +10,8 @@ const QUEUE_LIMIT = 100;
 let client = null;
 let loading = null;
 const pending = [];
+
+const granted = () => readConsent() === "granted";
 
 const projectKey = () => (process.env.NEXT_PUBLIC_POSTHOG_KEY || DEFAULT_KEY).trim();
 
@@ -25,10 +29,11 @@ const call = (method, ...args) => {
 };
 
 export const startPostHog = () => {
-  if (client || loading || !projectKey()) return;
-  loading = import("./posthogClient")
-    .then(({ createPostHog }) => {
-      client = createPostHog(projectKey(), PROXY_PATH, pending.length > 0);
+  if (client || loading || !projectKey() || !granted()) return;
+  loading = Promise.all([import("./posthogClient"), import("./salesAttribution")])
+    .then(([{ createPostHog }, sales]) => {
+      if (!granted()) return;
+      client = createPostHog(projectKey(), PROXY_PATH, pending.length > 0, sales);
       flush();
     })
     .catch(() => {})
@@ -43,14 +48,17 @@ export const startPostHogWhenIdle = () => {
 };
 
 export const syncPostHogPage = () => {
+  if (!granted()) pending.length = 0;
   client?.syncPage();
 };
 
 export const capturePostHog = (eventName, properties, { url, timestamp }) => {
+  if (!granted()) return;
   if (JOURNEY_ID.test(properties.journey_id || "")) call("useJourney", properties.journey_id);
   if (COMPLETED_BOOKING.test(eventName) && INTERNAL_ID.test(properties.event_id || "")) {
     call("identify", properties.event_id);
   }
-  call("capture", eventName, { ...properties, $current_url: url, $pathname: new URL(url).pathname }, { timestamp });
+  const page = { $current_url: url, $pathname: new URL(url).pathname };
+  call("capture", eventName, { ...properties, ...page }, { timestamp, transport: "sendBeacon" });
   if (COMPLETED_BOOKING.test(eventName)) startPostHog();
 };

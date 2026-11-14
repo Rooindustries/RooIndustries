@@ -109,7 +109,7 @@ const containsPhone = (text: string) => [...withoutDates(text).matchAll(DIGIT_RU
 
 const privateText = (text: string) => PRIVATE_TEXT.some((rule) => rule.test(text)) || containsPhone(text);
 const trimSpace = (text: string) => text.replace(/^ | $/g, "");
-const label = (value: unknown) => {
+export const campaignLabel = (value: unknown) => {
   if (typeof value !== "string") return "";
   const text = trimSpace(value.replace(UNSAFE, "").replace(/\p{White_Space}+/gu, " "));
   const kept = trimSpace(head(text, LABEL_CODE_POINTS));
@@ -126,11 +126,11 @@ const clickId = (value: unknown) =>
 
 const FIELDS = {
   creatorCode: ["ref", referralCode],
-  source: ["utm_source", label],
-  medium: ["utm_medium", label],
-  campaign: ["utm_campaign", label],
-  content: ["utm_content", label],
-  term: ["utm_term", label],
+  source: ["utm_source", campaignLabel],
+  medium: ["utm_medium", campaignLabel],
+  campaign: ["utm_campaign", campaignLabel],
+  content: ["utm_content", campaignLabel],
+  term: ["utm_term", campaignLabel],
   fbclid: ["fbclid", clickId],
   gclid: ["gclid", clickId],
 } as const;

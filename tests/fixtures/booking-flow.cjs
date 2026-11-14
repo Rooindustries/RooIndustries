@@ -221,7 +221,9 @@ const test = base.extend({
 
 const cookieBanner = (page) => page.getByRole("region", { name: "Cookie choice", exact: true });
 
-const declineCookies = (page) => cookieBanner(page).getByRole("button", { name: "Decline", exact: true }).click();
+const cookieChoice = (name) => (page) => cookieBanner(page).getByRole("button", { name, exact: true }).click();
+const declineCookies = cookieChoice("Decline");
+const acceptCookies = cookieChoice("Accept");
 
 const settleIdle = (page) => page.evaluate(() => new Promise((resolve) => {
   window.requestIdleCallback(() => setTimeout(resolve, 400), { timeout: 5000 });
@@ -367,6 +369,6 @@ const productionHostFixtures = {
 };
 
 module.exports = {
-  test, expect, overhaulPrice, cookieBanner, declineCookies, settleIdle, bookingEventId, routePaidStart,
-  checkoutStartCases, productionHostFixtures,
+  test, expect, overhaulPrice, cookieBanner, declineCookies, acceptCookies, settleIdle, bookingEventId,
+  routePaidStart, checkoutStartCases, productionHostFixtures,
 };

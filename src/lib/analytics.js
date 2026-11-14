@@ -2,6 +2,7 @@ import { isProductionBrowser } from "./productionBrowser";
 import { track } from "@vercel/analytics/react";
 import { loadSalesAttribution, withMetaPixel, withSalesAttribution } from "./analyticsModules";
 import packagePricing from "./packagePricing";
+import { capturePostHogEvent } from "./loadPostHog";
 
 const { getPackageSlug, toMoney } = packagePricing;
 const DEFAULT_CURRENCY = "USD";
@@ -29,10 +30,9 @@ export const trackEvent = (eventName, data = {}, options = {}) => {
     const origin = { url: window.location.href, timestamp: new Date() };
     withSalesAttribution(({ salesEventProperties }) => {
       const attribution = attributed ? salesEventProperties(options.attribution) : salesEventProperties();
-      track(eventName, { ...attribution, ...data });
-      import("./posthog")
-        .then(({ capturePostHog }) => capturePostHog(eventName, { ...attribution, ...data }, origin))
-        .catch(() => {});
+      const properties = { ...attribution, ...data };
+      track(eventName, properties);
+      capturePostHogEvent(eventName, properties, origin);
     });
     return true;
   } catch {
