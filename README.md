@@ -20,7 +20,7 @@ The host must allow unprivileged user and network namespaces. On GitHub-hosted U
 
 ## Product analytics
 
-PostHog (US Cloud) records pageviews and every event sent through `trackEvent`, which covers the booking funnel: `view_item`, `package_selected`, `checkout_started` and `booking_completed`. It loads after the page is idle, and only on `www.rooindustries.com` production builds, the same check Vercel Analytics uses. Local runs, CI and Vercel previews send nothing.
+PostHog (US Cloud) records pageviews and every event sent through `trackEvent`, which covers the booking funnel: `view_item`, `package_selected`, `checkout_started` and `booking_completed`. It loads after the page is idle, and only on `www.rooindustries.com` production builds, the same check Vercel Analytics uses. It starts on the first page in a tab that has a sales journey (the home page, packages, booking, payment and the other sales pages), including after in-app navigation from any other page. Local runs, CI and Vercel previews send nothing.
 
 | Variable | Default | Use |
 | --- | --- | --- |

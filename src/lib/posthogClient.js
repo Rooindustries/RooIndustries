@@ -51,16 +51,15 @@ const maskNetworkRequest = (request) => {
   return { ...request, name: url, requestHeaders: undefined, responseHeaders: undefined, requestBody: undefined, responseBody: undefined };
 };
 
-export const isPublicPage = () => Boolean(cleanUrl(window.location.href));
-
 export const createPostHog = (key, apiHost) => {
   const journeyId = captureSalesAttribution()?.journeyId;
+  if (!journeyId) return null;
   posthog.init(key, {
     api_host: apiHost,
     ui_host: UI_HOST,
     persistence: "memory",
     person_profiles: "identified_only",
-    ...(journeyId ? { bootstrap: { distinctID: journeyId, isIdentifiedID: false } } : {}),
+    bootstrap: { distinctID: journeyId, isIdentifiedID: false },
     capture_pageview: "history_change",
     capture_pageleave: "if_capture_pageview",
     autocapture: false,

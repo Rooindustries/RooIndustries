@@ -83,13 +83,6 @@ export default function AppClientRuntime() {
   }, []);
 
   useEffect(() => {
-    if (!isProductionBrowser()) return undefined;
-    return runWhenIdle(() => {
-      import("../lib/posthog").then(({ startPostHog }) => startPostHog()).catch(() => {});
-    });
-  }, []);
-
-  useEffect(() => {
     let cancelled = false;
     const cleanup = runWhenIdle(() => {
       if (!cancelled) {

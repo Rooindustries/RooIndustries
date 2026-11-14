@@ -24,19 +24,16 @@ const call = (method, ...args) => {
 };
 
 export const startPostHog = () => {
-  if (loading || !projectKey()) return loading;
+  if (client || loading || !projectKey()) return;
   loading = import("./posthogClient")
-    .then(({ createPostHog, isPublicPage }) => {
-      if (!isPublicPage()) return null;
+    .then(({ createPostHog }) => {
       client = createPostHog(projectKey(), PROXY_PATH);
       flush();
-      return client;
     })
-    .catch(() => {
+    .catch(() => {})
+    .finally(() => {
       loading = null;
-      return null;
     });
-  return loading;
 };
 
 export const capturePostHog = (eventName, properties = {}) => {
