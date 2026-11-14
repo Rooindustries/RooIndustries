@@ -29,6 +29,7 @@
     "negotiator": "^0.6.4",
     "next": "15.5.28",
     "postgres": "^3.4.9",
+    "posthog-js": "1.441.2",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-helmet-async": "^2.0.5",

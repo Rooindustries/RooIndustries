@@ -19,6 +19,17 @@ export function getSupabaseAssetOrigin(env = process.env) {
   return new URL(configured || "https://ntezmxzaibrrsgtujgxu.supabase.co").origin;
 }
 
+export function getPostHogProxyRewrites(env = process.env) {
+  const ingest = new URL(env.NEXT_PUBLIC_POSTHOG_HOST || "https://us.i.posthog.com");
+  const assets = new URL(ingest.origin);
+  assets.hostname = ingest.hostname.replace(/^([a-z]+)\.i\.posthog\.com$/, "$1-assets.i.posthog.com");
+  return [
+    { source: "/ingest/static/:path*", destination: `${assets.origin}/static/:path*` },
+    { source: "/ingest/array/:path*", destination: `${assets.origin}/array/:path*` },
+    { source: "/ingest/:path*", destination: `${ingest.origin}/:path*` },
+  ];
+}
+
 /** @type {import('next').NextConfig} */
 const isProduction = process.env.NODE_ENV === "production";
 const DEFAULT_SUPABASE_ASSET_ORIGIN =
@@ -120,6 +131,7 @@ const nextConfig = {
     NEXT_PUBLIC_ROO_SENTRY_ENABLED: isProductionDeployment() ? "1" : "0",
   },
   poweredByHeader: false,
+  skipTrailingSlashRedirect: true,
   distDir: validateDistDir(process.env.NEXT_DIST_DIR || ".next"),
   outputFileTracingRoot: process.cwd(),
   outputFileTracingIncludes: {
@@ -148,6 +160,7 @@ const nextConfig = {
   },
   async redirects() {
     return [
+      { source: '/:path((?!ingest/)[^/]+(?:/[^/]+)*)/', destination: '/:path', permanent: true },
       { source: '/tourney/:page(bracket|roster)', destination: '/tourney', permanent: true },
       {
         source: '/:path*',
@@ -160,7 +173,7 @@ const nextConfig = {
   },
   async rewrites() {
     return {
-      beforeFiles: [],
+      beforeFiles: getPostHogProxyRewrites(),
       afterFiles: [
         {
           source: '/BIOSGuide',

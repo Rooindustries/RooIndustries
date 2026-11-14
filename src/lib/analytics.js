@@ -26,9 +26,13 @@ export const trackEvent = (eventName, data = {}, options = {}) => {
     if (!isProductionBrowser()) return false;
     ensureAnalyticsQueue();
     const attributed = Object.hasOwn(options, "attribution");
+    const origin = { url: window.location.href, timestamp: new Date() };
     withSalesAttribution(({ salesEventProperties }) => {
       const attribution = attributed ? salesEventProperties(options.attribution) : salesEventProperties();
       track(eventName, { ...attribution, ...data });
+      import("./posthog")
+        .then(({ capturePostHog }) => capturePostHog(eventName, { ...attribution, ...data }, origin))
+        .catch(() => {});
     });
     return true;
   } catch {

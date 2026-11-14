@@ -1,5 +1,6 @@
 import { Medal, Trophy } from "lucide-react";
 import { Section, TourneyShell } from "./TourneyShared";
+import PostHogStart from "../../src/next/PostHogStart";
 import seo from "../../src/lib/seo";
 import { tourneyResults as results } from "../../src/lib/tourneyResults";
 import "./results.css";
@@ -34,6 +35,7 @@ function PodiumFinish({ place, label, team, medal }) {
 export default function TourneyResultsPage() {
   return (
     <TourneyShell>
+      <PostHogStart />
       <section className="tourney-hero" aria-labelledby="tourney-title">
         <div>
           <span className="tourney-badge">Overwatch Creator Tournament</span>
