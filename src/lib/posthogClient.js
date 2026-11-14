@@ -45,6 +45,19 @@ const scrubEvent = (event) => {
   };
 };
 
+const LINK_TAGS = new Set(["A", "AREA", "FORM"]);
+
+const maskAttribute = (name, value, element) => {
+  if (!["href", "action"].includes(name) || !LINK_TAGS.has(element?.tagName)) return value;
+  try {
+    const url = new URL(value, window.location.href);
+    if (url.origin !== window.location.origin) return value;
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return value;
+  }
+};
+
 const maskNetworkRequest = (request) => {
   const url = cleanUrl(request.name);
   if (!url) return null;
@@ -82,6 +95,7 @@ export const createPostHog = (key, apiHost) => {
       recordHeaders: false,
       recordBody: false,
       captureJsonLd: false,
+      maskAttributeFn: maskAttribute,
       maskCapturedNetworkRequestFn: maskNetworkRequest,
     },
     before_send: scrubEvent,

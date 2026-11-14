@@ -87,9 +87,15 @@ const decode = (request) => {
   return Array.isArray(payload) ? payload : payload.batch || [payload];
 };
 
+const gunzipJson = (value) => JSON.parse(zlib.gunzipSync(Buffer.from(value, "latin1")).toString("utf8"));
+const MUTATION_FIELDS = ["texts", "attributes", "removes", "adds"];
+
 const unpackSnapshot = (item) => {
-  if (typeof item?.data !== "string" || !item.cv) return item;
-  return { ...item, data: JSON.parse(zlib.gunzipSync(Buffer.from(item.data, "latin1")).toString("utf8")) };
+  if (!item?.cv) return item;
+  if (typeof item.data === "string") return { ...item, data: gunzipJson(item.data) };
+  const data = { ...item.data };
+  for (const field of MUTATION_FIELDS) if (typeof data[field] === "string") data[field] = gunzipJson(data[field]);
+  return { ...item, data };
 };
 
 async function stubPostHog(page) {
@@ -207,7 +213,11 @@ test.describe("production host", () => {
     expect(seen.posthogHosts).toEqual([]);
     const sent = JSON.stringify([seen.events, seen.snapshots]);
     for (const value of customer) expect(sent).not.toContain(value);
-    expect(JSON.stringify(seen.snapshots)).not.toContain("Review your booking");
+    const replay = JSON.stringify(seen.snapshots);
+    expect(seen.snapshots.filter((item) => item.type === 3 && item.data.adds?.length).length).toBeGreaterThan(0);
+    expect(replay).toContain("rooindustries.com/packages");
+    expect(replay).not.toContain("Review your booking");
+    expect(replay).not.toContain("utm_source");
 
     const stored = await page.evaluate(() => [...Object.keys(localStorage), ...Object.keys(sessionStorage)]);
     expect(stored.filter((key) => /^(ph_|__ph)/.test(key))).toEqual([]);
@@ -228,6 +238,13 @@ test.describe("production host", () => {
     await expect.poll(() => pageviews(seen)).toEqual([`${siteOrigin}${pathname}`]);
     const journeyId = await page.evaluate(() => JSON.parse(sessionStorage.getItem("sales_attribution")).journeyId);
     expect(new Set(seen.events.map((event) => event.properties.distinct_id))).toEqual(new Set([journeyId]));
+    expect(seen.posthogHosts).toEqual([]);
+  });
+
+  test("a standalone public page is counted", async ({ page }) => {
+    const seen = await stubPostHog(page);
+    await page.goto(site("/tourney"));
+    await expect.poll(() => pageviews(seen)).toEqual([`${siteOrigin}/tourney`]);
     expect(seen.posthogHosts).toEqual([]);
   });
 

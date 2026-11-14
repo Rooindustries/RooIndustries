@@ -37,6 +37,11 @@ export const startPostHog = () => {
     });
 };
 
+export const startPostHogWhenIdle = () => {
+  if ("requestIdleCallback" in window) window.requestIdleCallback(startPostHog, { timeout: 4000 });
+  else window.setTimeout(startPostHog, 1200);
+};
+
 export const capturePostHog = (eventName, properties = {}) => {
   if (JOURNEY_ID.test(properties.journey_id || "")) call("useJourney", properties.journey_id);
   if (COMPLETED_BOOKING.test(eventName) && INTERNAL_ID.test(properties.event_id || "")) {
