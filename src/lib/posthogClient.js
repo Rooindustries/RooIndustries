@@ -35,8 +35,43 @@ const cleanProperties = (properties) => {
   return output;
 };
 
+const privateSpans = [];
+let navigatedAt = 0;
+
+const noteHistoryChanges = () => {
+  for (const method of ["pushState", "replaceState"]) {
+    const original = window.history[method];
+    window.history[method] = function (...args) {
+      const at = Date.now();
+      const before = window.location.pathname;
+      const result = original.apply(this, args);
+      if (window.location.pathname !== before) navigatedAt = at;
+      return result;
+    };
+  }
+};
+
+const markPage = (publicPage) => {
+  const open = privateSpans.at(-1);
+  const now = Date.now();
+  if (!publicPage && (!open || open.end)) privateSpans.push({ start: navigatedAt > (open?.end || 0) ? navigatedAt : now });
+  if (publicPage && open && !open.end) open.end = now;
+};
+
+const recordedOnPrivatePage = (timestamp) =>
+  privateSpans.some(({ start, end }) => timestamp >= start && (!end || timestamp < end));
+
+const scrubSnapshot = (event) => {
+  const items = (event.properties?.$snapshot_data || []).filter((item) => !recordedOnPrivatePage(item.timestamp));
+  return items.length ? { ...event, properties: { ...cleanProperties(event.properties), $snapshot_data: items } } : null;
+};
+
 const scrubEvent = (event) => {
-  if (!event || !cleanUrl(event.properties?.$current_url || window.location.href)) return null;
+  if (!event) return null;
+  if (event.event === "$snapshot") return scrubSnapshot(event);
+  const publicPage = Boolean(cleanUrl(event.properties?.$current_url || window.location.href));
+  if (event.event === "$pageview") markPage(publicPage);
+  if (!publicPage) return null;
   return {
     ...event,
     properties: cleanProperties(event.properties || {}),
@@ -66,8 +101,10 @@ const maskNetworkRequest = (request) => {
 
 const journeyIdentity = (journeyId) => ({ distinctID: journeyId, isIdentifiedID: false });
 
-export const createPostHog = (key, apiHost) => {
-  if (!cleanUrl(window.location.href)) return null;
+export const createPostHog = (key, apiHost, queued) => {
+  const publicPage = Boolean(cleanUrl(window.location.href));
+  if (!publicPage && !queued) return null;
+  markPage(publicPage);
   const journeyId = captureSalesAttribution()?.journeyId;
   posthog.init(key, {
     api_host: apiHost,
@@ -89,6 +126,7 @@ export const createPostHog = (key, apiHost) => {
     disable_conversations: true,
     advanced_disable_feature_flags: true,
     mask_personal_data_properties: true,
+    disable_session_recording: !publicPage,
     session_recording: {
       maskAllInputs: true,
       maskTextSelector: "*",
@@ -100,7 +138,8 @@ export const createPostHog = (key, apiHost) => {
     },
     before_send: scrubEvent,
   });
-  let recording = true;
+  noteHistoryChanges();
+  let recording = publicPage;
   return {
     syncPage: () => {
       const publicPage = Boolean(cleanUrl(window.location.href));

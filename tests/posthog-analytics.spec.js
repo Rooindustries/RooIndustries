@@ -242,32 +242,55 @@ test.describe("production host", () => {
     expect(seen.posthogHosts).toEqual([]);
   });
 
-  test("an event keeps the page it happened on while PostHog is still loading", async ({ page, baseURL }) => {
-    const seen = await stubPostHog(page);
-    let release;
-    const gate = new Promise((resolve) => { release = resolve; });
-    let held = false;
+  const holdPostHog = async (page, baseURL) => {
+    const hold = { held: false };
+    const gate = new Promise((resolve) => { hold.release = resolve; });
     await page.route(`${siteOrigin}/_next/static/chunks/**`, async (route) => {
       const local = new URL(baseURL);
       local.pathname = new URL(route.request().url()).pathname;
       const response = await route.fetch({ url: local.href });
       const body = await response.body();
       if (body.includes("[PostHog.js]")) {
-        held = true;
+        hold.held = true;
         await gate;
       }
       return route.fulfill({ response, body });
     });
+    return hold;
+  };
+
+  test("an event keeps the page it happened on while PostHog is still loading", async ({ page, baseURL }) => {
+    const seen = await stubPostHog(page);
+    const hold = await holdPostHog(page, baseURL);
 
     await page.goto(site("/packages"));
-    await expect.poll(() => held, { timeout: 20000 }).toBe(true);
+    await expect.poll(() => hold.held, { timeout: 20000 }).toBe(true);
     await page.getByRole("link", { name: /Book Now/ }).first().click();
     await expect(page).toHaveURL(site("/booking"));
-    release();
+    hold.release();
 
     await expect.poll(() => named(seen, "package_selected").length).toBe(1);
     expect(named(seen, "package_selected")[0].properties.$current_url).toBe(`${siteOrigin}/packages`);
     expect(named(seen, "package_selected")[0].properties.$pathname).toBe("/packages");
+  });
+
+  test("a public event is still sent when PostHog finishes loading on a private page", async ({ page, baseURL }) => {
+    const seen = await stubPostHog(page);
+    const hold = await holdPostHog(page, baseURL);
+
+    await page.goto(site("/packages"));
+    await expect.poll(() => hold.held, { timeout: 20000 }).toBe(true);
+    await page.getByRole("button", { name: "Referrals", exact: true }).click();
+    await page.getByRole("link", { name: "Dashboard", exact: true }).click();
+    await expect(page.locator("#ref-login-identifier")).toBeVisible();
+    hold.release();
+
+    await expect.poll(() => named(seen, "service_visit").length, { timeout: 20000 }).toBe(1);
+    expect(named(seen, "service_visit")[0].properties.$current_url).toBe(`${siteOrigin}/packages`);
+    await page.waitForTimeout(4000);
+    expect(seen.events.filter((event) => !event.properties.$current_url.startsWith(`${siteOrigin}/packages`))).toEqual([]);
+    expect(JSON.stringify(seen.snapshots)).not.toContain("ref-login-identifier");
+    expect(seen.posthogHosts).toEqual([]);
   });
 
   test("replay records nothing from a private page visited in the app", async ({ page }) => {

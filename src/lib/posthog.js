@@ -28,7 +28,7 @@ export const startPostHog = () => {
   if (client || loading || !projectKey()) return;
   loading = import("./posthogClient")
     .then(({ createPostHog }) => {
-      client = createPostHog(projectKey(), PROXY_PATH);
+      client = createPostHog(projectKey(), PROXY_PATH, pending.length > 0);
       flush();
     })
     .catch(() => {})
