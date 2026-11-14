@@ -425,7 +425,8 @@ export const registerBookingPaidScenarios = async (ctx) => {
       to_regclass('ops.contact_messages') is not null as contact,
       to_regprocedure('public.roo_claim_booking_paid_events(integer)') is not null as claim_events,
       to_regprocedure('public.roo_claim_contact_retries(integer)') is not null as claim_contact,
-      exists (select 1 from pg_trigger where tgname = 'commerce_bookings_record_booking_paid_event') as event_trigger`)[0];
+      exists (select 1 from pg_trigger where tgname = 'commerce_bookings_record_booking_paid_event')
+        as event_trigger`)[0];
     const before = await schema();
     assert.ok(Object.values(before).every(Boolean), JSON.stringify(before));
     let refused;

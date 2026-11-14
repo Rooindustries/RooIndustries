@@ -196,6 +196,16 @@ test("phone numbers in campaign fields are dropped and numeric ad ids are kept",
   const phoneTouch = { landingPath: "/", gclid: "Cj0K.fixture-2" };
   expect(withoutTime((await storedAttribution(page)).lastTouch)).toEqual(phoneTouch);
 
+  const dates = {
+    utm_source: "meta", utm_medium: "27.11.2026", utm_campaign: "2026-11-27", utm_content: "11/27/2026",
+    utm_term: "2026-13-45",
+  };
+  await page.goto(`/contact?${new URLSearchParams(dates)}`);
+  await expect.poll(async () => (await storedAttribution(page)).lastTouch.landingPath).toBe("/contact");
+  expect(withoutTime((await storedAttribution(page)).lastTouch)).toEqual({
+    landingPath: "/contact", source: "meta", medium: "27.11.2026", campaign: "2026-11-27", content: "11/27/2026",
+  });
+
   const ids = {
     utm_source: "meta", utm_campaign: "120210123456789012", utm_content: "23851234567890123", utm_term: "9876543210",
   };

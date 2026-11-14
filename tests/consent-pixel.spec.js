@@ -77,8 +77,34 @@ async function expectBannerPlacement(page) {
   const launcherZone = { left: view.width - 84, top: view.height - 84 };
   const clearOfLauncher = box.x + box.width <= launcherZone.left || box.y + box.height <= launcherZone.top;
   expect(clearOfLauncher).toBe(true);
-  for (const name of ["Accept", "Decline"]) {
-    await expect(banner(page).getByRole("button", { name, exact: true })).toBeInViewport({ ratio: 1 });
+  if (view.width < 640) expect(box.height).toBeLessThanOrEqual(128);
+  const link = banner(page).getByRole("link", { name: "Privacy Policy" });
+  expect(await link.evaluate((node) => node.getClientRects().length)).toBe(1);
+  const button = (name) => banner(page).getByRole("button", { name, exact: true });
+  for (const control of [link, button("Accept"), button("Decline")]) {
+    await expect(control).toBeInViewport({ ratio: 1 });
+    const inner = await control.boundingBox();
+    expect(inner.x).toBeGreaterThanOrEqual(box.x);
+    expect(inner.y).toBeGreaterThanOrEqual(box.y);
+    expect(inner.x + inner.width).toBeLessThanOrEqual(box.x + box.width);
+    expect(inner.y + inner.height).toBeLessThanOrEqual(box.y + box.height);
+  }
+  const paint = await banner(page).locator("> div").evaluate((card) => {
+    const root = document.documentElement;
+    const current = root.dataset.theme;
+    const result = ["default", "dark"].map((theme) => {
+      root.dataset.theme = theme;
+      const style = getComputedStyle(card);
+      const alpha = style.backgroundColor.match(/^rgba?\((?:[\d.]+,\s*){3}([\d.]+)\)$/)?.[1] ?? "1";
+      return { theme, color: style.backgroundColor, alpha: Number(alpha), opacity: Number(style.opacity) };
+    });
+    root.dataset.theme = current;
+    return result;
+  });
+  for (const { color, alpha, opacity } of paint) {
+    expect(color).toMatch(/^rgba?\(/);
+    expect(alpha).toBe(1);
+    expect(opacity).toBe(1);
   }
 }
 
@@ -191,7 +217,9 @@ if (!pixelId) {
       test("shows without layout shift, persists Accept and loads nothing from Meta", async ({ page }) => {
         await page.goto("/packages");
         await expect(banner(page)).toBeVisible();
-        await expect(banner(page)).toContainText("Roo Industries uses cookies to measure visits and ads.");
+        await expect(banner(page).locator("p")).toHaveText(
+          "Roo Industries uses cookies to measure visits and ads. Privacy Policy",
+        );
         await expect(banner(page).getByRole("link", { name: "Privacy Policy" })).toHaveAttribute("href", "/privacy");
         await expectBannerPlacement(page);
         await expectNoBannerShift(page);

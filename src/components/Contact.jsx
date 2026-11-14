@@ -229,7 +229,7 @@ export default function Contact({ initialData = null }) {
             aria-busy={sending}
             className="glow-button w-full text-white font-semibold py-3 rounded transition duration-200 inline-flex items-center justify-center gap-2"
           >
-            Send Message
+            {sending ? "Sending..." : "Send Message"}
             <span className="glow-line glow-line-top" />
             <span className="glow-line glow-line-right" />
             <span className="glow-line glow-line-bottom" />

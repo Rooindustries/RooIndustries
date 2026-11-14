@@ -30,6 +30,8 @@ const LABEL_BYTES = 100;
 const PHONE_SEPARATOR = /[\s.()-]/;
 const PHONE_TEXT = /^[\d\s.()-]+$/;
 const PHONE_AFTER_PLUS = /(?:^|[^\p{L}\p{N}])\+[\d\s.()-]+/gu;
+const DATE_YEAR_FIRST = /^(\d{4})([-./])(\d{1,2})\2(\d{1,2})$/;
+const DATE_YEAR_LAST = /^(\d{1,2})([-./])(\d{1,2})\2(\d{4})$/;
 const EMAIL = /[^\s@]+@[^\s@]+\.[^\s@]+/;
 const CLICK_ID = /^[A-Za-z0-9_.-]{1,200}$/;
 const HOST = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
@@ -40,9 +42,21 @@ const phoneDigits = (text: string) => {
   const digits = text.replace(/\D/g, "").length;
   return digits >= 7 && digits <= 15;
 };
+const realDate = (year: number, month: number, day: number) => {
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+};
+const calendarDate = (text: string) => {
+  const first = DATE_YEAR_FIRST.exec(text);
+  if (first) return realDate(Number(first[1]), Number(first[3]), Number(first[4]));
+  const last = DATE_YEAR_LAST.exec(text);
+  if (!last) return false;
+  const [, a, , b, year] = last.map(Number);
+  return realDate(year, b, a) || realDate(year, a, b);
+};
 const looksLikePhone = (text: string) =>
   [...text.matchAll(PHONE_AFTER_PLUS)].some(([run]) => phoneDigits(run)) ||
-  (PHONE_TEXT.test(text) && PHONE_SEPARATOR.test(text) && phoneDigits(text));
+  (PHONE_TEXT.test(text) && PHONE_SEPARATOR.test(text) && phoneDigits(text) && !calendarDate(text));
 
 const utf8Bytes = (char: string) => {
   const code = char.codePointAt(0) || 0;

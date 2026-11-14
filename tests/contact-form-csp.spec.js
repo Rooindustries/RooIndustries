@@ -111,6 +111,32 @@ test("an invalid message shows the field error and stores nothing", async ({ pag
   await finish(page, testInfo, baseURL);
 });
 
+test("the send button says Sending... while a message is on its way", async ({ page, baseURL }, testInfo) => {
+  await page.goto("/contact");
+  let release;
+  const held = new Promise((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/contact", async (route) => {
+    await held;
+    await route.continue();
+  });
+  const idle = await page.getByRole("button", { name: "Send Message", exact: true }).boundingBox();
+  const response = submitForm(page, { ...fields, message: "Too short" });
+  const busy = page.getByRole("button", { name: "Sending...", exact: true });
+  await expect(busy).toBeDisabled();
+  await expect(busy).toHaveAttribute("aria-busy", "true");
+  const sending = await busy.boundingBox();
+  expect({ width: sending.width, height: sending.height }).toEqual({ width: idle.width, height: idle.height });
+  release();
+  expect((await response).status()).toBe(400);
+  const ready = page.getByRole("button", { name: "Send Message", exact: true });
+  await expect(ready).toBeEnabled();
+  await expect(ready).toHaveAttribute("aria-busy", "false");
+  expect(await fixtureState(baseURL)).toEqual({ rows: [], emails: [] });
+  await finish(page, testInfo, baseURL);
+});
+
 test("the sixth post inside the window is rate limited", async ({ page, baseURL }, testInfo) => {
   await page.goto("/contact");
   const statuses = await page.evaluate(async () => {
