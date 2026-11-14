@@ -311,6 +311,7 @@ test.describe("production host", () => {
     await page.goForward();
     await expect(page.locator("#ref-login-identifier")).toBeVisible();
     await page.waitForTimeout(300);
+    const finalBack = await page.evaluate(() => Date.now());
     await page.goBack();
     await expect(page).toHaveURL(site("/packages"));
     const returned = Date.now();
@@ -321,7 +322,7 @@ test.describe("production host", () => {
     await expect.poll(() => seen.snapshots.some((item) => item.timestamp > returned + 3000), { timeout: 20000 }).toBe(true);
 
     expect(JSON.stringify(seen.snapshots)).not.toContain("ref-login-identifier");
-    expect(seen.snapshots.some((item) => item.type === 2 && item.timestamp >= returned - 1000)).toBe(true);
+    expect(seen.snapshots.some((item) => item.type === 2 && item.timestamp >= finalBack)).toBe(true);
     expect(seen.events.filter((event) => !event.properties.$current_url.startsWith(`${siteOrigin}/packages`))).toEqual([]);
   });
 
