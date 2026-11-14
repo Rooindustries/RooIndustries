@@ -21,7 +21,7 @@ has_checksum() {
 
 if ! has_checksum "$jar" 2>/dev/null; then
   download="$(mktemp "$cache_dir/tla2tools.XXXXXX")"
-  curl --fail --silent --show-error --location \
+  curl --fail --silent --show-error --location --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 20 \
     "https://github.com/tlaplus/tlaplus/releases/download/v$version/tla2tools.jar" -o "$download"
   has_checksum "$download"
   mv "$download" "$jar"

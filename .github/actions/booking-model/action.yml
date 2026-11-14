@@ -1,0 +1,16 @@
+name: Check the booking hold model
+description: Runs the TLA+ booking hold model with the model checker jar kept in the Actions cache.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: "21"
+    - uses: actions/cache@v4
+      with:
+        path: ~/.cache/tla-tools
+        key: tla-tools-${{ hashFiles('scripts/check-booking-model.sh') }}
+        restore-keys: tla-tools-
+    - shell: bash
+      run: npm run check:booking-model
