@@ -12,7 +12,7 @@ import packageContent from "../lib/packageContent";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 import { persistBookingPackageSelection } from "../lib/checkoutStorage";
 import { trackEvent, trackPackageView } from "../lib/analytics";
-import { bookingPackagePath } from "../lib/bookingPackageParam";
+import { bookingPackagePath } from "../lib/bookingPackagePath";
 import { getSessionAvailability } from "../lib/sessionAvailability";
 import { reportRequestError, requestDeadline } from "../lib/clientRequest";
 

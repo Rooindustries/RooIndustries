@@ -14,11 +14,6 @@ const TITLE_BY_SLUG = new Map(BOOKABLE_TITLES.map((title) => [getPackageSlug(tit
 const DEFAULT_SLUG = getPackageSlug(DEFAULT_PACKAGE_TITLE);
 const PRICES_ERROR = "We couldn't load package prices. Check your connection and try again.";
 
-export const bookingPackagePath = (title) => {
-  const slug = getPackageSlug(title);
-  return slug ? `/booking?package=${encodeURIComponent(slug)}` : "/booking";
-};
-
 const slugFromSearch = (search) => {
   const slug = String(new URLSearchParams(search || "").get("package") || "").trim().toLowerCase();
   return TITLE_BY_SLUG.has(slug) ? slug : "";

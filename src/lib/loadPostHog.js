@@ -1,7 +1,7 @@
 import { isProductionBrowser } from "./productionBrowser";
 import { readConsent } from "./consentChoice";
 import { withPostHogOutbox } from "./analyticsModules";
-import { followChoices } from "./consentSignals";
+import { CONSENT_EVENT, CONSENT_RESET_EVENT, followChoices } from "./consentSignals";
 
 let poppedAt = 0;
 let countedPath = null;
@@ -32,8 +32,6 @@ const follow = (change) => {
 
 export const loadPostHog = () => follow(false);
 
-export const followPostHogChoice = () => follow(true);
-
 if (typeof window !== "undefined") {
   window.addEventListener("popstate", () => { poppedAt = Date.now(); });
   window.addEventListener("pageshow", ({ persisted }) => persisted && loadPostHog());
@@ -42,4 +40,5 @@ if (typeof window !== "undefined") {
     countedPath = null;
     made.length = 0;
   });
+  for (const name of [CONSENT_EVENT, CONSENT_RESET_EVENT]) window.addEventListener(name, () => follow(true));
 }

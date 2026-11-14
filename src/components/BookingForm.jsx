@@ -37,7 +37,8 @@ import {
   toMoney,
 } from "../lib/checkoutCodes";
 import { trackEvent } from "../lib/analytics";
-import { bookingPackagePath, useBookingPackage, useBookingPackageView } from "../lib/bookingPackageParam";
+import { bookingPackagePath } from "../lib/bookingPackagePath";
+import { useBookingPackage, useBookingPackageView } from "../lib/bookingPackageParam";
 import { isValidEmail } from "../lib/emailValidation";
 import { classifyHoldResponse } from "../lib/holdResponse";
 

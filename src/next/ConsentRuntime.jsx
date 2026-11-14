@@ -3,7 +3,6 @@ import ConsentBanner from "../components/ConsentBanner";
 import { onConsentChange, onConsentReset, readConsent } from "../lib/consent";
 import { withMetaPixel } from "../lib/analyticsModules";
 import { storeAttributionForConsent } from "../lib/attributionStore";
-import { followPostHogChoice } from "../lib/loadPostHog";
 
 const MODAL_DIALOG = '[aria-modal="true"]';
 
@@ -34,12 +33,10 @@ export default function ConsentRuntime() {
       setOpen(false);
       storeAttributionForConsent();
       withMetaPixel((pixel) => (value === "granted" ? pixel.loadMetaPixel() : pixel.revokeMetaPixel()));
-      followPostHogChoice();
     });
     const stopReset = onConsentReset(() => {
       storeAttributionForConsent();
       withMetaPixel((pixel) => pixel.revokeMetaPixel());
-      followPostHogChoice();
       setOpen(true);
     });
     return () => {
