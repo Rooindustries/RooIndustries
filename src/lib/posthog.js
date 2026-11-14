@@ -42,11 +42,15 @@ export const startPostHogWhenIdle = () => {
   else window.setTimeout(startPostHog, 1200);
 };
 
-export const capturePostHog = (eventName, properties = {}) => {
+export const syncPostHogPage = () => {
+  client?.syncPage();
+};
+
+export const capturePostHog = (eventName, properties = {}, { url = window.location.href, timestamp = new Date() } = {}) => {
   if (JOURNEY_ID.test(properties.journey_id || "")) call("useJourney", properties.journey_id);
   if (COMPLETED_BOOKING.test(eventName) && INTERNAL_ID.test(properties.event_id || "")) {
     call("identify", properties.event_id);
   }
-  call("capture", eventName, properties, { timestamp: new Date() });
+  call("capture", eventName, { ...properties, $current_url: url, $pathname: new URL(url).pathname }, { timestamp });
   if (COMPLETED_BOOKING.test(eventName)) startPostHog();
 };

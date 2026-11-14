@@ -100,7 +100,15 @@ export const createPostHog = (key, apiHost) => {
     },
     before_send: scrubEvent,
   });
+  let recording = true;
   return {
+    syncPage: () => {
+      const publicPage = Boolean(cleanUrl(window.location.href));
+      if (publicPage === recording) return;
+      recording = publicPage;
+      if (publicPage) posthog.startSessionRecording();
+      else posthog.stopSessionRecording();
+    },
     capture: (...args) => posthog.capture(...args),
     identify: (id) => posthog.identify(id),
     useJourney: (journeyId) => {
