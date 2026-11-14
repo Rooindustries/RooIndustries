@@ -8,8 +8,12 @@ const PASSWORD = "Synthetic-Content-Password-123";
 
 const adminControl = () => `http://127.0.0.1:${fixturePort("TOOLING_ADMIN_CONTROL_PORT")}`;
 
-const cms = async (request, path) => {
-  const response = await request.fetch(path, { method: "GET", headers: { "x-admin-key": ADMIN_KEY } });
+const cms = async (request, path, body) => {
+  const response = await request.fetch(path, {
+    method: body === undefined ? "GET" : "POST",
+    headers: { "x-admin-key": ADMIN_KEY },
+    ...(body === undefined ? {} : { data: body }),
+  });
   expect(response.ok(), await response.text()).toBe(true);
   return (await response.json()).data;
 };
@@ -47,6 +51,7 @@ const prepareAdminContext = async ({ context, page, request, baseURL }) => {
   expect(marker.versions.postgres).toContain("17.");
   await guardBrowserContext(context, marker.origins);
   expect((await request.post(`${control}/reset-rate-limits`)).ok()).toBe(true);
+  // Secure cookies are preserved in the product. Synthetic fixture HTTP needs this on private-IP hosts.
   await context.route("**/api/admin/content/session", async (route) => {
     const response = await route.fetch();
     const headers = response.headers();
@@ -55,4 +60,4 @@ const prepareAdminContext = async ({ context, page, request, baseURL }) => {
   });
 };
 
-module.exports = { adminControl, cms, login, choose, evidence, prepareAdminContext };
+module.exports = { ADMIN_KEY, EMAIL, PASSWORD, adminControl, cms, login, choose, evidence, prepareAdminContext };
