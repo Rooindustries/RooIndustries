@@ -28,12 +28,16 @@ const JOURNEY_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f
 const LABEL_CODE_POINTS = 100;
 const REFERRER_HOST_CHARS = 100;
 const PHONE_TEXT = /^[\d\s.()-]+$/;
-const DATE = /(?<!\d)(?=(\d{4}|\d{1,2})([-./ ])(\d{1,2})\2(\d{4}|\d{1,2})(?!\d))/g;
+const DATE = /(?<!\p{Nd})(?=(\p{Nd}{4}|\p{Nd}{1,2})([-./ ])(\p{Nd}{1,2})\2(\p{Nd}{4}|\p{Nd}{1,2})(?!\p{Nd}))/gu;
+const DIGIT = /\p{Nd}/u;
 const DIGIT_RUN = /(?:\+[\s.()-]*)?\p{Nd}+(?:[\s.()-]+\p{Nd}+)*/gu;
 const DIGIT_GROUP = /\p{Nd}+/gu;
+const UNSAFE = /(?!\p{White_Space})\p{Cc}|[\p{Cs}<>"'`]/gu;
 const HOST_CHAR = String.raw`[\p{L}\p{M}\p{N}_-]`;
-const DOTTED_HOST = String.raw`${HOST_CHAR}+(?:\.${HOST_CHAR}+)+`;
-const EMAIL = new RegExp(String.raw`[^\s@]+@${DOTTED_HOST}`, "u");
+const NAMED_HOST = String.raw`${HOST_CHAR}+(?:\.${HOST_CHAR}+)*\.\p{L}\p{M}*(?:\p{L}\p{M}*)+`;
+const NUMBERED_HOST = String.raw`(?<!${HOST_CHAR}|\.)\p{Nd}+(?:\.\p{Nd}+){3}`;
+const DOTTED_HOST = String.raw`(?:${NAMED_HOST}|${NUMBERED_HOST})`;
+const EMAIL = new RegExp(String.raw`[^\s@]+@${DOTTED_HOST}(?!${HOST_CHAR})`, "u");
 const URL_SCHEME = /[a-z][a-z\d+.-]*:\/\//i;
 const WWW_TOKEN = new RegExp(String.raw`(?<!${HOST_CHAR}|\.)www\.`, "iu");
 const PROTOCOL_RELATIVE = new RegExp(String.raw`(?<!${HOST_CHAR})//${HOST_CHAR}`, "u");
@@ -48,10 +52,18 @@ const realDate = (year: number, month: number, day: number) => {
   const date = new Date(Date.UTC(year, month - 1, day));
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 };
+const digitValue = (digit: string) => {
+  const point = digit.codePointAt(0) ?? 0;
+  let zero = point;
+  while (DIGIT.test(String.fromCodePoint(zero - 1))) zero -= 1;
+  return (point - zero) % 10;
+};
+const numberValue = (digits: string) => [...digits].reduce((total, digit) => total * 10 + digitValue(digit), 0);
 const calendarDate = (start: string, middle: string, end: string) => {
-  const [a, b, c] = [start, middle, end].map(Number);
-  if (start.length === 4 && end.length <= 2) return realDate(a, b, c);
-  return start.length <= 2 && end.length === 4 && (realDate(c, b, a) || realDate(c, a, b));
+  const [a, b, c] = [start, middle, end].map(numberValue);
+  const [startDigits, endDigits] = [start, end].map((part) => [...part].length);
+  if (startDigits === 4 && endDigits <= 2) return realDate(a, b, c);
+  return startDigits <= 2 && endDigits === 4 && (realDate(c, b, a) || realDate(c, a, b));
 };
 const withoutDates = (text: string) => {
   let undated = "";
@@ -77,11 +89,11 @@ const phoneRun = (run: string) => {
 const containsPhone = (text: string) => [...withoutDates(text).matchAll(DIGIT_RUN)].some(([run]) => phoneRun(run));
 
 const privateText = (text: string) => PRIVATE_TEXT.some((rule) => rule.test(text)) || containsPhone(text);
+const trimSpace = (text: string) => text.replace(/^ | $/g, "");
 const label = (value: unknown) => {
   if (typeof value !== "string") return "";
-  const text = value.replace(/\s+/g, " ").replace(/[\p{Cc}\p{Cf}\p{Cs}<>"'`]/gu, "")
-    .replace(/ {2,}/g, " ").trim();
-  const kept = Array.from(text).slice(0, LABEL_CODE_POINTS).join("").trim();
+  const text = trimSpace(value.replace(UNSAFE, "").replace(/\p{White_Space}+/gu, " "));
+  const kept = trimSpace(Array.from(text).slice(0, LABEL_CODE_POINTS).join(""));
   return privateText(text) || privateText(kept) ? "" : kept;
 };
 const referralCode = (value: unknown) =>

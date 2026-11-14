@@ -175,7 +175,10 @@ const checkoutAttribution = async (page, flow) => {
   return start.bookingPayload.salesAttribution;
 };
 
-const SCRIPTS = { "one-byte": "a", "two-byte": "ж", "three-byte": "夏", "four-byte": "𠀀", "combining mark": "q̃" };
+const SCRIPTS = {
+  "one-byte": "a", "two-byte": "ж", "three-byte": "夏", "four-byte": "𠀀",
+  "combining mark": "q̃", "format character": "\u200D",
+};
 const codePoints = (unit, count) => Array.from(unit.repeat(count)).slice(0, count).join("");
 const lengthRows = Object.entries(SCRIPTS).flatMap(([script, unit]) => [99, 100, 101].map((count) => ({
   name: `${script} ${count}`, text: codePoints(unit, count), kept: codePoints(unit, Math.min(count, 100)),
@@ -271,6 +274,16 @@ const filterRows = [
   ["a\uFF20example.com", KEEP], ["@handle", KEEP], ["hi@there", KEEP], ["\uFF21\uFF22\uFF23", KEEP],
   ["cafe\u0301", KEEP],
   ["\uFB01nal \u2460", KEEP], ["MiXeD Case", KEEP], ["spring   sale  \u3000 2026", "spring sale 2026"],
+  ["\uFF12\uFF10\uFF12\uFF16-\uFF11\uFF11-\uFF12\uFF17", KEEP],
+  ["\u0662\u0660\u0662\u0666-\u0661\u0661-\u0662\u0667", KEEP],
+  ["\u0662\u0667-\u0661\u0661-\u0662\u0660\u0662\u0666", KEEP],
+  ["\uFF12\uFF10\uFF12\uFF16-\uFF11\uFF13-\uFF14\uFF15", DROP],
+  ["v2.1/beta", KEEP], ["2.5/5", KEEP], ["ready for 2.0?", KEEP], ["1.5:1", KEEP], ["example.com/x", DROP],
+  ["cdn.example.co.uk#a", DROP], ["deal@2.5", KEEP], ["x@10.0.0.1", DROP], ["example\uFF0Ecom/x", KEEP],
+  ["example.com\uFF0Fx", KEEP], ["team \u{1F468}\u200D\u{1F469}\u200D\u{1F467} sale", KEEP],
+  ["\u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u0645", KEEP], ["spring\u00ADsale", KEEP],
+  ["\u200Fsale\u200E", KEEP], ["\uFEFFsale\uFEFF", KEEP], ["spring\u0007sale", "springsale"],
+  ["spring\u00A0sale", "spring sale"], ["spring\u3000\u3000sale", "spring sale"],
 ];
 
 test("labels with an email, a URL or a formatted phone number are dropped and every other label is kept", async ({
