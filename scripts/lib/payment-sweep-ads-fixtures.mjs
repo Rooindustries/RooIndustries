@@ -35,12 +35,12 @@ export const captureConsole = async (stream, fn) => {
   }
 };
 
-export const recordPayPalCalls = async (fn) => {
+export const recordProviderCalls = async (fn, hostSuffixes = ["paypal.com"]) => {
   const calls = [];
   const sweepFetch = globalThis.fetch;
   globalThis.fetch = (input, init = {}) => {
     const url = new URL(typeof input === "string" || input instanceof URL ? String(input) : input.url);
-    if (url.hostname.endsWith("paypal.com")) {
+    if (hostSuffixes.some((suffix) => url.hostname.endsWith(suffix))) {
       calls.push({ url, authorization: new Headers(init.headers).get("authorization"), body: init.body });
     }
     if (url.href === `${sandboxOrigin}/v2/checkout/orders` && init.method === "POST") {

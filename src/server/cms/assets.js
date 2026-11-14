@@ -1,3 +1,5 @@
+import envValue from "../supabase/envValue.cjs";
+const { readFirstEnvValue } = envValue;
 import crypto from "node:crypto";
 import sharp from "sharp";
 import { createSupabaseAdminClient } from "../supabase/adminClient.js";
@@ -67,7 +69,7 @@ export const issueCmsUpload = async ({ body, client, env = process.env, actor = 
   const signed = storageData(await client.storage.from(row.staging_bucket).createSignedUploadUrl(row.staging_path, { upsert: false }), "Upload signing");
   if (signed.path !== row.staging_path || typeof signed.signedUrl !== "string" || typeof signed.token !== "string") throw cmsError("The storage signature disagrees with the recorded path.", 503, "ASSET_UPLOAD_STATE_INVALID");
   const signedTarget = new URL(signed.signedUrl);
-  const storageOrigin = new URL(env.SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL).origin;
+  const storageOrigin = new URL(readFirstEnvValue(env, ["SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL"])).origin;
   if (signedTarget.origin !== storageOrigin || signedTarget.pathname !== `/storage/v1/object/upload/sign/${row.staging_bucket}/${row.staging_path}` || signedTarget.searchParams.get("token") !== signed.token) throw cmsError("The upload URL disagrees with its recorded destination.", 503, "ASSET_UPLOAD_STATE_INVALID");
   let signatureExpiresAt = expiresAt;
   try { const expiration = JSON.parse(Buffer.from(signed.token.split('.')[1], 'base64url').toString()).exp; if (!Number.isSafeInteger(expiration) || expiration * 1000 <= now()) throw new Error("Invalid expiry"); signatureExpiresAt = new Date(Math.min(Date.parse(expiresAt), expiration * 1000)).toISOString(); } catch { throw cmsError("Storage returned an invalid upload token.", 503, "ASSET_UPLOAD_STATE_INVALID"); }

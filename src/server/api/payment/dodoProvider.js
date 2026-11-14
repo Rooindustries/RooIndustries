@@ -1,9 +1,10 @@
 import DodoPayments from "dodopayments";
+import envValue from "../../supabase/envValue.cjs";
 import providerConfig from "./providerConfig.js";
 import { isTerminalDisputeStatus } from "../../referrals/disputeAccounting.js";
 
 export const DODO_CURRENCY = "USD";
-const read = (key) => String(process.env[key] || "").trim();
+const read = (key) => envValue.readProcessEnvValue(key);
 const failure = (code, status = 503) => Object.assign(new Error(code), { code, status, retryable: status >= 500 });
 
 export const createDodoClient = () => {

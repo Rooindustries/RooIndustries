@@ -120,12 +120,12 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await expectOnlyElevenOffered(other);
         await other.goto("/packages");
         await other.getByRole("link", { name: "Book Now" }).first().click();
-        await expect(other).toHaveURL(/\/booking$/);
+        await expect(other).toHaveURL(/\/booking\?package=overhaul$/);
         await expectOnlyElevenOffered(other);
         await other.goBack();
         await expect(other).toHaveURL(/\/packages$/);
         await other.goForward();
-        await expect(other).toHaveURL(/\/booking$/);
+        await expect(other).toHaveURL(/\/booking\?package=overhaul$/);
         await expectOnlyElevenOffered(other);
 
         await native.setPaymentStatus("succeeded");

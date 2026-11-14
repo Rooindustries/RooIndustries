@@ -96,24 +96,42 @@ async function expectNoBannerShift(page) {
   expect(await banner(page).evaluate((node) => getComputedStyle(node).position)).toBe("fixed");
 }
 
-async function controlsClearOfBanner(page) {
-  const result = await page.evaluate(() => {
-    const card = document.querySelector("[data-consent-banner] > div").getBoundingClientRect();
-    const stage = document.querySelector(".booking-dialog-stage").getBoundingClientRect();
-    const covers = (rect) => rect.width > 0 && rect.height > 0 && rect.left < card.right && rect.right > card.left &&
-      rect.top < card.bottom && rect.bottom > card.top;
-    const controls = [...document.querySelectorAll('[role="dialog"].ri-booking :is(h2, h3, button, a[href], input)')]
-      .filter((node) => node.checkVisibility({ visibilityProperty: true }));
-    const covered = controls.filter((node) => {
-      node.scrollIntoView({ block: "nearest", behavior: "instant" });
-      return covers(node.getBoundingClientRect());
-    }).map((node) => node.getAttribute("aria-label") || node.textContent.trim());
-    return { count: controls.length, stageBottom: stage.bottom, bannerTop: card.top, covered };
-  });
-  expect(result.count).toBeGreaterThan(0);
-  expect(result.stageBottom).toBeLessThanOrEqual(result.bannerTop);
-  expect(result.covered).toEqual([]);
+const tabStop = (page) => page.evaluate(() => {
+  const node = document.activeElement;
+  if (node?.closest("[data-consent-banner]")) return "banner";
+  return node?.closest('[aria-modal="true"]') ? "dialog" : "page";
+});
+
+async function tabStops(page, presses) {
+  const stops = [];
+  for (let press = 0; press < presses; press += 1) {
+    await page.keyboard.press("Tab");
+    stops.push(await tabStop(page));
+  }
+  return stops;
 }
+
+async function tabToBanner(page) {
+  for (let press = 0; press < 400; press += 1) {
+    await page.keyboard.press("Tab");
+    if (await tabStop(page) === "banner") return true;
+  }
+  return false;
+}
+
+const journeyId = "12345678-1234-4123-8123-123456789abc";
+const touch = { capturedAt: "2026-09-11T10:00:00.000Z", landingPath: "/", source: "meta" };
+const adCookieValue = Buffer.from(JSON.stringify({ version: 2, journeyId, firstTouch: touch, lastTouch: touch }))
+  .toString("base64url");
+const adCookie = async (context) => (await context.cookies()).find(({ name }) => name === "roo_attr");
+const setAdCookie = (context, url) => context.addCookies([{ name: "roo_attr", value: adCookieValue, url }]);
+const sessionJourney = (page) =>
+  page.evaluate(() => JSON.parse(sessionStorage.getItem("sales_attribution"))?.journeyId);
+const shot = (page, name) => page.screenshot({ path: test.info().outputPath(`${name}.png`) });
+const closeBooking = async (page) => {
+  await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+};
 
 const routeFreeQuote = async (page, startResponse) => {
   const quote = { grossAmount: 84.99, netAmount: 0, isFree: true };
@@ -122,27 +140,60 @@ const routeFreeQuote = async (page, startResponse) => {
   };
   await page.route("**/api/payment/quote", (route) =>
     route.fulfill({ json: { ok: true, quoteFingerprint: "fixture-free-quote", providers, quote } }));
-  if (startResponse) {
-    await page.route("**/api/payment/start", (route) => route.fulfill({ json: { ...startResponse, quote } }));
-  }
+  await page.route("**/api/payment/start", (route) => route.fulfill({ json: { ...startResponse, quote } }));
 };
 
-const reviewWithBanner = async (page, flow) => {
-  await page.goto("/booking?package=overhaul");
-  await expect(page.locator(".ri-booking-package-title")).toHaveText(overhaul);
-  await expect(banner(page)).toBeVisible();
-  await controlsClearOfBanner(page);
-  await page.getByRole("button", { name: /^Earliest available:/ }).click();
-  await controlsClearOfBanner(page);
-  await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
-  await controlsClearOfBanner(page);
-  await page.getByRole("button", { name: "Next", exact: true }).last().click();
-  await flow.details();
-  await controlsClearOfBanner(page);
-  await page.getByRole("button", { name: "Review before payment", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
-  await controlsClearOfBanner(page);
+const routePaidStart = (page, baseURL) => page.route("**/api/payment/start", (route) => route.fulfill({ json: {
+  ok: true, paymentAccessToken: "fixture-payment", status: "started",
+  providerPayload: { checkoutUrl: `${baseURL}/__test/checkout-handoff` },
+  sessionExpiresAt: new Date(Date.now() + 20 * 60 * 1000).toISOString(),
+  quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
+} }));
+
+const payAndReturn = async (page, flow) => {
+  await flow.review();
   await flow.payment();
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
+  await page.goto("/payment?dodo_return=1", { waitUntil: "domcontentloaded" });
+};
+
+const restingY = (page) => page.evaluate(() => new Promise((resolve) => {
+  let last = window.scrollY;
+  let still = 0;
+  const frame = () => {
+    still = window.scrollY === last ? still + 1 : 0;
+    last = window.scrollY;
+    if (still >= 20) resolve(Math.round(last));
+    else requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+}));
+
+const scrollToEnd = async (page) => {
+  await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" }));
+  return restingY(page);
+};
+
+const scrollLandings = async (page, ready) => {
+  await page.goto("/");
+  await ready();
+  await page.locator('[data-nav-surface="desktop"][data-nav-target="faq"]').click();
+  await expect(page).toHaveURL(/\/#faq$/);
+  const section = await restingY(page);
+  await page.goto("/");
+  await ready();
+  const bottom = await scrollToEnd(page);
+  await page.locator('footer a[href="/tools"]').click();
+  await expect(page).toHaveURL(/\/tools$/);
+  const tools = await restingY(page);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/$/);
+  const back = await restingY(page);
+  await page.goForward();
+  await expect(page).toHaveURL(/\/tools$/);
+  const forward = await restingY(page);
+  return { section, bottom, tools, back, forward };
 };
 
 if (!pixelId) {
@@ -174,6 +225,10 @@ if (!pixelId) {
 
       test("persists Decline and Cookie settings reopens the choice", async ({ page }) => {
         await page.goto("/");
+        await expect(banner(page)).toBeVisible();
+        await scrollToEnd(page);
+        await expectBannerPlacement(page);
+        await shot(page, `home-footer-banner-${width}`);
         await banner(page).getByRole("button", { name: "Decline", exact: true }).click();
         await expect(banner(page)).toHaveCount(0);
         await page.reload();
@@ -190,22 +245,94 @@ if (!pixelId) {
         expect(metaOf().beacons).toEqual([]);
       });
 
-      test("stays clear of the booking dialog and the Pay buttons", async ({ page, flow }) => {
-        await reviewWithBanner(page, flow);
-        await expect(page.getByRole("button", { name: "Pay your way", exact: true })).toBeVisible();
-        await controlsClearOfBanner(page);
-        await expectNoBannerShift(page);
-        await test.info().attach("payment-with-banner", { body: await page.screenshot(), contentType: "image/png" });
-      });
-
-      test("stays clear of the free booking Confirm button", async ({ page, flow }) => {
-        await routeFreeQuote(page);
-        await reviewWithBanner(page, flow);
-        await expect(page.getByRole("button", { name: "Confirm Free Booking", exact: true })).toBeVisible();
-        await controlsClearOfBanner(page);
+      test("leaves while the booking dialog is open and comes back by keyboard after it closes", async ({ page }) => {
+        await page.goto("/");
+        await expect(banner(page)).toBeVisible();
+        await expectBannerPlacement(page);
+        await shot(page, `home-banner-${width}`);
+        await page.locator('a[href^="/booking"]').first().click();
+        await expect(page).toHaveURL(/\/booking\?package=overhaul$/);
+        await expect(page.locator(".ri-booking-package-title")).toHaveText(overhaul);
+        await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
+        await settle(page);
+        await expect(banner(page)).toHaveCount(0);
+        expect(new Set(await tabStops(page, 30))).toEqual(new Set(["dialog"]));
+        await closeBooking(page);
+        await expect(banner(page)).toBeVisible();
+        await expectBannerPlacement(page);
+        await shot(page, `after-close-banner-${width}`);
+        await page.locator("body").focus();
+        expect(await tabToBanner(page)).toBe(true);
+        await expect(banner(page).getByRole("link", { name: "Privacy Policy" })).toBeFocused();
+        await page.keyboard.press("Tab");
+        await expect(banner(page).getByRole("button", { name: "Accept", exact: true })).toBeFocused();
+        await page.keyboard.press("Enter");
+        await expect(banner(page)).toHaveCount(0);
       });
     });
   }
+
+  for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 720 }]) {
+    test.describe(`dialogs at ${viewport.width}x${viewport.height}`, () => {
+      test.use({ viewport });
+
+      test("a direct load of a dialog page keeps the banner away until the dialog closes", async ({ page }) => {
+        for (const route of ["/payment-success", "/thank-you", "/booking"]) {
+          await page.goto(route);
+          await expect(page.getByRole("dialog")).toBeVisible();
+          await settle(page);
+          await expect(banner(page)).toHaveCount(0);
+        }
+        await expect(page.locator(".ri-booking-package-title")).toBeVisible();
+        await shot(page, `booking-dialog-banner-pending-${viewport.width}x${viewport.height}`);
+        await closeBooking(page);
+        await expect(banner(page)).toBeVisible();
+      });
+    });
+  }
+
+  test.describe("scroll landings at 1280x720", () => {
+    test.use({ viewport: { width: 1280, height: 720 } });
+
+    test("a pending banner moves no section landing or Back/Forward restore", async ({ page }) => {
+      const pending = await scrollLandings(page, () => expect(banner(page)).toBeVisible());
+      await page.evaluate(() => localStorage.setItem("roo-consent", "denied"));
+      const answered = await scrollLandings(page, async () => {
+        await settle(page);
+        await expect(banner(page)).toHaveCount(0);
+      });
+      expect(pending.section).toBeGreaterThan(0);
+      expect(pending.back).toBeGreaterThan(0);
+      expect(pending).toEqual(answered);
+    });
+  });
+
+  test("Decline and Cookie settings remove the ad cookie on pages without sales tracking", async ({
+    page, context, baseURL,
+  }) => {
+    await setAdCookie(context, baseURL);
+    await page.goto("/referrals/login");
+    await expect(banner(page)).toBeVisible();
+    await expect.poll(() => adCookie(context)).toBeUndefined();
+    expect(await sessionJourney(page)).toBe(journeyId);
+    await setAdCookie(context, baseURL);
+    await banner(page).getByRole("button", { name: "Decline", exact: true }).click();
+    await expect(banner(page)).toHaveCount(0);
+    await expect.poll(() => adCookie(context)).toBeUndefined();
+
+    await page.evaluate(() => {
+      localStorage.setItem("roo-consent", "granted");
+      sessionStorage.clear();
+    });
+    await setAdCookie(context, baseURL);
+    await page.goto("/meet-the-team");
+    await settle(page);
+    expect((await adCookie(context))?.value).toBe(adCookieValue);
+    await page.getByRole("button", { name: "Cookie settings", exact: true }).click();
+    await expect(banner(page)).toBeVisible();
+    await expect.poll(() => adCookie(context)).toBeUndefined();
+    expect(await sessionJourney(page)).toBe(journeyId);
+  });
 
   test("the Markdown privacy page has the cookie notice and the CSP allows Meta, not Formspree", async ({
     page,
@@ -224,6 +351,12 @@ if (!pixelId) {
   const paidReceipt = {
     eventId: paidEventId, paymentType: "paid", provider: "dodo", amount: 84.99, currency: "USD",
     packageTitle: overhaul, referralCode: "", attribution: null,
+  };
+
+  const paidFinalize = {
+    ok: true, status: "booked", provider: "dodo", bookingId: "fixture-consent-paid",
+    emailDispatch: { allSent: true, client: { sent: true }, owner: { sent: true } }, emailDispatchToken: "",
+    analyticsReceipt: paidReceipt,
   };
 
   test.describe("Meta pixel build", () => {
@@ -250,12 +383,7 @@ if (!pixelId) {
     test("after Accept the pixel sends PageView, ViewContent, InitiateCheckout and Purchase", async ({
       page, flow, baseURL,
     }) => {
-      await page.route("**/api/payment/start", (route) => route.fulfill({ json: {
-        ok: true, paymentAccessToken: "fixture-payment", status: "started",
-        providerPayload: { checkoutUrl: `${baseURL}/__test/checkout-handoff` },
-        sessionExpiresAt: new Date(Date.now() + 20 * 60 * 1000).toISOString(),
-        quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
-      } }));
+      await routePaidStart(page, baseURL);
       let finalizeRoute;
       await page.route("**/api/payment/finalize", (route) => { finalizeRoute = route; });
       await page.goto("/packages");
@@ -284,22 +412,13 @@ if (!pixelId) {
       await expect(bookingCard).toContainText(`$${tracked("ViewContent")[1].args[2].value.toFixed(2)}`);
       await expect.poll(() => tracked("PageView").map(({ path }) => path)).toEqual(["/packages", "/booking"]);
 
-      await flow.review();
-      await flow.payment();
-      await page.getByRole("button", { name: "Pay your way", exact: true }).click();
-      await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
+      await payAndReturn(page, flow);
       expect(tracked("InitiateCheckout")).toHaveLength(1);
       expect(tracked("InitiateCheckout")[0].args[2]).toMatchObject({
         content_name: overhaul, content_ids: ["overhaul"], value: 84.99, currency: "USD", num_items: 1,
       });
-
-      await page.goto("/payment?dodo_return=1", { waitUntil: "domcontentloaded" });
       await expect.poll(() => Boolean(finalizeRoute)).toBe(true);
-      await finalizeRoute.fulfill({ json: {
-        ok: true, status: "booked", provider: "dodo", bookingId: "fixture-consent-paid",
-        emailDispatch: { allSent: true, client: { sent: true }, owner: { sent: true } }, emailDispatchToken: "",
-        analyticsReceipt: paidReceipt,
-      } });
+      await finalizeRoute.fulfill({ json: paidFinalize });
       await expect(page).toHaveURL(/\/payment-success$/);
       await expect.poll(() => tracked("Purchase").length).toBe(1);
       const [, , data, options] = tracked("Purchase")[0].args;
@@ -328,6 +447,92 @@ if (!pixelId) {
       await settle(page);
       expect(tracked("Purchase")).toEqual([]);
       expect(tracked("InitiateCheckout")).toEqual([]);
+    });
+
+    test("a Purchase waits for Accept after the receipt and is sent once with the server's event id", async ({
+      page, flow, baseURL,
+    }) => {
+      await routePaidStart(page, baseURL);
+      let finalized = 0;
+      await page.route("**/api/payment/finalize", (route) => {
+        finalized += 1;
+        return route.fulfill({ json: paidFinalize });
+      });
+      await payAndReturn(page, flow);
+      await expect(page).toHaveURL(/\/payment-success$/);
+      await settle(page);
+      await expect(banner(page)).toHaveCount(0);
+      expect(metaOf().calls).toEqual([]);
+      const purchaseKey = `meta_purchase_tracked:${paidEventId}`;
+      expect(await page.evaluate((key) => sessionStorage.getItem(key), purchaseKey)).toBeNull();
+      await closeBooking(page);
+      await banner(page).getByRole("button", { name: "Accept", exact: true }).click();
+      await expect.poll(() => tracked("Purchase").length).toBe(1);
+      const [, , data, options] = tracked("Purchase")[0].args;
+      expect(options).toEqual({ eventID: paidEventId });
+      expect(data).toMatchObject({ value: 84.99, currency: "USD", content_ids: ["overhaul"] });
+      expect(tracked("InitiateCheckout")).toEqual([]);
+      expect(await page.evaluate((key) => sessionStorage.getItem(key), purchaseKey)).toBe("1");
+      await settle(page);
+      expect(tracked("Purchase")).toHaveLength(1);
+      expect(finalized).toBe(1);
+    });
+
+    test("a Decline that cannot be saved still stops the pixel for the session", async ({ page }) => {
+      await page.goto("/packages");
+      await banner(page).getByRole("button", { name: "Accept", exact: true }).click();
+      await expect.poll(() => tracked("PageView").length).toBe(1);
+      await page.evaluate(() => {
+        const failOnLocal = (original) => function failingStorage(...args) {
+          if (this === window.localStorage) throw new DOMException("Storage is full", "QuotaExceededError");
+          return original.apply(this, args);
+        };
+        Storage.prototype.setItem = failOnLocal(Storage.prototype.setItem);
+        Storage.prototype.removeItem = failOnLocal(Storage.prototype.removeItem);
+      });
+      await page.getByRole("button", { name: "Cookie settings", exact: true }).click();
+      await banner(page).getByRole("button", { name: "Decline", exact: true }).click();
+      await expect(banner(page)).toHaveCount(0);
+      expect(metaOf().calls.at(-1).args).toEqual(["consent", "revoke"]);
+      const before = metaOf().calls.length;
+      await overhaulDetails(page).click();
+      await closeDetails(page);
+      expect(await page.evaluate(() => localStorage.getItem("roo-consent"))).toBe("granted");
+      await page.goto("/booking?package=overhaul");
+      await expect(page.locator(".ri-booking-package-title")).toHaveText(overhaul);
+      await settle(page);
+      await page.waitForLoadState("networkidle");
+      await expect(banner(page)).toHaveCount(0);
+      expect(metaOf().calls.slice(before)).toEqual([]);
+    });
+
+    test("a saved Accept sends one PageView per page view whichever module loads first", async ({ page }) => {
+      await page.addInitScript(() => {
+        if (!localStorage.getItem("roo-consent")) localStorage.setItem("roo-consent", "granted");
+      });
+      let delayed = 0;
+      await page.route("**/_next/static/chunks/**", async (route) => {
+        const response = await route.fetch();
+        const body = await response.text();
+        if (body.includes("service_visit")) {
+          delayed += 1;
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+        }
+        await route.fulfill({ status: response.status(), contentType: response.headers()["content-type"], body });
+      });
+      await page.goto("/packages");
+      await settle(page);
+      await page.waitForLoadState("networkidle");
+      expect(delayed).toBeGreaterThan(0);
+      await expect.poll(() => tracked("PageView").length).toBe(1);
+      await page.locator('main a[href="/reviews"], footer a[href="/reviews"]').first().click();
+      await expect(page).toHaveURL(/\/tools$/);
+      await expect.poll(() => tracked("PageView").length).toBe(2);
+      await page.goBack();
+      await expect(page).toHaveURL(/\/packages$/);
+      await expect.poll(() => tracked("PageView").length).toBe(3);
+      await settle(page);
+      expect(tracked("PageView").map(({ path }) => path)).toEqual(["/packages", "/reviews", "/packages"]);
     });
   });
 }

@@ -2,7 +2,7 @@ import { buildBrowserCompletionBody } from "./bookingSummary.js";
 import envValue from "../../supabase/envValue.cjs";
 import { calculateCreatorCommission, originalBookingCommission } from "../../referrals/commissionMoney.js";
 import { isTerminalDisputeStatus, resolveDisputeReferralAccounting } from "../../referrals/disputeAccounting.js";
-const { resolveStoreBackend } = envValue;
+const { resolveStoreBackend, readProcessEnvValue } = envValue;
 import {
   createDodoCheckout,
   inspectDodoCheckout,
@@ -183,7 +183,7 @@ const fromSubunits = (value, currency = "USD") => {
 };
 
 const isLegacyCheckoutCompatibilityOpen = () => {
-  const deadline = String(process.env.PAYMENT_LEGACY_CHECKOUT_UNTIL || "").trim();
+  const deadline = readProcessEnvValue("PAYMENT_LEGACY_CHECKOUT_UNTIL");
   return !!deadline && isFutureIso(deadline);
 };
 
@@ -1044,7 +1044,7 @@ const verifyProviderCapture = async ({
         orderId,
         paymentId,
         signature,
-        secret: String(process.env.RAZORPAY_KEY_SECRET || "").trim(),
+        secret: readProcessEnvValue("RAZORPAY_KEY_SECRET"),
       });
       if (!validSignature) {
         return { ok: false, retryable: false, reason: "razorpay_signature_invalid" };
@@ -3015,7 +3015,12 @@ const createOrReusePaymentRecordForStart = async ({
     attemptCount: 0,
     lastAttemptAt: "",
     source: "start",
-    providerPublicData: provider === "dodo" ? { currency: "USD", productId: resolveDodoProductId(bookingPayload.packageTitle), taxInclusive: false, environment: String(process.env.DODO_PAYMENTS_ENVIRONMENT || "").trim() } : {},
+    providerPublicData: provider === "dodo" ? {
+      currency: "USD",
+      productId: resolveDodoProductId(bookingPayload.packageTitle),
+      taxInclusive: false,
+      environment: readProcessEnvValue("DODO_PAYMENTS_ENVIRONMENT"),
+    } : {},
     orderState: provider === "free" ? "not_required" : "creating",
     orderCreationLeaseId,
     orderCreationLeaseExpiresAt:

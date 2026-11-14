@@ -8,8 +8,8 @@ const parseGeneration = value => {
 };
 export const resolveSupabaseRuntimePolicy = (env = process.env) => {
   const runtime = readEnvValue(env,"VERCEL_ENV").toLowerCase() || (readEnvValue(env,"NODE_ENV").toLowerCase() === "production" ? "production" : "development");
-  const primaryBackend = resolveStoreBackend(env.DATA_PRIMARY_BACKEND);
-  const commercePrimaryBackend = resolveStoreBackend(env.COMMERCE_PRIMARY_BACKEND);
+  const primaryBackend = resolveStoreBackend(readEnvValue(env, "DATA_PRIMARY_BACKEND"));
+  const commercePrimaryBackend = resolveStoreBackend(readEnvValue(env, "COMMERCE_PRIMARY_BACKEND"));
   const cutoverEnabled = readBoolean(env,"SUPABASE_CUTOVER_ENABLED");
   const commerceCutoverEnabled = readBoolean(env,"COMMERCE_CUTOVER_ENABLED");
   if(runtime === "production" && !cutoverEnabled) throw new Error("Production Supabase cutover requires SUPABASE_CUTOVER_ENABLED=1.");

@@ -1,3 +1,5 @@
+import envValue from "../../../../src/server/supabase/envValue.cjs";
+const { readProcessEnvValue } = envValue;
 import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 import { logSafeError } from "../../../../src/server/safeErrorLog";
@@ -21,7 +23,7 @@ const safeEqual = (left, right) => {
 };
 
 const authorized = (request) => {
-  const configured = String(process.env.REF_ADMIN_KEY || "").trim();
+  const configured = readProcessEnvValue("REF_ADMIN_KEY");
   const supplied = String(request.headers.get("x-admin-key") || "").trim();
   return configured && safeEqual(configured, supplied);
 };

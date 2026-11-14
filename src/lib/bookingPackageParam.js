@@ -8,9 +8,12 @@ import { HOME_SECTION_DATA_KEYS, fetchHomeSectionData, readHomeSectionData } fro
 
 const { TOP_PACKAGE_PUBLIC_TITLE, findPackageBySlug, getPackagePricePresentation, getPackageSlug } = packagePricing;
 const PACKAGES = HOME_SECTION_DATA_KEYS.packagesList;
-const BOOKABLE_TITLES = ["Vertex Essentials", "Performance Vertex Overhaul", TOP_PACKAGE_PUBLIC_TITLE];
+const DEFAULT_PACKAGE_TITLE = "Performance Vertex Overhaul";
+const BOOKABLE_TITLES = ["Vertex Essentials", DEFAULT_PACKAGE_TITLE, TOP_PACKAGE_PUBLIC_TITLE];
 const BOOKABLE_SLUGS = new Set(BOOKABLE_TITLES.map(getPackageSlug));
+const DEFAULT_SLUG = getPackageSlug(DEFAULT_PACKAGE_TITLE);
 const PACKAGES_FROM_CODE = BOOKABLE_TITLES.map((title) => ({ title, price: getPackagePricePresentation(title).price }));
+const DEFAULT_FROM_CODE = findPackageBySlug(PACKAGES_FROM_CODE, DEFAULT_SLUG);
 
 export const bookingPackagePath = (title) => {
   const slug = getPackageSlug(title);
@@ -22,12 +25,11 @@ const slugFromSearch = (search) => {
   return BOOKABLE_SLUGS.has(slug) ? slug : "";
 };
 
-function usePackageFromSearch(search) {
+function usePackagesOfRecord(needed) {
   const hydrating = useHydrating();
-  const slug = slugFromSearch(search);
   const [fetched, setFetched] = useState(null);
-  const packages = hydrating || !slug ? null : fetched || readHomeSectionData(PACKAGES);
-  const waiting = Boolean(slug) && !packages;
+  const packages = hydrating || !needed ? null : fetched || readHomeSectionData(PACKAGES);
+  const waiting = needed && !packages;
   useEffect(() => {
     if (hydrating || !waiting) return undefined;
     let active = true;
@@ -42,7 +44,7 @@ function usePackageFromSearch(search) {
     };
   }, [hydrating, waiting]);
   useBookingDialogPending(waiting);
-  return useMemo(() => (packages ? findPackageBySlug(packages, slug) : null), [packages, slug]);
+  return packages;
 }
 
 const packageFromState = (state) => {
@@ -52,10 +54,21 @@ const packageFromState = (state) => {
   return { title: data.packageTitle, price: data.packagePrice || "", tag: data.packageTag || "" };
 };
 
-export function useNavigationPackage(location) {
+export function useBookingPackage(location, storedPackage) {
   const statePackage = useMemo(() => packageFromState(location?.state), [location?.state]);
-  const searchPackage = usePackageFromSearch(statePackage ? "" : location?.search);
-  return statePackage || searchPackage;
+  const slug = statePackage ? "" : slugFromSearch(location?.search);
+  const packages = usePackagesOfRecord(!statePackage);
+  return useMemo(() => {
+    if (statePackage) return { navigationPackage: statePackage, bookingPackage: statePackage };
+    const requestedPackage = findPackageBySlug(packages || PACKAGES_FROM_CODE, slug);
+    const navigationPackage = packages ? requestedPackage : null;
+    const storedOfRecord = storedPackage?.title
+      ? findPackageBySlug(packages, getPackageSlug(storedPackage.title)) || storedPackage
+      : null;
+    const bookingPackage = requestedPackage || storedOfRecord ||
+      findPackageBySlug(packages, DEFAULT_SLUG) || DEFAULT_FROM_CODE;
+    return { navigationPackage, bookingPackage };
+  }, [statePackage, packages, slug, storedPackage]);
 }
 
 export function useBookingPackageView(pkg) {

@@ -14,8 +14,8 @@ const packageCard = (page, pkg) => page.locator(".ri-package-card").filter({
 const cardPrice = async (page, pkg) =>
   (await packageCard(page, pkg).locator(".ri-price-current").first().textContent()).trim();
 
-const expectPackage = async (page, { slug, title, price }) => {
-  await expect(page).toHaveURL(new RegExp(`/booking\\?package=${slug}$`));
+const expectPackage = async (page, { slug, title, price }, path = `/booking?package=${slug}`) => {
+  await expect(page).toHaveURL((url) => url.pathname + url.search === path);
   await expect(bookingCard(page).locator(".ri-booking-package-title")).toHaveText(title);
   await expect(bookingCard(page)).toContainText(price);
 };
@@ -32,6 +32,18 @@ const bookFromPackages = async (page, pkg) => {
   const price = await cardPrice(page, pkg);
   await packageCard(page, pkg).locator(".ri-package-book-button").click();
   await expectPackage(page, { ...pkg, price });
+};
+
+const holdPackagesList = async (page) => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const list = { held: false, release };
+  await page.route("**/api/content/packages-list*", async (route) => {
+    list.held = true;
+    await gate;
+    await route.fallback();
+  });
+  return list;
 };
 
 for (const width of [360, 390, 1280]) {
@@ -91,51 +103,158 @@ test("a package link keeps the booking page canonical and out of search", async 
 test.describe("package prices", () => {
   test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata", viewport: { width: 1280, height: 900 } });
 
+  const STALE_PRICE = "$5.00";
+  const codePriceOf = (pkg) => getPackagePricePresentation(pkg.title).price;
+  const paymentTotal = (page) => page.locator("dt", { hasText: /^(Total|Subtotal)$/ }).locator("..").locator("dd");
+  const savedDraft = ({ title, price }) => {
+    sessionStorage.setItem("booking_draft", JSON.stringify({
+      lastTitle: title,
+      packages: { [title]: { selectedPackage: { title, price, tag: "" } } },
+    }));
+  };
+  const expectCheckoutPrice = async (page, flow, path, pkg, price) => {
+    await flow.review(path);
+    await flow.payment();
+    const quote = flow.state.calls.filter(({ path: called }) => called === "/api/payment/quote").at(-1);
+    expect(JSON.stringify(quote.body)).toContain(pkg.title);
+    await expect(paymentTotal(page)).toContainText(`${price} USD`);
+  };
+  const visibleWithPrice = (page, price) => page.evaluate((text) => [...document.querySelectorAll("body *")]
+    .filter((node) => node.childElementCount === 0 && node.textContent.includes(text) &&
+      node.checkVisibility({ visibilityProperty: true, opacityProperty: true }))
+    .length, price);
+
   test("the deep link, the package card and the server quote agree on the CMS price", async ({ page, flow }) => {
-    const codePrice = getPackagePricePresentation(bySlug.overhaul.title).price;
     const { overhaul: price } = await packagesPagePrices(page);
-    expect(price).not.toBe(codePrice);
+    expect(price).not.toBe(codePriceOf(bySlug.overhaul));
 
     await bookFromPackages(page, bySlug.overhaul);
     await page.goto("/booking?package=overhaul");
     await expectPackage(page, { ...bySlug.overhaul, price });
-
-    await flow.review("/booking?package=overhaul");
-    await flow.payment();
-    const quote = flow.state.calls.filter(({ path }) => path === "/api/payment/quote").at(-1);
-    expect(JSON.stringify(quote.body)).toContain(bySlug.overhaul.title);
-    const total = page.locator("dt", { hasText: /^(Total|Subtotal)$/ }).locator("..").locator("dd");
-    await expect(total).toContainText(`${price} USD`);
+    await expectCheckoutPrice(page, flow, "/booking?package=overhaul", bySlug.overhaul, price);
   });
 
-  test("a deep link waits for the CMS price instead of showing the code price", async ({ page, flow }) => {
-    const codePrice = getPackagePricePresentation(bySlug.overhaul.title).price;
-    const pricesPage = await page.context().newPage();
-    const { overhaul: price } = await packagesPagePrices(pricesPage);
-    await pricesPage.close();
-    const listCalls = () => flow.state.calls.filter(({ path }) => path === "/api/content/packages-list").length;
-    const callsBefore = listCalls();
-    let release;
-    let held = false;
-    const gate = new Promise((resolve) => { release = resolve; });
-    await page.route("**/api/content/packages-list*", async (route) => {
-      held = true;
-      await gate;
-      await route.fallback();
+  test("plain /booking and its payment total show the CMS price of the default package", async ({ page, flow }) => {
+    const { overhaul: price } = await packagesPagePrices(page);
+    expect(price).not.toBe(codePriceOf(bySlug.overhaul));
+
+    await page.goto("/booking");
+    await expectPackage(page, { ...bySlug.overhaul, price }, "/booking");
+    expect(await visibleWithPrice(page, codePriceOf(bySlug.overhaul))).toBe(0);
+    await expectCheckoutPrice(page, flow, "/booking", bySlug.overhaul, price);
+  });
+
+  const openRestoredDraft = async (page, pkg, savedPrice) => {
+    const price = (await packagesPagePrices(page))[pkg.slug];
+    expect(price).not.toBe(savedPrice);
+    await page.evaluate(savedDraft, { title: pkg.title, price: savedPrice });
+    await page.goto("/booking");
+    await expectPackage(page, { ...pkg, price }, "/booking");
+    expect(await visibleWithPrice(page, savedPrice)).toBe(0);
+    return price;
+  };
+
+  test("a restored draft shows the CMS price instead of the price it was saved with", async ({ page }) => {
+    await openRestoredDraft(page, bySlug.essentials, STALE_PRICE);
+  });
+
+  test("a draft saved at the code price checks out at the CMS price", async ({ page, flow }) => {
+    const pkg = bySlug.overhaul;
+    const price = await openRestoredDraft(page, pkg, codePriceOf(pkg));
+    await expectCheckoutPrice(page, flow, "/booking", pkg, price);
+  });
+
+  const heldLoads = [
+    { name: "a deep link", path: "/booking?package=overhaul", pkg: bySlug.overhaul },
+    { name: "plain /booking", path: "/booking", pkg: bySlug.overhaul },
+    { name: "a restored draft", path: "/booking", pkg: bySlug.essentials, savedPrice: STALE_PRICE },
+  ];
+  for (const { name, path, pkg, savedPrice } of heldLoads) {
+    test(`${name} waits for the CMS price instead of showing an older price`, async ({ page, flow }) => {
+      const wrongPrice = savedPrice || codePriceOf(pkg);
+      const pricesPage = await page.context().newPage();
+      const price = (await packagesPagePrices(pricesPage))[pkg.slug];
+      await pricesPage.close();
+      expect(price).not.toBe(wrongPrice);
+      if (savedPrice) await page.addInitScript(savedDraft, { title: pkg.title, price: savedPrice });
+      const listCalls = () => flow.state.calls
+        .filter(({ path: called }) => called === "/api/content/packages-list").length;
+      const callsBefore = listCalls();
+      const list = await holdPackagesList(page);
+      await page.goto(path);
+      await expect.poll(() => list.held).toBe(true);
+      await expect(page.getByRole("dialog")).toBeHidden();
+      expect(await visibleWithPrice(page, wrongPrice)).toBe(0);
+      list.release();
+      await expect(page.getByRole("dialog")).toBeVisible();
+      await expectPackage(page, { ...pkg, price }, path);
+      expect(await visibleWithPrice(page, wrongPrice)).toBe(0);
+      expect(listCalls() - callsBefore).toBe(1);
+      await page.unrouteAll({ behavior: "wait" });
     });
-    await page.goto("/booking?package=overhaul");
-    await expect.poll(() => held).toBe(true);
-    await expect(page.getByRole("dialog")).toBeHidden();
-    const visibleWithCodePrice = () => page.evaluate((text) => [...document.querySelectorAll("body *")]
-      .filter((node) => node.childElementCount === 0 && node.textContent.includes(text) &&
-        node.checkVisibility({ visibilityProperty: true, opacityProperty: true }))
-      .length, codePrice);
-    expect(await visibleWithCodePrice()).toBe(0);
-    release();
+  }
+});
+
+test.describe("a held slot on a package link", () => {
+  test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata", viewport: { width: 390, height: 844 } });
+
+  const email = page => page.getByRole("textbox", { name: "Booking email", exact: true });
+  const readHold = page => page.evaluate(() => JSON.parse(sessionStorage.getItem("my_slot_hold")));
+  const calls = (flow, path) => flow.state.calls.filter(({ path: called }) => called === path).length;
+  const reloadWithLatePackages = async (page) => {
+    await page.evaluate(() => sessionStorage.removeItem("roo-home-data:packages-list"));
+    const list = await holdPackagesList(page);
+    await page.reload();
+    await expect.poll(() => list.held).toBe(true);
+    list.release();
     await expect(page.getByRole("dialog")).toBeVisible();
-    await expectPackage(page, { ...bySlug.overhaul, price });
-    expect(await visibleWithCodePrice()).toBe(0);
-    expect(listCalls() - callsBefore).toBe(1);
     await page.unrouteAll({ behavior: "wait" });
+  };
+  const expectHeld = async (page, flow, hold, typed) => {
+    await expect(page).toHaveURL((url) => url.pathname + url.search === "/booking?package=essentials");
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toContainText("Slot 10:00 AM is reserved");
+    await expect(dialog).toContainText(bySlug.essentials.title);
+    await expect(dialog).toContainText(hold.price);
+    await expect(email(page)).toHaveValue(typed);
+    await expect(page.getByRole("button", { name: "Release Slot", exact: true })).toBeVisible();
+    expect(await readHold(page)).toMatchObject({ holdId: hold.holdId, holdToken: hold.holdToken,
+      startTimeUTC: hold.startTimeUTC, packageTitle: bySlug.essentials.title });
+    expect(calls(flow, "/api/holdSlot")).toBe(1);
+    expect(calls(flow, "/api/releaseHold")).toBe(0);
+  };
+  const reserveFromPackages = async (page) => {
+    await page.goto("/packages");
+    await expect(page.locator(".ri-package-card").first()).toBeVisible();
+    const price = await cardPrice(page, bySlug.essentials);
+    await bookFromPackages(page, bySlug.essentials);
+    await page.getByRole("button", { name: /^Earliest available:/ }).click();
+    await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+    await page.getByRole("button", { name: "Next", exact: true }).last().click();
+    await expect(email(page)).toBeVisible();
+    return { ...await readHold(page), price };
+  };
+
+  test("reloading, Back and Forward keep a slot reserved from a package link", async ({ page, flow }) => {
+    const hold = await reserveFromPackages(page);
+    await page.goBack();
+    await expect(page).toHaveURL(/\/packages$/);
+    await page.goForward();
+    await expectHeld(page, flow, hold, "");
+    await page.reload();
+    await expectHeld(page, flow, hold, "");
+    await reloadWithLatePackages(page);
+    await expectHeld(page, flow, hold, "");
+  });
+
+  test("reloading a package link keeps the reserved slot and the typed details", async ({ page, flow }) => {
+    const hold = await reserveFromPackages(page);
+    await flow.details("held@example.invalid");
+    await expect.poll(() => page.evaluate(() => sessionStorage.getItem("booking_draft")))
+      .toContain("held@example.invalid");
+    await reloadWithLatePackages(page);
+    await expectHeld(page, flow, hold, "held@example.invalid");
+    await expect(page.getByRole("textbox", { name: "PC specifications", exact: true }))
+      .toHaveValue("Ryzen 7700 / RTX 4070");
   });
 });

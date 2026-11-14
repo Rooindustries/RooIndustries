@@ -260,7 +260,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
             failure = body.failure;
           }
           if (body.contactDelivery !== undefined) {
-            if (!['captured', 'failed'].includes(body.contactDelivery)) {
+            if (!['captured', 'failed', 'slow'].includes(body.contactDelivery)) {
               throw new Error('Invalid fixture contact delivery.');
             }
             contactDelivery = body.contactDelivery;
@@ -270,6 +270,11 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
               throw new Error('Invalid fixture contact record state.');
             }
             contactRecord = body.contactRecord;
+          }
+          if (body.contactDue === true) {
+            for (const row of contactMessages) {
+              if (['pending', 'failed'].includes(row.status)) row.next_attempt_at = Date.now();
+            }
           }
           for (const name of ['enqueueDelayMs', 'emailDelayMs']) {
             if (body[name] !== undefined && (!Number.isInteger(body[name]) || body[name] < 0 || body[name] > 2000)) throw new Error('Invalid fixture delay.');
@@ -464,10 +469,19 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
           const error = new Error('Synthetic email provider unavailable.');
           throw Object.assign(error, { status: 503, code: 'email_provider_unavailable' });
         }
-        const id = `fixture-email-${emails.length + 1}`;
-        emails.push({ id, idempotencyKey, ...body, sentAt: Date.now() });
-        call.status = 200;
-        json(res, 200, { id });
+        if (contactDelivery === 'slow') {
+          await new Promise(resolve => {
+            const timer = setTimeout(resolve, 30000);
+            res.once('close', () => { clearTimeout(timer); resolve(); });
+          });
+          call.status = 499;
+          if (!res.destroyed) json(res, 504, { code: 'FIXTURE_SLOW_PROVIDER' });
+        } else {
+          const id = `fixture-email-${emails.length + 1}`;
+          emails.push({ id, idempotencyKey, ...body, sentAt: Date.now() });
+          call.status = 200;
+          json(res, 200, { id });
+        }
       } else if (apiRoutes && req.method === 'POST' && url.pathname === '/emails') {
         const idempotencyKey = req.headers['idempotency-key'];
         if (req.headers.authorization !== 'Bearer fixture-only-referral-email-key' || !dispatches.has(idempotencyKey) ||

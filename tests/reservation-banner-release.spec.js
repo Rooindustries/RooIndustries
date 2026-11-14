@@ -187,8 +187,8 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       try {
         await releaseButton(page).click();
         await expect(banner(page).getByRole("button", { name: "Releasing...", exact: true })).toBeDisabled();
-        await page.locator('a[href="/booking"]').first().click();
-        await expect(page).toHaveURL(url => url.pathname === "/booking");
+        await page.locator('a[href="/booking?package=overhaul"]').first().click();
+        await expect(page).toHaveURL(url => `${url.pathname}${url.search}` === "/booking?package=overhaul");
         const email = page.getByRole("textbox", { name: "Booking email", exact: true });
         await expect(email).toBeVisible();
         await email.fill("updated@example.invalid");
@@ -199,7 +199,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         respond();
         await expect.poll(async () => (await savedReservation(page)).hold).toBeNull();
         await page.waitForTimeout(1000);
-        await expect(page).toHaveURL(url => url.pathname === "/booking");
+        await expect(page).toHaveURL(url => `${url.pathname}${url.search}` === "/booking?package=overhaul");
         const { draft } = await savedReservation(page);
         expect(draft.packages[draft.lastTitle].form.email).toBe("updated@example.invalid");
       } finally {

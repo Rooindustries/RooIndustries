@@ -1,3 +1,5 @@
+import envValue from "../../supabase/envValue.cjs";
+const { readEnvValue } = envValue;
 import crypto from "node:crypto";
 import { Resend } from "resend";
 import { buildReferralVerificationEmailHtml } from "../../email/referralVerificationEmail.js";
@@ -57,7 +59,7 @@ const normalizeDispatchKind = (value) => {
 };
 
 const createResendClient = (env = process.env) => {
-  const apiKey = String(env.RESEND_API_KEY || "").trim();
+  const apiKey = readEnvValue(env, "RESEND_API_KEY");
   return apiKey ? new Resend(apiKey) : null;
 };
 
@@ -67,8 +69,8 @@ const resolveBaseUrl = (env = process.env) => {
       env.SITE_URL ||
       "https://www.rooindustries.com"
   );
-  const runtime = String(env.VERCEL_ENV || "").trim().toLowerCase() ||
-    (String(env.NODE_ENV || "").trim().toLowerCase() === "production" ? "production" : "development");
+  const runtime = readEnvValue(env, "VERCEL_ENV").toLowerCase() ||
+    (readEnvValue(env, "NODE_ENV").toLowerCase() === "production" ? "production" : "development");
   if (runtime === "production" && ![
     "https://www.rooindustries.com", "https://www.rooindustries.com/",
     "https://rooindustries.com", "https://rooindustries.com/",
@@ -83,7 +85,7 @@ const resolveBaseUrl = (env = process.env) => {
 };
 
 const resolveFromAddress = (env = process.env) =>
-  String(env.FROM_EMAIL || "onboarding@resend.dev").trim();
+  readEnvValue(env, "FROM_EMAIL") || "onboarding@resend.dev";
 
 export const buildReferralEmailIdempotencyKey = ({
   dispatchKind,

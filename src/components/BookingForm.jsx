@@ -37,7 +37,7 @@ import {
   toMoney,
 } from "../lib/checkoutCodes";
 import { trackEvent } from "../lib/analytics";
-import { bookingPackagePath, useBookingPackageView, useNavigationPackage } from "../lib/bookingPackageParam";
+import { bookingPackagePath, useBookingPackage, useBookingPackageView } from "../lib/bookingPackageParam";
 import { isValidEmail } from "../lib/emailValidation";
 import { classifyHoldResponse } from "../lib/holdResponse";
 
@@ -559,13 +559,8 @@ export default function BookingForm() {
   const [preventHoldAutoload, setPreventHoldAutoload] = useState(false);
   const [drafts, setDrafts] = useState({});
 
-  const navigationPackage = useNavigationPackage(location);
-
-  const selectedPackage = useMemo(() => {
-    if (navigationPackage?.title) return preparePackage(navigationPackage);
-    if (persistedPackage) return preparePackage(persistedPackage);
-    return DEFAULT_VERTEX_PACKAGE;
-  }, [navigationPackage, persistedPackage]);
+  const { navigationPackage, bookingPackage } = useBookingPackage(location, persistedPackage);
+  const selectedPackage = useMemo(() => preparePackage(bookingPackage), [bookingPackage]);
   useBookingPackageView(navigationPackage && selectedPackage);
 
   const prevPackageRef = useRef(selectedPackage.title);

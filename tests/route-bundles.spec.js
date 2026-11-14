@@ -226,7 +226,9 @@ for (const result of ["success", "error"]) {
       await route.fulfill({
         status: result === "success" ? 200 : 400,
         contentType: "application/json",
-        body: JSON.stringify(result === "success" ? { ok: true } : { ok: false, fields: { email: "Synthetic email error" } }),
+        body: JSON.stringify(result === "success"
+          ? { ok: true }
+          : { ok: false, fields: { email: "Synthetic email error" } }),
       });
     });
     await page.goto("/contact");
@@ -237,7 +239,8 @@ for (const result of ["success", "error"]) {
     await page.getByPlaceholder("your.email@example.com", { exact: true }).fill("person@fixture.invalid");
     await page.getByPlaceholder("Tell me about your PC and what you'd like to optimize...", { exact: true }).fill("Synthetic contact form check.");
     await page.getByRole("button", { name: "Send Message", exact: true }).click();
-    if (result === "success") await expect(page.getByText("Thanks, your message is in. We'll reply by email.")).toBeVisible();
+    const thanks = "Thanks, your message is in. We'll reply by email.";
+    if (result === "success") await expect(page.getByText(thanks)).toBeVisible();
     else {
       await expect(page.getByText("Synthetic email error", { exact: false })).toBeVisible();
       await expect(page.getByRole("button", { name: "Send Message", exact: true })).toBeEnabled();

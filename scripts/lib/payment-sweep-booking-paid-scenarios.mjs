@@ -121,6 +121,43 @@ export const registerBookingPaidScenarios = async (ctx) => {
     }));
   }
 
+  const paymentStatus = (checkout) =>
+    requestFlow("status", { paymentAccessToken: checkout.started.body.paymentAccessToken });
+
+  await run("ads-receipt-rules", withMail(async () => {
+    await clearEvents();
+    const checkout = await a1Start("paypal");
+    const unconfirmed = await paymentStatus(checkout);
+    assert.equal(unconfirmed.status, 200, JSON.stringify(unconfirmed));
+    assert.equal(unconfirmed.body.status, "started", JSON.stringify(unconfirmed.body));
+    assert.equal(unconfirmed.body.analyticsReceipt, null, JSON.stringify(unconfirmed.body));
+    assert.equal((await a1Hook("paypal")).status, 200);
+    const receipt = await finalize(checkout);
+    const status = await paymentStatus(checkout);
+    assert.equal(status.status, 200, JSON.stringify(status));
+    assert.deepEqual(status.body.analyticsReceipt, receipt);
+    assert.equal(receipt.paymentType, "paid");
+    assert.equal(receipt.provider, "paypal");
+    assert.match(receipt.eventId, /^[a-f0-9]{40}$/);
+    const event = await assertOneEvent(checkout.id, receipt);
+    return { unconfirmed: unconfirmed.body.status, receipt, eventId: event.event_id };
+  }));
+
+  await run("ads-receipt-rules-free", withMail(async () => {
+    await clearEvents();
+    const checkout = await a1Start("free");
+    const receipt = checkout.started.body.analyticsReceipt;
+    assert.equal(checkout.started.body.status, "booked", JSON.stringify(checkout.started.body));
+    assert.deepEqual({ paymentType: receipt?.paymentType, provider: receipt?.provider, amount: receipt?.amount },
+      { paymentType: "free", provider: "free", amount: 0 }, JSON.stringify(receipt));
+    assert.equal(receipt.eventId, bookingEventId(checkout.id));
+    const status = await paymentStatus(checkout);
+    assert.equal(status.status, 200, JSON.stringify(status));
+    assert.deepEqual(status.body.analyticsReceipt, receipt);
+    assert.equal((await events()).length, 0);
+    return { receipt };
+  }));
+
   await run("ads-booking-paid-webhook-then-reconcile", withMail(async () => {
     await clearEvents();
     const checkout = await a1Start("paypal");
@@ -263,6 +300,47 @@ export const registerBookingPaidScenarios = async (ctx) => {
     assert.deepEqual(retry.body.summary.bookingPaidEvents, { reported: 1 });
     assert.equal((await assertOneEvent(checkout.id)).status, "reported");
     return { failedSummary: cron.body.summary.bookingPaidEvents, retried: retry.body.summary.bookingPaidEvents };
+  }));
+
+  await run("ads-booking-paid-lost-acknowledgement", withMail(async () => {
+    await clearEvents();
+    const checkout = await a1Start("paypal");
+    assert.equal((await a1Hook("paypal")).status, 200);
+    fixture.setRequestHook(async (phase, request) => {
+      if (phase === "before" && request.path.startsWith("/rest/v1/rpc/roo_ack_booking_paid_events")) {
+        throw new Error("Synthetic booking paid acknowledgement loss");
+      }
+    });
+    let lost;
+    try {
+      lost = await captureConsole("log", reconcileRoute);
+    } finally {
+      fixture.setRequestHook(null);
+    }
+    assert.equal(lost.result.status, 200, JSON.stringify(lost.result.body));
+    assert.equal(lost.result.body.summary.bookingPaidEvents.pending, true, JSON.stringify(lost.result.body));
+    assert.equal(paidLines(lost.lines).length, 1, JSON.stringify(lost.lines));
+    const claimed = await assertOneEvent(checkout.id);
+    assert.equal(claimed.status, "claimed");
+    assert.ok(claimed.claimed_until > new Date(), JSON.stringify(claimed));
+    assert.equal(claimed.reported_at, null);
+    const { result: leased, lines: leasedLines } = await captureConsole("log", reconcileRoute);
+    assert.deepEqual(leased.body.summary.bookingPaidEvents, { reported: 0 });
+    assert.equal(paidLines(leasedLines).length, 0);
+    await sql`update ops.booking_paid_events set claimed_until = now() - interval '1 second'
+      where event_id = ${claimed.event_id}`;
+    const { result: retried, lines } = await captureConsole("log", reconcileRoute);
+    assert.deepEqual(retried.body.summary.bookingPaidEvents, { reported: 1 });
+    const logged = paidLines(lines);
+    assert.deepEqual(logged.map((line) => line.event_id), [claimed.event_id]);
+    const reported = await assertOneEvent(checkout.id);
+    assert.equal(reported.status, "reported");
+    assert.equal(reported.claimed_until, null);
+    assert.ok(reported.reported_at);
+    const { result: settled, lines: settledLines } = await captureConsole("log", reconcileRoute);
+    assert.deepEqual(settled.body.summary.bookingPaidEvents, { reported: 0 });
+    assert.equal(paidLines(settledLines).length, 0);
+    return { lostSummary: lost.result.body.summary.bookingPaidEvents, claimed, reported, relogged: logged[0] };
   }));
 
   await run("ads-booking-paid-baseline", withMail(async () => {

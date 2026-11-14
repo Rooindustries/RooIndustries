@@ -1,3 +1,5 @@
+import envValue from "@/src/server/supabase/envValue.cjs";
+const { readProcessEnvValue } = envValue;
 import { createDownloadDataClient } from "@/src/server/downloads/downloadAccess";
 import { getDownloadBySlug } from "@/src/server/downloads/downloadCatalog";
 import {
@@ -75,9 +77,7 @@ const readCookie = (request, name) => {
 };
 
 const readLegacyToken = (url) => {
-  const deadline = new Date(
-    String(process.env.PAYMENT_LEGACY_COMPLETION_UNTIL || "")
-  ).getTime();
+  const deadline = new Date(readProcessEnvValue("PAYMENT_LEGACY_COMPLETION_UNTIL")).getTime();
   if (!Number.isFinite(deadline) || deadline <= Date.now()) return "";
   return url.searchParams.get("token") || "";
 };

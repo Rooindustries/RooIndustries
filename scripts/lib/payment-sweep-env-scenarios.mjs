@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import {
   fixtureMail,
   postPayPalCaptureWebhook,
-  recordPayPalCalls,
+  recordProviderCalls,
   sandboxOrigin,
   startPayPalCheckout,
   sweepRoot,
@@ -16,6 +16,19 @@ const paddedPayPal = {
   PAYPAL_CLIENT_ID: "fixture-client\\n",
   PAYPAL_CLIENT_SECRET: "fixture-secret\\n",
 };
+const paddedRazorpay = {
+  RAZORPAY_KEY_ID: "rzp_test_fixture\\n ",
+  RAZORPAY_KEY_SECRET: " fixture-secret\\n",
+  RAZORPAY_WEBHOOK_SECRET: "fixture-webhook-secret \\n",
+};
+const paddedDodo = {
+  DODO_PAYMENTS_ENVIRONMENT: "test_mode\\n ",
+  DODO_PAYMENTS_API_KEY: " fixture-dodo\\n",
+  DODO_PAYMENTS_WEBHOOK_KEY: `whsec_${Buffer.from("fixture-dodo-secret").toString("base64")}\\n `,
+  DODO_PAYMENTS_PRODUCT_ID: "pdt_fixture \\n",
+  DODO_PAYMENTS_RETURN_URL: "https://example.invalid/checkout\\n",
+};
+const paddedBackend = { DATA_PRIMARY_BACKEND: " supabase\\n", COMMERCE_PRIMARY_BACKEND: "supabase\\n " };
 const releaseSecret = "x".repeat(40);
 const pastCutoff = "2000-01-01T00:00:00.000Z";
 const productionRelease = {
@@ -71,9 +84,77 @@ const runValidateRuntimeEnv = (values) => {
   return { status: result.status, runtimeLine, stderr: String(result.stderr || "").slice(-2000) };
 };
 
+const assertOneBooking = async (ctx, paymentId) => {
+  const payment = (await ctx.row(paymentId)).payload;
+  assert.equal(payment.status, "booked", JSON.stringify(payment));
+  assert.ok(payment.bookingId, JSON.stringify(payment));
+  const bookings = await ctx.sql`
+    select b.legacy_sanity_id, b.status from commerce.bookings b
+    join commerce.payment_records p on p.id = b.payment_record_id
+    where p.legacy_sanity_id = ${payment._id}`;
+  assert.equal(bookings.length, 1, JSON.stringify(bookings));
+  assert.equal(bookings[0].legacy_sanity_id, payment.bookingId);
+  assert.equal(bookings[0].status, "captured");
+  return { payment, booking: { ...bookings[0] } };
+};
+
+const authorizations = (calls) => [...new Set(calls.map((call) => call.authorization))];
+
 export async function registerEnvScenarios(ctx) {
+  await ctx.run("ads-env-razorpay-padded-capture", () => withEnv({
+    ...paddedRazorpay, ...paddedBackend, ...fixtureMail,
+  }, async () => {
+    const { result, calls } = await recordProviderCalls(async () => {
+      const checkout = await ctx.a1Start("razorpay");
+      const finalized = await ctx.requestFlow("finalize", {
+        paymentAccessToken: checkout.started.body.paymentAccessToken,
+        body: checkout.proof,
+      });
+      return { checkout, finalized, webhook: await ctx.a1Hook("razorpay") };
+    }, ["razorpay.com"]);
+    assert.equal(result.finalized.status, 200, JSON.stringify(result.finalized));
+    assert.ok(result.finalized.body.analyticsReceipt, JSON.stringify(result.finalized.body));
+    assert.equal(result.webhook.status, 200, JSON.stringify(result.webhook));
+    const basic = `Basic ${Buffer.from("rzp_test_fixture:fixture-secret").toString("base64")}`;
+    assert.ok(calls.some((call) => call.url.pathname === "/v1/orders"), JSON.stringify(calls));
+    assert.deepEqual(authorizations(calls), [basic]);
+    const { booking } = await assertOneBooking(ctx, result.checkout.id);
+    return {
+      finalizeStatus: result.finalized.status,
+      webhookStatus: result.webhook.status,
+      booking,
+      razorpayCalls: calls.map((call) => `${call.url.origin}${call.url.pathname}`),
+      exactBasicAuth: true,
+    };
+  }));
+
+  await ctx.run("ads-env-dodo-padded-webhook", () => withEnv({
+    ...paddedDodo, ...paddedBackend, ...fixtureMail,
+  }, async () => {
+    const { result, calls } = await recordProviderCalls(async () => {
+      const checkout = await ctx.a1Start("dodo");
+      return { checkout, webhook: await ctx.a1Hook("dodo") };
+    }, ["dodopayments.com"]);
+    assert.equal(result.webhook.status, 200, JSON.stringify(result.webhook));
+    assert.deepEqual(authorizations(calls), ["Bearer fixture-dodo"]);
+    const session = calls.find((call) => call.url.pathname === "/checkouts");
+    assert.ok(session, JSON.stringify(calls.map((call) => call.url.href)));
+    const returnUrl = new URL(JSON.parse(session.body).return_url);
+    assert.equal(`${returnUrl.origin}${returnUrl.pathname}`, "https://example.invalid/checkout");
+    const { payment, booking } = await assertOneBooking(ctx, result.checkout.id);
+    assert.equal(payment.providerPublicData.environment, "test_mode");
+    assert.equal(payment.providerPublicData.productId, "pdt_fixture");
+    return {
+      webhookStatus: result.webhook.status,
+      booking,
+      dodoCalls: calls.map((call) => `${call.url.origin}${call.url.pathname}`),
+      environment: payment.providerPublicData.environment,
+      returnUrl: returnUrl.href,
+    };
+  }));
+
   await ctx.run("ads-env-paypal-padded-webhook", async () => {
-    const { result, calls } = await withEnv({ ...paddedPayPal, ...fixtureMail }, () => recordPayPalCalls(async () => {
+    const { result, calls } = await withEnv({ ...paddedPayPal, ...fixtureMail }, () => recordProviderCalls(async () => {
       const started = await startPayPalCheckout(ctx);
       assert.equal(started.status, 200, JSON.stringify(started));
       const bookingsBefore = await ctx.sql`select legacy_sanity_id from commerce.bookings`;
@@ -91,15 +172,7 @@ export async function registerEnvScenarios(ctx) {
     assert.equal(verifyBody.webhook_id, "fixture-webhook");
     assert.equal(verifyBody.webhook_event.resource.id, "capture-fixture");
     const order = calls.find((call) => call.url.pathname === "/v2/checkout/orders");
-    const paymentId = JSON.parse(order.body).purchase_units[0].custom_id;
-    const payment = (await ctx.row(paymentId)).payload;
-    assert.equal(payment.status, "booked", JSON.stringify(payment));
-    assert.ok(payment.bookingId, JSON.stringify(payment));
-    const [booking] = await ctx.sql`
-      select b.legacy_sanity_id, b.status from commerce.bookings b
-      join commerce.payment_records p on p.id = b.payment_record_id
-      where p.legacy_sanity_id = ${payment._id} and b.legacy_sanity_id = ${payment.bookingId}`;
-    assert.ok(booking, `No booking row is linked to ${payment._id}`);
+    const { booking } = await assertOneBooking(ctx, JSON.parse(order.body).purchase_units[0].custom_id);
     return {
       startStatus: result.started.status,
       webhookStatus: result.webhook.status,
@@ -123,6 +196,22 @@ export async function registerEnvScenarios(ctx) {
     assert.equal(live.status, 0, JSON.stringify(live));
     assert.match(live.runtimeLine, /runtime=production,/, JSON.stringify(live));
     assert.match(live.runtimeLine, /paypalEnabled=true, paypalMode=live$/, JSON.stringify(live));
-    return { sandbox: sandbox.runtimeLine, sandboxOverLive: sandboxOverLive.runtimeLine, live: live.runtimeLine };
+    const paddedStore = runValidateRuntimeEnv({ ...paddedPayPal, ...paddedBackend });
+    assert.equal(paddedStore.status, 0, JSON.stringify(paddedStore));
+    const unsupportedStore = runValidateRuntimeEnv({ ...paddedPayPal, DATA_PRIMARY_BACKEND: "mysql\\n" });
+    assert.equal(unsupportedStore.status, 1, JSON.stringify(unsupportedStore));
+    const { resolveSupabaseRuntimePolicy } = await import("../../src/server/supabase/runtime.js");
+    const runtimePolicy = resolveSupabaseRuntimePolicy(paddedBackend);
+    assert.equal(runtimePolicy.primaryBackend, "supabase");
+    assert.equal(runtimePolicy.commercePrimaryBackend, "supabase");
+    assert.throws(() => resolveSupabaseRuntimePolicy({ DATA_PRIMARY_BACKEND: "mysql\\n" }),
+      (error) => error.code === "UNSUPPORTED_STORE_BACKEND");
+    return {
+      sandbox: sandbox.runtimeLine,
+      sandboxOverLive: sandboxOverLive.runtimeLine,
+      live: live.runtimeLine,
+      paddedStore: { prebuild: paddedStore.status, runtime: runtimePolicy.primaryBackend },
+      unsupportedStore: unsupportedStore.status,
+    };
   });
 }

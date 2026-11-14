@@ -1,5 +1,5 @@
 import envValue from "../../supabase/envValue.cjs";
-const { resolveStoreBackend } = envValue;
+const { resolveStoreBackend, readProcessEnvValue } = envValue;
 import { createDataClient as createClient } from "../../data/documentClient.js";
 import { sanitizeSalesAttribution } from "../../../lib/salesAttribution.ts";
 import { validateBookingContact } from "../../../lib/bookingContactValidation.js";
@@ -322,9 +322,7 @@ export default async function handler(req, res) {
       req.internalContext?.preserveHistoricalAccounting === true;
     const backendOwner =
       resolveStoreBackend(req.internalContext?.backendOwner);
-    const legacyCompletionDeadline = new Date(
-      process.env.PAYMENT_LEGACY_COMPLETION_UNTIL || ""
-    ).getTime();
+    const legacyCompletionDeadline = new Date(readProcessEnvValue("PAYMENT_LEGACY_COMPLETION_UNTIL")).getTime();
     const allowLegacyCompletion =
       isTestEnv ||
       (Number.isFinite(legacyCompletionDeadline) &&

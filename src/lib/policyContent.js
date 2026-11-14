@@ -1,5 +1,3 @@
-const { withCookieNotice } = require("./cookieNotice");
-
 const MONEY_BACK_FAQ_QUESTION =
   "Do you offer a money-back guarantee? What is the warranty?";
 const MONEY_BACK_FAQ_ANSWER =
@@ -85,7 +83,6 @@ const applyTermsPolicyOverrides = (value) => {
 const applyPublicPolicyOverrides = (resource, value) => {
   if (resource === "faq-questions") return applyFaqPolicyOverrides(value);
   if (resource === "terms") return applyTermsPolicyOverrides(value);
-  if (resource === "privacy-policy") return withCookieNotice(value);
   return value;
 };
 

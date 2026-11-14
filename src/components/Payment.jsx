@@ -6,7 +6,8 @@ import { PayPalScriptProvider, PayPalButtons, usePayPalScriptReducer } from "@pa
 import { motion } from "framer-motion";
 import { WalletCards } from "lucide-react";
 import packagePricing from "../lib/packagePricing";
-import { bookingSalesAttribution, preloadMetaPixel } from "../lib/analyticsModules";
+import { preloadMetaPixel } from "../lib/analyticsModules";
+import { paymentStartBody } from "../lib/paymentStartBody";
 import { trackCheckoutSessionStarted, trackConfirmedPurchase } from "../lib/analytics";
 import { preloadConfirmationPage, preloadConfirmationPages } from "../lib/confirmationPages";
 import { useBookingDialogPending } from "../lib/bookingDialogHold";
@@ -1263,14 +1264,13 @@ export default function Payment({ hideFooter = false }) {
         throw new Error("Checkout price is still being confirmed. Please try again.");
       }
 
+      const body = await paymentStartBody({ operation, provider, quoteFingerprint,
+        salesAttribution: bookingData.salesAttribution, buildPayload: buildCheckoutPayload });
+      if (!body) return { terminal: true, stale: true };
       const { response, data } = await fetchJson("/api/payment/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider,
-          quoteFingerprint,
-          bookingPayload: buildCheckoutPayload(await bookingSalesAttribution(bookingData.salesAttribution)),
-        }),
+        body,
       });
 
       if (!operation.current()) return { terminal: true, stale: true };

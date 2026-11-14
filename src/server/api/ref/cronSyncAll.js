@@ -1,3 +1,5 @@
+import envValue from "../../supabase/envValue.cjs";
+const { readProcessEnvValue } = envValue;
 import {createDataClient as createClient} from '../../data/documentClient.js';
 import crypto from 'crypto';
 import {requireSecret} from './auth.js';
@@ -28,7 +30,7 @@ export default async function handler(req, res) {
   }
 
   const authHeader = String(req.headers.authorization || '');
-  const expected = `Bearer ${String(process.env.CRON_SECRET || '').trim()}`;
+  const expected = `Bearer ${readProcessEnvValue("CRON_SECRET")}`;
   const providedBuffer = Buffer.from(authHeader);
   const expectedBuffer = Buffer.from(expected);
   const authorized =

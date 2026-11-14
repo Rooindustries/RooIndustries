@@ -1,8 +1,10 @@
+import envValue from "./envValue.cjs";
+const { readEnvValue } = envValue;
 import crypto from "node:crypto";
 import { createSupabaseAdminClient } from "./adminClient.js";
 
 const hashIdentity = (value, env = process.env) => {
-  const secret = String(env.RATE_LIMIT_HASH_SECRET || "").trim();
+  const secret = readEnvValue(env, "RATE_LIMIT_HASH_SECRET");
   if (!secret) throw new Error("RATE_LIMIT_HASH_SECRET is required.");
   return crypto
     .createHmac("sha256", secret)

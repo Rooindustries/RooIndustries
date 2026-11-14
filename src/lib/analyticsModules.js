@@ -38,9 +38,11 @@ export const bookingSalesAttribution = async (stored) => {
 };
 
 export const withMetaPixel = (action) => {
-  if (!metaPixelId()) return false;
-  metaPixel.use(action);
-  return true;
+  if (!metaPixelId()) return Promise.resolve(false);
+  return metaPixel.load().then(action, (error) => {
+    reportRequestError(error);
+    return false;
+  });
 };
 
 export const preloadMetaPixel = () => {

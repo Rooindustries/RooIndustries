@@ -8,7 +8,10 @@ export default function SalesTelemetry() {
   const location = useLocation();
   const path = salesPath(location.pathname);
   useEffect(() => {
-    if (path) trackPageView(path);
+    if (!path) return undefined;
+    const view = new AbortController();
+    trackPageView(view.signal);
+    return () => view.abort();
   }, [path]);
   useEffect(() => {
     if (!path) return;

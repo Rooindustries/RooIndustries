@@ -62,6 +62,7 @@ const env = withNodeOption({
   SALES_PREVIEW_READ_ONLY: apiRoutes ? "0" : "1",
   ...(apiRoutes ? {
     ...apiRouteSecrets,
+    CRON_SECRET: "fixture-only-tooling-cron-secret",
     RESEND_API_KEY: "fixture-only-referral-email-key",
     RESEND_BASE_URL: contentURL,
     FROM_EMAIL: "reset@fixture.invalid",

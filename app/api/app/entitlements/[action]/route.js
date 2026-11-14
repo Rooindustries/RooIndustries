@@ -1,3 +1,5 @@
+import envValue from "../../../../../src/server/supabase/envValue.cjs";
+const { readProcessEnvValue } = envValue;
 import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 import { requireSupabaseBearerUser } from "../../../../../src/server/supabase/accounts";
@@ -18,8 +20,7 @@ const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
 
 const licensingEnabled = () =>
   TRUE_VALUES.has(
-    String(process.env.SUPABASE_LICENSING_ENABLED || "")
-      .trim()
+    readProcessEnvValue("SUPABASE_LICENSING_ENABLED")
       .toLowerCase()
   );
 
@@ -91,7 +92,7 @@ const requireUser = async (request) => {
 };
 
 const requireAdministrator = async (request) => {
-  const configuredKey = String(process.env.REF_ADMIN_KEY || "").trim();
+  const configuredKey = readProcessEnvValue("REF_ADMIN_KEY");
   const providedKey = String(request.headers.get("x-admin-key") || "").trim();
   if (configuredKey && safeEqual(configuredKey, providedKey)) {
     return { actorUserId: null };

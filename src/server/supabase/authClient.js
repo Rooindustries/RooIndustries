@@ -1,10 +1,8 @@
 import { createSupabaseAdminFetch } from "./adminClient.js";
+import envValue from "./envValue.cjs";
 import { createClient } from "@supabase/supabase-js";
 
-const readFirst = (env, keys) =>
-  keys
-    .map((key) => String(env?.[key] || "").trim())
-    .find(Boolean) || "";
+const { readFirstEnvValue: readFirst } = envValue;
 
 export const resolveSupabaseAuthEnv = (env = process.env) => {
   const url = readFirst(env, ["SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL"]);

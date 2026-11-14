@@ -1,10 +1,10 @@
-import { readConsent } from "./consent";
+import { onConsentChange, readConsent } from "./consent";
 import { metaPixelId } from "./analyticsModules";
 
 const META_PIXEL_SCRIPT_ID = "roo-meta-pixel";
 const META_PIXEL_SRC = "https://connect.facebook.net/en_US/fbevents.js";
 const STANDARD_EVENTS = new Set(["PageView", "ViewContent", "InitiateCheckout", "Purchase"]);
-const pixelState = { initializedId: "", pageViewSent: false, granted: false };
+const pixelState = { initializedId: "", granted: false };
 
 const metaPixelAllowed = () =>
   typeof window !== "undefined" && typeof document !== "undefined" &&
@@ -40,11 +40,7 @@ const ensureFbq = () => {
 export const loadMetaPixel = () => {
   try {
     if (!metaPixelAllowed()) return false;
-    const fbq = ensureFbq();
-    if (!pixelState.pageViewSent) {
-      fbq("track", "PageView");
-      pixelState.pageViewSent = true;
-    }
+    ensureFbq();
     if (document.getElementById(META_PIXEL_SCRIPT_ID)) return true;
     const script = document.createElement("script");
     script.id = META_PIXEL_SCRIPT_ID;
@@ -72,16 +68,31 @@ export const metaTrack = (event, data = {}, { eventId } = {}) => {
   try {
     if (!STANDARD_EVENTS.has(event) || !metaPixelAllowed()) return false;
     const fbq = ensureFbq();
-    if (event === "PageView") {
-      fbq("track", "PageView");
-      pixelState.pageViewSent = true;
-    } else if (eventId) {
-      fbq("track", event, data, { eventID: eventId });
-    } else {
-      fbq("track", event, data);
-    }
+    if (event === "PageView") fbq("track", "PageView");
+    else if (eventId) fbq("track", event, data, { eventID: eventId });
+    else fbq("track", event, data);
     return true;
   } catch {
     return false;
   }
 };
+
+const consentGranted = (signal) => new Promise((resolve) => {
+  if (readConsent() === "granted" || signal?.aborted) {
+    resolve(!signal?.aborted);
+    return;
+  }
+  const finish = (granted) => {
+    stopListening();
+    signal?.removeEventListener("abort", cancel);
+    resolve(granted);
+  };
+  const cancel = () => finish(false);
+  const stopListening = onConsentChange((value) => {
+    if (value === "granted") finish(true);
+  });
+  signal?.addEventListener("abort", cancel, { once: true });
+});
+
+export const metaTrackWhenGranted = async (event, data, options, signal) =>
+  (await consentGranted(signal)) && metaTrack(event, data, options);

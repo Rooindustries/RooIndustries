@@ -53,7 +53,7 @@ const bookFromHome = async (page) => {
   await hydrated(page);
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem("referral_session"))).toBe(REFERRAL);
   await page.locator(".ri-package-book-button").first().click();
-  await expect(page).toHaveURL(/\/booking$/);
+  await expect(page).toHaveURL(/\/booking\?package=overhaul$/);
   await expect(page.getByRole("dialog")).toBeVisible();
 };
 
@@ -111,7 +111,7 @@ test("a referral link keeps its code and campaign and applies the referral in bo
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem("referral_session"))).toBe(REFERRAL);
   await expect.poll(() => page.evaluate(() => window.location.search)).toBe(`?ref=${REFERRAL}&utm_source=discord`);
   await page.locator(".ri-package-book-button").first().click();
-  await expect(page).toHaveURL(/\/booking$/);
+  await expect(page).toHaveURL(/\/booking\?package=overhaul$/);
   await page.getByRole("button", { name: /^Earliest available:/ }).click();
   await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
   await page.getByRole("button", { name: "Next", exact: true }).last().click();
@@ -194,7 +194,7 @@ test("going back and forward over booking keeps the home page mounted and the re
   await page.goBack();
   await expect(page).toHaveURL(new RegExp(`/\\?ref=${REFERRAL}&utm_source=discord$`));
   await page.goForward();
-  await expect(page).toHaveURL(/\/booking$/);
+  await expect(page).toHaveURL(/\/booking\?package=overhaul$/);
   await page.goBack();
   await expect(page).toHaveURL(new RegExp(`/\\?ref=${REFERRAL}&utm_source=discord$`));
   await page.waitForTimeout(1000);

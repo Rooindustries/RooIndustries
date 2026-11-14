@@ -1,3 +1,5 @@
+import envValue from "../../supabase/envValue.cjs";
+const { readEnvValue } = envValue;
 import crypto from "node:crypto";
 
 const VERSION = "v1";
@@ -11,7 +13,7 @@ const decodeCanonicalBase64Url = (value) => {
 };
 
 const resolveKey = (env = process.env) => {
-  const secret = String(env.REF_SESSION_SECRET || "").trim();
+  const secret = readEnvValue(env, "REF_SESSION_SECRET");
   if (secret.length < 32) {
     throw new Error("Referral email token sealing is not configured.");
   }

@@ -133,6 +133,41 @@ test("a newer start that fails fast does not unlock another method while an olde
   await expect(razorpay).toBeEnabled();
 });
 
+test("leaving checkout while sales attribution loads starts no payment", async ({ page, flow }) => {
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const attribution = { held: false, delivered: false };
+  await page.route("**/_next/static/chunks/**", async route => {
+    const response = await route.fetch();
+    const body = await response.text();
+    if (body.includes("first_source")) {
+      attribution.held = true;
+      await gate;
+      await route.fulfill({ response, body });
+      attribution.delivered = true;
+      return;
+    }
+    await route.fulfill({ response, body });
+  });
+  const starts = () => flow.state.calls.filter(({ path }) => path === "/api/payment/start");
+
+  await flow.review();
+  await flow.payment();
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Opening checkout...", exact: true })).toBeVisible();
+  await expect.poll(() => attribution.held).toBe(true);
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
+  release();
+  await expect.poll(() => attribution.delivered).toBe(true);
+  expect(starts()).toEqual([]);
+
+  await flow.payment();
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  await expect(page).toHaveURL(/checkout-handoff$/);
+  expect(starts()).toHaveLength(1);
+});
+
 const paypalSdkStub = `
 window.paypal = {
   version: "5.0.0",

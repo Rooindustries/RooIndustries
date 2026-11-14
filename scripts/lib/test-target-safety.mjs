@@ -171,10 +171,53 @@ export function refuseEnvFiles(directory = process.cwd()) {
 
 export { validateDistDir } from "../../next.config.mjs";
 
-export function installNetworkGuard(origins) {
+const refuseProxyEnvironment = () => {
   for (const name of ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy", "NODE_USE_ENV_PROXY"]) {
     if (process.env[name] && process.env[name] !== "0") fail("Proxy transports are refused for local checks.");
   }
+};
+
+const productionHost = "www.rooindustries.com";
+const productionHostMap = `MAP ${productionHost} 127.0.0.1, MAP * ~NOTFOUND, EXCLUDE 127.0.0.1`;
+const productionHostRules = `--host-resolver-rules=${productionHostMap}`;
+const secureOriginsArg = "--unsafely-treat-insecure-origin-as-secure=";
+
+export function loopbackProductionHost(baseURL, args = []) {
+  const local = new URL(localOrigin(baseURL));
+  if (local.hostname !== "127.0.0.1") fail("The production host maps only onto a 127.0.0.1 fixture.");
+  const origin = `http://${productionHost}:${local.port}`;
+  const secure = args.filter(arg => arg.startsWith(secureOriginsArg)).map(arg => arg.slice(secureOriginsArg.length));
+  return {
+    origin,
+    loopback: local.origin,
+    args: [
+      ...args.filter(arg => !arg.startsWith(secureOriginsArg) && !arg.startsWith("--host-resolver-rules=")),
+      productionHostRules,
+      `${secureOriginsArg}${[...secure, origin].join(",")}`,
+    ],
+  };
+}
+
+const requireLoopbackMapping = async context => {
+  refuseProxyEnvironment();
+  const browser = context.browser();
+  if (browser?.browserType().name() !== "chromium") fail("The production host needs a Chromium loopback mapping.");
+  const session = await browser.newBrowserCDPSession();
+  const { arguments: args } = await session.send("Browser.getBrowserCommandLine").finally(() => session.detach());
+  if (args.filter(arg => arg.startsWith("--host-resolver-rules=")).at(-1) !== productionHostRules ||
+      args.some(arg => /^--(?:proxy-server|proxy-pac-url)=/.test(arg))) {
+    fail("The production host needs the loopback mapping.");
+  }
+};
+
+const browserOrigins = origins => origins.flatMap(origin => {
+  if (typeof origin !== "string" || !origin.startsWith(`http://${productionHost}:`)) return [localOrigin(origin)];
+  const local = localOrigin(origin.replace(`//${productionHost}:`, "//127.0.0.1:"));
+  return [local, `http://${productionHost}:${new URL(local).port}`];
+});
+
+export function installNetworkGuard(origins) {
+  refuseProxyEnvironment();
   const remoteBrowser = remoteBrowserEndpoint();
   const loopbackHosts = ["127.0.0.1", "localhost", "[::1]"];
   const loopbackAliases = origin => {
@@ -330,7 +373,8 @@ export function prepareTestTarget({ browser = false } = {}) {
 }
 
 export async function guardBrowserContext(context, origins) {
-  const allowed = new Set(origins.map(localOrigin));
+  const allowed = new Set(browserOrigins(origins));
+  if ([...allowed].some(origin => new URL(origin).hostname === productionHost)) await requireLoopbackMapping(context);
   const contentAssetOrigins = new Set(process.env.TOOLING_CONTENT_PORT ? [...allowed].map(origin => {
     const url = new URL(origin);
     url.port = process.env.TOOLING_CONTENT_PORT;

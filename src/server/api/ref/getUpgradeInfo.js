@@ -1,3 +1,5 @@
+import envValue from "../../supabase/envValue.cjs";
+const { readFirstProcessEnvValue } = envValue;
 import { createDataClient as createClient } from "../../data/documentClient.js";
 import { resolveUpgradeContext } from "./pricing.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
@@ -150,9 +152,7 @@ export const resolveBookingFromSubmittedOrderId = async ({ id, client }) => {
 export default async function handler(req, res) {
   const method = String(req?.method || "GET").toUpperCase();
   const legacyGetDeadline = new Date(
-    process.env.LEGACY_UPGRADE_GET_UNTIL ||
-      process.env.PAYMENT_LEGACY_COMPLETION_UNTIL ||
-      ""
+    readFirstProcessEnvValue("LEGACY_UPGRADE_GET_UNTIL", "PAYMENT_LEGACY_COMPLETION_UNTIL")
   ).getTime();
   const allowLegacyGet =
     process.env.NODE_ENV === "test" ||

@@ -6,6 +6,9 @@ const fs = require("node:fs/promises");
 test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata", reducedMotion: "reduce", actionTimeout: 10000, navigationTimeout: 30000, trace: "off", video: "off" });
 
 const dialogSelector = '[role="dialog"].ri-booking';
+const bookingUrl = /\/booking(\?package=[a-z-]+)?$/;
+const overhaul = "Performance Vertex Overhaul";
+const cookieBanner = page => page.getByRole("region", { name: "Cookie choice", exact: true });
 const fields = [
   ["discord", "Discord username"],
   ["email", "Booking email"],
@@ -111,6 +114,25 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 1280, height: 800
         expect.soft(metrics.scale).toBeLessThanOrEqual(1.2);
       });
     }
+
+    test("the slot step fits the screen when opened while the cookie banner shows", async ({
+      page, flow,
+    }, testInfo) => {
+      flow.state.slots[0].times = allDaySlots;
+      await page.goto("/");
+      await expect(cookieBanner(page)).toBeVisible();
+      await page.locator('a[href^="/booking"]').first().click();
+      await expect(page).toHaveURL(bookingUrl);
+      await expect(page.locator(".ri-booking-package-title")).toHaveText(overhaul);
+      await page.getByRole("button", { name: /^Earliest available:/ }).click();
+      await ready(page);
+      await expect(cookieBanner(page)).toHaveCount(0);
+      const metrics = await measure(page, "Next");
+      await save(page, testInfo, "slot-fit-banner-pending", metrics);
+      expectFits(metrics, "slot");
+      expect.soft(metrics.scale).toBeGreaterThan(0.5);
+      expect.soft(metrics.scale).toBeLessThanOrEqual(1.2);
+    });
 
     test("the details step refits when an error appears and when the window resizes", async ({ page, flow }, testInfo) => {
       await flow.reserve();
@@ -476,17 +498,24 @@ for (const [from, to] of [["phone", "desktop"], ["desktop", "phone"]]) {
   });
 }
 
-const openFrom = (route, link) => async page => {
+const openFrom = (route, link, before) => async page => {
   await page.goto(route);
   await waitForRouteCommitted(page);
+  await before?.(page);
   await evaluateBrowserTask(page, () => document.fonts.ready);
   await page.evaluate(sampleFrames);
   await link(page).click();
 };
-const homeLink = page => page.locator('a[href="/booking"]').first();
+const homeLink = page => page.locator('a[href^="/booking"]').first();
+const packagesLink = page =>
+  page.locator(".ri-package-details-button").first().locator("xpath=..").locator('a[href^="/booking"]');
 const openers = [
-  ["the homepage", openFrom("/", homeLink)],
-  ["packages", openFrom("/packages", page => page.locator(".ri-package-details-button").first().locator("xpath=..").locator('a[href="/booking"]'))],
+  ["the homepage", openFrom("/", homeLink), overhaul],
+  ["the homepage while the cookie banner shows", async page => {
+    await openFrom("/", homeLink, banner => expect(cookieBanner(banner)).toBeVisible())(page);
+    await expect(cookieBanner(page)).toHaveCount(0);
+  }, overhaul],
+  ["packages", openFrom("/packages", packagesLink), overhaul],
   ["a reopen after closing", async page => {
     await openFrom("/", homeLink)(page);
     await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
@@ -494,7 +523,7 @@ const openers = [
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await page.evaluate(() => { window.__resizeFrames = []; });
     await homeLink(page).click();
-  }],
+  }, overhaul],
   ["a Forward after going Back", async page => {
     await openFrom("/", homeLink)(page);
     await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
@@ -503,21 +532,22 @@ const openers = [
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await page.evaluate(() => { window.__resizeFrames = []; });
     await page.goForward();
-  }],
+  }, overhaul],
   ["a direct load", async page => {
     await page.addInitScript(sampleFrames);
     await page.goto("/booking");
-  }],
+  }, ""],
 ];
 
 for (const [size, viewport] of Object.entries(sizes)) {
   test.describe(`${size} open`, () => {
     test.use({ viewport, hasTouch: viewport.width < 780 });
 
-    for (const [name, open] of openers) {
+    for (const [name, open, packageTitle] of openers) {
       test(`opening from ${name} matches the window from the first frame`, async ({ page, flow }, testInfo) => {
         await open(page);
-        await expect(page).toHaveURL(/\/booking$/);
+        await expect(page).toHaveURL(bookingUrl);
+        if (packageTitle) await expect(page.locator(".ri-booking-package-title")).toHaveText(packageTitle);
         await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
         await expect.poll(() => page.evaluate(() => window.__resizeFrames.length)).toBeGreaterThanOrEqual(60);
         const frames = await page.evaluate(() => window.__resizeFrames);

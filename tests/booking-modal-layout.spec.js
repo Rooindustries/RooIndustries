@@ -3,6 +3,14 @@ const { waitForRouteCommitted } = require("./fixtures/react-hydration.cjs");
 const { test, expect } = require("./fixtures/booking-flow.cjs");
 const fs = require("node:fs/promises");
 
+const bookingUrl = /\/booking(\?package=[a-z-]+)?$/;
+const firstBookingLink = page => page.locator('a[href^="/booking"]').first();
+const cookieBanner = page => page.getByRole("region", { name: "Cookie choice", exact: true });
+const settleIdle = page => page.evaluate(() => new Promise(resolve => {
+  window.requestIdleCallback(() => setTimeout(resolve, 400), { timeout: 5000 });
+}));
+const expectPackage = (page, title) => expect(page.locator(".ri-booking-package-title")).toHaveText(title);
+
 test.use({
   javaScriptEnabled: true,
   timezoneId: "Asia/Kolkata",
@@ -205,7 +213,8 @@ async function openMaxSlot(page) {
   await page.goto("/packages");
   const link = page.locator(".ri-package-card", { hasText: "Performance Vertex Max" }).getByRole("link", { name: "Book Now" });
   await link.click();
-  await expect(page).toHaveURL(/\/booking$/);
+  await expect(page).toHaveURL(bookingUrl);
+  await expect(page).toHaveURL(/\/booking\?package=max$/);
   await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
   await expect(page.locator(".ri-booking-package-title")).toHaveText("Performance Vertex Max");
 }
@@ -294,6 +303,49 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       });
     }
 
+    test("direct load of /booking keeps the dialog still and the cookie banner away until it closes", async ({
+      page, flow,
+    }, testInfo) => {
+      const errors = watchErrors(page);
+      await page.goto("/booking");
+      await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
+      await settleIdle(page);
+      const layout = await settledDialogLayout(page, testInfo, "booking-load-banner-pending");
+      expect(grewOpenFromNothing(layout)).toBe(false);
+      expect(layout.dialogShifts).toEqual([]);
+      expect(layout.cls).toBeLessThan(0.1);
+      await expect(cookieBanner(page)).toHaveCount(0);
+      expect(await focusIsInDialog(page)).toBe(true);
+      await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await expect(cookieBanner(page)).toBeVisible();
+      expect(errors).toEqual([]);
+    });
+
+    test("opening booking while the cookie banner shows does not shift the dialog", async ({
+      page, flow,
+    }, testInfo) => {
+      const errors = watchErrors(page);
+      await page.goto("/");
+      await waitForRouteCommitted(page);
+      await expect(cookieBanner(page)).toBeVisible();
+      await page.evaluate(() => Object.assign(window.__bookingDialogLayout, { shifts: [], sizes: [] }));
+      await firstBookingLink(page).click();
+      await expect(page).toHaveURL(bookingUrl);
+      await expectPackage(page, "Performance Vertex Overhaul");
+      await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
+      const layout = await settledDialogLayout(page, testInfo, "click-open-banner-pending");
+      expect(grewOpenFromNothing(layout)).toBe(true);
+      await expect(cookieBanner(page)).toHaveCount(0);
+      await page.reload();
+      await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
+      const direct = await settledDialogLayout(page, testInfo, "reload-banner-pending");
+      const [opened, reloaded] = [layout.sizes.at(-1), direct.sizes.at(-1)];
+      expect(Math.abs(opened.width - reloaded.width)).toBeLessThanOrEqual(1);
+      expect(Math.abs(opened.height - reloaded.height)).toBeLessThanOrEqual(1);
+      expect(errors).toEqual([]);
+    });
+
     for (const route of ["/payment-success", "/thank-you"]) {
       test(`direct load of ${route} does not shift the page`, async ({ page, flow }, testInfo) => {
         const errors = watchErrors(page);
@@ -322,7 +374,9 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await testInfo.attach("dialog-shown", { body: JSON.stringify(shown), contentType: "application/json" });
       await page.goto("/");
       await waitForRouteCommitted(page);
-      await page.locator('a[href="/booking"]').first().click();
+      await firstBookingLink(page).click();
+      await expect(page).toHaveURL(bookingUrl);
+      await expectPackage(page, "Performance Vertex Overhaul");
       await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
       await settledDialogLayout(page, testInfo, "slow-availability-click-open");
       expect(errors).toEqual([]);
@@ -454,8 +508,9 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     test("opening booking from the home page still animates the dialog open", async ({ page, flow }, testInfo) => {
       await page.goto("/");
       await waitForRouteCommitted(page);
-      await page.locator('a[href="/booking"]').first().click();
-      await expect(page).toHaveURL(/\/booking$/);
+      await firstBookingLink(page).click();
+      await expect(page).toHaveURL(bookingUrl);
+      await expectPackage(page, "Performance Vertex Overhaul");
       await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
       const layout = await settledDialogLayout(page, testInfo, "click-open");
       expect(grewOpenFromNothing(layout)).toBe(true);
@@ -468,8 +523,9 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
       await expect(page.getByRole("dialog")).toHaveCount(0);
       await page.evaluate(() => Object.assign(window.__bookingDialogLayout, { shifts: [], sizes: [] }));
-      await page.locator('a[href="/booking"]').first().click();
-      await expect(page).toHaveURL(/\/booking$/);
+      await firstBookingLink(page).click();
+      await expect(page).toHaveURL(bookingUrl);
+      await expectPackage(page, "Performance Vertex Overhaul");
       await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
       const layout = await settledDialogLayout(page, testInfo, "reopen");
       expect(grewOpenFromNothing(layout)).toBe(true);

@@ -1,4 +1,4 @@
-import { onConsentChange, readConsent } from "./consent";
+import { readConsent } from "./consent";
 
 type StoredAttribution = Record<string, unknown> & {
   firstTouch?: Record<string, unknown>;
@@ -99,10 +99,8 @@ export function writeStoredAttribution(value: StoredAttribution) {
   writeSession(value);
 }
 
-const moveForConsent = () => {
+export function storeAttributionForConsent() {
   const stored = readStoredAttribution();
   if (!stored || typeof stored !== "object" || Array.isArray(stored)) return;
   writeStoredAttribution(stored as StoredAttribution);
-};
-
-if (typeof window !== "undefined") onConsentChange(moveForConsent);
+}

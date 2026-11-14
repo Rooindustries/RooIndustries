@@ -82,7 +82,7 @@ for (const invalidation of ["new checkout", "explicit null"]) test(`history cann
   await page.getByRole("link", { name: "Back to Home", exact: true }).click();
   await expect(page).toHaveURL(/\/$/);
   if (invalidation === "new checkout") {
-    await page.locator('a[href="/booking"]').first().click();
+    await page.locator('a[href="/booking?package=overhaul"]').first().click();
     await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
     await expect.poll(() => page.evaluate(id => sessionStorage.getItem(`booking_confirmation_summary:${id}`), bookingId)).toBeNull();
     await page.goBack();
@@ -351,7 +351,7 @@ test("reschedule completion keeps its recovery wording after reload and another 
   await page.reload();
   await expect(page.getByText(message, { exact: true })).toBeVisible();
   await page.getByRole("link", { name: "Back to Home", exact: true }).click();
-  await page.locator('a[href="/booking"]').first().click();
+  await page.locator('a[href="/booking?package=overhaul"]').first().click();
   await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
   await page.goBack();
   await expect(page).toHaveURL(/\/$/);

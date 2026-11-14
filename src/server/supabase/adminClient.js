@@ -1,9 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
+import envValue from "./envValue.cjs";
 
-const readFirst = (env, keys) =>
-  keys
-    .map((key) => String(env?.[key] || "").trim())
-    .find(Boolean) || "";
+const { readFirstEnvValue: readFirst } = envValue;
 
 export const resolveSupabaseAdminEnv = (env = process.env) => {
   const url = readFirst(env, ["SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL"]);

@@ -8,6 +8,7 @@ begin
   if to_regclass('ops.contact_messages') is null then
     return;
   end if;
+  lock table ops.contact_messages in access exclusive mode;
   select count(*) into v_unsent
   from ops.contact_messages
   where status in ('pending', 'failed', 'dead');

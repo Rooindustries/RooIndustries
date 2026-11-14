@@ -117,15 +117,21 @@ const landingCampaign = (search: string) => {
   return campaign;
 };
 
+const sessionReferral = () => {
+  try {
+    return referralCode(sessionStorage.getItem("referral_session"));
+  } catch {
+    return "";
+  }
+};
+
 const newTouch = (landingPath: string, campaign: Partial<Record<Field, string>>) => {
   let referrerHost = "";
   try {
     const referrer = new URL(document.referrer);
     if (referrer.origin !== window.location.origin) referrerHost = referrer.hostname;
   } catch {}
-  let creatorCode = campaign.creatorCode || "";
-  if (!creatorCode) { try { creatorCode = referralCode(sessionStorage.getItem("referral_session")); } catch {} }
-  return { capturedAt: new Date().toISOString(), landingPath, referrerHost, ...campaign, creatorCode };
+  return { capturedAt: new Date().toISOString(), landingPath, referrerHost, ...campaign };
 };
 
 export function captureSalesAttribution(landing?: SalesLanding): SalesAttribution | null {
@@ -136,12 +142,15 @@ export function captureSalesAttribution(landing?: SalesLanding): SalesAttributio
     if (!landingPath) return null;
     const stored = sanitizeSalesAttribution(readStoredAttribution());
     const campaign = landingCampaign(search);
-    const changed = Object.entries(campaign).some(([key, value]) => value !== stored?.lastTouch[key as Field]);
+    const referral = campaign.creatorCode || sessionReferral();
+    const fields = referral ? { ...campaign, creatorCode: referral } : campaign;
+    const tagged = Object.keys(campaign).length > 0;
+    const changed = tagged && FIELD_KEYS.some((key) => fields[key] !== stored?.lastTouch[key]);
     let current = stored;
     if (!stored || changed) {
       const journeyId = stored?.journeyId || newJourneyId();
       if (!journeyId) return null;
-      const touch = newTouch(landingPath, campaign);
+      const touch = newTouch(landingPath, fields);
       const firstTouch = stored?.firstTouch || touch;
       current = sanitizeSalesAttribution({ version: 2, journeyId, firstTouch, lastTouch: touch });
     }

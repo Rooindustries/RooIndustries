@@ -161,6 +161,43 @@ test("a failed send stays queued for retry and is logged", async ({ page, baseUR
   await finish(page, testInfo, baseURL);
 });
 
+test("a slow email provider is queued and the retry delivers once", async ({ page, baseURL }, testInfo) => {
+  test.setTimeout(90_000);
+  const runCron = async () => {
+    const response = await apiFixture.requestRoute(baseURL, "/api/payment/reconcile", {
+      method: "POST",
+      headers: { authorization: "Bearer fixture-only-tooling-cron-secret" },
+    });
+    return (await response.json()).summary.contactMessages;
+  };
+  await apiFixture.configureApiFixture(baseURL, { contactDelivery: "slow" });
+  await page.goto("/contact");
+  const submittedAt = Date.now();
+  const response = await submitForm(page);
+  expect(Date.now() - submittedAt).toBeLessThan(15_000);
+  expect(response.status()).toBe(202);
+  expect(await response.json()).toEqual({ ok: true, queued: true });
+  await expect(page.getByText(thanks, { exact: true })).toBeVisible();
+  const queued = await fixtureState(baseURL);
+  expect(queued.emails).toEqual([]);
+  expect(queued.rows).toHaveLength(1);
+  expect(queued.rows[0]).toMatchObject({
+    ...fields,
+    status: "failed",
+    attempts: 1,
+    last_error_code: "email_send_timeout",
+  });
+  await apiFixture.configureApiFixture(baseURL, { contactDelivery: "captured", contactDue: true });
+  expect(await runCron()).toEqual({ claimed: 1, sent: 1, failed: 0 });
+  expect(await runCron()).toEqual({ claimed: 0, sent: 0, failed: 0 });
+  const { rows, emails } = await fixtureState(baseURL);
+  expect(rows).toHaveLength(1);
+  expect(emails).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ status: "sent", attempts: 2, provider_message_id: emails[0].id });
+  expect(emails[0]).toMatchObject({ idempotencyKey: `contact-message-${rows[0].id}`, to: [inbox] });
+  await finish(page, testInfo, baseURL);
+});
+
 test("a filled honeypot is recorded as spam and never sent", async ({ page, baseURL }, testInfo) => {
   await page.goto("/contact");
   const response = await submitForm(page, fields, "Fixture Company");

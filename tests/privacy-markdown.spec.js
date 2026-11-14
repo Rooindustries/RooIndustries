@@ -61,9 +61,11 @@ test("privacy HTML and Markdown share the same cookie notice", async ({ page, re
   const markdownSection = markdown.split("## Cookies and browser storage\n\n")[1].split("\n\nLast updated")[0]
     .split("\n\n[Contact")[0].split("\n\n").map(unescape);
   expect(markdownSection).toEqual(COOKIE_NOTICE.paragraphs);
+  expect(markdown.split(`## ${COOKIE_NOTICE.heading}\n`)).toHaveLength(2);
 
   await page.goto("/privacy");
   const sections = page.locator("main section");
+  await expect(page.getByRole("heading", { name: COOKIE_NOTICE.heading, exact: true })).toHaveCount(1);
   const cookieSection = sections.last();
   await expect(cookieSection.getByRole("heading", { level: 2 })).toHaveText(COOKIE_NOTICE.heading);
   expect(await cookieSection.locator("p").allTextContents()).toEqual(markdownSection);

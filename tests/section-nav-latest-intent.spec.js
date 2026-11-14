@@ -866,6 +866,9 @@ test("homepage section replacements keep Back and Forward in the same document",
     await openPage(page, "/reviews", surface);
     const startLength = await historyLength(page);
     const documentStartedAt = await page.evaluate(() => performance.timeOrigin);
+    if (surface === "desktop") {
+      await page.getByRole("region", { name: "Cookie choice" }).getByRole("button", { name: "Decline" }).click();
+    }
     await page.locator(FOOTER("/").selector).click();
     await expect.poll(() => readRoute(page)).toEqual({ path: "/", hash: "", top: true });
     await clickSettledSection(page, "benefits", surface);
@@ -1215,7 +1218,7 @@ test.describe("navigation interleaving matrix follow-ups", () => {
       await openPage(page, "/reviews", surface);
       await clickSection(page, "plans", surface);
       await expectMatrixLanding(page, { path: "/", hash: SECTIONS.plans });
-      const book = page.locator('#packages a[href="/booking"]').first();
+      const book = page.locator('#packages a[href="/booking?package=overhaul"]').first();
       await book.scrollIntoViewIfNeeded();
       await page.evaluate(() => window.scrollBy({ top: 180, behavior: "instant" }));
       const before = await page.evaluate(() => window.scrollY);

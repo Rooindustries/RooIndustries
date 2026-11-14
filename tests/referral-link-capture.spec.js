@@ -77,3 +77,69 @@ test("an ad landing keeps first and last touch through checkout, in a cookie onl
   const [start] = flow.startBodies();
   expect(start.bookingPayload.salesAttribution).toEqual(relanded);
 });
+
+const storedAttribution = (page) => page.evaluate(() => JSON.parse(sessionStorage.getItem("sales_attribution")));
+const settle = async (page) => {
+  await page.waitForLoadState("networkidle");
+  await page.evaluate(() => new Promise((resolve) => {
+    window.requestIdleCallback(() => setTimeout(resolve, 400), { timeout: 5000 });
+  }));
+};
+
+test("a tagged landing that drops a campaign field starts a new last touch with only its own fields", async ({
+  page,
+}) => {
+  await page.goto("/?utm_source=meta&utm_campaign=summer");
+  await expect.poll(async () => (await storedAttribution(page))?.lastTouch.campaign).toBe("summer");
+  const first = await storedAttribution(page);
+  await page.goto("/packages?utm_source=meta");
+  await expect.poll(async () => (await storedAttribution(page)).lastTouch.landingPath).toBe("/packages");
+  const relanded = await storedAttribution(page);
+  expect(relanded.journeyId).toBe(first.journeyId);
+  expect(relanded.firstTouch).toEqual(first.firstTouch);
+  expect(withoutTime(relanded.lastTouch)).toEqual({ landingPath: "/packages", source: "meta" });
+  await page.goto("/reviews");
+  await settle(page);
+  expect(await storedAttribution(page)).toEqual(relanded);
+});
+
+test("attribution keeps only safe labels and skips pages outside the sales journey", async ({ page }) => {
+  for (const path of ["/meet-the-team", "/tourney", "/downloads/utilities"]) {
+    await page.goto(`${path}?utm_source=meta&email=private@example.invalid`);
+    await settle(page);
+    expect(await storedAttribution(page)).toBeNull();
+  }
+  const unsafe = new URLSearchParams({
+    utm_source: "buyer@example.invalid", utm_campaign: "https://example.invalid/?token=secret",
+    utm_content: "Alice Customer", fbclid: "bad id!", ref: "winton",
+  });
+  await page.goto(`/?${unsafe}`);
+  await expect.poll(() => storedAttribution(page)).not.toBeNull();
+  const landing = await storedAttribution(page);
+  expect(withoutTime(landing.lastTouch))
+    .toEqual({ landingPath: "/", creatorCode: "winton", content: "Alice Customer" });
+  expect(JSON.stringify(landing)).not.toMatch(/example\.invalid|token|bad id/);
+  await page.goto("/upgrade-xoc?ref=winton&utm_campaign=upgrade");
+  await expect.poll(async () => (await storedAttribution(page)).lastTouch.landingPath).toBe("/upgrade");
+  const upgrade = await storedAttribution(page);
+  expect(upgrade.journeyId).toBe(landing.journeyId);
+  expect(withoutTime(upgrade.lastTouch))
+    .toEqual({ landingPath: "/upgrade", creatorCode: "winton", campaign: "upgrade" });
+});
+
+test("checkout still starts when the browser cannot make a journey id", async ({ page, flow }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window.crypto, "randomUUID", {
+      configurable: true, value: () => { throw new Error("Browser randomness unavailable"); },
+    });
+  });
+  await page.goto("/?utm_source=meta");
+  await settle(page);
+  expect(await storedAttribution(page)).toBeNull();
+  await flow.review();
+  await flow.payment();
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Checkout handoff", exact: true })).toBeVisible();
+  const [start] = flow.startBodies();
+  expect(start.bookingPayload.salesAttribution ?? null).toBeNull();
+});

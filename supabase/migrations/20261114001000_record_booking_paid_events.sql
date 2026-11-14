@@ -13,14 +13,16 @@ create table if not exists ops.booking_paid_events (
   package_title text,
   attribution jsonb,
   status text not null default 'pending'
-    check (status in ('pending', 'reported', 'baseline')),
+    check (status in ('pending', 'claimed', 'reported', 'baseline')),
+  claimed_until timestamptz,
   created_at timestamptz not null default now(),
-  reported_at timestamptz
+  reported_at timestamptz,
+  check ((status = 'claimed') = (claimed_until is not null))
 );
 
-create index if not exists booking_paid_events_pending_idx
+create index if not exists booking_paid_events_unreported_idx
   on ops.booking_paid_events (created_at, event_id)
-  where status = 'pending';
+  where status in ('pending', 'claimed');
 
 alter table ops.booking_paid_events enable row level security;
 
@@ -140,7 +142,7 @@ returns table (
   package_title text,
   attribution jsonb,
   created_at timestamptz,
-  reported_at timestamptz
+  claimed_until timestamptz
 )
 language sql
 security definer
@@ -150,12 +152,13 @@ as $$
     select pending.event_id
     from ops.booking_paid_events pending
     where pending.status = 'pending'
+      or (pending.status = 'claimed' and pending.claimed_until <= now())
     order by pending.created_at, pending.event_id
     limit greatest(1, least(coalesce(p_limit, 50), 200))
     for update skip locked
   )
   update ops.booking_paid_events paid
-  set status = 'reported', reported_at = now()
+  set status = 'claimed', claimed_until = now() + interval '5 minutes'
   from claimable
   where paid.event_id = claimable.event_id
   returning
@@ -168,7 +171,23 @@ as $$
     paid.package_title,
     paid.attribution,
     paid.created_at,
-    paid.reported_at;
+    paid.claimed_until;
+$$;
+
+create or replace function public.roo_ack_booking_paid_events(p_event_ids text[])
+returns integer
+language sql
+security definer
+set search_path = ''
+as $$
+  with acknowledged as (
+    update ops.booking_paid_events paid
+    set status = 'reported', reported_at = now(), claimed_until = null
+    where paid.event_id = any(coalesce(p_event_ids, array[]::text[]))
+      and paid.status = 'claimed'
+    returning paid.event_id
+  )
+  select count(*)::integer from acknowledged;
 $$;
 
 revoke all on function migration.booking_paid_event_id(text)
@@ -180,6 +199,10 @@ revoke all on function migration.record_booking_paid_event()
 revoke all on function public.roo_claim_booking_paid_events(integer)
   from public, anon, authenticated;
 grant execute on function public.roo_claim_booking_paid_events(integer)
+  to service_role;
+revoke all on function public.roo_ack_booking_paid_events(text[])
+  from public, anon, authenticated;
+grant execute on function public.roo_ack_booking_paid_events(text[])
   to service_role;
 
 notify pgrst, 'reload schema';

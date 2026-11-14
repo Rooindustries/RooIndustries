@@ -36,13 +36,8 @@ export const trackEvent = (eventName, data = {}, options = {}) => {
   }
 };
 
-export const trackPageView = (path) => {
-  try {
-    return Boolean(path) && metaTrack("PageView");
-  } catch {
-    return false;
-  }
-};
+export const trackPageView = (signal) =>
+  withMetaPixel((pixel) => pixel.metaTrackWhenGranted("PageView", {}, {}, signal));
 
 export const trackPackageView = ({ title, price, surface } = {}) => {
   try {
@@ -94,52 +89,51 @@ export const trackCheckoutSessionStarted = ({ packageTitle, price, provider, cur
   }
 };
 
-const sentReceipts = new Set();
+const receipts = new Set();
 
 const sendOnce = (key, send) => {
   try {
-    if (sentReceipts.has(key) || sessionStorage.getItem(key)) return false;
+    if (receipts.has(key) || sessionStorage.getItem(key)) return;
   } catch {}
-  if (!send()) return false;
-  sentReceipts.add(key);
-  try { sessionStorage.setItem(key, "1"); } catch {}
-  return true;
+  receipts.add(key);
+  Promise.resolve().then(send).catch(() => false).then((sent) => {
+    if (!sent) {
+      receipts.delete(key);
+      return;
+    }
+    try { sessionStorage.setItem(key, "1"); } catch {}
+  });
 };
 
 const trackPaidPurchaseOnMeta = (receipt) => {
   const pkg = packageFields(receipt.packageTitle, receipt.amount);
-  return Boolean(pkg) && metaTrack("Purchase", {
+  return Boolean(pkg) && withMetaPixel((pixel) => pixel.metaTrackWhenGranted("Purchase", {
     content_name: pkg.name,
     content_ids: pkg.slug ? [pkg.slug] : [],
     content_type: "product",
     value: receipt.amount,
     currency: receipt.currency,
-  }, { eventId: receipt.eventId });
+  }, { eventId: receipt.eventId }));
 };
+
+const trackCompletedBooking = async (receipt) => Boolean(await loadSalesAttribution()) &&
+  trackEvent(receipt.paymentType === "paid" ? "booking_completed" : "free_booking_completed", {
+    event_id: receipt.eventId,
+    package: receipt.packageTitle,
+    payment_type: receipt.paymentType,
+    payment_provider: receipt.provider,
+    amount: receipt.amount,
+    currency: receipt.currency,
+    referral_code: receipt.referralCode || "",
+  }, { attribution: receipt.attribution ?? null });
 
 const validReceipt = (receipt) => Boolean(receipt) && /^[a-f0-9]{40}$/.test(receipt.eventId || "") &&
   ["paid", "free"].includes(receipt.paymentType) && Number.isFinite(receipt.amount) && receipt.amount >= 0;
 
-const sendConfirmedPurchase = (receipt) => {
-  try {
-    if (!validReceipt(receipt)) return false;
-    const paid = receipt.paymentType === "paid";
-    const vercel = sendOnce(`booking_completion_tracked:${receipt.eventId}`, () =>
-      trackEvent(paid ? "booking_completed" : "free_booking_completed", {
-        event_id: receipt.eventId,
-        package: receipt.packageTitle,
-        payment_type: receipt.paymentType,
-        payment_provider: receipt.provider,
-        amount: receipt.amount,
-        currency: receipt.currency,
-        referral_code: receipt.referralCode || "",
-      }, { attribution: receipt.attribution ?? null }));
-    const meta = paid && sendOnce(`meta_purchase_tracked:${receipt.eventId}`, () => trackPaidPurchaseOnMeta(receipt));
-    return vercel || meta;
-  } catch {
-    return false;
+export const trackConfirmedPurchase = (receipt) => {
+  if (!validReceipt(receipt)) return;
+  sendOnce(`booking_completion_tracked:${receipt.eventId}`, () => trackCompletedBooking(receipt));
+  if (receipt.paymentType === "paid") {
+    sendOnce(`meta_purchase_tracked:${receipt.eventId}`, () => trackPaidPurchaseOnMeta(receipt));
   }
 };
-
-export const trackConfirmedPurchase = (receipt) =>
-  loadSalesAttribution().then((module) => Boolean(module) && sendConfirmedPurchase(receipt));

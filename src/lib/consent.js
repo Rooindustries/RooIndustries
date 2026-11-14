@@ -4,32 +4,48 @@ const CONSENT_RESET_EVENT = "roo-consent-reset";
 
 const CHOICES = new Set(["granted", "denied"]);
 
-export const readConsent = () => {
+let pageChoice = null;
+
+const storedChoice = (storage) => {
   try {
-    if (typeof window === "undefined") return "unset";
-    const value = window.localStorage.getItem(CONSENT_KEY);
-    return CHOICES.has(value) ? value : "unset";
+    const value = window[storage].getItem(CONSENT_KEY);
+    return CHOICES.has(value) ? value : "";
   } catch {
-    return "unset";
+    return "";
   }
 };
 
+const forgetChoice = (storage) => {
+  try {
+    window[storage].removeItem(CONSENT_KEY);
+  } catch {}
+};
+
+export const readConsent = () => {
+  if (typeof window === "undefined") return "unset";
+  return pageChoice || storedChoice("sessionStorage") || storedChoice("localStorage") || "unset";
+};
+
 export const writeConsent = (value) => {
-  if (!CHOICES.has(value) || typeof window === "undefined") return false;
-  let saved = false;
+  if (!CHOICES.has(value) || typeof window === "undefined") return;
+  pageChoice = value;
   try {
     window.localStorage.setItem(CONSENT_KEY, value);
-    saved = true;
-  } catch {}
+    forgetChoice("sessionStorage");
+  } catch {
+    forgetChoice("localStorage");
+    try {
+      window.sessionStorage.setItem(CONSENT_KEY, value);
+    } catch {}
+  }
   window.dispatchEvent(new CustomEvent(CONSENT_EVENT, { detail: value }));
-  return saved;
 };
 
 export const resetConsent = () => {
   if (typeof window === "undefined") return;
-  try {
-    window.localStorage.removeItem(CONSENT_KEY);
-  } catch {}
+  pageChoice = "unset";
+  forgetChoice("localStorage");
+  forgetChoice("sessionStorage");
   window.dispatchEvent(new CustomEvent(CONSENT_RESET_EVENT));
 };
 

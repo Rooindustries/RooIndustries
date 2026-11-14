@@ -107,7 +107,9 @@ const seed=async(provider='paypal',status='booked',changes={})=>{
 };
 const tokenFor=r=>access.createPaymentAccessToken({paymentRecordId:r._id,provider:r.provider,pricingFingerprint:r.pricingFingerprint,backend:'supabase',cutoverGeneration:0,expirySeconds:600});
 const paypalReq=(type,resource,id=`event-fixture-${scenarioNumber}`)=>{const body={id,event_type:type,resource};return{body,rawBody:JSON.stringify(body),headers:{'paypal-transmission-id':'fixture-transmission','paypal-transmission-time':new Date().toISOString(),'paypal-transmission-sig':'fixture-signature','paypal-cert-url':'https://example.invalid/cert','paypal-auth-algo':'SHA256withRSA'}};};
-const razorReq=(type,payload)=>{const body={event:type,payload};const rawBody=JSON.stringify(body);return{body,rawBody,headers:{'x-razorpay-signature':crypto.createHmac('sha256',process.env.RAZORPAY_WEBHOOK_SECRET).update(rawBody).digest('hex')}};};
+const razorpaySignature=rawBody=>crypto.createHmac('sha256','fixture-webhook-secret').update(rawBody).digest('hex');
+const razorReq=(type,payload)=>{const body={event:type,payload};const rawBody=JSON.stringify(body);
+  return{body,rawBody,headers:{'x-razorpay-signature':razorpaySignature(rawBody)}};};
 const dodoReq=(payment=dodoPayment,type='payment.succeeded')=>{const body={business_id:'business-fixture',type,timestamp:'2026-01-01T00:00:00.000Z',data:payment};const rawBody=JSON.stringify(body),timestamp=String(Math.floor(Date.now()/1000)),id=`dodo-fixture-${scenarioNumber}`;const signature=crypto.createHmac('sha256',Buffer.from('fixture-dodo-secret')).update(`${id}.${timestamp}.${rawBody}`).digest('base64');return{body,rawBody,headers:{'webhook-id':id,'webhook-timestamp':timestamp,'webhook-signature':`v1,${signature}`}};};
 const requestFlow=async(action,input={})=>{const response=await fetch(`${origin}/flow/${action}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(input),signal:AbortSignal.timeout(30000)});return{status:response.status,body:await response.json()};};
 const assertRefund=async({reversed=false}={})=>{

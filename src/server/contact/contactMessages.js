@@ -14,6 +14,7 @@ const NAME_LIMIT = 100;
 const MESSAGE_MIN = 10;
 const MESSAGE_MAX = 5000;
 const CONTROL_CHARACTERS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/;
+const SEND_TIMEOUT_MS = 8000;
 
 const contactError = (code, status, extra = {}) =>
   Object.assign(new Error(code), { code, status, ...extra });
@@ -69,6 +70,7 @@ const deliveryConfig = (env) => ({
 const sendMessage = async ({ id, name, email, message }, env) => {
   const { apiKey, from, to } = deliveryConfig(env);
   if (!apiKey || !from) return { sent: false, errorCode: "email_provider_unconfigured" };
+  const signal = AbortSignal.timeout(SEND_TIMEOUT_MS);
   try {
     const result = await new Resend(apiKey).emails.send(
       {
@@ -78,14 +80,12 @@ const sendMessage = async ({ id, name, email, message }, env) => {
         subject: `Contact form: ${name}`,
         text: `Name: ${name}\nEmail: ${email}\n\n${message}`,
       },
-      { idempotencyKey: `contact-message-${id}` }
+      { idempotencyKey: `contact-message-${id}`, signal }
     );
     if (isIdempotencyPayloadConflict(result)) return { sent: false, errorCode: "email_delivery_unknown" };
     if (result?.error) {
-      return {
-        sent: false,
-        errorCode: getSafeErrorCode({ code: result.error.name || result.error.code }, "email_send_failed"),
-      };
+      const code = signal.aborted ? "email_send_timeout" : result.error.name || result.error.code;
+      return { sent: false, errorCode: getSafeErrorCode({ code }, "email_send_failed") };
     }
     const providerMessageId = String(result?.data?.id || "").trim();
     if (!providerMessageId) return { sent: false, errorCode: "email_provider_receipt_missing" };
@@ -136,17 +136,18 @@ export async function submitContactMessage(
 }
 
 export async function retryContactMessages(
-  { limit = 20 } = {},
+  { limit = 20, deadline },
   { adminClient = createSupabaseAdminClient(), env = process.env } = {}
 ) {
-  const { data, error } = await adminClient.rpc("roo_claim_contact_retries", { p_limit: limit });
-  if (error || !Array.isArray(data)) throw rpcError("claim", error);
-  let sent = 0;
-  let failed = 0;
-  for (const row of data) {
-    const result = await deliver(row, adminClient, env);
-    if (result.sent && result.recorded) sent += 1;
-    else failed += 1;
+  const summary = { claimed: 0, sent: 0, failed: 0 };
+  while (summary.claimed < limit && deadline - Date.now() >= SEND_TIMEOUT_MS) {
+    const { data, error } = await adminClient.rpc("roo_claim_contact_retries", { p_limit: 1 });
+    if (error || !Array.isArray(data)) throw rpcError("claim", error);
+    if (!data.length) break;
+    summary.claimed += 1;
+    const result = await deliver(data[0], adminClient, env);
+    if (result.sent && result.recorded) summary.sent += 1;
+    else summary.failed += 1;
   }
-  return { claimed: data.length, sent, failed };
+  return summary;
 }

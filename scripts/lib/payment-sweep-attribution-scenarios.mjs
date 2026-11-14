@@ -3,7 +3,7 @@ import {
   fixtureMail,
   paypalOrders,
   postPayPalCaptureWebhook,
-  recordPayPalCalls,
+  recordProviderCalls,
   startPayPalCheckout,
   withEnv,
 } from "./payment-sweep-ads-fixtures.mjs";
@@ -50,7 +50,7 @@ const v1Touch = {
 };
 
 const payWithAttribution = async (ctx, salesAttribution) => {
-  const { result: started, calls } = await recordPayPalCalls(() => startPayPalCheckout(ctx, { salesAttribution }));
+  const { result: started, calls } = await recordProviderCalls(() => startPayPalCheckout(ctx, { salesAttribution }));
   assert.equal(started.status, 200, JSON.stringify(started));
   const orders = paypalOrders(calls);
   assert.equal(orders.length, 1, JSON.stringify(started));
