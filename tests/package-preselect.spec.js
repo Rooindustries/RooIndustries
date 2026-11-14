@@ -164,6 +164,22 @@ test.describe("package prices", () => {
     await expectCheckoutPrice(page, flow, "/booking", pkg, price);
   });
 
+  test("a package picked on the packages page comes back after refreshing plain /booking", async ({ page, flow }) => {
+    const pkg = bySlug.essentials;
+    const price = (await packagesPagePrices(page))[pkg.slug];
+    await bookFromPackages(page, pkg);
+    await page.getByRole("button", { name: /^Earliest available:/ }).click();
+    await page.getByRole("button", { name: /, (fully available|limited slots)$/ }).click();
+    await page.goto("/booking");
+    await expectPackage(page, { ...pkg, price }, "/booking");
+    await page.reload();
+    await expectPackage(page, { ...pkg, price }, "/booking");
+    await expect(page.getByTestId("booking-step-tracker").locator('[aria-current="step"]'))
+      .toContainText("Pick a slot");
+    const draft = await page.evaluate(() => JSON.parse(sessionStorage.getItem("booking_draft")));
+    expect(draft.packages[draft.lastTitle].selectedPackage.title).toBe(pkg.title);
+  });
+
   const heldLoads = [
     { name: "a deep link", path: "/booking?package=overhaul", pkg: bySlug.overhaul },
     { name: "plain /booking", path: "/booking", pkg: bySlug.overhaul },
