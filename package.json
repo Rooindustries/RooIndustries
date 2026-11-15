@@ -163,7 +163,8 @@
     "test:build-lock": "node --test tests/build-lock.test.mjs",
     "check:repository-files": "node scripts/check-repository-files.mjs",
     "test:repository-files": "node --test tests/repository-files.test.mjs && node scripts/check-content-regions.mjs",
-    "test:runner-routing": "node --test tests/runner-routing.test.mjs"
+    "test:runner-routing": "node --test tests/runner-routing.test.mjs",
+    "test:nav:switch": "playwright test tests/route-switch-response.spec.js --project=chromium --workers=1"
   },
   "eslintConfig": {
     "extends": [
