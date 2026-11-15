@@ -10,7 +10,6 @@ import {
 } from "../server/supabase/shadowStore";
 import { SupabaseDocumentClient } from "../server/supabase/documentClient";
 import { createSupabaseAdminFetch } from "../server/supabase/adminClient";
-import { requireRateLimit } from "../server/api/ref/rateLimit";
 
 const createRpcClient = (seed = []) => {
   const documents = new Map(seed.map((document) => [document._id, document]));
@@ -236,8 +235,6 @@ describe("Supabase shadow document utilities", () => {
 });
 
 describe("Supabase document compatibility client", () => {
-
-
   test.each(["refRateLimitBucket", "booking"])(
     "still refreshes projected %s mutations, including mixed batches",
     async (type) => {

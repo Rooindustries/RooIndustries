@@ -1,5 +1,5 @@
 name: Install PostgreSQL 17 and PostgREST 16.4
-description: Installs the database and REST server the native suites run against, and exports PG_BIN and POSTGREST_BIN.
+description: Installs PostgreSQL and PostgREST 16.4 and 14.5, and exports PG_BIN, POSTGREST_BIN, and POSTGREST_14_BIN.
 runs:
   using: composite
   steps:

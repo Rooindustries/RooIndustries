@@ -335,8 +335,6 @@ describe("Supabase-primary referral email routes", () => {
     expect(loaded.requeueReferralEmailDispatch).not.toHaveBeenCalled();
   });
 
-
-
   test("reuses the Supabase source token while a credential reset is pending", async () => {
     process.env.REF_SESSION_SECRET = testSessionSecret;
     const loaded = loadForgotHandler();
@@ -376,8 +374,6 @@ describe("Supabase-primary referral email routes", () => {
       idempotencyKey: `referral-email-${"a".repeat(64)}`,
     });
   });
-
-
 
   test("replaces a corrupt sealed Supabase reset token before enqueue", async () => {
     const loaded = loadForgotHandler();

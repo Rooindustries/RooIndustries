@@ -126,6 +126,4 @@ describe("referral creator admin route", () => {
     });
     expect(mockFlush).not.toHaveBeenCalled();
   });
-
-
 });
