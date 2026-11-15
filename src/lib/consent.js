@@ -1,10 +1,7 @@
-import { CONSENT_EVENT, CONSENT_KEY, CONSENT_RESET_EVENT } from "./consentSignals";
+import { CONSENT_EVENT, CONSENT_KEY, CONSENT_RESET_EVENT, DECLINED_KEY, STORAGES } from "./consentSignals";
 import { CHOICES, keepUnsaved, readConsent } from "./consentChoice";
 
 export { readConsent };
-
-const DECLINED_KEY = "roo-consent-declined";
-const STORAGES = ["localStorage", "sessionStorage"];
 
 let followingOtherTabs = false;
 
@@ -18,14 +15,6 @@ const keep = (key, value) => STORAGES.find((storage) => {
 });
 
 const keepDecline = () => keep(DECLINED_KEY, String(Date.now()));
-
-export const storedDecline = () => Math.max(...STORAGES.map((storage) => {
-  try {
-    return Number(window[storage].getItem(DECLINED_KEY)) || 0;
-  } catch {
-    return 0;
-  }
-}));
 
 const forgetChoice = (storage) => {
   try {

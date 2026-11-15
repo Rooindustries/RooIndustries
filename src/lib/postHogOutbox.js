@@ -1,6 +1,6 @@
-import { readConsent, storedDecline } from "./consent";
+import { readConsent } from "./consent";
 import { sanitizeAnalyticsEvent } from "./salesPaths";
-import { followChoices, lastDecline } from "./consentSignals";
+import { declinedSince, followChoices } from "./consentSignals";
 
 const OUTBOX_KEY = "roo-posthog-outbox";
 const COUNTED_KEY = "roo-posthog-counted";
@@ -8,35 +8,49 @@ const OUTBOX_LIMIT = 100;
 
 let posthog = null;
 let unstored = null;
-const countedHere = new Set();
+let marksHere = {};
 
 const granted = () => readConsent() === "granted";
 
-const storedList = (key) => {
+const stored = (key) => {
   try {
-    const items = JSON.parse(sessionStorage.getItem(key));
-    return Array.isArray(items) ? items : [];
+    return JSON.parse(sessionStorage.getItem(key));
   } catch {
-    return [];
+    return null;
   }
 };
 
-const read = () => unstored || storedList(OUTBOX_KEY);
+const read = () => {
+  const items = unstored || stored(OUTBOX_KEY);
+  return Array.isArray(items) ? items : [];
+};
 
-const firstCount = (mark) => {
-  const marks = storedList(COUNTED_KEY);
-  if (countedHere.has(mark) || marks.includes(mark)) return false;
-  countedHere.add(mark);
+const storedMarks = () => {
+  const marks = stored(COUNTED_KEY);
+  return marks && typeof marks === "object" && !Array.isArray(marks) ? marks : {};
+};
+
+const keepMarks = (marks) => {
+  marksHere = marks;
   try {
-    sessionStorage.setItem(COUNTED_KEY, JSON.stringify([...marks, mark]));
+    if (Object.keys(marks).length) sessionStorage.setItem(COUNTED_KEY, JSON.stringify(marks));
+    else sessionStorage.removeItem(COUNTED_KEY);
   } catch {}
-  return true;
 };
 
-const current = (items) => {
-  const declined = Math.max(lastDecline(), storedDecline());
-  return items.filter(({ at }) => at >= declined);
+const countOnce = (entries, since) => {
+  const marks = Object.fromEntries(Object.entries({ ...storedMarks(), ...marksHere }).filter(([, at]) => at >= since));
+  const kept = entries.filter(({ mark, at }) => {
+    if (!mark) return true;
+    if (Object.hasOwn(marks, mark)) return false;
+    marks[mark] = at;
+    return true;
+  });
+  keepMarks(marks);
+  return kept;
 };
+
+const current = (items, since = declinedSince()) => items.filter(({ at }) => at >= since);
 
 const write = (items) => {
   try {
@@ -49,12 +63,12 @@ const write = (items) => {
 };
 
 const followChoice = () => {
-  if (granted()) return;
+  if (granted()) {
+    countOnce([], declinedSince());
+    return;
+  }
   write([]);
-  countedHere.clear();
-  try {
-    sessionStorage.removeItem(COUNTED_KEY);
-  } catch {}
+  keepMarks({});
 };
 
 const withPostHog = (action) => {
@@ -77,11 +91,13 @@ export const store = (entries) => {
     followChoice();
     return;
   }
-  const kept = entries.flatMap(({ path, mark, ...entry }) => {
+  const since = declinedSince();
+  const fresh = current(entries, since).flatMap(({ path, ...entry }) => {
     const cleaned = cleanPath(path);
-    return cleaned && (!mark || firstCount(mark)) ? [{ ...entry, path: cleaned }] : [];
+    return cleaned ? [{ ...entry, path: cleaned }] : [];
   });
-  write(current([...read(), ...kept]).sort((a, b) => a.at - b.at).slice(-OUTBOX_LIMIT));
+  const kept = countOnce(fresh, since).map(({ mark, ...entry }) => entry);
+  write(current([...read(), ...kept], since).sort((a, b) => a.at - b.at).slice(-OUTBOX_LIMIT));
   if (kept.length) withPostHog(({ sendPostHog }) => sendPostHog(kept.map(({ event }) => event)));
 };
 

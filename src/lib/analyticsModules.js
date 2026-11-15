@@ -1,7 +1,7 @@
 import { reportRequestError } from "./clientRequest";
 import { cleanOutsideValue } from "./outsideValue.cjs";
 
-const lazyModule = (importModule) => {
+export const lazyModule = (importModule) => {
   let loaded = null;
   let loading = null;
   const load = () => {

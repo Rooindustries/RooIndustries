@@ -144,6 +144,15 @@ export const registerBookingPaidScenarios = async (ctx) => {
     return { unconfirmed: unconfirmed.body.status, receipt, eventId: event.event_id };
   }));
 
+  await run("ads-receipt-rules-creator-code", withMail(async () => {
+    await clearEvents();
+    const checkout = await a1Start("paypal", "referral", { referralCode: "2468" });
+    assert.equal((await a1Hook("paypal")).status, 200);
+    const receipt = await finalize(checkout);
+    assert.equal(receipt.referralCode, "2468", JSON.stringify(receipt));
+    return { receipt };
+  }));
+
   await run("ads-receipt-rules-free", withMail(async () => {
     await clearEvents();
     const checkout = await a1Start("free");

@@ -1,27 +1,8 @@
-const { test, expect } = require("./fixtures/booking-flow.cjs");
+const { test, expect, openFreePayment } = require("./fixtures/booking-flow.cjs");
 
 test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata", actionTimeout: 10000, reducedMotion: "reduce" });
 
 const bookingId = "fixture-free-confirmation";
-
-const openFreePayment = async (page, flow) => {
-  await page.route("**/api/ref/validateCoupon?code=free100*", route => route.fulfill({
-    json: { ok: true, coupon: { code: "free100", discountType: "percent", discountPercent: 100, canCombineWithReferral: true } },
-  }));
-  await page.route("**/api/payment/quote", route => {
-    const free = route.request().postDataJSON().couponCode === "free100";
-    return route.fulfill({ json: {
-      ok: true,
-      quoteFingerprint: free ? "fixture-approved-free" : "fixture-paid",
-      quote: { grossAmount: 84.99, netAmount: free ? 0 : 84.99, isFree: free },
-    } });
-  });
-  await flow.review();
-  await flow.codeInput("free100");
-  await expect(page.getByRole("button", { name: "Remove coupon code free100", exact: true })).toBeVisible();
-  await flow.payment();
-  await expect(page.getByRole("button", { name: "Confirm Free Booking", exact: true })).toBeEnabled();
-};
 
 const holdConfirmation = async (page, fail = false) => {
   let release;

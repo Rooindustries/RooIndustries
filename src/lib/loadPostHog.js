@@ -1,7 +1,7 @@
 import { isProductionBrowser } from "./productionBrowser";
 import { readConsent } from "./consentChoice";
 import { withPostHogOutbox } from "./analyticsModules";
-import { CONSENT_EVENT, CONSENT_RESET_EVENT, followChoices, lastDecline } from "./consentSignals";
+import { CONSENT_EVENT, CONSENT_RESET_EVENT, declinedSince, followChoices } from "./consentSignals";
 
 let poppedAt = 0;
 let countedPath = null;
@@ -14,13 +14,14 @@ const newId = () => "10000000-1000-4000-8000-100000000000".replace(/[018]/g, (di
 
 export const lastPopstate = () => poppedAt;
 
-export const eventMoment = () =>
-  isProductionBrowser() && granted() ? { path: window.location.pathname, at: Date.now() } : null;
+export const eventMoment = () => isProductionBrowser() && granted()
+  ? { path: window.location.pathname, at: Math.max(Date.now(), declinedSince()) }
+  : null;
 
 export const keepPostHogEvent = (event, properties, options) => {
   try {
     const { moment = eventMoment(), mark } = options || {};
-    if (!moment || moment.at < lastDecline() || !granted()) return false;
+    if (!moment || moment.at < declinedSince() || !granted()) return false;
     made.push({ id: newId(), event, properties, mark, ...moment });
     withPostHogOutbox((outbox) => outbox.store(made.splice(0)));
     return true;

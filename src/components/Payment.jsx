@@ -6,9 +6,10 @@ import { PayPalScriptProvider, PayPalButtons, usePayPalScriptReducer } from "@pa
 import { motion } from "framer-motion";
 import { WalletCards } from "lucide-react";
 import packagePricing from "../lib/packagePricing";
-import { preloadMetaPixel } from "../lib/analyticsModules";
 import { checkoutStartCounted, paymentStartBody } from "../lib/paymentStartBody";
-import { trackCheckoutSessionStarted, trackConfirmedPurchase } from "../lib/checkoutAnalytics";
+import {
+  preloadPurchaseTracking, trackCheckoutSessionStarted, trackConfirmedPurchase,
+} from "../lib/checkoutAnalytics";
 import { eventMoment } from "../lib/loadPostHog";
 import { preloadConfirmationPage, preloadConfirmationPages } from "../lib/confirmationPages";
 import { useBookingDialogPending } from "../lib/bookingDialogHold";
@@ -115,7 +116,7 @@ function PayPalCheckout({ children }) {
 
 export default function Payment({ hideFooter = false }) {
   useEffect(() => { clearBookingConfirmation(); }, []);
-  useEffect(preloadMetaPixel, []);
+  useEffect(preloadPurchaseTracking, []);
   useEffect(() => {
     preloadConfirmationPages().catch(() => {});
   }, []);
@@ -1101,8 +1102,7 @@ export default function Payment({ hideFooter = false }) {
     return buildConfirmationNavigationState(responseBody);
   };
 
-  const navigateToConfirmation = async (kind, responseBody, operation) => {
-    trackConfirmedPurchase(responseBody.analyticsReceipt);
+  const showConfirmation = async (kind, responseBody, operation) => {
     await Promise.race([
       preloadConfirmationPage(kind).catch(() => {}),
       new Promise(resolve => setTimeout(resolve, CONFIRMATION_PRELOAD_WAIT_MS)),
@@ -1112,6 +1112,11 @@ export default function Payment({ hideFooter = false }) {
       ? buildFinalizeNavigation(responseBody, operation)
       : buildConfirmationNavigationState(responseBody);
     navigate(kind === "paid" ? "/payment-success" : "/thank-you", { state, replace: true });
+  };
+
+  const navigateToConfirmation = (kind, responseBody, operation) => {
+    trackConfirmedPurchase(responseBody.analyticsReceipt);
+    return showConfirmation(kind, responseBody, operation);
   };
 
   const fetchJson = async (
@@ -1272,6 +1277,9 @@ export default function Payment({ hideFooter = false }) {
         body,
       });
       const moment = eventMoment();
+      const booked = response.ok && data?.ok &&
+        ["booked", "email_partial"].includes(String(data.status || "").trim().toLowerCase());
+      if (booked) trackConfirmedPurchase(data.analyticsReceipt);
       if (response.ok && data?.ok && await checkoutStartCounted(data, provider)) {
         const price = data.quote?.netAmount;
         trackCheckoutSessionStarted({ packageTitle: bookingData.packageTitle, price, provider, moment });
@@ -1340,12 +1348,8 @@ export default function Payment({ hideFooter = false }) {
         sessionExpiresAt: String(data.sessionExpiresAt || "").trim(),
         result: data,
       };
-      const returnedStatus = String(data.status || "").trim().toLowerCase();
-      if (
-        provider !== "free" &&
-        (returnedStatus === "booked" || returnedStatus === "email_partial")
-      ) {
-        await navigateToConfirmation("paid", data, operation);
+      if (provider !== "free" && booked) {
+        await showConfirmation("paid", data, operation);
         return { ...nextSession, terminal: true };
       }
       if (provider !== "free") {
@@ -1651,7 +1655,7 @@ export default function Payment({ hideFooter = false }) {
         throw new Error(data.error || "Could not save your free booking.");
       }
 
-      await navigateToConfirmation("free", data, operation);
+      await showConfirmation("free", data, operation);
     } catch (err) {
       if (!operation.current()) return;
       console.error("Free booking failed");

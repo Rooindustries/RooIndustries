@@ -1,5 +1,6 @@
 import { createDataClient as createClient } from "../../data/documentClient.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
+import { CREATOR_CODE } from "./creatorCode.js";
 import { logSafeError } from "../../safeErrorLog.js";
 import { resolveSupabaseCreatorRegistrationConflicts } from "../../supabase/accounts.js";
 import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
@@ -36,7 +37,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ ok: false, error: "Missing code" });
 
     if (req.query.purpose === "registration") {
-      if (!/^[a-z0-9](?:[a-z0-9-]{1,48}[a-z0-9])$/.test(code)) {
+      if (!CREATOR_CODE.test(code)) {
         return res.status(400).json({
           ok: false,
           error: "Invalid referral code",

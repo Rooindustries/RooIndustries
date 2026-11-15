@@ -1,6 +1,6 @@
 const {
   test: bookingTest, expect, cookieBanner, acceptCookies, declineCookies, cookieSettingsReady, openCookieSettings,
-  settleIdle, productionHostFixtures,
+  settleIdle, productionHostFixtures, openFreePayment,
 } = require("./fixtures/booking-flow.cjs");
 const { posthogFixtures, postHogCode, named, pageviews } = require("./fixtures/posthog.cjs");
 
@@ -65,6 +65,11 @@ const confirmedBooking = {
     provider: "dodo", amount: 84.99, currency: "USD", referralCode: "", attribution: null,
   },
 };
+const freeBooking = {
+  ...confirmedBooking, provider: "free", bookingId: "fixture-posthog-free-booking",
+  paymentAccessToken: "fixture-free-access",
+  analyticsReceipt: { ...confirmedBooking.analyticsReceipt, paymentType: "free", provider: "free", amount: 0 },
+};
 const idleStart = (page) => page.evaluate(() => new Promise((resolve) => {
   window.requestIdleCallback(() => resolve(), { timeout: 4000 });
 }));
@@ -74,13 +79,13 @@ const pastPostHogStart = async (page, seen) => {
     await expect.poll(() => seen.loading.size, { message: round }).toBe(0);
   }
 };
-const pickSlot = async (page) => {
+const pickSlot = async (page, time = "10:00 AM") => {
   await page.getByRole("button", { name: /^Earliest available:/ }).click();
-  await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+  await page.getByRole("button", { name: time, exact: true }).click();
 };
 const reserveSlot = (page) => page.getByRole("button", { name: "Next", exact: true }).last().click();
-const reachPayment = async (page) => {
-  await pickSlot(page);
+const reachPayment = async (page, time) => {
+  await pickSlot(page, time);
   await reserveSlot(page);
   await page.getByRole("textbox", { name: "Discord username", exact: true }).fill("fixture_visitor");
   await page.getByRole("textbox", { name: "Booking email", exact: true }).fill("visitor@example.invalid");
@@ -91,10 +96,10 @@ const reachPayment = async (page) => {
   await page.getByRole("button", { name: "Continue to payment", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Complete Payment", exact: true })).toBeVisible();
 };
-const confirmBooking = async (page, baseURL, { receipt, beforeReturn, afterFinalize } = {}) => {
+const confirmBooking = async (page, baseURL, { receipt, beforeReturn, afterFinalize, time } = {}) => {
   await page.getByRole("link", { name: /Book Now/ }).first().click();
   await expect(page).toHaveURL((url) => url.pathname === "/booking");
-  await reachPayment(page);
+  await reachPayment(page, time);
   let finalizeRoute;
   await page.route("**/api/payment/finalize", (route) => { finalizeRoute = route; });
   await page.getByRole("button", { name: "Pay your way", exact: true }).click();
@@ -107,6 +112,7 @@ const confirmBooking = async (page, baseURL, { receipt, beforeReturn, afterFinal
   await afterFinalize?.();
   await expect(page).toHaveURL(`${baseURL}/payment-success`);
 };
+const storedMarks = (page) => page.evaluate(() => sessionStorage.getItem("roo-posthog-counted") || "");
 const sessionKeys = (page) => page.evaluate(() => Object.keys(sessionStorage));
 const holdChunk = async (page, { origin, loopback }, ...markers) => {
   const hold = { held: false };
@@ -541,9 +547,12 @@ test.describe("cookie choice", () => {
 
     const acceptedAt = await browserNow(page);
     await openCookieSettings(page);
+    await page.evaluate(() => localStorage.setItem("roo-consent-declined", String(Date.now() + 3600000)));
     await acceptCookies(page);
     await seeDetails(page);
     await expect.poll(() => named(seen, "view_item").length).toBe(1);
+    const correctedDecline = Number(await page.evaluate(() => localStorage.getItem("roo-consent-declined")));
+    expect(correctedDecline).toBeLessThanOrEqual(await browserNow(page));
     await interactUntilReplay(page, seen, (item) => item.timestamp > acceptedAt);
     expect(sentBetween(seen, declinedAt, acceptedAt)).toEqual([]);
     expect(Date.parse(named(seen, "view_item")[0].timestamp)).toBeGreaterThan(acceptedAt);
@@ -756,6 +765,28 @@ test.describe("cookie choice", () => {
     expect(await otherMarks(page)).toEqual(marks);
   });
 
+  test("a booking counted before a Decline in another tab counts again once, though the list was loading", async ({
+    page, context, posthog: seen, baseURL, productionHost,
+  }) => {
+    test.setTimeout(240000);
+    await page.goto("/packages");
+    await acceptCookies(page);
+    await confirmBooking(page, baseURL);
+    await expect.poll(() => named(seen, "booking_completed").length).toBe(1);
+    await expect.poll(() => storedMarks(page)).toContain(`booking:${eventId}`);
+    const hold = await holdOutbox(page, productionHost);
+    await page.goto("/packages", { waitUntil: "commit" });
+    await expect.poll(() => hold.held, { timeout: 20000 }).toBe(true);
+    await (await chooseInOtherTab(context, ["Decline", "Accept"])).close();
+    hold.release();
+    await expect.poll(() => storedMarks(page)).not.toContain(`booking:${eventId}`);
+
+    await confirmBooking(page, baseURL, { time: "11:00 AM" });
+    await expect.poll(() => named(seen, "booking_completed").length).toBe(2);
+    await settleIdle(page);
+    expect(named(seen, "booking_completed")).toHaveLength(2);
+  });
+
   for (const request of inFlightRequests) {
     for (const choice of ["Accept", "Decline"]) {
       test(`${choice} in another tab while ${request.name} is in flight decides ${request.event}`, async ({
@@ -899,6 +930,26 @@ test.describe("waiting list", () => {
     expect(seenAt.path).toBe("/payment");
     hold.release();
     await expect.poll(() => named(seen, "booking_completed").length).toBe(1);
+  });
+
+  test("a free booking is stored when its receipt arrives, before the checkout count has loaded", async ({
+    page, flow, posthog: seen, productionHost,
+  }) => {
+    test.setTimeout(180000);
+    const hold = await holdChunk(page, productionHost, "[PostHog.js]", "roo-checkouts-counted");
+    await page.goto("/packages");
+    await acceptCookies(page);
+    await openFreePayment(page, flow);
+    await page.route("**/api/payment/start", (route) => route.fulfill({ json: freeBooking }));
+    await page.getByRole("button", { name: "Confirm Free Booking", exact: true }).click();
+    await expect.poll(() => outbox(page)).toContain("free_booking_completed");
+    expect(new URL(page.url()).pathname).toBe("/payment");
+
+    hold.release();
+    await expect(page).toHaveURL((url) => url.pathname === "/thank-you");
+    await expect.poll(() => named(seen, "free_booking_completed").length).toBe(1);
+    await pastPostHogStart(page, seen);
+    expect(named(seen, "free_booking_completed")).toHaveLength(1);
   });
 
   test("a service visit is stored the moment it begins and sent once, ahead of later page views", async ({

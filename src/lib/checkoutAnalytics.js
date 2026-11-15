@@ -1,6 +1,14 @@
 import { reportRequestError } from "./clientRequest";
 import { DEFAULT_CURRENCY, metaTrack, packageFields, trackEvent } from "./analytics";
 import { keepPostHogEvent } from "./loadPostHog";
+import { lazyModule, preloadMetaPixel } from "./analyticsModules";
+
+const bookingAnalytics = lazyModule(() => import("./bookingAnalytics"));
+
+export const preloadPurchaseTracking = () => {
+  bookingAnalytics.load().catch(reportRequestError);
+  preloadMetaPixel();
+};
 
 export const trackCheckoutSessionStarted = ({ packageTitle, price, provider, moment } = {}) => {
   try {
@@ -47,7 +55,5 @@ export const trackConfirmedPurchase = (receipt) => {
   if (!validReceipt(receipt)) return;
   const booking = completedBooking(receipt);
   keepPostHogEvent(...booking, { mark: `booking:${receipt.eventId}` });
-  import("./bookingAnalytics")
-    .then(({ trackBookingOnce }) => trackBookingOnce(receipt, booking))
-    .catch(reportRequestError);
+  bookingAnalytics.use(({ trackBookingOnce }) => trackBookingOnce(receipt, booking));
 };

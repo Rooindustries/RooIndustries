@@ -339,9 +339,10 @@ try{
         upgradeIntentToken: issueUpgradeIntentToken({ bookingId: original._id, email: original.email, targetPackageTitle: target.title, backend: 'supabase', cutoverGeneration: 0 }) };
     }
     if(variant==='referral'){
-      const referral={_id:'referral.a1',_type:'referral',slug:{_type:'slug',current:'fixture'},registrationStatus:'verified',currentDiscountPercent:0,currentCommissionPercent:10,totalSales:0,totalEarnings:0,backendOwner:'supabase',cutoverGeneration:0};
+      const code=bookingFields.referralCode||'FIXTURE';
+      const referral={_id:'referral.a1',_type:'referral',slug:{_type:'slug',current:code.toLowerCase()},registrationStatus:'verified',currentDiscountPercent:0,currentCommissionPercent:10,totalSales:0,totalEarnings:0,backendOwner:'supabase',cutoverGeneration:0};
       const current=await documents.getDocument(referral._id);if(current)await documents.patch(referral._id).ifRevisionId(current._rev).set(referral).commit();else await documents.create(referral);
-      input.bookingPayload.referralCode='FIXTURE';
+      input.bookingPayload.referralCode=code;
     }
     if(variant==='coupon'||provider==='free'){
       const code=`A1${scenarioNumber}`,percent=provider==='free'?100:10;

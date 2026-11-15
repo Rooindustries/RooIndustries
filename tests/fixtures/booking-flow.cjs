@@ -360,6 +360,29 @@ const checkoutStartCases = [
 ].map(([name, prepare, run]) => ({ name, prepare: prepare || (() => null), run }));
 
 const productionOnlyScripts = ["https://scripts.seorce.com/api?**", "https://widget.intercom.io/widget/**"];
+
+const openFreePayment = async (page, flow) => {
+  await page.route("**/api/ref/validateCoupon?code=free100*", route => route.fulfill({
+    json: {
+      ok: true,
+      coupon: { code: "free100", discountType: "percent", discountPercent: 100, canCombineWithReferral: true },
+    },
+  }));
+  await page.route("**/api/payment/quote", route => {
+    const free = route.request().postDataJSON().couponCode === "free100";
+    return route.fulfill({ json: {
+      ok: true,
+      quoteFingerprint: free ? "fixture-approved-free" : "fixture-paid",
+      quote: { grossAmount: 84.99, netAmount: free ? 0 : 84.99, isFree: free },
+    } });
+  });
+  await flow.review();
+  await flow.codeInput("free100");
+  await expect(page.getByRole("button", { name: "Remove coupon code free100", exact: true })).toBeVisible();
+  await flow.payment();
+  await expect(page.getByRole("button", { name: "Confirm Free Booking", exact: true })).toBeEnabled();
+};
+
 const productionHostFixtures = {
   productionHost: [async ({}, use, workerInfo) => {
     const { loopbackProductionHost } = await import("../../scripts/lib/test-target-safety.mjs");
@@ -379,5 +402,5 @@ const productionHostFixtures = {
 
 module.exports = {
   test, expect, overhaulPrice, cookieBanner, declineCookies, acceptCookies, cookieSettingsReady, openCookieSettings,
-  settleIdle, bookingEventId, routePaidStart, checkoutStartCases, productionHostFixtures,
+  settleIdle, bookingEventId, routePaidStart, checkoutStartCases, productionHostFixtures, openFreePayment,
 };

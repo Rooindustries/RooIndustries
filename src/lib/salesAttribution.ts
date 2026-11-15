@@ -115,7 +115,7 @@ export const campaignLabel = (value: unknown) => {
   const kept = trimSpace(head(text, LABEL_CODE_POINTS));
   return privateText(head(text, SCAN_CODE_POINTS)) || privateText(kept) ? "" : kept;
 };
-export const referralCode = (value: unknown) =>
+const referralCode = (value: unknown) =>
   bounded(value, REFERRAL_CODE_CHARS) && REFERRAL_CODE.test(value.trim()) && /[a-z]/i.test(value)
     ? value.trim()
     : "";
