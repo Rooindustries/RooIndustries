@@ -1,5 +1,5 @@
 const { randomUUID } = require("node:crypto");
-const { fixturePort } = require("./fixture-ports.cjs");
+const { fixtureOrigin } = require("./fixture-ports.cjs");
 
 const owners = new WeakMap();
 
@@ -86,7 +86,7 @@ const holdChunksOnServer = async (page, origins, matches) => {
       : route.fulfill({ response, body }));
   return {
     held: async () => {
-      const url = `http://127.0.0.1:${fixturePort("TOOLING_CONTENT_PORT")}/__held_posthog?id=${id}`;
+      const url = `${fixtureOrigin(process.env.BASE_URL, "TOOLING_CONTENT_PORT")}/__held_posthog?id=${id}`;
       const response = await fetch(url);
       return (await response.json()).held;
     },

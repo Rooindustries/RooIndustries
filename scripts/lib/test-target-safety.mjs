@@ -178,13 +178,15 @@ const refuseProxyEnvironment = () => {
 };
 
 const productionHost = "www.rooindustries.com";
-const productionHostMap = `MAP ${productionHost} 127.0.0.1, MAP * ~NOTFOUND, EXCLUDE 127.0.0.1`;
+const productionTestHost = process.env.ROO_TEST_HOST || "127.0.0.1";
+const productionHostMap =
+  `MAP ${productionHost} ${productionTestHost}, MAP * ~NOTFOUND, EXCLUDE ${productionTestHost}`;
 const productionHostRules = `--host-resolver-rules=${productionHostMap}`;
 const secureOriginsArg = "--unsafely-treat-insecure-origin-as-secure=";
 
 export function loopbackProductionHost(baseURL, args = []) {
   const local = new URL(localOrigin(baseURL));
-  if (local.hostname !== "127.0.0.1") fail("The production host maps only onto a 127.0.0.1 fixture.");
+  if (local.hostname !== productionTestHost) fail("The production host must map onto the configured fixture host.");
   const origin = `http://${productionHost}:${local.port}`;
   const secure = args.filter(arg => arg.startsWith(secureOriginsArg)).map(arg => arg.slice(secureOriginsArg.length));
   return {
@@ -212,7 +214,7 @@ const requireLoopbackMapping = async context => {
 
 const browserOrigins = origins => origins.flatMap(origin => {
   if (typeof origin !== "string" || !origin.startsWith(`http://${productionHost}:`)) return [localOrigin(origin)];
-  const local = localOrigin(origin.replace(`//${productionHost}:`, "//127.0.0.1:"));
+  const local = localOrigin(origin.replace(`//${productionHost}:`, `//${productionTestHost}:`));
   return [local, `http://${productionHost}:${new URL(local).port}`];
 });
 

@@ -3,7 +3,7 @@ const path = require("node:path");
 const zlib = require("node:zlib");
 const { randomUUID } = require("node:crypto");
 const { expect } = require("@playwright/test");
-const { fixturePort } = require("./fixture-ports.cjs");
+const { fixtureOrigin } = require("./fixture-ports.cjs");
 
 const recorderDir = path.dirname(require.resolve("posthog-js/dist/lazy-recorder.js"));
 const SENDS_KEY = "roo-test-posthog-sends";
@@ -70,7 +70,7 @@ const ingest = async (route, seen) => {
   let first;
   if (recorded.length) {
     const entry = seen.recording.then(async () => {
-      const url = `http://127.0.0.1:${fixturePort("TOOLING_CONTENT_PORT")}/batch`;
+      const url = `${fixtureOrigin(process.env.BASE_URL, "TOOLING_CONTENT_PORT")}/batch`;
       const { cookie } = await request.allHeaders();
       const response = await fetch(url, {
         method: "POST",
@@ -102,7 +102,7 @@ const stubPostHog = async (context, origin, capture) => {
     taken: 0, arrived: new Map(), recording: Promise.resolve(),
   };
   seen.received = async () => {
-    const url = `http://127.0.0.1:${fixturePort("TOOLING_CONTENT_PORT")}/__posthog?capture=${capture}`;
+    const url = `${fixtureOrigin(process.env.BASE_URL, "TOOLING_CONTENT_PORT")}/__posthog?capture=${capture}`;
     const response = await fetch(url);
     if (!response.ok) throw new Error(`PostHog fixture returned ${response.status}`);
     const { events } = await response.json();
