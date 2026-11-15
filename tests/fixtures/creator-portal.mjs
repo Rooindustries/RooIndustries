@@ -134,7 +134,7 @@ export async function portalHandle(ctx) {
     const previous = operations.get(body.p_operation_key);
     if (previous) return send({ code: '23505', message: 'Synthetic operation conflict.' }, 409);
     const source = documents.find(row => row._id === body.p_source_document_id);
-    if (!source || source._rev !== body.p_source_expected_revision || Object.entries(body.p_source_preconditions).some(([key, value]) => source[key] !== value)) return send({ code: '40001', message: 'Synthetic credential precondition conflict.' }, 409);
+    if (!source || source._rev !== body.p_source_expected_revision || Object.entries(body.p_source_preconditions).some(([key, value]) => source[key] !== value)) return send({ code: 'PT409', message: 'Synthetic credential precondition conflict.' }, 409);
     const operation = {
       operation_key: body.p_operation_key, user_id: body.p_user_id, principal_id: 'fixture-principal',
       password_hash: body.p_password_hash, source_backend: body.p_source_backend,
@@ -160,7 +160,7 @@ export async function portalHandle(ctx) {
     if (!operation || !['auth_applied', 'mirrored'].includes(operation.status)) return send({ code: '55000', message: 'Synthetic operation not ready.' }, 409);
     const source = documents.find(row => row._id === operation.source_document_id);
     if (operation.status !== 'mirrored') {
-      if (!source || source._rev !== operation.source_expected_revision || Object.entries(operation.source_preconditions).some(([key, value]) => source[key] !== value)) return send({ code: '40001', message: 'Synthetic source conflict.' }, 409);
+      if (!source || source._rev !== operation.source_expected_revision || Object.entries(operation.source_preconditions).some(([key, value]) => source[key] !== value)) return send({ code: 'PT409', message: 'Synthetic source conflict.' }, 409);
       const updated = { ...source, ...operation.source_mutation.set };
       for (const field of operation.source_mutation.unset) delete updated[field];
       const [saved] = mutate([{ operation: 'replace', document: updated, expected_revision: source._rev }]);

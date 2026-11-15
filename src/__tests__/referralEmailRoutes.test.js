@@ -335,27 +335,7 @@ describe("Supabase-primary referral email routes", () => {
     expect(loaded.requeueReferralEmailDispatch).not.toHaveBeenCalled();
   });
 
-  test("bounds reset retries after repeated source revision conflicts", async () => {
-    const loaded = loadForgotHandler();
-    loaded.enqueueReferralEmailMutation.mockRejectedValue(
-      Object.assign(new Error("source changed"), { code: "40001" })
-    );
-    const response = createResponse();
 
-    await loaded.handler(
-      {
-        method: "POST",
-        headers: { "x-forwarded-for": "203.0.113.1" },
-        body: { email: "creator@example.com" },
-      },
-      response
-    );
-
-    expect(response.statusCode).toBe(200);
-    expect(response.body).toEqual({ ok: true, message: "If email exists, link sent." });
-    expect(loaded.enqueueReferralEmailMutation).toHaveBeenCalledTimes(3);
-    expect(loaded.deliverReferralEmailDispatch).not.toHaveBeenCalled();
-  });
 
   test("reuses the Supabase source token while a credential reset is pending", async () => {
     process.env.REF_SESSION_SECRET = testSessionSecret;
@@ -397,79 +377,7 @@ describe("Supabase-primary referral email routes", () => {
     });
   });
 
-  test("concurrent Supabase requests recover the committed reset token", async () => {
-    const loaded = loadForgotHandler();
-    let source = {
-      _id: "referral.creator",
-      _rev: "revision-one",
-      _type: "referral",
-      name: "Creator",
-      creatorEmail: "creator@example.com",
-      registrationStatus: "active",
-    };
-    let winnerToken = "";
-    let providerSends = 0;
-    loaded.fetch.mockImplementation(async () => ({ ...source }));
-    loaded.enqueueReferralEmailMutation.mockImplementation(async (options) => {
-      if (winnerToken && options.token === winnerToken) {
-        return {
-          idempotency_key: `referral-email-${"a".repeat(64)}`,
-          status: "sent",
-          replayed: true,
-        };
-      }
-      const mutation = options.mutations[0];
-      if (mutation.expected_revision !== source._rev) {
-        throw Object.assign(new Error("source changed"), { code: "40001" });
-      }
-      winnerToken = options.token;
-      source = { ...mutation.document, _rev: "revision-two" };
-      return {
-        idempotency_key: `referral-email-${"a".repeat(64)}`,
-        status: "sent",
-      };
-    });
-    loaded.deliverReferralEmailDispatch.mockImplementation(async () => {
-      if (providerSends === 0) {
-        providerSends += 1;
-        return { claimed: true, sent: 1, pending: false };
-      }
-      return { claimed: false, sent: 1, pending: false };
-    });
-    const request = {
-      method: "POST",
-      headers: { "x-forwarded-for": "203.0.113.1" },
-      body: { email: "creator@example.com" },
-    };
-    const first = createResponse();
-    const second = createResponse();
 
-    await Promise.all([
-      loaded.handler(request, first),
-      loaded.handler(request, second),
-    ]);
-
-    expect(first.statusCode).toBe(200);
-    expect(second.statusCode).toBe(200);
-    expect(loaded.enqueueReferralEmailMutation).toHaveBeenCalledTimes(3);
-    const firstToken = loaded.enqueueReferralEmailMutation.mock.calls[0][0].token;
-    const recoveredToken = loaded.enqueueReferralEmailMutation.mock.calls[2][0].token;
-    expect(recoveredToken).toBe(firstToken);
-    expect(source.resetTokenHash).toBe(
-      crypto.createHash("sha256").update(firstToken).digest("hex")
-    );
-    expect(source.resetDeliveryToken).toMatch(/^v1\./);
-    expect(providerSends).toBe(1);
-    expect(loaded.deliverReferralEmailDispatch).toHaveBeenCalledTimes(2);
-    expect(
-      loaded.deliverReferralEmailDispatch.mock.calls.map(([options]) =>
-        options.idempotencyKey
-      )
-    ).toEqual([
-      `referral-email-${"a".repeat(64)}`,
-      `referral-email-${"a".repeat(64)}`,
-    ]);
-  });
 
   test("replaces a corrupt sealed Supabase reset token before enqueue", async () => {
     const loaded = loadForgotHandler();

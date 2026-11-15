@@ -1,3 +1,4 @@
+import { WRITE_CONFLICT_CODE } from "./writeConflict.js";
 import envValue from "./envValue.cjs";
 const { resolveStoreBackend } = envValue;
 import crypto from "node:crypto";
@@ -69,8 +70,7 @@ const requireRpcData = ({ data, error }, operation) => {
     const statusByCode = {
       "22023": 400,
       "23505": 409,
-      "40001": 409,
-      PT409: 409,
+      [WRITE_CONFLICT_CODE]: 409,
       "55000": 503,
       "55006": 503,
       P0002: 404,

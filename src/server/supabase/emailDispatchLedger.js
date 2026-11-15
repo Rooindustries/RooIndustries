@@ -1,3 +1,4 @@
+import { isWriteConflict } from "./writeConflict.js";
 import crypto from "node:crypto";
 
 const normalizeDispatch = (value = {}) => ({
@@ -102,7 +103,7 @@ export const readTerminalBookingEmailDispatches = async ({
         });
         return [recipientType, dispatch];
       } catch (error) {
-        if (error.code !== "40001") throw error;
+        if (!isWriteConflict(error)) throw error;
       }
     }
     return [recipientType, normalizeDispatch()];

@@ -1,3 +1,4 @@
+import { isWriteConflict } from "../../supabase/writeConflict.js";
 import envValue from "../../supabase/envValue.cjs";
 const { readOutsideEnvValue } = envValue;
 import crypto from "node:crypto";
@@ -44,7 +45,7 @@ const requireRpcData = ({ data, error }, operation) => {
   failure.status = error.status || 503;
   failure.statusCode = failure.status;
   failure.referralEmailSourceStateConflict =
-    String(error.code || "") === "40001";
+    isWriteConflict(error);
   throw failure;
 };
 

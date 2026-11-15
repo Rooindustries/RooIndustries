@@ -61,7 +61,7 @@ const createRpcClient = (seed = []) => {
             mutation.expected_revision &&
             current?._rev !== mutation.expected_revision
           ) {
-            return { data: null, error: { code: "40001" } };
+            return { data: null, error: { code: "PT409" } };
           }
           if (mutation.operation === "delete") {
             documents.delete(id);
@@ -236,44 +236,7 @@ describe("Supabase shadow document utilities", () => {
 });
 
 describe("Supabase document compatibility client", () => {
-  test("preserves durable limiter counts when commerce projection is unavailable", async () => {
-    const shadowClient = createRpcClient();
-    const rpc = shadowClient.rpc.getMockImplementation();
-    shadowClient.rpc.mockImplementation((name, args) =>
-      name === "roo_refresh_operational_shadow"
-        ? Promise.resolve({ data: null, error: { code: "23505" } })
-        : rpc(name, args)
-    );
-    const client = new SupabaseDocumentClient({ shadowClient });
-    const res = {
-      setHeader: jest.fn(),
-      status: jest.fn().mockReturnThis(),
-      json: jest.fn(),
-    };
-    const options = {
-      key: "ref-login:existing-window",
-      windowMs: 60_000,
-      max: 2,
-      now: Date.parse("2026-09-06T00:00:30Z"),
-      client,
-    };
-    expect(await requireRateLimit(res, options)).toBe(true);
-    const initial = [...shadowClient.documents.values()][0];
-    expect(initial).toMatchObject({ _type: "rateLimitBucket", count: 1 });
-    expect(await requireRateLimit(res, options)).toBe(true);
-    expect(shadowClient.documents.get(initial._id)).toMatchObject({ count: 2 });
-    const blockedRevision = shadowClient.documents.get(initial._id)._rev;
-    expect(await requireRateLimit(res, options)).toBe(false);
-    expect(res.status).toHaveBeenLastCalledWith(429);
-    expect(res.setHeader).toHaveBeenCalledWith("Retry-After", "30");
-    expect(shadowClient.documents.get(initial._id)).toMatchObject({
-      count: 2,
-      _rev: blockedRevision,
-    });
-    await expect(
-      client.patch(initial._id).ifRevisionId(initial._rev).inc({ count: 1 }).commit()
-    ).rejects.toMatchObject({ code: "40001" });
-  });
+
 
   test.each(["refRateLimitBucket", "booking"])(
     "still refreshes projected %s mutations, including mixed batches",

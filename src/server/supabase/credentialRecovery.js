@@ -1,3 +1,4 @@
+import { WRITE_CONFLICT_CODE, isWriteConflict } from "./writeConflict.js";
 import envValue from "./envValue.cjs";
 const { resolveStoreBackend } = envValue;
 import bcrypt from "bcryptjs";
@@ -17,7 +18,6 @@ const mark = (client, operationKey, status, errorCode = null) =>
   });
 
 const DETERMINISTIC_ERROR_CODES = new Set([
-  "40001",
   "55000",
   "P0002",
   "SOURCE_REVISION_CONFLICT",
@@ -36,7 +36,7 @@ const MISSING_RECOVERY_RECORDER_CODES = new Set([
 
 const RECOVERY_ERROR_MESSAGES = {
   CREDENTIAL_AUTH_OUTCOME_UNKNOWN: "Credential Auth outcome requires verified recovery.",
-  "40001": "Credential source precondition changed.",
+  [WRITE_CONFLICT_CODE]: "Credential source precondition changed.",
   "55000": "Credential source operation is not ready.",
   P0002: "Credential source document is unavailable.",
   SOURCE_REVISION_CONFLICT: "Credential source revision changed.",
@@ -64,7 +64,7 @@ const errorClassification = (error) => {
   const code = errorCode(error);
   return {
     code,
-    errorClass: DETERMINISTIC_ERROR_CODES.has(code)
+    errorClass: isWriteConflict({ code }) || DETERMINISTIC_ERROR_CODES.has(code)
       ? "deterministic"
       : "transient",
     message: String(

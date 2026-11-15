@@ -1,3 +1,4 @@
+import { WRITE_CONFLICT_CODE } from "./writeConflict.js";
 import crypto from "node:crypto";
 import { evaluate, parse } from "groq-js";
 import { isBookingBlockingStatus } from "../booking/bookingStatus.js";
@@ -147,7 +148,7 @@ const removePath = (object, path) => {
 
 const revisionConflict = () => {
   const error = new Error("Document revision conflict.");
-  error.code = "40001";
+  error.code = WRITE_CONFLICT_CODE;
   error.status = 409;
   error.statusCode = 409;
   return error;

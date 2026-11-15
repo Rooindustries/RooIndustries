@@ -1,3 +1,4 @@
+import { isWriteConflict } from "../../supabase/writeConflict.js";
 import crypto from "node:crypto";
 import { createDataClient as createClient } from "../../data/documentClient.js";
 import {
@@ -13,7 +14,7 @@ import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 const client = createClient({}, { allowLegacyFallback: false });
 
 const isVerificationSourceConflict = (error) => {
-  if (String(error?.code || "") === "40001") return true;
+  if (isWriteConflict(error)) return true;
   return (
     Number(error?.statusCode || error?.status || 0) === 409 &&
     error?.code !== "CREATOR_ACCOUNT_INACTIVE"

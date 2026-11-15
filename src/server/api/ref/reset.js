@@ -1,3 +1,4 @@
+import { isWriteConflict } from "../../supabase/writeConflict.js";
 import { createDataClient as createClient } from "../../data/documentClient.js";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
@@ -123,7 +124,7 @@ export default async function handler(req, res) {
         }
       } catch (error) {
         logSafeError("Supabase referral password update failed", error);
-        if (["23505", "40001"].includes(String(error?.code || ""))) {
+        if ((isWriteConflict(error) || String(error?.code || "") === "23505")) {
           return res
             .status(400)
             .json({ ok: false, error: "Invalid or expired reset link" });

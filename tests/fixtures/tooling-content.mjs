@@ -177,7 +177,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
       if (!value?._id || !value?._type || !['create', 'replace'].includes(mutation.operation)) throw new Error('Unsupported fixture mutation.');
       const index = next.findIndex(row => row._id === value._id);
       if (mutation.operation === 'create' && index >= 0) throw Object.assign(new Error('Synthetic duplicate ID.'), { status: 409, code: '23505' });
-      if (mutation.operation === 'replace' && (index < 0 || next[index]._rev !== mutation.expected_revision)) throw Object.assign(new Error('Synthetic revision conflict.'), { status: 409, code: '40001' });
+      if (mutation.operation === 'replace' && (index < 0 || next[index]._rev !== mutation.expected_revision)) throw Object.assign(new Error('Synthetic revision conflict.'), { status: 409, code: 'PT409' });
       const saved = { ...value, _rev: `tooling-fixture-${++revision}` };
       if (index >= 0) next[index] = saved;
       else next.push(saved);
@@ -434,7 +434,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
         json(res, 200, results);
       } else if (apiRoutes && req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_enqueue_referral_email_mutation') {
         if (enqueueDelayMs) await new Promise(resolve => setTimeout(resolve, enqueueDelayMs));
-        if (delivery === 'token_conflict') throw Object.assign(new Error('Synthetic reset token revision conflict.'), { status: 409, code: '40001' });
+        if (delivery === 'token_conflict') throw Object.assign(new Error('Synthetic reset token revision conflict.'), { status: 409, code: 'PT409' });
         if (delivery === 'enqueue_failed') throw Object.assign(new Error('Synthetic email enqueue outage.'), { status: 503, code: 'FIXTURE_ENQUEUE_UNAVAILABLE' });
         mutate(body.p_mutations);
         const key = `referral-email-${createHash('sha256').update(`${body.p_dispatch_kind}:${body.p_referral_id}:${body.p_token_hash}:${body.p_recipient_hash}`).digest('hex')}`;

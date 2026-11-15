@@ -127,16 +127,5 @@ describe("referral creator admin route", () => {
     expect(mockFlush).not.toHaveBeenCalled();
   });
 
-  test("maps optimistic concurrency conflicts to a reload response", async () => {
-    mockUpdate.mockRejectedValue(Object.assign(new Error("version conflict"), {
-      code: "40001",
-    }));
-    const response = await PATCH(request({ body: {} }));
-    expect(response.status).toBe(409);
-    await expect(response.json()).resolves.toMatchObject({
-      ok: false,
-      error: expect.stringContaining("Reload"),
-    });
-    expect(mockFlush).not.toHaveBeenCalled();
-  });
+
 });

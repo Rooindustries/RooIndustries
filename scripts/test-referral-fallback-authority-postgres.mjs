@@ -126,7 +126,7 @@ begin
     for update;
     if v_operation = 'replace' then
       if not found or v_existing.source_revision is distinct from v_mutation->>'expected_revision' then
-        raise exception 'document revision conflict' using errcode='40001';
+        raise exception 'document revision conflict' using errcode='PT409';
       end if;
     elsif v_operation = 'create_if_missing' and found then
       v_results := v_results || jsonb_build_array(v_existing.payload);
@@ -237,6 +237,21 @@ try {
     path.join(
       root,
       "supabase/migrations/20260715100000_add_referral_fallback_authority.sql"
+    ),
+  ]);
+  run(path.join(pgBin, "psql"), [
+    "-h",
+    postgresHost,
+    "-p",
+    String(port),
+    "-d",
+    "postgres",
+    "-v",
+    "ON_ERROR_STOP=1",
+    "-f",
+    path.join(
+      root,
+      "supabase/migrations/20261115000000_return_deliberate_conflicts_at_once.sql"
     ),
   ]);
 

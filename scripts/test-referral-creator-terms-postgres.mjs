@@ -105,7 +105,7 @@ begin
   if p_cutover_generation <> (
     select generation from migration.commerce_control where singleton
   ) then
-    raise exception 'Commerce generation is stale' using errcode = '40001';
+    raise exception 'Commerce generation is stale' using errcode = 'PT409';
   end if;
   update migration.source_documents
   set payload = v_document,
@@ -115,7 +115,7 @@ begin
   where legacy_sanity_id = v_id
     and source_revision = p_mutations->0->>'expected_revision';
   if not found then
-    raise exception 'document revision conflict' using errcode = '40001';
+    raise exception 'document revision conflict' using errcode = 'PT409';
   end if;
   perform public.roo_project_referral_account_shadow(array[v_id]);
   insert into migration.commerce_mirror_outbox(command_id, documents)
@@ -151,6 +151,16 @@ try {
     "-f", path.join(
       root,
       "supabase/migrations/20260715080000_add_referral_creator_terms_editor.sql"
+    ),
+  ]);
+  run(path.join(pgBin, "psql"), [
+    "-h", postgresHost,
+    "-p", String(port),
+    "-d", "postgres",
+    "-v", "ON_ERROR_STOP=1",
+    "-f", path.join(
+      root,
+      "supabase/migrations/20261115000000_return_deliberate_conflicts_at_once.sql"
     ),
   ]);
 
@@ -264,7 +274,7 @@ try {
       'terms-fixture-wrong-generation', ${creatorId}, 1, 2000, 1000, 1000, true,
       'Wrong generation fixture', 0
     )`,
-    (error) => error.code === "40001"
+    (error) => error.code === "PT409"
   );
   await sql`
     update migration.commerce_control set primary_backend='sanity' where singleton
@@ -378,7 +388,7 @@ try {
       'terms-fixture-0002', ${creatorId}, 2, 2000, 1000, 1000, false,
       'Stale fixture update', 1
     )`,
-    (error) => error.code === "40001"
+    (error) => error.code === "PT409"
   );
   await assert.rejects(
     sql`select public.roo_admin_update_creator_terms(
