@@ -46,14 +46,19 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
     fs.writeFileSync(artifact, JSON.stringify(evidence, null, 2));
   };
   let originalFetch;
+  let restoreNetwork;
   let database;
   const stop = async () => {
     if (server.listening) {
       server.closeAllConnections();
       await new Promise(resolve => server.close(resolve));
     }
-    if (database) await database.stop();
+    if (database) {
+      await database.stop();
+      fs.rmSync(database.scratch, { recursive: true, force: true });
+    }
     if (originalFetch) globalThis.fetch = originalFetch;
+    restoreNetwork?.();
     evidence.stopped = true;
     save();
   };
@@ -71,7 +76,7 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
       postgrestBin: process.env.POSTGREST_BIN || 'postgrest',
     });
     origins = [base, database.origin, database.postgrestUrl, `http://${host}:${database.pgPort}`];
-    installNetworkGuard(origins);
+    restoreNetwork = installNetworkGuard(origins);
     originalFetch = globalThis.fetch;
     evidence.database = {
       version: database.postgresVersion, postgrest: database.postgrestVersion,
@@ -306,6 +311,7 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
       setRequestHook: database.setRequestHook };
   } catch (error) {
     await stop();
+    if (error.scratch) fs.rmSync(error.scratch, { recursive: true, force: true });
     throw error;
   }
 }
