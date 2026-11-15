@@ -578,9 +578,7 @@ export default function Navbar() {
               data-nav-target="plans"
               aria-current={isActive("/packages") ? "page" : isPlansActive ? "location" : undefined}
               onClick={(event) => handleSectionLinkClick(event, SECTION_HASHES.plans)}
-              className={`nav-cta inline-flex items-center gap-2 px-2 py-1.5 text-[11px] min-[360px]:px-2.5
-                min-[360px]:text-xs sm:px-5 sm:py-3 sm:text-base font-semibold whitespace-nowrap rounded-full
-                text-white transition ${isPlansActive ? "ring-2 ring-[color:var(--color-focus-ring)]" : ""}`}
+              className="nav-cta inline-flex items-center gap-2 px-2 py-1.5 text-[11px] min-[360px]:px-2.5 min-[360px]:text-xs sm:px-5 sm:py-3 sm:text-base font-semibold whitespace-nowrap rounded-full text-white transition"
             >
               Packages
             </a>
