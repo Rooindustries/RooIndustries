@@ -19,21 +19,21 @@ const slugFromSearch = (search) => {
   return TITLE_BY_SLUG.has(slug) ? slug : "";
 };
 
-const bookable = (list) =>
-  BOOKABLE_TITLES.some((title) => findPackageBySlug(list, getPackageSlug(title))) ? list : null;
+const firstPackage = (list, slugs) => slugs.reduce((found, slug) => found || findPackageBySlug(list, slug), null);
 
-function usePackagesOfRecord(needed) {
+function usePackagesOfRecord(needed, slugs) {
   const hydrating = useHydrating();
   const [fetched, setFetched] = useState(null);
   const [failed, setFailed] = useState(false);
-  const packages = hydrating || !needed ? null : fetched || bookable(readHomeSectionData(PACKAGES));
+  const usable = (list) => (firstPackage(list, slugs) ? list : null);
+  const packages = hydrating || !needed ? null : usable(fetched) || usable(readHomeSectionData(PACKAGES));
   const loading = needed && !packages && !failed;
   useEffect(() => {
     if (hydrating || !loading) return undefined;
     let active = true;
     fetchHomeSectionData(PACKAGES, { cached: false }).then((list) => {
       if (!active) return;
-      if (bookable(list)) setFetched(list);
+      if (firstPackage(list, slugs)) setFetched(list);
       else setFailed(true);
     }, (error) => {
       reportRequestError(error);
@@ -42,7 +42,7 @@ function usePackagesOfRecord(needed) {
     return () => {
       active = false;
     };
-  }, [hydrating, loading]);
+  }, [hydrating, loading, slugs]);
   useBookingDialogPending(loading);
   const retry = useCallback(() => setFailed(false), []);
   return { packages, loading, retry };
@@ -58,18 +58,19 @@ const packageFromState = (state) => {
 export function useBookingPackage(location, storedPackage) {
   const statePackage = useMemo(() => packageFromState(location.state), [location.state]);
   const priced = Boolean(statePackage?.price);
-  const { packages, loading, retry } = usePackagesOfRecord(!priced);
   const slug = statePackage ? getPackageSlug(statePackage.title) : slugFromSearch(location.search);
   const storedTitle = storedPackage?.title || "";
+  const storedSlug = getPackageSlug(storedTitle);
+  const slugs = useMemo(() => [slug, storedSlug, DEFAULT_SLUG], [slug, storedSlug]);
+  const { packages, loading, retry } = usePackagesOfRecord(!priced, slugs);
   const choice = useMemo(() => {
     if (priced) return { navigationPackage: statePackage, bookingPackage: statePackage, pricesReady: true };
     const requested = findPackageBySlug(packages, slug);
-    const ofRecord = requested || findPackageBySlug(packages, getPackageSlug(storedTitle)) ||
-      findPackageBySlug(packages, DEFAULT_SLUG);
+    const ofRecord = firstPackage(packages, slugs);
     if (ofRecord) return { navigationPackage: requested, bookingPackage: ofRecord, pricesReady: true };
     const title = statePackage?.title || TITLE_BY_SLUG.get(slug) || storedTitle || DEFAULT_PACKAGE_TITLE;
     return { navigationPackage: null, bookingPackage: { title, price: "" }, pricesReady: false };
-  }, [priced, statePackage, packages, slug, storedTitle]);
+  }, [priced, statePackage, packages, slug, slugs, storedTitle]);
   const pricesError = choice.pricesReady || loading ? "" : PRICES_ERROR;
   return { ...choice, pricesError, retryPrices: retry };
 }

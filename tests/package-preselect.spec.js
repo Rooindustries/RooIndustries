@@ -278,6 +278,9 @@ test.describe("a held slot on a package link", () => {
     ["fails to load", (route) => route.fulfill({ status: 503, json: { ok: false } })],
     ["arrives empty", (route) => route.fulfill({ json: { ok: true, data: [] } })],
     ["has no bookable package", (route) => route.fulfill({ json: { ok: true, data: [{ title: "Gift Card" }] } })],
+    ["has only a package this booking did not ask for", (route) => route.fulfill({
+      json: { ok: true, data: [{ title: bySlug.max.title, price: "$149.99" }] },
+    })],
   ];
   for (const [problem, answer] of unusableLists) {
     test(`a packages list that ${problem} shows no price and a retry that keeps the slot and details`, async ({
