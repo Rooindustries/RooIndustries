@@ -50,9 +50,16 @@ test('a stale creator terms save shows the conflict', async ({ page, request }) 
     reason: 'A newer edit',
   } });
   expect(newer.ok(), await newer.text()).toBe(true);
+  const callsUrl = `http://127.0.0.1:${fixturePort('TOOLING_ADMIN_CONTROL_PORT')}/creator-terms-rpcs`;
+  const beforeCalls = await (await request.get(callsUrl)).json();
   const response = page.waitForResponse((item) => item.url().endsWith('/api/admin/referral-creators') && item.request().method() === 'PATCH');
   await page.getByRole('button', { name: 'Save creator settings', exact: true }).click();
-  expect((await response).status()).toBe(409);
+  const conflict = await response;
+  expect(conflict.status()).toBe(409);
+  expect(await conflict.json()).toMatchObject({ ok: false, error: expect.stringContaining('Reload') });
+  const calls = (await (await request.get(callsUrl)).json()).slice(beforeCalls.length);
+  expect(calls).toContain('roo_admin_update_creator_terms');
+  expect(calls.some((rpc) => rpc.includes('mirror'))).toBe(false);
   await expect(page.getByRole('alert').filter({ hasText: /draft conflict/i })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Save creator settings', exact: true })).toBeDisabled();
 });

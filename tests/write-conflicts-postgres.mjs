@@ -109,15 +109,19 @@ test('write conflicts return through the application', async (t) => {
         } else if (request.status === 409 && request.response?.code === 'PT409') conflicts++;
       });
       try {
+        const providerRequests = fixture.evidence.providerRequests.length;
         const request = new Request('http://127.0.0.1/api/ref/forgot', {
           method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email }),
         });
         const response = await within(runLegacyApiHandler({ request, handler }), 2000);
         assert.equal(response.status, 200);
+        assert.deepEqual(await response.json(), { ok: true, message: 'If email exists, link sent.' });
         assert.equal(attempts, 3);
         assert.equal(conflicts, 3);
         const [{ count }] = await database.sql`select count(*)::int count from accounts.referral_email_dispatches where referral_id = ${id}`;
         assert.equal(count, 0);
+        assert.equal(database.requestLog.some((entry) => entry.rpc === 'roo_claim_referral_email_dispatch'), false);
+        assert.equal(fixture.evidence.providerRequests.length, providerRequests);
       } finally { database.setRequestHook(null); await stopRequests(); }
     });
 
