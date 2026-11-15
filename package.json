@@ -184,6 +184,7 @@
     ]
   },
   "devDependencies": {
+    "@babel/parser": "7.29.9",
     "@lhci/cli": "0.15.1",
     "@playwright/test": "^1.55.0",
     "autoprefixer": "^10.4.21",
