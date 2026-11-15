@@ -37,7 +37,11 @@ const test = base.extend({
     try {
       await use();
     } finally {
-      await session.detach();
+      try {
+        await session.detach();
+      } catch (error) {
+        if (!page.isClosed()) throw error;
+      }
     }
   }, { auto: true }],
   flow: async ({ page, context, baseURL }, use, testInfo) => {
