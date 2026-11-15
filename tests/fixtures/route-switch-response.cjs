@@ -151,7 +151,8 @@ const installMeasurement = async page => {
         const high = Number(to.opacity);
         if (fade.anchor === null || high < 0.5) return null;
         if (fade.timing.easing !== "linear" || from.easing !== "linear") {
-          state.timingError = `the bar's fade easing is ${from.easing}, the reading needs linear`;
+          const easing = fade.timing.easing !== "linear" ? fade.timing.easing : from.easing;
+          state.timingError = `the bar's fade easing is ${easing}, the reading needs linear`;
           return null;
         }
         const progress = low >= 0.5 ? 0 : (0.5 - low) / (high - low);
@@ -254,7 +255,9 @@ const segmentPainted = async (page, position) => {
   const color = segment.color.match(/^rgb\((\d+), (\d+), (\d+)\)$/);
   if (!color) throw new Error(`Unexpected accent color: ${segment.color}`);
   const rgb = color.slice(1).map(Number);
-  const png = await page.screenshot({ clip: { x: 0, y: 0, width: segment.width, height: segment.rows }, scale: "css" });
+  if (segment.rows !== 3) return `the segment is ${segment.rows} px high, not 3, at ${position}`;
+  const clip = { x: 0, y: 0, width: segment.width, height: segment.rows };
+  const png = await page.screenshot({ clip, scale: "css" });
   const { data, info } = await sharp(png).removeAlpha().raw().toBuffer({ resolveWithObject: true });
   if (segment.right - segment.left < 10) return `the segment is under 10 px at ${position}`;
   for (let row = 0; row < info.height; row += 1) {
