@@ -2,7 +2,6 @@ import { handleCmsRequest } from "../../../../../../src/server/cms/http.js";
 import { finalizeCmsUpload } from "../../../../../../src/server/cms/assets.js";
 
 export const runtime = "nodejs";
-export const preferredRegion = "dub1";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 

@@ -158,7 +158,7 @@
     "test:reproducible-build": "node --test tests/reproducible-build.test.mjs",
     "test:build-lock": "node --test tests/build-lock.test.mjs",
     "check:repository-files": "node scripts/check-repository-files.mjs",
-    "test:repository-files": "node --test tests/repository-files.test.mjs",
+    "test:repository-files": "node --test tests/repository-files.test.mjs && node scripts/check-content-regions.mjs",
     "test:runner-routing": "node --test tests/runner-routing.test.mjs"
   },
   "eslintConfig": {

@@ -7,7 +7,6 @@ import { cmsError } from "@/src/server/cms/errors.js";
 import { logSafeError } from "@/src/server/safeErrorLog.js";
 
 export const runtime = "nodejs";
-export const preferredRegion = "dub1";
 export const dynamic = "force-dynamic";
 
 export const POST = async request => {
