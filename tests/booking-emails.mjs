@@ -633,7 +633,10 @@ test('booking confirmation eligibility against PostgreSQL 17', { timeout: 300000
           ('roo_claim_booking_email_dispatch', 'roo_complete_booking_email_dispatch',
            'roo_list_email_dispatch_recovery_bookings', 'roo_fetch_recovery_payment_documents')`;
         for (const definition of definitions) await database.sql.unsafe(definition.sql);
-      } else await database.sql.unsafe(fs.readFileSync(file, 'utf8'));
+      } else {
+        await database.sql.unsafe(fs.readFileSync(file, 'utf8'));
+        await database.sql.unsafe(fs.readFileSync(new URL('../supabase/migrations/20261115000000_return_deliberate_conflicts_at_once.sql', import.meta.url), 'utf8'));
+      }
       const after = await database.sql`select id, to_jsonb(dispatch) as row from commerce.email_dispatches dispatch order by id`;
       assert.deepEqual(after, before);
       result.reapplied = true;

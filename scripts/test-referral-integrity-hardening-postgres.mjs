@@ -286,7 +286,7 @@ begin
       and primary_backend='supabase'
       and generation=p_generation
   ) then
-    raise exception 'Commerce generation is stale' using errcode='40001';
+    raise exception 'Commerce generation is stale' using errcode='PT409';
   end if;
 end;
 $$;
@@ -383,7 +383,7 @@ begin
     end if;
     if v_expected_revision is not null
       and v_current.source_revision is distinct from v_expected_revision then
-      raise exception 'document revision conflict' using errcode='40001';
+      raise exception 'document revision conflict' using errcode='PT409';
     end if;
     if v_operation = 'delete' then
       update migration.source_documents
@@ -487,6 +487,7 @@ const migrationFiles = [
   "20260720091000_harden_referral_email_dispatch_source_state.sql",
   "20260720092000_add_referral_recovery_evidence.sql",
   "20260720093000_ignore_namespaced_mirror_metadata.sql",
+  "20261115000000_return_deliberate_conflicts_at_once.sql",
 ];
 
 const digest = (value) =>
@@ -674,7 +675,7 @@ try {
         ${sql.json(creatorAccount("active", "lifecycle-r1"))}::jsonb
       )
     `,
-    (error) => error.code === "40001"
+    (error) => error.code === "PT409"
   );
 
   await sql`

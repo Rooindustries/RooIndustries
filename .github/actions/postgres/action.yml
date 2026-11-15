@@ -1,5 +1,5 @@
 name: Install PostgreSQL 17 and PostgREST 16.4
-description: Installs the database and REST server the native suites run against, and exports PG_BIN and POSTGREST_BIN.
+description: Installs PostgreSQL and PostgREST 16.4 and 14.5, and exports PG_BIN, POSTGREST_BIN, and POSTGREST_14_BIN.
 runs:
   using: composite
   steps:
@@ -7,6 +7,10 @@ runs:
       with:
         path: ~/.cache/roo-postgrest
         key: postgrest-v16.4-linux-static-x86-64-b47ecc82
+    - uses: actions/cache@v4
+      with:
+        path: ~/.cache/roo-postgrest-14
+        key: postgrest-v14.5-linux-static-x86-64-ab5cc7e9
     - if: ${{ !startsWith(runner.name, 'devbox-') }}
       shell: bash
       run: |
@@ -31,3 +35,13 @@ runs:
         test "$("$RUNNER_TEMP/postgrest/postgrest" --version)" = "PostgREST 16.4"
         echo "PG_BIN=/usr/lib/postgresql/17/bin" >> "$GITHUB_ENV"
         echo "POSTGREST_BIN=$RUNNER_TEMP/postgrest/postgrest" >> "$GITHUB_ENV"
+        archive14="$HOME/.cache/roo-postgrest-14/postgrest.tar.xz"
+        mkdir -p "$(dirname "$archive14")" "$RUNNER_TEMP/postgrest-14"
+        if [ ! -f "$archive14" ]; then
+          curl --fail --silent --show-error --location --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 20 \
+            https://github.com/PostgREST/postgrest/releases/download/v14.5/postgrest-v14.5-linux-static-x86-64.tar.xz -o "$archive14"
+        fi
+        echo "ab5cc7e974d4940447991804588cfb8b3f7b2c57b691f0905df04d51ede69470  $archive14" | sha256sum --check
+        tar -xJf "$archive14" -C "$RUNNER_TEMP/postgrest-14"
+        test "$("$RUNNER_TEMP/postgrest-14/postgrest" --version)" = "PostgREST 14.5"
+        echo "POSTGREST_14_BIN=$RUNNER_TEMP/postgrest-14/postgrest" >> "$GITHUB_ENV"

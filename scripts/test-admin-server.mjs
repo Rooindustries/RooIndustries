@@ -156,6 +156,10 @@ try {
     if (request.method === "GET" && request.url === "/fixture") {
       response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(marker)); return;
     }
+    if (request.method === "GET" && request.url === "/creator-terms-rpcs") {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify(fixture.requestLog.map(({ rpc }) => rpc).filter(Boolean))); return;
+    }
     if (request.method === "POST" && request.url === "/emails") {
       let raw = "";
       for await (const chunk of request) raw += chunk;

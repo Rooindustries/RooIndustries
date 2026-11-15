@@ -11,6 +11,7 @@ import {
   fetchShadowDocuments,
   fetchUpgradeBookingChain,
 } from "./shadowStore.js";
+import { WRITE_CONFLICT_CODE } from "./writeConflict.js";
 
 const clone = (value) =>
   value === undefined ? undefined : JSON.parse(JSON.stringify(value));
@@ -147,7 +148,7 @@ const removePath = (object, path) => {
 
 const revisionConflict = () => {
   const error = new Error("Document revision conflict.");
-  error.code = "40001";
+  error.code = WRITE_CONFLICT_CODE;
   error.status = 409;
   error.statusCode = 409;
   return error;

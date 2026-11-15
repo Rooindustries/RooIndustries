@@ -7,6 +7,7 @@ import { buildResetEmailHtml } from "../../email/referralResetEmail.js";
 import { isIdempotencyPayloadConflict } from "../../email/resendOutcome.js";
 import { createSupabaseAdminClient } from "../../supabase/adminClient.js";
 import { getSafeErrorCode, logSafeError } from "../../safeErrorLog.js";
+import { isWriteConflict } from "../../supabase/writeConflict.js";
 
 const DISPATCH_KINDS = new Set([
   "registration_verification",
@@ -44,7 +45,7 @@ const requireRpcData = ({ data, error }, operation) => {
   failure.status = error.status || 503;
   failure.statusCode = failure.status;
   failure.referralEmailSourceStateConflict =
-    String(error.code || "") === "40001";
+    isWriteConflict(error);
   throw failure;
 };
 

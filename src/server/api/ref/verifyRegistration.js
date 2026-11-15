@@ -9,11 +9,12 @@ import { hashShadowDocument } from "../../supabase/shadowStore.js";
 import { logSafeError } from "../../safeErrorLog.js";
 import { setReferralSessionCookie } from "./auth.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
+import { isWriteConflict } from "../../supabase/writeConflict.js";
 
 const client = createClient({}, { allowLegacyFallback: false });
 
 const isVerificationSourceConflict = (error) => {
-  if (String(error?.code || "") === "40001") return true;
+  if (isWriteConflict(error)) return true;
   return (
     Number(error?.statusCode || error?.status || 0) === 409 &&
     error?.code !== "CREATOR_ACCOUNT_INACTIVE"

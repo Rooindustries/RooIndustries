@@ -362,6 +362,10 @@ jobs:
           playwright-ports: "3211"
       - name: Run native admin CMS suite
         run: xvfb-run -a npx playwright test -c playwright.admin.config.js
+      - name: Run write conflict browser cases
+        env:
+          POSTGREST_BIN: ${{ env.POSTGREST_14_BIN }}
+        run: xvfb-run -a npm run test:conflict-ui:postgres17
       - name: Run all six native booking-hold browser cases
         env:
           NEXT_DIST_DIR: .next-e2e-native-booking
@@ -432,7 +436,7 @@ jobs:
       - name: Run the payout and recovery suites
         uses: ./.github/actions/npm-suites
         with:
-          suites: creator-payouts:postgres17 booking-payment-window payment-recovery:postgres17
+          suites: creator-payouts:postgres17 booking-payment-window payment-recovery:postgres17 conflict-codes:postgrest write-conflicts:postgres17 referral-reset-conflict:postgres17
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

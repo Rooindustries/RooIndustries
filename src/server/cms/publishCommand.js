@@ -6,6 +6,7 @@ import { CMS_SYSTEM_FIELDS as system, preserveContentDocument, removedProtectedR
 import { contentType, documentId, loadDocument } from "./documents.js";
 import { cmsError, rpcData, validationError } from "./errors.js";
 import { assertGlobalCmsWritesAllowed } from "./writeControl.js";
+import { isWriteConflict } from "../supabase/writeConflict.js";
 
 const counters = new Set(["timesUsed", "activeReservations", "redemptionCount", "autoDeactivatedByRedemptionId", "autoDeactivatedAt"]);
 const hash = value => crypto.createHash("sha256").update(stableCmsJson(value)).digest("hex");
@@ -27,11 +28,11 @@ const refuseEnrichment = (value, path = "$", depth = 0) => {
     refuseEnrichment(item, `${path}.${key}`, depth + 1);
   }
 };
-const ROLLED_BACK_SQLSTATE = /^(22...|23...|40001|40P01|42501|55000|55006|P0001|P0002)$/;
+const ROLLED_BACK_SQLSTATE = /^(22...|23...|40P01|42501|55000|55006|P0001|P0002)$/;
 const rejectedBeforeCommit = ({ error, status }) => {
   const code = typeof error?.code === "string" ? error.code : "";
   if (status < 400) return false;
-  return ROLLED_BACK_SQLSTATE.test(code);
+  return isWriteConflict(error) || ROLLED_BACK_SQLSTATE.test(code);
 };
 const committed = (result, id) => {
   const record = result?.results?.find?.(entry => entry?._id === id || entry?.id === id) || result?.results?.[0];

@@ -93,7 +93,7 @@ begin
       delete from migration.source_documents
       where legacy_sanity_id=v_id
         and (v_expected is null or source_revision=v_expected);
-      if not found then raise exception 'revision conflict' using errcode='40001'; end if;
+      if not found then raise exception 'revision conflict' using errcode='PT409'; end if;
     elsif v_operation = 'create' then
       v_revision := replace(extensions.gen_random_uuid()::text, '-', '');
       v_payload := v_mutation->'document' || jsonb_build_object('_rev', v_revision);
@@ -107,7 +107,7 @@ begin
       set source_revision=v_revision,payload=v_payload
       where legacy_sanity_id=v_id
         and (v_expected is null or source_revision=v_expected);
-      if not found then raise exception 'revision conflict' using errcode='40001'; end if;
+      if not found then raise exception 'revision conflict' using errcode='PT409'; end if;
       v_results := v_results || jsonb_build_array(v_payload);
     end if;
     insert into migration.mutation_audit(document_id,operation)
@@ -158,6 +158,21 @@ try {
     path.join(
       root,
       "supabase/migrations/20260715110000_add_referral_email_dispatch_ledger.sql"
+    ),
+  ]);
+  run(path.join(pgBin, "psql"), [
+    "-h",
+    postgresHost,
+    "-p",
+    String(port),
+    "-d",
+    "postgres",
+    "-v",
+    "ON_ERROR_STOP=1",
+    "-f",
+    path.join(
+      root,
+      "supabase/migrations/20261115000000_return_deliberate_conflicts_at_once.sql"
     ),
   ]);
 
@@ -406,7 +421,7 @@ try {
     p_error_code: null,
     p_retry_delay_seconds: 60,
   });
-  assert.equal(wrongLease.error.code, "40001");
+  assert.equal(wrongLease.error.code, "PT409");
   const firstCompletion = await rpc("roo_complete_referral_email_dispatch", {
     p_idempotency_key: firstBatch.data[0].idempotency_key,
     p_lease_id: firstLease,

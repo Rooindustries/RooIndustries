@@ -1,3 +1,4 @@
+import { isWriteConflict } from "../supabase/writeConflict.js";
 export const cmsError = (message, status, code, details) => Object.assign(new Error(message), { status, statusCode: status, code, ...(details === undefined ? {} : { details }) });
 export const validationError = (path, message) => cmsError("Content validation failed.", 400, "CMS_VALIDATION_FAILED", [{ path, message }]);
 export const rpcData = ({ data, error }, operation = "CMS operation") => {
@@ -25,7 +26,7 @@ export const rpcData = ({ data, error }, operation = "CMS operation") => {
   if (code === "CMS_CREATE_INTENT_CONFLICT") throw cmsError("This create attempt already published a document. Load it and edit the latest version.", 409, code, details);
   if (code) throw cmsError(code === "CMS_REVISION_CONFLICT" ? "This document changed. Reload and try again." : code === "CMS_REFERENCED" ? "This document is referenced by live content." : "This singleton already exists.", 409, code, details);
   if (text.startsWith("CMS_") && error.code === "23505") throw cmsError("This content conflicts with stored content.", 409, text.match(/^CMS_[A-Z0-9_]+/)[0], details);
-  if (["40001", "23505"].includes(error.code)) throw cmsError("This content conflicts with stored content.", 409, "CMS_REVISION_CONFLICT", details || { currentRevision: null });
+  if (isWriteConflict(error) || error.code === "23505") throw cmsError("This content conflicts with stored content.", 409, "CMS_REVISION_CONFLICT", details || { currentRevision: null });
   if (["22023", "23503", "23514"].includes(error.code)) throw validationError(details?.path || "$", text.startsWith("CMS_") ? text : "The request violates content integrity.");
   if (error.code === "P0002") throw cmsError("Document not found.", 404, "CMS_NOT_FOUND");
   throw cmsError(`${operation} is temporarily unavailable.`, 503, "CMS_UNAVAILABLE");

@@ -1012,7 +1012,7 @@ export default async function handler(req, res) {
               .ifRevisionId(patchedBooking._rev).set(patchValues).commit()) || { ...patchedBooking, ...patchValues };
             break;
           } catch (error) {
-            if (Number(error?.statusCode || error?.status || 0) !== 409 && error?.code !== "40001") throw error;
+            if (Number(error?.statusCode || error?.status || 0) !== 409) throw error;
             if (attempt === 1) break;
             patchedBooking = await getBookingForEmailDispatch({ bookingId: booking._id, client: writeClient });
             if (!patchedBooking?._id) return res.status(409).json({ error: "Stored booking is no longer available." });
