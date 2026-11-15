@@ -53,9 +53,9 @@ const scoreFile = path.join(scoreDir, "route-switch-score.json");
 const runId = process.ppid;
 
 const readState = () => {
-  if (!fs.existsSync(stateFile)) return { runId, results: {} };
+  if (!fs.existsSync(stateFile)) return { runId, results: {}, responses: {} };
   const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
-  return state.runId === runId ? state : { runId, results: {} };
+  return state.runId === runId ? state : { runId, results: {}, responses: {} };
 };
 
 test.use({ javaScriptEnabled: true, viewport: { width: 1440, height: 900 }, serviceWorkers: "block" });
@@ -177,6 +177,8 @@ test.describe("Scored page switches", () => {
     fs.mkdirSync(scoreDir, { recursive: true });
     const state = readState();
     state.results[info.title] = info.status === "passed";
+    const response = info.annotations.find(note => note.type === "route switch response");
+    if (response) state.responses[info.title] = response.description;
     fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
   });
 
@@ -186,6 +188,13 @@ test.describe("Scored page switches", () => {
     const failures = Object.entries(state.results).filter(([, passed]) => !passed).map(([name]) => name);
     fs.writeFileSync(scoreFile, JSON.stringify({ failures }, null, 2));
     console.log(`ROUTE SWITCH FAILURES: ${failures.length}/${entries.length + 6}`);
+    const [slowest] = Object.entries(state.responses)
+      .map(([name, value]) => [name, value === "none" ? Infinity : Number(value)])
+      .sort((first, second) => second[1] - first[1]);
+    if (slowest) {
+      const time = Number.isFinite(slowest[1]) ? `${slowest[1]} ms` : "no response";
+      console.log(`ROUTE SWITCH SLOWEST: ${time}, ${slowest[0]}`);
+    }
   });
 
   for (const entry of entries) {

@@ -1,7 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const sharp = require("sharp");
-const { expect } = require("@playwright/test");
+const { expect, test } = require("@playwright/test");
 const { holdChunks, holdRoute, inspectChunks } = require("./held-routes.cjs");
 const { waitForHydrated } = require("./react-hydration.cjs");
 const { declineCookies } = require("./booking-flow.cjs");
@@ -36,6 +36,9 @@ const targets = {
 const matches = (body, marker) => body.toString().startsWith('"use strict";') && body.includes(marker);
 
 const findChunk = (target, distDir) => {
+  if (!test.info().config.metadata.ownsToolingServer && !process.env.NEXT_DIST_DIR) {
+    throw new Error("BASE_URL is set, so NEXT_DIST_DIR must name the build that BASE_URL serves.");
+  }
   const details = targets[target];
   const chunkDir = path.join(distDir, "static/chunks");
   const chunks = fs.readdirSync(chunkDir, { recursive: true }).filter(file => file.endsWith(".js"));
@@ -108,44 +111,86 @@ const holdTargets = async (page, baseURL, names, distDir) => {
   return holds;
 };
 
-const measurements = new WeakMap();
-
 const installMeasurement = async page => {
-  const session = await page.context().newCDPSession(page);
-  const measurement = { session, frames: [] };
-  measurements.set(page, measurement);
-  session.on("Page.screencastFrame", ({ data, metadata, sessionId }) => {
-    measurement.frames.push({ data, timestamp: metadata.timestamp * 1000 });
-    session.send("Page.screencastFrameAck", { sessionId });
-  });
   await page.addInitScript(() => {
     window.routeSwitchMeasurement = null;
+    const barSelector = '[role="progressbar"][aria-label="Loading page"]';
+    const visible = (element, opacityProperty) => {
+      if (!element || !element.checkVisibility({ opacityProperty, visibilityProperty: true })) return false;
+      const box = element.getBoundingClientRect();
+      return box.width > 0 && box.height > 0 && box.bottom > 0 && box.top < innerHeight &&
+        box.right > 0 && box.left < innerWidth;
+    };
     document.addEventListener("click", () => {
       const state = window.routeSwitchMeasurement;
       if (!state || state.clicked !== null) return;
       state.clicked = performance.now();
+      const fades = [];
+      let loading = null;
+      const capture = bar => {
+        for (const animation of bar.getAnimations()) {
+          if (animation.transitionProperty !== "opacity" || fades.some(fade => fade.animation === animation)) continue;
+          fades.push({
+            animation, anchor: loading, ended: null, keyframes: animation.effect.getKeyframes(),
+            timing: animation.effect.getComputedTiming(), rate: animation.playbackRate,
+          });
+        }
+      };
+      const track = () => {
+        const bar = document.querySelector(barSelector);
+        if (bar && loading === null) loading = performance.now();
+        if (!bar && loading !== null) {
+          for (const fade of fades) fade.ended ??= performance.now();
+          loading = null;
+        }
+        if (bar) capture(bar);
+      };
+      const crossing = fade => {
+        const [from, to] = fade.keyframes;
+        const low = Number(from.opacity);
+        const high = Number(to.opacity);
+        if (fade.anchor === null || high < 0.5) return null;
+        if (fade.timing.easing !== "linear" || from.easing !== "linear") {
+          state.timingError = `the bar's fade easing is ${from.easing}, the reading needs linear`;
+          return null;
+        }
+        const progress = low >= 0.5 ? 0 : (0.5 - low) / (high - low);
+        const at = fade.anchor + (low >= 0.5 ? 0 : (fade.timing.delay + progress * fade.timing.duration) / fade.rate);
+        return fade.ended === null || fade.ended > at ? at : null;
+      };
       const observe = () => {
         if (document.querySelector(state.heading)) state.mounted = true;
         const headings = [...document.querySelectorAll("h1, h2")];
         if (headings.some(node => /we couldn.t load this page/i.test(node.textContent))) {
           state.error = true;
         }
+        track();
       };
-      new MutationObserver(observe).observe(document.documentElement, { childList: true, subtree: true });
+      new MutationObserver(observe).observe(document.documentElement, {
+        childList: true, subtree: true, attributes: true, attributeFilter: ["data-state", "role"],
+      });
+      document.addEventListener("transitionrun", event => {
+        if (event.propertyName === "opacity" && event.target.matches(barSelector)) capture(event.target);
+      }, true);
+      track();
+      window.routeSwitchSettle = () => {
+        const bar = document.querySelector(barSelector);
+        if (bar) capture(bar);
+        const crossings = fades.map(crossing).filter(at => at !== null);
+        const barAt = visible(bar, false) && crossings.length ? Math.min(...crossings) - state.clicked : null;
+        if (barAt !== null && (state.headingAt === null || barAt <= state.headingAt)) {
+          state.response = barAt;
+          state.responseKind = "bar";
+        } else if (state.headingAt !== null) {
+          state.response = state.headingAt;
+          state.responseKind = "heading";
+        }
+        return state;
+      };
       const frame = () => {
         const now = performance.now();
-        const bar = document.querySelector('[role="progressbar"][aria-label="Loading page"]');
-        const style = bar && getComputedStyle(bar);
-        const heading = document.querySelector(state.heading);
-        const visible = element => {
-          if (!element || !element.checkVisibility({ opacityProperty: true, visibilityProperty: true })) return false;
-          const box = element.getBoundingClientRect();
-          return box.width > 0 && box.height > 0 && box.bottom > 0 && box.top < innerHeight &&
-            box.right > 0 && box.left < innerWidth;
-        };
-        if (state.response === null && ((visible(bar) && Number(style.opacity) >= 0.5) || visible(heading))) {
-          state.response = now - state.clicked;
-          state.responseKind = visible(heading) ? "heading" : "bar";
+        if (state.headingAt === null && visible(document.querySelector(state.heading), true)) {
+          state.headingAt = now - state.clicked;
         }
         if (now - state.clicked >= 300) {
           state.measured = true;
@@ -157,15 +202,10 @@ const installMeasurement = async page => {
 };
 
 const armMeasurement = async (page, target) => {
-  const measurement = measurements.get(page);
-  measurement.frames = [];
-  measurement.accent = await page.evaluate(() =>
-    getComputedStyle(document.documentElement).getPropertyValue("--color-accent").trim());
-  await measurement.session.send("Page.startScreencast", { format: "png", everyNthFrame: 1 });
   await page.evaluate(({ route, heading, selector }) => {
     window.routeSwitchMeasurement = {
-      clicked: null, response: null, responseKind: null, pixels: null, pixelAt: null,
-      measured: false, mounted: false, error: false,
+      clicked: null, response: null, responseKind: null, pixels: null, headingAt: null,
+      timingError: null, measured: false, mounted: false, error: false,
       heading: selector || `#main-content [data-route-key="${route}"] ${heading || "h1"}`,
     };
   }, targets[target]);
@@ -184,39 +224,68 @@ const proofClick = async (page, label, mobile = false) => {
   await page.locator(`#${surface}-proof-menu`).getByRole("link", { name: label, exact: true }).click();
 };
 
-const measuredResponse = async page => {
-  await page.waitForFunction(() => window.routeSwitchMeasurement.measured);
-  const measurement = measurements.get(page);
-  await measurement.session.send("Page.stopScreencast");
-  const state = await page.evaluate(() => ({
-    ...window.routeSwitchMeasurement, origin: performance.timeOrigin,
-  }));
-  if (state.responseKind !== "bar") return;
-  const color = measurement.accent.match(/^#([0-9a-f]{6})$/i);
-  if (!color) throw new Error(`Unexpected accent color: ${measurement.accent}`);
-  const rgb = [0, 2, 4].map(offset => parseInt(color[1].slice(offset, offset + 2), 16));
-  let pixelAt = null;
-  for (const frame of measurement.frames) {
-    const elapsed = frame.timestamp - state.origin - state.clicked;
-    if (!Number.isFinite(elapsed) || elapsed < 0 || elapsed > 300) continue;
-    const image = sharp(Buffer.from(frame.data, "base64"));
-    const { width } = await image.metadata();
-    const pixels = await image.extract({ left: 0, top: 0, width, height: 3 }).removeAlpha().raw().toBuffer();
-    let run = 0;
-    for (let offset = 0; offset < pixels.length; offset += 3) {
-      const match = rgb.every((channel, index) => Math.abs(channel - pixels[offset + index]) <= 8);
-      run = match ? run + 1 : 0;
-      if (run >= 10) break;
-    }
-    if (run >= 10) {
-      pixelAt = elapsed;
-      break;
+const segmentPositions = [0.26, 0.5, 0.74];
+
+const segmentAt = (page, position) => page.evaluate(async position => {
+  const bar = document.querySelector('[role="progressbar"][aria-label="Loading page"]');
+  if (!bar || bar.dataset.state !== "loading") return null;
+  await Promise.all(bar.getAnimations().map(animation => animation.finished));
+  const segment = bar.firstElementChild;
+  segment.style.animation = "";
+  segment.style.transform = "";
+  for (const animation of segment.getAnimations()) {
+    animation.pause();
+    animation.currentTime = position * animation.effect.getComputedTiming().duration;
+  }
+  segment.style.transform = getComputedStyle(segment).transform;
+  segment.style.animation = "none";
+  window.routeSwitchSegment = segment;
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const box = segment.getBoundingClientRect();
+  return {
+    left: Math.max(0, Math.ceil(box.left) + 1), right: Math.min(innerWidth, Math.floor(box.right) - 1),
+    rows: Math.floor(box.height), width: innerWidth, color: getComputedStyle(segment).backgroundColor,
+  };
+}, position);
+
+const segmentPainted = async (page, position) => {
+  const segment = await segmentAt(page, position);
+  if (!segment) return `the bar is not loading at ${position}`;
+  const color = segment.color.match(/^rgb\((\d+), (\d+), (\d+)\)$/);
+  if (!color) throw new Error(`Unexpected accent color: ${segment.color}`);
+  const rgb = color.slice(1).map(Number);
+  const png = await page.screenshot({ clip: { x: 0, y: 0, width: segment.width, height: segment.rows }, scale: "css" });
+  const { data, info } = await sharp(png).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  if (segment.right - segment.left < 10) return `the segment is under 10 px at ${position}`;
+  for (let row = 0; row < info.height; row += 1) {
+    for (let column = segment.left; column < segment.right; column += 1) {
+      const offset = (row * info.width + column) * 3;
+      const pixel = [...data.subarray(offset, offset + 3)];
+      if (!rgb.every((channel, index) => Math.abs(channel - pixel[index]) <= 8)) {
+        const shown = await page.evaluate(() => window.routeSwitchSegment.isConnected ? "the bar" : "a new bar");
+        return `pixel ${column},${row} is rgb(${pixel.join(", ")}), not ${segment.color}, at ${position} on ${shown}`;
+      }
     }
   }
-  await page.evaluate(pixelAt => {
-    window.routeSwitchMeasurement.pixels = pixelAt !== null;
-    window.routeSwitchMeasurement.pixelAt = pixelAt;
-  }, pixelAt);
+  return true;
+};
+
+const measuredResponse = async page => {
+  await page.waitForFunction(() => window.routeSwitchMeasurement.measured);
+  const state = await page.evaluate(() => window.routeSwitchSettle());
+  const response = state.response === null ? "none" : String(Math.round(state.response));
+  test.info().annotations.push({ type: "route switch response", description: response });
+  if (state.responseKind !== "bar") return;
+  let pixels = true;
+  for (const position of segmentPositions) {
+    if (pixels === true) pixels = await segmentPainted(page, position);
+  }
+  await page.evaluate(pixels => {
+    window.routeSwitchMeasurement.pixels = pixels;
+    const segment = document.querySelector(".route-progress-segment");
+    segment.style.animation = "";
+    segment.style.transform = "";
+  }, pixels);
 };
 
 const finishSuperseded = async (page, held, second, heading = "h1") => {
@@ -234,8 +303,8 @@ const finishSuperseded = async (page, held, second, heading = "h1") => {
   await expect(page.getByRole("heading", { name: /We couldn.t load this page/ })).toHaveCount(0);
   if (result.responseKind === "bar") {
     expect(result.pixels, "the accent segment is visible on screen").toBe(true);
-    expect(result.pixelAt, "the accent segment appears within 300 ms").toBeLessThanOrEqual(300);
   }
+  expect(result.timingError, "the bar's fade can be read").toBeNull();
   expect(result.response, "a response is visible within 300 ms").not.toBeNull();
   expect(result.response, "a response is visible within 300 ms").toBeLessThanOrEqual(300);
 };
