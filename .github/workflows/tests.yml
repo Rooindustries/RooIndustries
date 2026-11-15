@@ -17,7 +17,7 @@ concurrency:
 jobs:
   tested-tree:
     name: Check for an already tested tree
-    if: github.event_name == 'push'
+    if: github.event_name != 'pull_request'
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-24.04' || vars.TESTS_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 5
     permissions:
@@ -515,14 +515,12 @@ jobs:
       - name: Compare the cached build with the clean build from another path
         run: bash scripts/compare-build-fingerprints.sh build-fingerprint/rest-1.txt build-fingerprint/navigation.txt
       - id: tree
-        if: github.event_name == 'pull_request'
         run: |
           tree="$(git rev-parse 'HEAD^{tree}')"
           mkdir -p tested-tree
           echo "$tree" > tested-tree/tree
           echo "tree=$tree" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
-        if: github.event_name == 'pull_request'
         with:
           name: tested-tree-${{ steps.tree.outputs.tree }}
           path: tested-tree/
@@ -543,16 +541,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           failed="$(jq -r --arg event "$GITHUB_EVENT_NAME" '
-            if $event == "pull_request" or $event == "merge_group" then
+            if $event == "pull_request" then
               to_entries | map(select(.value.result != (if .key == "tested-tree" then "skipped" else "success" end)))
-            elif $event == "push" and all(.[]; .result == "success") then
+            elif ($event == "push" or $event == "merge_group")
+              and .["tested-tree"].outputs.tested == "false" and all(.[]; .result == "success") then
               []
-            elif $event == "push" and .["tested-tree"].result == "success" and .["tested-tree"].outputs.tested == "true" then
+            elif ($event == "push" or $event == "merge_group")
+              and .["tested-tree"].result == "success" and .["tested-tree"].outputs.tested == "true" then
               to_entries | map(select(.value.result != (if .key == "tested-tree" then "success" else "skipped" end)))
-            elif $event == "push" then
-              to_entries | map(select(.value.result != "success"))
             else
-              to_entries
+              [{key: "invalid test results", value: {result: "failure"}}]
             end
             | map("\(.key)=\(.value.result)") | join(", ")
           ' <<< "$NEEDS")"
@@ -561,7 +559,7 @@ jobs:
             exit 1
           fi
           shortcut="$(jq -r --arg event "$GITHUB_EVENT_NAME" '
-            $event == "push" and .["tested-tree"].result == "success"
+            ($event == "push" or $event == "merge_group") and .["tested-tree"].result == "success"
             and .["tested-tree"].outputs.tested == "true"
             and (all(.[]; .result == "success") | not)
           ' <<< "$NEEDS")"
@@ -571,7 +569,7 @@ jobs:
             | [$jobs[] | select(
                 .status != "completed" or
                 .conclusion != (if .name == "Check for an already tested tree" then
-                  if $event == "push" then "success" else "skipped" end
+                  if $event == "push" or $event == "merge_group" then "success" else "skipped" end
                 elif $shortcut then "skipped" else "success" end)
               ) | "\(.name)=\(.status)/\(.conclusion // "null")"]
             + (if any($jobs[]; (.name | startswith("Playwright ")) and .name != "Playwright creator portal and API routes" and .name != "Playwright revalidation") then [] else ["No Playwright matrix jobs listed"] end)
