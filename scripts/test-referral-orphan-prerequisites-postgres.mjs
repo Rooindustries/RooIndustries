@@ -8,6 +8,10 @@ const migrations = new URL("../supabase/migrations/", import.meta.url);
 const repair = await fs.readFile(new URL("20260914000000_repair_referral_orphan_reclaim_prerequisites.sql", migrations), "utf8");
 const retirement = await fs.readFile(new URL("20260914010000_preserve_retired_tourney_identity_domains.sql", migrations), "utf8");
 const history = await fs.readFile(new URL("20260712092342_close_supabase_port_and_unified_auth.sql", migrations), "utf8");
+const conflictCodes = await fs.readFile(new URL("20261115000000_return_deliberate_conflicts_at_once.sql", migrations), "utf8");
+const conflictCodesRollback = await fs.readFile(new URL("../rollbacks/20261115000000_return_deliberate_conflicts_at_once.sql", migrations), "utf8");
+const pinnedReclaimBodies = repair.match(/'public\.roo_reclaim_referral_orphan_identity\(text,uuid,text\)',array\[([^\]]+)\]/)[1].match(/[0-9a-f]{32}/g);
+assert.equal(pinnedReclaimBodies.length, 2);
 const start = history.indexOf("create or replace function public.roo_create_oauth_intent(p_intent jsonb)");
 assert.ok(start >= 0);
 const predecessor = history.slice(start, history.indexOf("$$;", start) + 3);
@@ -139,6 +143,13 @@ async function intent(sql, account, overrides = {}) {
   return { ...result, tokenHash };
 }
 
+async function reclaimBody(sql) {
+  const [row] = await sql`select md5(prosrc) body, md5(replace(prosrc, '''PT409''', '''40001''')) reviewed,
+      prosrc like '%''40001''%' retry from pg_proc
+    where oid='public.roo_reclaim_referral_orphan_identity(text,uuid,text)'::regprocedure`;
+  return row;
+}
+
 async function refusesWithoutMutation(sql, migration, message) {
   const before = { rows: await rowsState(sql), catalog: await catalogState(sql) };
   await assert.rejects(sql.savepoint((tx) => tx.unsafe(migration)), { code: "55000" }, message);
@@ -146,12 +157,21 @@ async function refusesWithoutMutation(sql, migration, message) {
 }
 
 const cases = [
-  ["complete history is a no-op and keeps strict link reauthentication", async (sql) => {
+  ["complete history keeps the reviewed reclaim body and strict link reauthentication", async (sql) => {
+    const current = await reclaimBody(sql);
+    assert.equal(current.retry, false, "Reclaim still raises a code the API re-runs.");
+    assert.ok(pinnedReclaimBodies.includes(current.reviewed), "Reclaim changed beyond the conflict code.");
     const before = { rows: await rowsState(sql), catalog: await catalogState(sql) };
-    await sql.unsafe(repair);
+    await assert.rejects(sql.savepoint((tx) => tx.unsafe(repair)),
+      { code: "55000", message: /roo_reclaim_referral_orphan_identity/ });
     assert.deepEqual({ rows: await rowsState(sql), catalog: await catalogState(sql) }, before);
     const target = await createAccount(sql, true);
     await assert.rejects(sql.savepoint((tx) => intent(tx, target)), { code: "42501" });
+    await sql.unsafe(conflictCodesRollback);
+    assert.ok(pinnedReclaimBodies.includes((await reclaimBody(sql)).body));
+    const reviewed = { rows: await rowsState(sql), catalog: await catalogState(sql) };
+    await sql.unsafe(repair);
+    assert.deepEqual({ rows: await rowsState(sql), catalog: await catalogState(sql) }, reviewed);
   }],
   ["missing feature is repaired without changing optional ordinary links or newer RPCs", async (sql) => {
     await simulateMissingFeature(sql);
@@ -205,6 +225,10 @@ const cases = [
     await sql.unsafe(repair);
     assert.deepEqual({ rows: await rowsState(sql), catalog: await catalogState(sql) }, retired);
     assert.ok((await intent(sql, target)).id, "Retirement prerequisite replay tightened optional link policy.");
+    await sql.unsafe(conflictCodes);
+    const replayed = await reclaimBody(sql);
+    assert.equal(replayed.retry, false, "Replayed reclaim body kept a code the API re-runs.");
+    assert.ok(pinnedReclaimBodies.includes(replayed.reviewed));
   }],
   ["partial binding installation refuses without mutation", async (sql) => {
     await simulateMissingFeature(sql);

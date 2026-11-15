@@ -13,7 +13,7 @@
 
 
 -- roo_upsert_native_creator_account takes a for-share lock on this row and
--- raises 40001 when the revision moved, so it has to be the real table. Its
+-- raises PT409 when the revision moved, so it has to be the real table. Its
 -- project_referral_source_change trigger is excluded: that projection is an
 -- unrelated dependency chain and plays no part in identity-link conflicts.
 CREATE TABLE migration.source_documents (
