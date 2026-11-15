@@ -1,11 +1,12 @@
 const {
   test: bookingTest, expect, cookieBanner, acceptCookies, declineCookies, cookieSettingsReady, openCookieSettings,
-  settleIdle, productionHostFixtures, openFreePayment,
+  settleIdle, productionHostFixtures, openFreePayment, installProductionOnlyScripts,
 } = require("./fixtures/booking-flow.cjs");
 const { posthogFixtures, postHogCode, named, pageviews, arrived, closeTab, expectLeavesFollowViews,
   recordSends, sendsFrom } =
   require("./fixtures/posthog.cjs");
 const { holdRoute, holdChunks, holdChunksOnServer } = require("./fixtures/held-routes.cjs");
+const { waitForHydrated } = require("./fixtures/react-hydration.cjs");
 
 const eventId = "a".repeat(40);
 const desktopChrome = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36";
@@ -351,6 +352,7 @@ test.describe("production host", () => {
     expect(await arrived(seen, "$pageleave")).toEqual([]);
     expect(hold.answered).toBeFalsy();
     await page.goto("/about", { waitUntil: "domcontentloaded" });
+    await waitForHydrated(page, "#main-content");
     expect(hold.answered).toBeFalsy();
     expect(await arrived(seen, "$pageview")).toEqual([]);
     expect(await arrived(seen, "$pageleave")).toEqual([]);
@@ -365,7 +367,7 @@ test.describe("production host", () => {
   });
 
   test("closing before any page view sends no page leave", async ({
-    page, context, posthog: seen, productionHost,
+    page, context, flow, posthog: seen, productionHost,
   }) => {
     await recordSends(page);
     const hold = await holdChunksOnServer(page, {
@@ -383,11 +385,15 @@ test.describe("production host", () => {
     await closeTab(page);
     await closed;
 
+    await flow.restoreRoutes();
+    await installProductionOnlyScripts(context);
+    await seen.restoreRoutes();
     const next = await context.newPage();
     await next.goto("/about");
     expect(await sendsFrom(next)).toEqual([]);
     await expect.poll(async () => (await arrived(seen, "$pageview")).map((event) => event.properties.$pathname))
       .toEqual(["/about"]);
+    expect(named(seen, "$pageview").filter(fromTab(seen, next))).toHaveLength(1);
     expect(await journeyOf(next)).toBe(journeyId);
     await closeTab(next);
     await expect.poll(async () => (await arrived(seen, "$pageleave"))
@@ -1337,6 +1343,7 @@ test.describe("waiting list", () => {
     await acceptCookies(page);
     await expect.poll(() => outbox(page)).toEqual(["$pageview"]);
     await page.goto("/admin/content", { waitUntil: "domcontentloaded" });
+    await waitForHydrated(page, "#content-admin-email");
     await settleIdle(page);
     expect(await outbox(page)).toEqual(["$pageview"]);
 

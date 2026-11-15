@@ -115,18 +115,21 @@ const stubPostHog = async (context, origin, capture) => {
     seen.events.sort((a, b) => seen.arrived.get(a) - seen.arrived.get(b));
   };
   await context.addInitScript(() => Object.defineProperty(Navigator.prototype, "webdriver", { get: () => false }));
-  await context.route((url) => url.hostname.endsWith("posthog.com"), (route) => {
-    seen.posthogHosts.push(route.request().url());
-    return route.abort("blockedbyclient");
-  });
-  await context.route(`${origin}/ingest/**`, async (route) => {
-    seen.loading.add(route);
-    try {
-      return await ingest(route, seen);
-    } finally {
-      seen.loading.delete(route);
-    }
-  });
+  seen.restoreRoutes = async () => {
+    await context.route((url) => url.hostname.endsWith("posthog.com"), (route) => {
+      seen.posthogHosts.push(route.request().url());
+      return route.abort("blockedbyclient");
+    });
+    await context.route(`${origin}/ingest/**`, async (route) => {
+      seen.loading.add(route);
+      try {
+        return await ingest(route, seen);
+      } finally {
+        seen.loading.delete(route);
+      }
+    });
+  };
+  await seen.restoreRoutes();
   context.on("request", (request) => {
     if (request.resourceType() === "script" && !new URL(request.url()).pathname.startsWith("/ingest/")) {
       seen.loading.add(request);
