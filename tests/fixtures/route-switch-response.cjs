@@ -245,7 +245,7 @@ const segmentAt = (page, position) => page.evaluate(async position => {
   const box = segment.getBoundingClientRect();
   return {
     left: Math.max(0, Math.ceil(box.left) + 1), right: Math.min(innerWidth, Math.floor(box.right) - 1),
-    rows: Math.floor(box.height), width: innerWidth, color: getComputedStyle(segment).backgroundColor,
+    rows: box.height, width: innerWidth, color: getComputedStyle(segment).backgroundColor,
   };
 }, position);
 
