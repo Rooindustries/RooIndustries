@@ -1,6 +1,10 @@
 {
   "framework": "nextjs",
+  "regions": ["dub1"],
   "functions": {
+    "app/api/downloads/file/route.js": {
+      "regions": ["iad1"]
+    },
     "app/api/admin/content/**/*": {
       "regions": [
         "dub1"
