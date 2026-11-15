@@ -18,7 +18,9 @@ const expectNotCacheable = (response) => {
 
 const expectCacheable = (response) => {
   expect(response.headers()["cache-control"]).toBe("public, max-age=0, must-revalidate, s-maxage=60");
-  expect(response.headers()["vercel-cdn-cache-control"]).toBe("public, max-age=60");
+  expect(response.headers()["vercel-cdn-cache-control"]).toBe(
+    "public, max-age=60, stale-while-revalidate=31536000",
+  );
   expect(response.headers()["vercel-cache-tag"]).toBe("public-content");
 };
 
