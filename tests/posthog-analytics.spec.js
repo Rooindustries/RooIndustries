@@ -3,6 +3,7 @@ const {
   settleIdle, productionHostFixtures, openFreePayment,
 } = require("./fixtures/booking-flow.cjs");
 const { posthogFixtures, postHogCode, named, pageviews } = require("./fixtures/posthog.cjs");
+const { holdRoute, holdChunks } = require("./fixtures/held-routes.cjs");
 
 const eventId = "a".repeat(40);
 const desktopChrome = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36";
@@ -53,6 +54,8 @@ const sentBetween = (seen, from, to) => [
   ...seen.snapshots.filter((item) => item.timestamp > from && item.timestamp < to),
 ];
 const sentAt = (event) => Date.parse(event.timestamp);
+const since = (from) => (event) => sentAt(event) >= from;
+const fromTab = (seen, tab) => (event) => seen.senders.get(event) === tab;
 const storedOutbox = (page) => page.evaluate(() => sessionStorage.getItem("roo-posthog-outbox"));
 const outboxEntries = async (page) => JSON.parse(await storedOutbox(page));
 const outbox = async (page) => (await outboxEntries(page))?.map((item) => item.event) ?? null;
@@ -114,31 +117,12 @@ const confirmBooking = async (page, baseURL, { receipt, beforeReturn, afterFinal
 };
 const storedMarks = (page) => page.evaluate(() => sessionStorage.getItem("roo-posthog-counted") || "");
 const sessionKeys = (page) => page.evaluate(() => Object.keys(sessionStorage));
-const holdChunk = async (page, { origin, loopback }, ...markers) => {
-  const hold = { held: false };
-  const gate = new Promise((resolve) => { hold.release = resolve; });
-  await page.route(`${origin}/_next/static/chunks/**`, async (route) => {
-    const response = await route.fetch({ url: route.request().url().replace(origin, loopback) });
-    const body = await response.body();
-    if (!markers.some((marker) => body.includes(marker))) return route.fallback();
-    hold.held = true;
-    await gate;
-    return route.fulfill({ response, body });
-  });
-  return hold;
-};
+const holdChunk = (page, { origin, loopback }, ...markers) =>
+  holdChunks(page, { origin, fetchOrigin: loopback }, (body) => markers.some((marker) => body.includes(marker)));
 const holdPostHog = (page, productionHost) => holdChunk(page, productionHost, "[PostHog.js]");
 const holdOutbox = (page, productionHost) => holdChunk(page, productionHost, "roo-posthog-outbox");
-const holdRequest = async (page, path, answer = (route) => route.fallback()) => {
-  const hold = { held: false };
-  const gate = new Promise((resolve) => { hold.release = resolve; });
-  await page.context().route(`**${path}`, async (route) => {
-    hold.held = true;
-    await gate;
-    return answer(route);
-  }, { times: 1 });
-  return hold;
-};
+const holdRequest = (page, path, answer = (route) => route.fallback()) =>
+  holdRoute(page.context(), `**${path}`, answer, { times: 1 });
 const failedAnswer = (route) => route.fulfill({ status: 500, json: { ok: false, error: "Fixture start failed." } });
 const postHogKeys = async (page) => (await sessionKeys(page)).filter((key) => /^(roo-)?posthog/.test(key));
 const otherMarks = async (page) =>
@@ -180,8 +164,6 @@ const inFlightRequests = [
       .toBeVisible(),
   },
 ];
-
-test.afterEach(({ page }) => page.unrouteAll({ behavior: "ignoreErrors" }));
 
 test.describe("production host", () => {
   test("PostHog records the booking funnel without customer details", async ({ page, posthog: seen, baseURL }) => {
@@ -459,13 +441,14 @@ test.describe("production host", () => {
     expect(seen.events).toEqual([]);
     hold.release();
 
+    const returnedAt = await browserNow(page);
     await page.goto("/packages");
     await expect.poll(() => named(seen, "checkout_started").length).toBe(1);
     const started = named(seen, "checkout_started")[0];
     expect(started.properties.$current_url).toBe(`${baseURL}${paymentPath}`);
     expect(sentAt(started)).toBeGreaterThanOrEqual(clickedAt);
     expect(sentAt(started)).toBeLessThanOrEqual(leftAt);
-    await expect.poll(() => pageviews(seen).at(-1)).toBe(`${baseURL}/packages`);
+    await expect.poll(() => pageviews(seen, since(returnedAt))).toEqual([`${baseURL}/packages`]);
     const views = pageviews(seen).length;
 
     await page.reload();
@@ -717,7 +700,7 @@ test.describe("cookie choice", () => {
       hold.release();
       postHog.release();
 
-      await expect.poll(() => pageviews(seen)).toContain(`${baseURL}/about`);
+      await expect.poll(() => pageviews(seen, fromTab(seen, page))).toContain(`${baseURL}/about`);
       await pastPostHogStart(page, seen);
       await settleIdle(page);
       expect(seen.events.filter((event) => event.properties.$pathname === "/packages")).toEqual([]);
@@ -863,7 +846,7 @@ test.describe("cookie choice", () => {
         await acceptCookies(page);
       }
       hold.release();
-      await expect.poll(() => pageviews(seen)).toContain(`${baseURL}/packages`);
+      await expect.poll(() => pageviews(seen, since(leftAt))).toContain(`${baseURL}/packages`);
       await pastPostHogStart(page, seen);
       await settleIdle(page);
       const here = seen.events.filter((event) => event.properties.$pathname === "/packages");
@@ -966,10 +949,11 @@ test.describe("waiting list", () => {
 
     await page.goto("/tourney");
     await expect.poll(async () => (await outboxEntries(page)).map(({ path }) => path)).toContain("/tourney");
+    const returnedAt = await browserNow(page);
     await page.goto(visited);
     hold.release();
     await expect.poll(() => named(seen, "service_visit").length).toBe(1);
-    await expect.poll(() => pageviews(seen).at(-1)).toBe(`${baseURL}${visited}`);
+    await expect.poll(() => pageviews(seen, since(returnedAt))).toEqual([`${baseURL}${visited}`]);
     await pastPostHogStart(page, seen);
     expect(named(seen, "service_visit").map((event) => event.uuid)).toEqual([visit.id]);
     const order = seen.events.map((event) => event.uuid);
@@ -1001,7 +985,7 @@ test.describe("waiting list", () => {
     await context.clearCookies({ name: "roo_attr" });
     await context.clearCookies({ name: "roo_attr_last" });
     await landing.goto("/meet-the-team?utm_source=elsewhere");
-    await expect.poll(() => pageviews(seen)).toContain(`${baseURL}/meet-the-team`);
+    await expect.poll(() => pageviews(seen, fromTab(seen, landing))).toEqual([`${baseURL}/meet-the-team`]);
     await settleIdle(landing);
     expect(await journeyOf(landing)).toBeUndefined();
     expect(await landing.evaluate(() => sessionStorage.getItem("sales_attribution"))).toBeNull();
@@ -1055,8 +1039,9 @@ test.describe("waiting list", () => {
     await expect.poll(() => outbox(page)).toEqual(["$pageview"]);
     hold.release();
 
+    const returnedAt = await browserNow(page);
     await page.goto("/packages");
-    await expect.poll(() => pageviews(seen)).toContain(`${baseURL}/packages`);
+    await expect.poll(() => pageviews(seen, since(returnedAt))).toContain(`${baseURL}/packages`);
     await pastPostHogStart(page, seen);
     await settleIdle(page);
     expect(named(seen, "booking_completed")).toEqual([]);
@@ -1128,9 +1113,10 @@ test.describe("waiting list", () => {
     expect(stored.map(({ event }) => event)).toContain("checkout_started");
     hold.release();
 
+    const returnedAt = await browserNow(page);
     await page.goto("/packages");
     await expect.poll(() => named(seen, "checkout_started").length).toBe(1);
-    await expect.poll(() => pageviews(seen).at(-1)).toBe(`${baseURL}/packages`);
+    await expect.poll(() => pageviews(seen, since(returnedAt))).toEqual([`${baseURL}/packages`]);
     expect(await outbox(page)).toBeNull();
     await page.goBack({ waitUntil: "commit" });
     await page.goBack({ waitUntil: "commit" });

@@ -59,15 +59,22 @@ const ingest = async (route, seen) => {
   if (url.pathname.startsWith("/ingest/array/") || url.pathname.startsWith("/ingest/flags")) {
     return route.fulfill({ json: remoteConfig });
   }
+  const sender = request.frame().page();
   for (const event of decode(request)) {
-    if (event.event === "$snapshot") seen.snapshots.push(...event.properties.$snapshot_data.map(unpackSnapshot));
-    else seen.events.push(event);
+    if (event.event === "$snapshot") {
+      seen.snapshots.push(...event.properties.$snapshot_data.map(unpackSnapshot));
+    } else {
+      seen.events.push(event);
+      seen.senders.set(event, sender);
+    }
   }
   return route.fulfill({ json: { status: 1 } });
 };
 
 const stubPostHog = async (context, origin) => {
-  const seen = { events: [], snapshots: [], requests: [], posthogHosts: [], scripts: [], loading: new Set() };
+  const seen = {
+    events: [], snapshots: [], requests: [], posthogHosts: [], scripts: [], loading: new Set(), senders: new WeakMap(),
+  };
   await context.addInitScript(() => Object.defineProperty(Navigator.prototype, "webdriver", { get: () => false }));
   await context.route((url) => url.hostname.endsWith("posthog.com"), (route) => {
     seen.posthogHosts.push(route.request().url());
@@ -97,7 +104,8 @@ const stubPostHog = async (context, origin) => {
 
 const postHogCode = async (seen) => (await Promise.all(seen.scripts)).filter(Boolean);
 const named = (seen, name) => seen.events.filter((event) => event.event === name);
-const pageviews = (seen) => named(seen, "$pageview").map((event) => event.properties.$current_url);
+const pageviews = (seen, keep = () => true) =>
+  named(seen, "$pageview").filter(keep).map((event) => event.properties.$current_url);
 const posthogFixtures = {
   posthog: async ({ context, baseURL }, use) => use(await stubPostHog(context, baseURL)),
 };

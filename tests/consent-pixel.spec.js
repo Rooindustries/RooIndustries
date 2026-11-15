@@ -2,6 +2,7 @@ const {
   test, expect, cookieBanner: banner, settleIdle: settle, bookingEventId, routePaidStart, checkoutStartCases,
   declineCookies, openCookieSettings, productionHostFixtures,
 } = require("./fixtures/booking-flow.cjs");
+const { inspectChunks } = require("./fixtures/held-routes.cjs");
 
 const pixelId = String(process.env.TOOLING_META_PIXEL_ID || "").trim();
 const fakeFbevents = `(function () {
@@ -569,19 +570,15 @@ if (!pixelId) {
       expect(meta.calls.slice(before)).toEqual([]);
     });
 
-    test("a saved Accept sends one PageView per page view whichever module loads first", async ({ page }) => {
+    test("a saved Accept sends one PageView per page view whichever module loads first", async ({ page, baseURL }) => {
       await page.addInitScript(() => {
         if (!localStorage.getItem("roo-consent")) localStorage.setItem("roo-consent", "granted");
       });
       let delayed = 0;
-      await page.route("**/_next/static/chunks/**", async (route) => {
-        const response = await route.fetch();
-        const body = await response.text();
-        if (body.includes("service_visit")) {
-          delayed += 1;
-          await new Promise((resolve) => setTimeout(resolve, 1500));
-        }
-        await route.fulfill({ status: response.status(), contentType: response.headers()["content-type"], body });
+      await inspectChunks(page, { origin: new URL(baseURL).origin }, (body) => {
+        if (!body.includes("service_visit")) return undefined;
+        delayed += 1;
+        return new Promise((resolve) => setTimeout(resolve, 1500));
       });
       await page.goto("/packages");
       await settle(page);

@@ -1,6 +1,7 @@
 const { createHash } = require("node:crypto");
 const { test: base, expect } = require("@playwright/test");
 const { fixturePort } = require("./fixture-ports.cjs");
+const { heldRouteFixtures } = require("./held-routes.cjs");
 
 const providers = {
   dodo: { enabled: true, mode: "test" },
@@ -22,6 +23,7 @@ const startedCheckout = (baseURL, checkouts, request) => {
 };
 
 const test = base.extend({
+  ...heldRouteFixtures,
   cpuThrottling: [async ({ page, browserName }, use, testInfo) => {
     const rate = Number(process.env.PW_CPU_THROTTLING_RATE || 1);
     if (!Number.isFinite(rate) || rate < 1) throw new Error("Invalid CPU throttling rate.");
