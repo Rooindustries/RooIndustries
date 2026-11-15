@@ -1,9 +1,14 @@
 const testHost = process.env.ROO_TEST_HOST || '127.0.0.1';
 const fs = require("fs");
 const path = require("path");
-const { test, expect } = require("@playwright/test");
+const { test: base, expect } = require("@playwright/test");
+const { heldRouteFixtures } = require("./fixtures/held-routes.cjs");
+const { holdTarget, openPage, proofClick } = require("./fixtures/route-switch-response.cjs");
+
 const { waitForHydrated } = require("./fixtures/react-hydration.cjs");
 const { navLink } = require("./fixtures/nav-link.cjs");
+
+const test = base.extend(heldRouteFixtures);
 
 const BASE_URL = process.env.BASE_URL;
 if (!BASE_URL) {
@@ -637,4 +642,81 @@ test.afterEach(async () => {
     crashLog.slice(crashLogAtStart).map(({ type, viewport, url, message }) => ({ type, viewport, url, message })),
     "client crash/hydration errors captured"
   ).toEqual([]);
+});
+
+test("clicked navigation is active while its page file is held", async ({ page, baseURL }, info) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const held = await holdTarget(page, baseURL, "benchmarks", info.config.metadata.toolingDistDir);
+  try {
+    await openPage(page, "/");
+    await proofClick(page, "Benchmarks");
+    await held.waiting;
+    const link = page.locator('#desktop-proof-menu a[href="/benchmarks"]');
+    await expect(link).toHaveAttribute("aria-current", "page", { timeout: 3000 });
+    await expect(page).toHaveURL(/\/$/);
+  } finally {
+    held.release();
+  }
+});
+
+test("Proof reopened during a held switch stays open after landing", async ({ page, baseURL }, info) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const held = await holdTarget(page, baseURL, "benchmarks", info.config.metadata.toolingDistDir);
+  try {
+    await openPage(page, "/");
+    await proofClick(page, "Benchmarks");
+    await held.waiting;
+    const proof = page.locator('button[aria-controls="desktop-proof-menu"]');
+    await proof.click();
+    await expect(proof).toHaveAttribute("aria-expanded", "true");
+    held.release();
+    await expect(page).toHaveURL(/\/benchmarks$/);
+    await expect(page.getByRole("heading", { name: "Performance Benchmarks" })).toBeVisible();
+    await expect(proof).toHaveAttribute("aria-expanded", "true", { timeout: 3000 });
+  } finally {
+    held.release();
+  }
+});
+
+test("Back and Forward close the open phone menu", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openPage(page, "/about");
+  await proofClick(page, "Benchmarks", true);
+  await expect(page).toHaveURL(/\/benchmarks$/);
+  await proofClick(page, "Reviews", true);
+  await expect(page).toHaveURL(/\/reviews$/);
+  const menu = page.getByRole("button", { name: "Open menu" });
+  await menu.click();
+  await expect(menu).toHaveAttribute("aria-expanded", "true");
+  await page.goBack();
+  await expect(page).toHaveURL(/\/benchmarks$/);
+  await expect(menu).toHaveAttribute("aria-expanded", "false");
+  await menu.click();
+  await expect(menu).toHaveAttribute("aria-expanded", "true");
+  await page.goForward();
+  await expect(page).toHaveURL(/\/reviews$/);
+  await expect(menu).toHaveAttribute("aria-expanded", "false");
+});
+
+test("a reset link removes its query token before navigation and history", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => {
+    window.history.replaceState(window.history.state, "", "/referrals/reset?token=abc123");
+  });
+  await openPage(page, "/referrals/reset");
+  await expect(page).toHaveURL(/\/referrals\/reset$/);
+  await proofClick(page, "Reviews");
+  await expect(page).toHaveURL(/\/reviews$/);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/referrals\/reset$/);
+});
+
+test("a safe initial query survives client navigation and Back", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openPage(page, "/about?campaign=launch");
+  await expect(page).toHaveURL(/\/about\?campaign=launch$/);
+  await proofClick(page, "Reviews");
+  await expect(page).toHaveURL(/\/reviews$/);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/about\?campaign=launch$/);
 });
