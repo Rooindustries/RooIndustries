@@ -20,9 +20,9 @@ export const eventMoment = () => isProductionBrowser() && granted()
 
 export const keepPostHogEvent = (event, properties, options) => {
   try {
-    const { moment = eventMoment(), mark } = options || {};
+    const { moment = eventMoment(), mark, attribution } = options || {};
     if (!moment || moment.at < declinedSince() || !granted()) return false;
-    made.push({ id: newId(), event, properties, mark, ...moment });
+    made.push({ id: newId(), event, properties, mark, attribution, ...moment });
     withPostHogOutbox((outbox) => outbox.store(made.splice(0)));
     return true;
   } catch {

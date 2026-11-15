@@ -32,6 +32,26 @@ const journeyOf = async (page) => {
   const cookie = (await page.context().cookies()).find(({ name }) => name === "roo_attr");
   return cookie ? JSON.parse(Buffer.from(cookie.value, "base64url").toString("utf8")).journeyId : undefined;
 };
+const receiptJourney = "8f0c6a52-7d1e-4b3a-9c2d-1e5f6a7b8c9d";
+const receiptAttribution = (fields) => {
+  const touch = { capturedAt: "2026-11-01T10:00:00.000Z", landingPath: "/packages", ...fields };
+  return { version: 2, journeyId: receiptJourney, firstTouch: touch, lastTouch: { ...touch } };
+};
+const SALES_LABELS = [
+  "journey_id", "landing_path", "creator_code", "campaign_source", "campaign_medium", "campaign", "campaign_content",
+  "campaign_term", "referrer_host", "first_source", "first_campaign", "has_fbclid", "has_gclid",
+];
+const salesLabels = (properties) =>
+  Object.fromEntries(SALES_LABELS.filter((key) => Object.hasOwn(properties, key))
+    .map((key) => [key, properties[key]]));
+const recordVercel = async (context) => {
+  const sent = [];
+  await context.exposeFunction("__recordVercel", (payload) => sent.push(payload));
+  await context.addInitScript(() => {
+    window.va = (method, payload) => method === "event" && window.__recordVercel(payload);
+  });
+  return (name) => sent.find((payload) => payload?.name === name)?.data;
+};
 const seeDetails = async (page) => {
   await page.getByRole("button", { name: "See What's Included" }).first().click();
   const dialog = page.getByRole("dialog");
@@ -861,21 +881,72 @@ test.describe("waiting list", () => {
     "buyer@example.com", "buyer%40example.com", "evil.example", "555-0199", "fbclid-value-1234", "creatorref",
   ];
 
-  test("a creator code from the link is never stored, and the booking still reaches PostHog with it", async ({
+  test("a creator code from the link is never stored, and reaches PostHog with the visit and the booking", async ({
     page, posthog: seen, baseURL, productionHost,
   }) => {
     test.setTimeout(180000);
     const hold = await holdPostHog(page, productionHost);
     await page.goto("/packages?ref=creatorref");
     await acceptCookies(page);
-    await confirmBooking(page, baseURL, { receipt: { referralCode: "typedcode" } });
-    await expect.poll(() => outbox(page)).toContain("booking_completed");
+    await seeDetails(page);
+    await expect.poll(() => outbox(page)).toEqual(["$pageview", "view_item"]);
     expect(await storedOutbox(page)).not.toContain("creatorref");
+    const attribution = receiptAttribution({ creatorCode: "creatorref" });
+    await confirmBooking(page, baseURL, { receipt: { referralCode: "typedcode", attribution } });
+    await expect.poll(() => outbox(page)).toContain("booking_completed");
 
     hold.release();
     await expect.poll(() => named(seen, "booking_completed").length).toBe(1);
+    expect(named(seen, "view_item")[0].properties).toMatchObject({ creator_code: "creatorref" });
     expect(named(seen, "booking_completed")[0].properties)
       .toMatchObject({ creator_code: "creatorref", referral_code: "typedcode", event_id: eventId });
+  });
+
+  test("a booking reaches PostHog with its receipt's campaign, though the browser's changed before hand-over", async ({
+    page, context, posthog: seen, baseURL, productionHost,
+  }) => {
+    test.setTimeout(180000);
+    const vercelCopy = await recordVercel(context);
+    const hold = await holdPostHog(page, productionHost);
+    await page.goto("/packages");
+    await acceptCookies(page);
+    const attribution = receiptAttribution({ source: "meta", campaign: "autumn" });
+    await confirmBooking(page, baseURL, { receipt: { attribution } });
+    await expect.poll(() => outbox(page)).toContain("booking_completed");
+    await expect.poll(() => vercelCopy("booking_completed")).toBeTruthy();
+
+    const other = await context.newPage();
+    await other.goto("/packages?utm_source=launch&utm_campaign=spring");
+    await expect.poll(() => named(seen, "$pageview").filter(fromTab(seen, other)).map(({ properties }) =>
+      properties.campaign)).toEqual(["spring"]);
+    await other.close();
+    hold.release();
+
+    await expect.poll(() => named(seen, "booking_completed").length).toBe(1);
+    const booked = named(seen, "booking_completed")[0].properties;
+    expect(booked).toMatchObject({ journey_id: receiptJourney, campaign_source: "meta", campaign: "autumn" });
+    expect(salesLabels(booked)).toEqual(salesLabels(vercelCopy("booking_completed")));
+    expect(Object.values(salesLabels(booked))).not.toContain("spring");
+    expect(Object.values(salesLabels(booked))).not.toContain("launch");
+    const views = named(seen, "$pageview").filter(fromTab(seen, page));
+    expect(views.length).toBeGreaterThan(0);
+    for (const view of views) expect(view.properties).toMatchObject({ campaign_source: "launch", campaign: "spring" });
+  });
+
+  test("a booking whose receipt has no campaign reaches PostHog with none, and a visit keeps the browser's", async ({
+    page, context, posthog: seen, baseURL,
+  }) => {
+    test.setTimeout(180000);
+    const vercelCopy = await recordVercel(context);
+    await page.goto("/packages?utm_source=launch&utm_campaign=spring");
+    await acceptCookies(page);
+    await seeDetails(page);
+    await confirmBooking(page, baseURL);
+    await expect.poll(() => named(seen, "booking_completed").length).toBe(1);
+    await expect.poll(() => vercelCopy("booking_completed")).toBeTruthy();
+    expect(salesLabels(named(seen, "booking_completed")[0].properties)).toEqual({});
+    expect(salesLabels(vercelCopy("booking_completed"))).toEqual({});
+    expect(named(seen, "view_item")[0].properties).toMatchObject({ campaign_source: "launch", campaign: "spring" });
   });
 
   test("a code typed at checkout reaches PostHog on the booking from the receipt", async ({

@@ -56,6 +56,6 @@ const validReceipt = (receipt) => Boolean(receipt) && /^[a-f0-9]{40}$/.test(rece
 export const trackConfirmedPurchase = (receipt) => {
   if (!validReceipt(receipt)) return;
   const booking = completedBooking(receipt);
-  keepPostHogEvent(...booking, { mark: `booking:${receipt.eventId}` });
+  keepPostHogEvent(...booking, { mark: `booking:${receipt.eventId}`, attribution: receipt.attribution ?? null });
   bookingAnalytics.use(({ trackBookingOnce }) => trackBookingOnce(receipt, booking));
 };
