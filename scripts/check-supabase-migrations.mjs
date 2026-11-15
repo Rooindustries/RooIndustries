@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { retrySqlFailures } from "./lib/check-retry-sql.mjs";
 import {
   hasBoundedMigrationPrefix,
   hasBrowserDataGrant,
@@ -15,7 +16,7 @@ const files = fs
   .readdirSync(migrationsDirectory)
   .filter((file) => file.endsWith(".sql"))
   .sort();
-const failures = [];
+const failures = retrySqlFailures(migrationsDirectory, files);
 const versions = new Set();
 const localByVersion = new Map();
 
