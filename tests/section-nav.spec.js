@@ -720,3 +720,16 @@ test("a safe initial query survives client navigation and Back", async ({ page }
   await page.goBack();
   await expect(page).toHaveURL(/\/about\?campaign=launch$/);
 });
+
+test("an old section marker does not replace the next page in history", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => {
+    window.history.replaceState({ ...window.history.state, __rooSectionTrip: true }, "", window.location.href);
+  });
+  await openPage(page, "/referrals/reset");
+  expect(await page.evaluate(() => window.history.state.__rooSectionTrip)).toBeUndefined();
+  await proofClick(page, "Reviews");
+  await expect(page).toHaveURL(/\/reviews$/);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/referrals\/reset$/);
+});

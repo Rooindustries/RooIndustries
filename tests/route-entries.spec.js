@@ -475,3 +475,47 @@ for (const [action, state] of [["pause", "paused"], ["cancel", "idle"]]) {
     await attach(testInfo, "interrupted-animation-close", { action, exits });
   });
 }
+
+for (const [name, route, hash] of [
+  ["recovery", "/referrals/reset", "#type=recovery&access_token=access&refresh_token=refresh"],
+  ["registration", "/referrals/verify", `#token=${"a".repeat(43)}`],
+]) {
+  test(`a ${name} link keeps its fragment until the page receives it`, async ({ page }) => {
+    await page.addInitScript(() => {
+      window.__addressChanges = [];
+      const replace = window.history.replaceState.bind(window.history);
+      window.history.replaceState = (state, title, url) => {
+        if (state?.__rooLegacy) window.__addressChanges.push(String(url));
+        return replace(state, title, url);
+      };
+    });
+    if (name === "registration") {
+      await page.route("**/api/ref/verifyRegistration", route =>
+        route.fulfill({ json: { ok: true } }));
+    }
+    const confirmation = name === "registration"
+      ? page.waitForRequest(request => request.url().endsWith("/api/ref/verifyRegistration"))
+      : null;
+    await page.goto(`${route}${hash}`);
+    await waitForRouteCommitted(page);
+    expect(await page.evaluate(() => window.__addressChanges[0])).toBe(`${route}${hash}`);
+    if (confirmation) expect((await confirmation).postDataJSON().token).toBe("a".repeat(43));
+  });
+}
+
+test("a reset query token is removed when the page takes over the address", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.history.replaceState(window.history.state, "", "/referrals/reset?token=abc123");
+    window.__firstRouteAddress = null;
+    const replace = window.history.replaceState.bind(window.history);
+    window.history.replaceState = (state, title, url) => {
+      if (state?.__rooLegacy && window.__firstRouteAddress === null) {
+        window.__firstRouteAddress = String(url);
+      }
+      return replace(state, title, url);
+    };
+  });
+  await page.goto("/referrals/reset");
+  await waitForRouteCommitted(page);
+  expect(await page.evaluate(() => window.__firstRouteAddress)).toBe("/referrals/reset");
+});

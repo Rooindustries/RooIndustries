@@ -170,3 +170,17 @@ test("a home section link in View My Plan closes booking and adds its section en
   await expect(dialog).toBeVisible();
   await expect(page.locator("#services")).toBeAttached();
 });
+
+test("reopening payment restores the visited page without a hydration error", async ({ page }) => {
+  await page.goto("/reviews");
+  await waitForRouteCommitted(page);
+  await expect(page.getByRole("heading", { name: "Community Reviews", exact: true })).toBeVisible();
+  await page.goto("/payment");
+  await expect(page.locator("#main-content").getByRole("heading", {
+    name: "Community Reviews", exact: true,
+  })).toBeVisible();
+  await expect(page.getByRole("dialog").getByRole("heading", { name: "Complete Payment", exact: true })).toBeVisible();
+  expect(page.__routeErrors.filter(error => /hydrat|didn't match|server rendered/i.test(error))).toEqual([]);
+  await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
+  await expect(page).toHaveURL(/\/reviews$/);
+});
