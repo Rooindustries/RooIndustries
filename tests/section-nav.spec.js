@@ -2,8 +2,8 @@ const testHost = process.env.ROO_TEST_HOST || '127.0.0.1';
 const fs = require("fs");
 const path = require("path");
 const { test: base, expect } = require("@playwright/test");
-const { heldRouteFixtures } = require("./fixtures/held-routes.cjs");
-const { holdTarget, openPage, proofClick } = require("./fixtures/route-switch-response.cjs");
+const { heldRouteFixtures, holdChunks } = require("./fixtures/held-routes.cjs");
+const { targets, openPage, proofClick } = require("./fixtures/route-switch-response.cjs");
 
 const { waitForHydrated } = require("./fixtures/react-hydration.cjs");
 const { navLink } = require("./fixtures/nav-link.cjs");
@@ -644,9 +644,20 @@ test.afterEach(async () => {
   ).toEqual([]);
 });
 
-test("clicked navigation is active while its page file is held", async ({ page, baseURL }, info) => {
+const holdBenchmarks = async (page, baseURL) => {
+  let reached;
+  const waiting = new Promise(resolve => { reached = resolve; });
+  const held = await holdChunks(page, { origin: baseURL }, body => {
+    const match = body.toString().startsWith('"use strict";') && body.includes(targets.benchmarks.marker);
+    if (match) reached();
+    return match;
+  });
+  return { waiting, release: held.release };
+};
+
+test("clicked navigation is active while its page file is held", async ({ page, baseURL }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  const held = await holdTarget(page, baseURL, "benchmarks", info.config.metadata.toolingDistDir);
+  const held = await holdBenchmarks(page, baseURL);
   try {
     await openPage(page, "/");
     await proofClick(page, "Benchmarks");
@@ -659,9 +670,9 @@ test("clicked navigation is active while its page file is held", async ({ page, 
   }
 });
 
-test("Proof reopened during a held switch stays open after landing", async ({ page, baseURL }, info) => {
+test("Proof reopened during a held switch stays open after landing", async ({ page, baseURL }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  const held = await holdTarget(page, baseURL, "benchmarks", info.config.metadata.toolingDistDir);
+  const held = await holdBenchmarks(page, baseURL);
   try {
     await openPage(page, "/");
     await proofClick(page, "Benchmarks");
@@ -672,6 +683,8 @@ test("Proof reopened during a held switch stays open after landing", async ({ pa
     held.release();
     await expect(page).toHaveURL(/\/benchmarks$/);
     await expect(page.getByRole("heading", { name: "Performance Benchmarks" })).toBeVisible();
+    await expect(page.locator('.route-progress')).toHaveAttribute("data-state", "idle");
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     await expect(proof).toHaveAttribute("aria-expanded", "true", { timeout: 3000 });
   } finally {
     held.release();

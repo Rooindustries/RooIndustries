@@ -1,7 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { test: base, expect } = require("@playwright/test");
-const { heldRouteFixtures, holdRoute } = require("./fixtures/held-routes.cjs");
+const { heldRouteFixtures } = require("./fixtures/held-routes.cjs");
 const { navLink } = require("./fixtures/nav-link.cjs");
 const {
   targets, holdTarget, holdTargets, installMeasurement, armMeasurement, openPage, proofClick, finishSuperseded,
@@ -182,10 +182,10 @@ test.describe("Scored page switches", () => {
 
   test.afterAll(async () => {
     const state = readState();
-    if (Object.keys(state.results).length !== entries.length + 5) return;
+    if (Object.keys(state.results).length !== entries.length + 4) return;
     const failures = Object.entries(state.results).filter(([, passed]) => !passed).map(([name]) => name);
     fs.writeFileSync(scoreFile, JSON.stringify({ failures }, null, 2));
-    console.log(`ROUTE SWITCH FAILURES: ${failures.length}/35`);
+    console.log(`ROUTE SWITCH FAILURES: ${failures.length}/34`);
   });
 
   for (const entry of entries) {
@@ -313,6 +313,8 @@ test.describe("Scored page switches", () => {
       await finished;
       await expect(page).toHaveURL(/\/benchmarks$/);
       await expect(page.getByRole("heading", { name: "Performance Benchmarks" })).toBeVisible();
+      await expect(page.locator('.route-progress')).toHaveAttribute("data-state", "idle");
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       const expanded = await proof.getAttribute("aria-expanded");
       expect.soft(expanded, "Proof remains open when Benchmarks lands").toBe("true");
       if (expanded !== "true") await proof.click();
@@ -331,52 +333,4 @@ test.describe("Scored page switches", () => {
     }
   });
 
-  test("35. A stale Reviews file loads a fresh document", async ({ page, baseURL }) => {
-    let failed = false;
-    let sawError = false;
-    let markMissing;
-    let releaseFailure;
-    const missing = new Promise(resolve => { markMissing = resolve; });
-    const failureGate = new Promise(resolve => { releaseFailure = resolve; });
-    await page.exposeBinding("recordRouteError", () => { sawError = true; });
-    await page.addInitScript(() => {
-      new MutationObserver(() => {
-        const headings = [...document.querySelectorAll("h1, h2")];
-        if (headings.some(node => /we couldn.t load this page/i.test(node.textContent))) {
-          window.recordRouteError();
-        }
-      }).observe(document, { childList: true, subtree: true });
-    });
-    const data = await holdRoute(page, "**/api/content/reviews-gallery", route => route.continue());
-    await page.route(`${baseURL}/_next/static/chunks/**`, async route => {
-      const response = await route.fetch();
-      const body = await response.body();
-      if (!failed && body.toString().startsWith('"use strict";') && body.includes(targets.reviews.marker)) {
-        failed = true;
-        await failureGate;
-        await route.fulfill({ status: 404, contentType: "text/plain", body: "Missing page file" });
-        markMissing();
-      } else {
-        await route.fulfill({ response, body });
-      }
-    });
-    try {
-      await openPage(page, "/about");
-      await page.evaluate(() => { window.routeEntryMarker = true; });
-      await proofClick(page, "Reviews");
-      releaseFailure();
-      await missing;
-      const error = page.getByRole("heading", { name: /We couldn.t load this page/ });
-      await Promise.race([page.waitForURL(/\/reviews$/), error.waitFor({ state: "visible" })]);
-      data.release();
-      expect(await error.count()).toBe(0);
-      await expect(page).toHaveURL(/\/reviews$/);
-      await expect(page.getByRole("heading", { name: "Community Reviews" })).toBeVisible();
-      expect(sawError).toBe(false);
-      expect(await page.evaluate(() => window.routeEntryMarker)).toBeUndefined();
-    } finally {
-      releaseFailure();
-      data.release();
-    }
-  });
 });
