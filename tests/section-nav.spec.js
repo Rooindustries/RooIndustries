@@ -1,9 +1,14 @@
 const testHost = process.env.ROO_TEST_HOST || '127.0.0.1';
 const fs = require("fs");
 const path = require("path");
-const { test, expect } = require("@playwright/test");
+const { test: base, expect } = require("@playwright/test");
+const { heldRouteFixtures, holdChunks } = require("./fixtures/held-routes.cjs");
+const { targets, openPage, proofClick } = require("./fixtures/route-switch-response.cjs");
+
 const { waitForHydrated } = require("./fixtures/react-hydration.cjs");
 const { navLink } = require("./fixtures/nav-link.cjs");
+
+const test = base.extend(heldRouteFixtures);
 
 const BASE_URL = process.env.BASE_URL;
 if (!BASE_URL) {
@@ -638,3 +643,185 @@ test.afterEach(async () => {
     "client crash/hydration errors captured"
   ).toEqual([]);
 });
+
+const holdBenchmarks = async (page, baseURL) => {
+  let reached;
+  const waiting = new Promise(resolve => { reached = resolve; });
+  const held = await holdChunks(page, { origin: baseURL }, body => {
+    const match = body.toString().startsWith('"use strict";') && body.includes(targets.benchmarks.marker);
+    if (match) reached();
+    return match;
+  });
+  return { waiting, release: held.release };
+};
+
+test("clicked navigation is active while its page file is held", async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const held = await holdBenchmarks(page, baseURL);
+  try {
+    await openPage(page, "/");
+    await proofClick(page, "Benchmarks");
+    await held.waiting;
+    const link = page.locator('#desktop-proof-menu a[href="/benchmarks"]');
+    await expect(link).toHaveAttribute("aria-current", "page", { timeout: 3000 });
+    await expect(page).toHaveURL(/\/$/);
+  } finally {
+    held.release();
+  }
+});
+
+test("Proof reopened during a held switch stays open after landing", async ({ page, baseURL }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const held = await holdBenchmarks(page, baseURL);
+  try {
+    await openPage(page, "/");
+    await proofClick(page, "Benchmarks");
+    await held.waiting;
+    const proof = page.locator('button[aria-controls="desktop-proof-menu"]');
+    await proof.click();
+    await expect(proof).toHaveAttribute("aria-expanded", "true");
+    held.release();
+    await expect(page).toHaveURL(/\/benchmarks$/);
+    await expect(page.getByRole("heading", { name: "Performance Benchmarks" })).toBeVisible();
+    await expect(page.locator('.route-progress')).toHaveAttribute("data-state", "idle");
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await expect(proof).toHaveAttribute("aria-expanded", "true", { timeout: 3000 });
+  } finally {
+    held.release();
+  }
+});
+
+test("Back and Forward close the open phone menu", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openPage(page, "/about");
+  await proofClick(page, "Benchmarks", true);
+  await expect(page).toHaveURL(/\/benchmarks$/);
+  await proofClick(page, "Reviews", true);
+  await expect(page).toHaveURL(/\/reviews$/);
+  const menu = page.getByRole("button", { name: "Open menu" });
+  await menu.click();
+  await expect(menu).toHaveAttribute("aria-expanded", "true");
+  await page.goBack();
+  await expect(page).toHaveURL(/\/benchmarks$/);
+  await expect(menu).toHaveAttribute("aria-expanded", "false");
+  await menu.click();
+  await expect(menu).toHaveAttribute("aria-expanded", "true");
+  await page.goForward();
+  await expect(page).toHaveURL(/\/reviews$/);
+  await expect(menu).toHaveAttribute("aria-expanded", "false");
+});
+
+test("a reset link removes its query token before navigation and history", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => {
+    window.history.replaceState(window.history.state, "", "/referrals/reset?token=abc123");
+  });
+  await openPage(page, "/referrals/reset");
+  await expect(page).toHaveURL(/\/referrals\/reset$/);
+  await proofClick(page, "Reviews");
+  await expect(page).toHaveURL(/\/reviews$/);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/referrals\/reset$/);
+});
+
+test("a safe initial query survives client navigation and Back", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openPage(page, "/about?campaign=launch");
+  await expect(page).toHaveURL(/\/about\?campaign=launch$/);
+  await proofClick(page, "Reviews");
+  await expect(page).toHaveURL(/\/reviews$/);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/about\?campaign=launch$/);
+});
+
+test("an old section marker does not replace the next page in history", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => {
+    window.history.replaceState({ ...window.history.state, __rooSectionTrip: true }, "", window.location.href);
+  });
+  await openPage(page, "/referrals/reset");
+  expect(await page.evaluate(() => window.history.state.__rooSectionTrip)).toBeUndefined();
+  await proofClick(page, "Reviews");
+  await expect(page).toHaveURL(/\/reviews$/);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/referrals\/reset$/);
+});
+
+for (const origin of ["/reviews", "/about"]) {
+  for (const surface of ["desktop", "mobile", "bar"]) {
+    for (const action of ACTIONS.filter(item => surface !== "bar" || item.target === "plans")) {
+      test(`held Home section keeps ${action.label} active from ${origin} on ${surface}`, async ({ page, baseURL }) => {
+        await page.setViewportSize(surface === "desktop" ? { width: 1440, height: 900 } : { width: 390, height: 844 });
+        const held = await holdHome(page, baseURL);
+        try {
+          await openPage(page, origin);
+          if (surface === "mobile") await page.getByRole("button", { name: "Open menu" }).click();
+          const linkSurface = surface === "desktop" && action.target === "plans" ? "bar" : surface;
+          const selector = `[data-nav-surface="${linkSurface}"][data-nav-target="${action.target}"]`;
+          await page.evaluate(() => {
+            window.sectionSamples = [];
+            window.sectionSampling = true;
+            const sample = () => {
+              if (!window.sectionSampling) return;
+              window.sectionSamples.push([...document.querySelectorAll('[data-nav-target][aria-current="location"]')]
+                .map(element => element.dataset.navTarget));
+              requestAnimationFrame(sample);
+            };
+            document.addEventListener("click", () => requestAnimationFrame(sample), { once: true, capture: true });
+          });
+          await page.locator(selector).click();
+          await held.waiting;
+          await expect(page.locator(selector)).toHaveAttribute("aria-current", "location", { timeout: 3000 });
+          await expect(page.locator('#main-content [data-route-key="/"]')).toHaveCount(0);
+          held.release();
+          await expect(page.locator('#main-content [data-route-key="/"]')).toBeVisible();
+          await expect(page.locator(selector)).toHaveAttribute("aria-current", "location");
+          await page.evaluate(() => new Promise(resolve => {
+            requestAnimationFrame(() => requestAnimationFrame(resolve));
+          }));
+          const samples = await page.evaluate(() => {
+            window.sectionSampling = false;
+            return window.sectionSamples;
+          });
+          expect(samples.length).toBeGreaterThan(1);
+          expect(samples.every(active => active.length > 0 && active.every(item => item === action.target))).toBe(true);
+        } finally {
+          held.release();
+        }
+      });
+    }
+  }
+}
+
+const holdHome = async (page, baseURL) => {
+  let reached;
+  const waiting = new Promise(resolve => { reached = resolve; });
+  const held = await holdChunks(page, { origin: baseURL }, body => {
+    const match = body.toString().startsWith('"use strict";') && body.includes(targets.home.marker);
+    if (match) reached();
+    return match;
+  });
+  return { waiting, release: held.release };
+};
+
+for (const [label, origin, selector, viewport] of [
+  ["desktop logo", "/reviews", '[data-nav-row] a[href="/"]:visible', { width: 1440, height: 900 }],
+  ["phone logo", "/reviews", '[data-nav-row] a[href="/"]:visible', { width: 390, height: 844 }],
+  ["Home link", "/no-such-page", 'a:has-text("Back to Home")', { width: 1440, height: 900 }],
+]) {
+  test(`held ${label} leaves home sections inactive`, async ({ page, baseURL }) => {
+    await page.setViewportSize(viewport);
+    const held = await holdHome(page, baseURL);
+    try {
+      await openPage(page, origin);
+      await page.locator(selector).click();
+      await held.waiting;
+      await expect(page.locator('[data-nav-target][aria-current="location"]')).toHaveCount(0);
+      held.release();
+      await expect(page.locator('#main-content [data-route-key="/"]')).toBeVisible();
+      await expect(page.locator('[data-nav-target][aria-current="location"]')).toHaveCount(0);
+    } finally {
+      held.release();
+    }
+  });
+}

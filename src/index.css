@@ -2122,7 +2122,9 @@ html.low-performance-mode #how-it-works .deferred-section-content {
   content-visibility: visible;
 }
 
-html.low-performance-mode *:not(.glow-line):not(.ri-engineer-status-pulse):not(.ri-reveal):not(.site-dialog-overlay):not(.site-dialog-panel) {
+html.low-performance-mode *:not(.glow-line):not(.ri-engineer-status-pulse):not(.ri-reveal):not(
+  .site-dialog-overlay
+):not(.site-dialog-panel):not(.route-progress-segment) {
   animation: none !important;
 }
 

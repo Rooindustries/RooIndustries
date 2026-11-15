@@ -15,6 +15,7 @@ import SalesTelemetry from "./components/SalesTelemetry";
 import { loadPostHog } from "./lib/loadPostHog";
 import { SpeedInsights } from "@vercel/speed-insights/react";
 import ReservationBanner from "./components/ReservationBanner";
+import RouteProgress, { RouteWaiting } from "./components/RouteProgress";
 import { BookingDialogReady } from "./lib/bookingDialogHold";
 import IntercomMessenger from "./components/IntercomMessenger";
 import { subscribePerfDebugChanges, syncPerfDebugFromEnvironment } from "./lib/perfDebug";
@@ -143,7 +144,7 @@ const IntercomRuntime = ({ disabledRoutes, disabled }) => {
 
 const RouteFallback = () => {
   useBookingDialogPending(true);
-  return <div className="pt-16 text-center text-ink-secondary text-sm">Loading...</div>;
+  return <div className="pt-16 text-center text-ink-secondary text-sm"><RouteWaiting />Loading...</div>;
 };
 
 const withRouteSuspense = (node, fallback = <RouteFallback />) => (
@@ -692,6 +693,7 @@ export function AppContent({
           }`}
           aria-hidden="true"
         />
+        <RouteProgress />
         <div className="app-bg-grid-layer absolute inset-0"></div>
         <div className="app-bg-radial-layer absolute inset-0"></div>
 
@@ -719,7 +721,7 @@ export function AppContent({
         </main>
       </div>
       {isFlowRoute && (initialBookingModalComponent ? flowModal : (
-        <Suspense fallback={null}>{flowModal}</Suspense>
+        <Suspense fallback={<RouteWaiting />}>{flowModal}</Suspense>
       ))}
       <PerfDebugRuntime />
     </SectionNavigationProvider>

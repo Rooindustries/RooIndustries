@@ -8,6 +8,7 @@ import { SECTION_HASHES, buildHomeSectionHref } from "../lib/sectionNavigation";
 import { useActiveHomeSection, useSectionNavigation } from "../lib/sectionNavigator";
 import { useScrollRuntime } from "../lib/scrollRuntime";
 import { onMediaChange } from "../lib/mediaQuery";
+import { useRouteSwitch } from "../next/PendingMemoryRouter";
 
 const canAnimateLogo = () => {
   if (typeof window === "undefined") return false;
@@ -75,6 +76,7 @@ const applyTheme = (theme, { persist = true } = {}) => {
 
 export default function Navbar() {
   const location = useLocation();
+  const { pending, target } = useRouteSwitch();
   const activeHomeHash = useActiveHomeSection();
   const {
     goToSection,
@@ -96,9 +98,9 @@ export default function Navbar() {
   const scrolled = scrollY > 12;
   const bannerHidden = scrollY > 8;
 
-  const isActive = (path) => location.pathname === path;
+  const isActive = (path) => target.pathname === path;
 
-  const isHomeSectionActive = (...hashes) => isActive("/") && hashes.includes(activeHomeHash);
+  const isHomeSectionActive = (...hashes) => isActive("/") && hashes.includes(pending ? target.hash : activeHomeHash);
   const isBenefitsActive = isHomeSectionActive(SECTION_HASHES.benefits);
   const isPlansActive = isActive("/packages") || isHomeSectionActive(SECTION_HASHES.plans);
   const isFaqActive =
@@ -106,7 +108,7 @@ export default function Navbar() {
     isHomeSectionActive(SECTION_HASHES.faq, SECTION_HASHES.upgradePath, SECTION_HASHES.trust);
   const isProofActive = isActive("/benchmarks") || isActive("/reviews");
   const isReferralsActive =
-    location.pathname === "/referrals" || location.pathname.startsWith("/referrals/");
+    target.pathname === "/referrals" || target.pathname.startsWith("/referrals/");
   const isDashboardActive = isReferralsActive && !isActive("/referrals/register");
   const isTeamActive = isActive("/meet-the-team");
   const navMenuOpen = open || proofOpen || referralsOpen;
@@ -201,8 +203,8 @@ export default function Navbar() {
   }, [updateHeaderOffset]);
 
   useEffect(() => {
-    if (!isOwnSectionArrival(location)) closeMenus();
-  }, [closeMenus, isOwnSectionArrival, location]);
+    if (!isOwnSectionArrival(target)) closeMenus();
+  }, [closeMenus, isOwnSectionArrival, target.key]);
 
   useEffect(() => {
     return onMediaChange(window.matchMedia(DESKTOP_NAV_QUERY), closeMenus);
@@ -574,6 +576,7 @@ export default function Navbar() {
               href="/#packages"
               data-nav-surface="bar"
               data-nav-target="plans"
+              aria-current={isActive("/packages") ? "page" : isPlansActive ? "location" : undefined}
               onClick={(event) => handleSectionLinkClick(event, SECTION_HASHES.plans)}
               className="nav-cta inline-flex items-center gap-2 px-2 py-1.5 text-[11px] min-[360px]:px-2.5 min-[360px]:text-xs sm:px-5 sm:py-3 sm:text-base font-semibold whitespace-nowrap rounded-full text-white transition"
             >

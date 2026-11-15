@@ -220,3 +220,34 @@ test("How It Works videos load and play near the viewport and pause away", async
     await expect.poll(() => page.locator("#how-it-works video").evaluateAll((videos) => videos.length > 0 && videos.every((video) => video.paused)), { timeout: 3000 }).toBe(true);
   });
 });
+
+test("payment keeps chat hidden while home can open it", async ({ browser, baseURL }, testInfo) => {
+  const options = { viewport: { width: 1366, height: 768 } };
+  const installChat = page => page.route("https://widget.intercom.io/**", route => route.fulfill({
+    contentType: "application/javascript",
+    body: 'document.body.insertAdjacentHTML("beforeend", \'<button class="intercom-launcher">Chat</button>\')',
+  }));
+  await withScenario(browser, testInfo, baseURL, options, async ({ page, scenario, navigate }) => {
+    await installChat(page);
+    await navigate("/payment");
+    await expect.poll(() => page.evaluate(() => window.intercomSettings?.hide_default_launcher)).toBe(true);
+    scenario.interacted = true;
+    await page.keyboard.press("Tab");
+    await page.evaluate(() => new Promise(resolve => requestIdleCallback(resolve)));
+    await expect(page.locator(".intercom-launcher")).toHaveCount(0);
+    await expect(page.locator("#intercom-embed-script")).toHaveCount(0);
+    expect(widgetRequests(scenario)).toHaveLength(0);
+    await page.waitForLoadState("networkidle");
+  });
+  await withScenario(browser, testInfo, baseURL, options, async ({ page, scenario, navigate }) => {
+    await installChat(page);
+    await navigate();
+    await expect.poll(() => page.evaluate(() => window.intercomSettings?.hide_default_launcher)).toBe(false);
+    scenario.interacted = true;
+    await page.keyboard.press("Tab");
+    await expect(page.locator("#intercom-embed-script")).toBeAttached();
+    await expect(page.locator(".intercom-launcher")).toBeVisible();
+    expect(widgetRequests(scenario)).toHaveLength(1);
+    await page.waitForLoadState("networkidle");
+  });
+});

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { MemoryRouter } from "react-router-dom";
+import PendingMemoryRouter from "./PendingMemoryRouter";
 import { AppContent } from "../App";
 import { buildQueryString } from "./routeQuery";
 import { sanitizeBrowserSearch } from "../lib/browserSearch";
@@ -26,7 +26,7 @@ export default function LegacyRoutePage({
   });
 
   return (
-    <MemoryRouter initialEntries={[initialEntry]}>
+    <PendingMemoryRouter initialEntries={[initialEntry]}>
       <AppContent
         initialHomeData={initialHomeData}
         initialRouteData={initialRouteData}
@@ -38,6 +38,6 @@ export default function LegacyRoutePage({
         routeShell="memory"
         notFound={notFound}
       />
-    </MemoryRouter>
+    </PendingMemoryRouter>
   );
 }
