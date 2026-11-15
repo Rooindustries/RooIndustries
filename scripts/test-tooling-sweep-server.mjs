@@ -56,6 +56,7 @@ const env = withNodeOption({
   SUPABASE_CUTOVER_ENABLED: "1",
   COMMERCE_CUTOVER_ENABLED: "1",
   SUPABASE_URL: outside(contentURL),
+  NEXT_PUBLIC_POSTHOG_HOST: outside(contentURL),
   NEXT_PUBLIC_SUPABASE_URL: outside(contentURL),
   NEXT_PUBLIC_SUPABASE_ASSET_URL: outside(contentURL),
   SUPABASE_SECRET_KEY: outside("fixture-only-tooling-server-secret-key"),

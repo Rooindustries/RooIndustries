@@ -37,14 +37,17 @@ const test = base.extend({
     try {
       await use();
     } finally {
-      await session.detach();
+      try {
+        await session.detach();
+      } catch (error) {
+        if (!page.isClosed()) throw error;
+      }
     }
   }, { auto: true }],
   flow: async ({ page, context, baseURL }, use, testInfo) => {
     const { guardBrowserContext } = await import("../../scripts/lib/test-target-safety.mjs");
     const contentURL = new URL(baseURL);
     contentURL.port = String(fixturePort("TOOLING_CONTENT_PORT"));
-    await guardBrowserContext(context, [baseURL, contentURL.origin]);
     const date = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
     const state = {
       calls: [],
@@ -63,7 +66,7 @@ const test = base.extend({
     const json = (route, data, status = 200) => route.fulfill({
       status, contentType: "application/json", body: JSON.stringify(data),
     });
-    await context.route("**/*", async (route) => {
+    const flowRoute = async (route) => {
       const request = route.request();
       const url = new URL(request.url());
       if (url.origin !== new URL(baseURL).origin) return route.fallback();
@@ -165,13 +168,18 @@ const test = base.extend({
       }
       if (path === "/api/payment/start") return json(route, startedCheckout(baseURL, state.checkouts, request));
       return route.fallback();
-    });
-    const booking = async (path = "/booking") => {
-      await page.goto(path);
+    };
+    const restoreRoutes = async () => {
+      await guardBrowserContext(context, [baseURL, contentURL.origin]);
+      await context.route("**/*", flowRoute);
+    };
+    await restoreRoutes();
+    const booking = async (path = "/booking", options) => {
+      await page.goto(path, options);
       await page.getByRole("button", { name: /^Earliest available:/ }).click();
     };
-    const reserve = async (path) => {
-      await booking(path);
+    const reserve = async (path, options) => {
+      await booking(path, options);
       await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
       await page.getByRole("button", { name: "Next", exact: true }).last().click();
       await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toBeVisible();
@@ -182,8 +190,8 @@ const test = base.extend({
       await page.getByRole("textbox", { name: "PC specifications", exact: true }).fill("Ryzen 7700 / RTX 4070");
       await page.getByRole("textbox", { name: "Main game or application", exact: true }).fill("CS2");
     };
-    const review = async (path) => {
-      await reserve(path);
+    const review = async (path, options) => {
+      await reserve(path, options);
       await details();
       await page.getByRole("button", { name: "Review before payment", exact: true }).click();
       await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
@@ -210,7 +218,7 @@ const test = base.extend({
       await page.getByPlaceholder("e.g. 1a2b3c4d5e6f7g8h9i", { exact: true }).fill("fixture-order");
     };
     try {
-      await use({ state, booking, reserve, details, review, payment, codeInput, upgrade, startBodies });
+      await use({ state, booking, reserve, details, review, payment, codeInput, upgrade, startBodies, restoreRoutes });
     } finally {
       await testInfo.attach("requests", { body: JSON.stringify({ calls: state.calls, aborted: state.aborted }, null, 2), contentType: "application/json" });
       if (!page.isClosed()) {
@@ -362,8 +370,13 @@ const checkoutStartCases = [
 ].map(([name, prepare, run]) => ({ name, prepare: prepare || (() => null), run }));
 
 const productionOnlyScripts = ["https://scripts.seorce.com/api?**", "https://widget.intercom.io/widget/**"];
+const installProductionOnlyScripts = async (context) => {
+  for (const script of productionOnlyScripts) {
+    await context.route(script, (route) => route.fulfill({ contentType: "application/javascript", body: "" }));
+  }
+};
 
-const openFreePayment = async (page, flow) => {
+const openFreePayment = async (page, flow, options) => {
   await page.route("**/api/ref/validateCoupon?code=free100*", route => route.fulfill({
     json: {
       ok: true,
@@ -378,7 +391,7 @@ const openFreePayment = async (page, flow) => {
       quote: { grossAmount: 84.99, netAmount: free ? 0 : 84.99, isFree: free },
     } });
   });
-  await flow.review();
+  await flow.review(undefined, options);
   await flow.codeInput("free100");
   await expect(page.getByRole("button", { name: "Remove coupon code free100", exact: true })).toBeVisible();
   await flow.payment();
@@ -419,9 +432,7 @@ const productionHostFixtures = {
     use({ ...launchOptions, args: productionHost.args }), { scope: "worker" }],
   baseURL: async ({ productionHost }, use) => use(productionHost.origin),
   productionOnlyScriptStubs: [async ({ context, flow }, use) => {
-    for (const script of productionOnlyScripts) {
-      await context.route(script, (route) => route.fulfill({ contentType: "application/javascript", body: "" }));
-    }
+    await installProductionOnlyScripts(context);
     await use(flow);
   }, { auto: true }],
 };
@@ -430,4 +441,5 @@ module.exports = {
   test, expect, overhaulPrice, cookieBanner, declineCookies, acceptCookies, cookieSettingsReady, openCookieSettings,
   settleIdle, bookingEventId, routePaidStart, checkoutStartCases, productionHostFixtures, openFreePayment,
   analyticsWaitLimitMs, recordCheckoutTimes, checkoutTimes, withinAnalyticsWait,
+  installProductionOnlyScripts,
 };
