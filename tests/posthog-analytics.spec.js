@@ -2,7 +2,8 @@ const {
   test: bookingTest, expect, cookieBanner, acceptCookies, declineCookies, cookieSettingsReady, openCookieSettings,
   settleIdle, productionHostFixtures, openFreePayment,
 } = require("./fixtures/booking-flow.cjs");
-const { posthogFixtures, postHogCode, named, pageviews } = require("./fixtures/posthog.cjs");
+const { posthogFixtures, postHogCode, named, pageviews, arrived, closeTab, expectLeavesFollowViews } =
+  require("./fixtures/posthog.cjs");
 const { holdRoute, holdChunks } = require("./fixtures/held-routes.cjs");
 
 const eventId = "a".repeat(40);
@@ -319,6 +320,64 @@ test.describe("production host", () => {
       expect(event.properties.$pathname).toBe(new URL(event.properties.$current_url).pathname);
       expect(JSON.stringify(event.properties)).not.toMatch(/utm_source=|#included|ref-login/);
     }
+  });
+
+  test("page leaves follow page views during navigation and tab close", async ({ page, posthog: seen }) => {
+    await page.goto("/packages");
+    await acceptCookies(page);
+    await expect.poll(async () => (await arrived(seen, "$pageview")).map((event) => event.properties.$pathname))
+      .toEqual(["/packages"]);
+    await page.goto("/about");
+    await expect.poll(async () => (await arrived(seen, "$pageview")).map((event) => event.properties.$pathname))
+      .toEqual(["/packages", "/about"]);
+    await expect.poll(async () => (await arrived(seen, "$pageleave"))
+      .map((event) => event.properties.$prev_pageview_pathname)).toContain("/packages");
+    await closeTab(page);
+    await expect.poll(async () => (await arrived(seen, "$pageleave"))
+      .map((event) => event.properties.$prev_pageview_pathname)).toContain("/about");
+    expectLeavesFollowViews(seen);
+    expect(seen.posthogHosts).toEqual([]);
+  });
+
+  test("leaving before PostHog downloads sends page views before page leaves", async ({
+    page, posthog: seen, productionHost,
+  }) => {
+    const hold = await holdPostHog(page, productionHost);
+    await page.goto("/packages");
+    const acceptedAt = Date.now();
+    await acceptCookies(page);
+    await expect.poll(() => hold.held, { timeout: 20000 }).toBe(true);
+    expect(await arrived(seen, "$pageview")).toEqual([]);
+    expect(await arrived(seen, "$pageleave")).toEqual([]);
+    expect(Date.now() - acceptedAt).toBeLessThan(1000);
+    await page.goto("/about");
+    expect(await arrived(seen, "$pageview")).toEqual([]);
+    expect(await arrived(seen, "$pageleave")).toEqual([]);
+    hold.release();
+    await expect.poll(async () => (await arrived(seen, "$pageview")).map((event) => event.properties.$pathname))
+      .toEqual(["/packages", "/about"]);
+    await closeTab(page);
+    await expect.poll(async () => (await arrived(seen, "$pageleave"))
+      .map((event) => event.properties.$prev_pageview_pathname)).toContain("/about");
+    expectLeavesFollowViews(seen);
+    expect(seen.posthogHosts).toEqual([]);
+  });
+
+  test("a never-visible tab sends a page view before its page leave", async ({ page, posthog: seen }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(Document.prototype, "visibilityState", { get: () => "hidden" });
+      Object.defineProperty(Document.prototype, "hidden", { get: () => true });
+    });
+    await page.goto("/packages");
+    expect(await page.evaluate(() => document.visibilityState)).toBe("hidden");
+    await acceptCookies(page);
+    await expect.poll(async () => (await arrived(seen, "$pageview")).map((event) => event.properties.$pathname))
+      .toEqual(["/packages"]);
+    await closeTab(page);
+    await expect.poll(async () => (await arrived(seen, "$pageleave"))
+      .map((event) => event.properties.$prev_pageview_pathname)).toContain("/packages");
+    expectLeavesFollowViews(seen);
+    expect(seen.posthogHosts).toEqual([]);
   });
 
   test("an event keeps the page it happened on while PostHog is still loading", async ({

@@ -1,6 +1,8 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const zlib = require("node:zlib");
+const { expect } = require("@playwright/test");
+const { fixturePort } = require("./fixture-ports.cjs");
 
 const recorderDir = path.dirname(require.resolve("posthog-js/dist/lazy-recorder.js"));
 const POSTHOG_CODE = /\[PostHog\.js\]|phc_[A-Za-z0-9]{20,}/;
@@ -19,13 +21,14 @@ const remoteConfig = {
   siteApps: [],
 };
 
-const decode = (request) => {
-  const body = request.postDataBuffer();
+const decodeBody = (body) => {
   if (!body?.length) return [];
-  const text = body[0] === 0x1f && body[1] === 0x8b ? zlib.gunzipSync(body).toString("utf8") : body.toString("utf8");
+  let text = (body[0] === 0x1f && body[1] === 0x8b ? zlib.gunzipSync(body) : body).toString("utf8");
+  if (text.startsWith("data=")) text = Buffer.from(new URLSearchParams(text).get("data"), "base64").toString("utf8");
   const payload = JSON.parse(text);
   return Array.isArray(payload) ? payload : payload.batch || [payload];
 };
+const decode = (request) => decodeBody(request.postDataBuffer());
 
 const gunzipJson = (value) => JSON.parse(zlib.gunzipSync(Buffer.from(value, "latin1")).toString("utf8"));
 
@@ -66,14 +69,28 @@ const ingest = async (route, seen) => {
     } else {
       seen.events.push(event);
       seen.senders.set(event, sender);
+      seen.arrived.set(event, Date.now());
     }
   }
   return route.fulfill({ json: { status: 1 } });
 };
 
-const stubPostHog = async (context, origin) => {
+const stubPostHog = async (context, origin, capture) => {
   const seen = {
     events: [], snapshots: [], requests: [], posthogHosts: [], scripts: [], loading: new Set(), senders: new WeakMap(),
+    taken: 0, arrived: new Map(),
+  };
+  seen.received = async () => {
+    const url = `http://127.0.0.1:${fixturePort("TOOLING_CONTENT_PORT")}/__posthog?capture=${capture}`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`PostHog fixture returned ${response.status}`);
+    const { events } = await response.json();
+    for (const { receivedAt, ...event } of events.slice(seen.taken)) {
+      if (event.event === "$snapshot") continue;
+      seen.events.push(event);
+      seen.arrived.set(event, receivedAt);
+    }
+    seen.taken = events.length;
   };
   await context.addInitScript(() => Object.defineProperty(Navigator.prototype, "webdriver", { get: () => false }));
   await context.route((url) => url.hostname.endsWith("posthog.com"), (route) => {
@@ -104,10 +121,33 @@ const stubPostHog = async (context, origin) => {
 
 const postHogCode = async (seen) => (await Promise.all(seen.scripts)).filter(Boolean);
 const named = (seen, name) => seen.events.filter((event) => event.event === name);
+const arrived = async (seen, name) => {
+  await seen.received();
+  return named(seen, name);
+};
+const closeTab = async (page) => {
+  await page.unrouteAll({ behavior: "wait" });
+  await page.context().unrouteAll({ behavior: "wait" });
+  await page.close({ runBeforeUnload: true });
+};
+const expectLeavesFollowViews = (seen) => {
+  for (const leave of named(seen, "$pageleave")) {
+    const id = leave.properties.$prev_pageview_id;
+    expect(id).toBeTruthy();
+    const view = named(seen, "$pageview").find((event) => event.properties.$pageview_id === id);
+    expect(view, `Missing page view for ${id}`).toBeTruthy();
+    expect(leave.properties.$prev_pageview_pathname).toBe(view.properties.$pathname);
+    expect(seen.arrived.get(view)).toBeLessThanOrEqual(seen.arrived.get(leave));
+  }
+};
 const pageviews = (seen, keep = () => true) =>
   named(seen, "$pageview").filter(keep).map((event) => event.properties.$current_url);
 const posthogFixtures = {
-  posthog: async ({ context, baseURL }, use) => use(await stubPostHog(context, baseURL)),
+  posthog: async ({ context, baseURL }, use, testInfo) => {
+    const capture = `pw-${testInfo.testId}`.replace(/[^A-Za-z0-9_-]/g, "_");
+    await context.addCookies([{ name: "roo_posthog_capture", value: capture, url: baseURL }]);
+    await use(await stubPostHog(context, baseURL, capture));
+  },
 };
 
-module.exports = { posthogFixtures, postHogCode, named, pageviews };
+module.exports = { posthogFixtures, postHogCode, named, pageviews, arrived, closeTab, expectLeavesFollowViews };

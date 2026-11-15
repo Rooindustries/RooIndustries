@@ -1,12 +1,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
+import { gunzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { uiRepairsFixture } from './ui-repairs-server.mjs';
 import { localOrigin } from '../../scripts/lib/test-target-safety.mjs';
 import { listenOnPort } from '../../scripts/lib/free-tcp-port.mjs';
 import { referralEmail } from './api-routes.mjs';
 import fixturePorts from './fixture-ports.cjs';
+
+const posthogReceived = [];
 
 export async function createToolingContentFixture({ origin, artifact, apiRoutes = false, clockFile, server: shared, instance }) {
   const target = new URL(localOrigin(origin));
@@ -191,6 +194,36 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
       if (instance && req.method === 'GET' && url.pathname === fixturePorts.INSTANCE_PATH) {
         res.writeHead(200, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
         res.end(instance);
+        return;
+      }
+      if (req.method === 'GET' && url.pathname === '/__posthog') {
+        const events = posthogReceived.filter(entry => entry.capture === url.searchParams.get('capture'))
+          .flatMap(({ events, receivedAt }) => events.map(event => ({ ...event, receivedAt })));
+        json(res, 200, { events });
+        return;
+      }
+      if (/^\/(i\/v0\/e|e|s|batch|capture|engage|flags|decide)\/?$/.test(url.pathname)) {
+        if (req.method !== 'POST') {
+          json(res, 404, {});
+          return;
+        }
+        const chunks = [];
+        let size = 0;
+        for await (const chunk of req) {
+          size += chunk.length;
+          if (size > 131072) throw new Error('Fixture body is too large.');
+          chunks.push(chunk);
+        }
+        const buffer = Buffer.concat(chunks);
+        let text = (buffer[0] === 0x1f && buffer[1] === 0x8b ? gunzipSync(buffer) : buffer).toString('utf8');
+        if (text.startsWith('data=')) {
+          text = Buffer.from(new URLSearchParams(text).get('data'), 'base64').toString('utf8');
+        }
+        const payload = JSON.parse(text);
+        const events = Array.isArray(payload) ? payload : payload.batch || [payload];
+        const capture = /(?:^|;\s*)roo_posthog_capture=([^;]*)/.exec(req.headers.cookie || '')?.[1];
+        posthogReceived.push({ capture, receivedAt: Date.now(), path: url.pathname, events });
+        json(res, 200, { status: 1 });
         return;
       }
       let raw = '';
