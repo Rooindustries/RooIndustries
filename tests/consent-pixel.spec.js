@@ -1,6 +1,6 @@
 const {
   test, expect, cookieBanner: banner, settleIdle: settle, bookingEventId, routePaidStart, checkoutStartCases,
-  declineCookies, productionHostFixtures,
+  declineCookies, openCookieSettings, productionHostFixtures,
 } = require("./fixtures/booking-flow.cjs");
 
 const pixelId = String(process.env.TOOLING_META_PIXEL_ID || "").trim();
@@ -261,7 +261,7 @@ if (!pixelId) {
         await page.waitForLoadState("networkidle");
         await expect(banner(page)).toHaveCount(0);
         expect(await page.evaluate(() => localStorage.getItem("roo-consent"))).toBe("denied");
-        await page.getByRole("button", { name: "Cookie settings", exact: true }).click();
+        await openCookieSettings(page);
         await expect(banner(page)).toBeVisible();
         expect(await page.evaluate(() => localStorage.getItem("roo-consent"))).toBeNull();
         await banner(page).getByRole("button", { name: "Accept", exact: true }).click();
@@ -353,7 +353,7 @@ if (!pixelId) {
     await page.goto("/meet-the-team");
     await settle(page);
     expect(await adCookies(context)).toEqual(adCookieValues);
-    await page.getByRole("button", { name: "Cookie settings", exact: true }).click();
+    await openCookieSettings(page);
     await expect(banner(page)).toBeVisible();
     await expect.poll(() => adCookies(context)).toEqual({});
     expect(await sessionJourney(page)).toBe(journeyId);
@@ -553,7 +553,7 @@ if (!pixelId) {
         Storage.prototype.setItem = failOnLocal(Storage.prototype.setItem);
         Storage.prototype.removeItem = failOnLocal(Storage.prototype.removeItem);
       });
-      await page.getByRole("button", { name: "Cookie settings", exact: true }).click();
+      await openCookieSettings(page);
       await declineCookies(page);
       await expect(banner(page)).toHaveCount(0);
       expect(meta.calls.at(-1).args).toEqual(["consent", "revoke"]);
@@ -620,7 +620,7 @@ if (!pixelId) {
         .toEqual(["roo_attr", "roo_attr_last"]);
       const other = await context.newPage();
       await other.goto("/reviews");
-      await other.getByRole("button", { name: "Cookie settings", exact: true }).click();
+      await openCookieSettings(other);
       await declineCookies(other);
       await expect.poll(() => adCookies(context)).toEqual({});
       const revokes = () => fromFirstTab().filter(({ args }) => args.join() === "consent,revoke").length;
@@ -645,14 +645,13 @@ if (!pixelId) {
     productionTest("Decline, Cookie settings and a Decline in another tab remove Meta's own cookies", async ({
       page, context,
     }) => {
-      const cookieSettings = (target) => target.getByRole("button", { name: "Cookie settings", exact: true }).click();
       const acceptOn = async (target) => {
         await target.goto("/packages?fbclid=FixtureClickId");
         await banner(target).getByRole("button", { name: "Accept", exact: true }).click();
         await expect.poll(() => metaCookies(context)).toEqual(metaSet);
       };
       await acceptOn(page);
-      await cookieSettings(page);
+      await openCookieSettings(page);
       await expect.poll(() => metaCookies(context)).toEqual([]);
       await context.addCookies(["_fbp", "_fbc"].map((name) => ({
         name, value: `fb.1.1.${name}`, domain: ".rooindustries.com", path: "/",
@@ -660,11 +659,11 @@ if (!pixelId) {
       expect(await metaCookies(context)).toEqual(metaSet);
       await declineCookies(page);
       await expect.poll(() => metaCookies(context)).toEqual([]);
-      await cookieSettings(page);
+      await openCookieSettings(page);
       await acceptOn(page);
       const other = await context.newPage();
       await other.goto("/reviews");
-      await cookieSettings(other);
+      await openCookieSettings(other);
       await declineCookies(other);
       await expect.poll(() => metaCookies(context)).toEqual([]);
     });

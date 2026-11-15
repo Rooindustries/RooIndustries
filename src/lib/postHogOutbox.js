@@ -1,26 +1,42 @@
-import { readConsent } from "./consent";
+import { readConsent, storedDecline } from "./consent";
 import { sanitizeAnalyticsEvent } from "./salesPaths";
 import { followChoices, lastDecline } from "./consentSignals";
 
 const OUTBOX_KEY = "roo-posthog-outbox";
+const COUNTED_KEY = "roo-posthog-counted";
 const OUTBOX_LIMIT = 100;
 
 let posthog = null;
 let unstored = null;
+const countedHere = new Set();
 
 const granted = () => readConsent() === "granted";
 
-const read = () => {
-  if (unstored) return unstored;
+const storedList = (key) => {
   try {
-    const items = JSON.parse(sessionStorage.getItem(OUTBOX_KEY));
+    const items = JSON.parse(sessionStorage.getItem(key));
     return Array.isArray(items) ? items : [];
   } catch {
     return [];
   }
 };
 
-const current = (items) => items.filter(({ at }) => at >= lastDecline());
+const read = () => unstored || storedList(OUTBOX_KEY);
+
+const firstCount = (mark) => {
+  const marks = storedList(COUNTED_KEY);
+  if (countedHere.has(mark) || marks.includes(mark)) return false;
+  countedHere.add(mark);
+  try {
+    sessionStorage.setItem(COUNTED_KEY, JSON.stringify([...marks, mark]));
+  } catch {}
+  return true;
+};
+
+const current = (items) => {
+  const declined = Math.max(lastDecline(), storedDecline());
+  return items.filter(({ at }) => at >= declined);
+};
 
 const write = (items) => {
   try {
@@ -33,7 +49,12 @@ const write = (items) => {
 };
 
 const followChoice = () => {
-  if (!granted()) write([]);
+  if (granted()) return;
+  write([]);
+  countedHere.clear();
+  try {
+    sessionStorage.removeItem(COUNTED_KEY);
+  } catch {}
 };
 
 const withPostHog = (action) => {
@@ -53,16 +74,15 @@ const cleanPath = (path) => {
 
 export const store = (entries) => {
   if (!granted()) {
-    write([]);
+    followChoice();
     return;
   }
-  const kept = entries.flatMap(({ path, ...entry }) => {
+  const kept = entries.flatMap(({ path, mark, ...entry }) => {
     const cleaned = cleanPath(path);
-    return cleaned ? [{ ...entry, path: cleaned }] : [];
+    return cleaned && (!mark || firstCount(mark)) ? [{ ...entry, path: cleaned }] : [];
   });
-  if (!kept.length) return;
   write(current([...read(), ...kept]).sort((a, b) => a.at - b.at).slice(-OUTBOX_LIMIT));
-  withPostHog(({ sendPostHog }) => sendPostHog(kept.map(({ event }) => event)));
+  if (kept.length) withPostHog(({ sendPostHog }) => sendPostHog(kept.map(({ event }) => event)));
 };
 
 export const follow = () => withPostHog(({ syncPostHogPage, startPostHogWhenIdle }) => {
@@ -75,7 +95,7 @@ export const postHogQueued = () => granted() && current(read()).length > 0;
 export const takePostHogQueue = () => {
   followChoice();
   const items = granted() ? current(read()) : [];
-  if (items.length) write([]);
+  write([]);
   return items;
 };
 

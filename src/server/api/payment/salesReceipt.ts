@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { sanitizeSalesAttribution } from "../../../lib/salesAttribution.ts";
+import { referralCode, sanitizeSalesAttribution } from "../../../lib/salesAttribution.ts";
 
 export const bookingEventId = (paymentRecordId: string) =>
   createHash("sha256").update(`booking-confirmed:${paymentRecordId}`).digest("hex").slice(0, 40);
@@ -19,7 +19,7 @@ export function buildSalesReceipt(record: Record<string, any> = {}) {
       provider: String(record.provider),
       amount,
       currency,
-      referralCode: String(record.pricingSnapshot?.effectiveReferralCode || "").slice(0, 80),
+      referralCode: referralCode(record.pricingSnapshot?.effectiveReferralCode),
       attribution: sanitizeSalesAttribution(record.bookingPayload?.salesAttribution),
     };
   } catch {

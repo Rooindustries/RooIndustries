@@ -21,7 +21,7 @@ const lazyModule = (importModule) => {
   return { load, use };
 };
 
-const salesAttribution = lazyModule(() => import("./salesAttribution"));
+const salesAttribution = lazyModule(() => import("./salesTracking"));
 const metaPixel = lazyModule(() => import("./metaPixel"));
 const postHogOutbox = lazyModule(() => import("./postHogOutbox"));
 
@@ -35,11 +35,6 @@ export const loadSalesAttribution = () => salesAttribution.load().catch((error) 
   reportRequestError(error);
   return null;
 });
-
-export const bookingSalesAttribution = async (stored) => {
-  const module = await loadSalesAttribution();
-  return module ? module.sanitizeSalesAttribution(stored) || module.captureSalesAttribution() : null;
-};
 
 export const withMetaPixel = (action) => {
   if (!metaPixelId()) return Promise.resolve(false);

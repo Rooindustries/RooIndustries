@@ -7,8 +7,9 @@ const COOKIE_NOTICE = {
       "Accept on the cookie banner.",
     ].join(" "),
     [
-      "Always on: in local storage, roo-consent remembers whether you accepted or declined, roo-theme",
-      "remembers light or dark mode, and roo-checkouts-counted marks each checkout you start as counted for 30 days.",
+      "Always on: in local storage, roo-consent remembers whether you accepted or declined,",
+      "roo-consent-declined remembers when you last declined, roo-theme remembers light or dark mode, and",
+      "roo-checkouts-counted marks each checkout you start as counted for 30 days.",
     ].join(" "),
     [
       "Always on: session storage keeps your booking draft, the time slot you are holding, your checkout",
@@ -38,7 +39,8 @@ const COOKIE_NOTICE = {
       "or referral link that brought you here for 90 days. PostHog counts page views, booking steps and",
       "clicks without cookies, and records how public pages are used with every input and all page text hidden.",
       "Page views and other events that have not reached PostHog yet wait in this tab's session storage",
-      "(roo-posthog-outbox) until they are sent. When our Meta pixel is turned on, it tells Meta which pages",
+      "(roo-posthog-outbox) until they are sent, and roo-posthog-counted marks a visit or booking PostHog has",
+      "already counted. When our Meta pixel is turned on, it tells Meta which pages",
       "and packages you viewed and when you start checkout or book, so we can measure our ads. It never sends",
       "your name, email or phone, and Meta sets its own _fbp and _fbc cookies.",
     ].join(" "),
@@ -48,7 +50,8 @@ const COOKIE_NOTICE = {
     ].join(" "),
     [
       "Changing your choice: use Cookie settings at the bottom of any page. Declining removes the roo_attr,",
-      "roo_attr_last, _fbp and _fbc cookies, clears roo-posthog-outbox and stops PostHog and the Meta pixel.",
+      "roo_attr_last, _fbp and _fbc cookies, removes roo-posthog-outbox and roo-posthog-counted, and stops",
+      "PostHog and the Meta pixel.",
     ].join(" "),
   ],
 };

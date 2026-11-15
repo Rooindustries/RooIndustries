@@ -18,10 +18,9 @@ const projectKey = () => cleanOutsideValue(process.env.NEXT_PUBLIC_POSTHOG_KEY |
 const deliver = (attribution) => ({ id, event, properties, path, at }) => {
   const booking = COMPLETED_BOOKING.test(event);
   if (booking && INTERNAL_ID.test(properties.event_id || "")) client.identify(properties.event_id);
-  const creator = booking ? { referral_code: attribution.creator_code || "" } : {};
   const page = { $current_url: `${window.location.origin}${path}`, $pathname: path };
   const options = { uuid: id, timestamp: new Date(at), transport: "sendBeacon" };
-  client.capture(event, { ...attribution, ...creator, ...properties, ...page }, options);
+  client.capture(event, { ...attribution, ...properties, ...page }, options);
 };
 
 const flush = () => {
@@ -35,7 +34,7 @@ const flush = () => {
 
 export const startPostHog = () => {
   if (client || loading || !projectKey() || !granted()) return;
-  loading = Promise.all([import("./posthogClient"), import("./salesAttribution")])
+  loading = Promise.all([import("./posthogClient"), import("./salesTracking")])
     .then(([{ createPostHog }, salesAttribution]) => {
       if (!granted()) return;
       client = createPostHog(projectKey(), PROXY_PATH, postHogQueued(), salesAttribution);

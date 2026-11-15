@@ -17,11 +17,16 @@ export const lastPopstate = () => poppedAt;
 export const eventMoment = () =>
   isProductionBrowser() && granted() ? { path: window.location.pathname, at: Date.now() } : null;
 
-export const keepPostHogEvent = (event, properties = {}, moment = eventMoment()) => {
-  if (!moment || moment.at < lastDecline() || !granted()) return false;
-  made.push({ id: newId(), event, properties, ...moment });
-  withPostHogOutbox((outbox) => outbox.store(made.splice(0)));
-  return true;
+export const keepPostHogEvent = (event, properties, options) => {
+  try {
+    const { moment = eventMoment(), mark } = options || {};
+    if (!moment || moment.at < lastDecline() || !granted()) return false;
+    made.push({ id: newId(), event, properties, mark, ...moment });
+    withPostHogOutbox((outbox) => outbox.store(made.splice(0)));
+    return true;
+  } catch {
+    return false;
+  }
 };
 
 const follow = (change) => {

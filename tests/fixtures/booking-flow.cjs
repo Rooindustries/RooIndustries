@@ -225,6 +225,15 @@ const cookieChoice = (name) => (page) => cookieBanner(page).getByRole("button", 
 const declineCookies = cookieChoice("Decline");
 const acceptCookies = cookieChoice("Accept");
 
+const cookieSettingsReady = async (page) => {
+  const button = page.getByRole("button", { name: "Cookie settings", exact: true });
+  await expect.poll(() => button.evaluate((node) => Object.entries(node).some(([key, props]) =>
+    key.startsWith("__reactProps$") && typeof props.onClick === "function"))).toBe(true);
+  return button;
+};
+
+const openCookieSettings = async (page) => (await cookieSettingsReady(page)).click();
+
 const settleIdle = (page) => page.evaluate(() => new Promise((resolve) => {
   window.requestIdleCallback(() => setTimeout(resolve, 400), { timeout: 5000 });
 }));
@@ -369,6 +378,6 @@ const productionHostFixtures = {
 };
 
 module.exports = {
-  test, expect, overhaulPrice, cookieBanner, declineCookies, acceptCookies, settleIdle, bookingEventId,
-  routePaidStart, checkoutStartCases, productionHostFixtures,
+  test, expect, overhaulPrice, cookieBanner, declineCookies, acceptCookies, cookieSettingsReady, openCookieSettings,
+  settleIdle, bookingEventId, routePaidStart, checkoutStartCases, productionHostFixtures,
 };

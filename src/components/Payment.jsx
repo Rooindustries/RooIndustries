@@ -9,7 +9,7 @@ import packagePricing from "../lib/packagePricing";
 import { preloadMetaPixel } from "../lib/analyticsModules";
 import { checkoutStartCounted, paymentStartBody } from "../lib/paymentStartBody";
 import { trackCheckoutSessionStarted, trackConfirmedPurchase } from "../lib/checkoutAnalytics";
-import { eventMoment } from "../lib/analytics";
+import { eventMoment } from "../lib/loadPostHog";
 import { preloadConfirmationPage, preloadConfirmationPages } from "../lib/confirmationPages";
 import { useBookingDialogPending } from "../lib/bookingDialogHold";
 import { beginCheckoutConfirmation } from "../lib/checkoutConfirmation";
@@ -233,7 +233,6 @@ export default function Payment({ hideFooter = false }) {
   };
 
   const buildConfirmationNavigationState = (responseBody = {}) => {
-    trackConfirmedPurchase(responseBody.analyticsReceipt);
     const baseState = getModalFlowState();
     const bookingId = String(responseBody?.bookingId || "").trim();
 
@@ -1103,6 +1102,7 @@ export default function Payment({ hideFooter = false }) {
   };
 
   const navigateToConfirmation = async (kind, responseBody, operation) => {
+    trackConfirmedPurchase(responseBody.analyticsReceipt);
     await Promise.race([
       preloadConfirmationPage(kind).catch(() => {}),
       new Promise(resolve => setTimeout(resolve, CONFIRMATION_PRELOAD_WAIT_MS)),
@@ -1200,7 +1200,6 @@ export default function Payment({ hideFooter = false }) {
   };
 
   const startSessionCheckout = async (provider, operation = createPaymentOperation()) => {
-    const moment = eventMoment();
     if (!operation.current()) return { terminal: true, stale: true };
     if (
       paymentSession?.provider === provider &&
@@ -1272,6 +1271,7 @@ export default function Payment({ hideFooter = false }) {
         headers: { "Content-Type": "application/json" },
         body,
       });
+      const moment = eventMoment();
       if (response.ok && data?.ok && await checkoutStartCounted(data, provider)) {
         const price = data.quote?.netAmount;
         trackCheckoutSessionStarted({ packageTitle: bookingData.packageTitle, price, provider, moment });

@@ -36,7 +36,7 @@ import {
   sanitizeReferralForCheckout,
   toMoney,
 } from "../lib/checkoutCodes";
-import { eventMoment, trackEvent } from "../lib/analytics";
+import { trackEvent } from "../lib/analytics";
 import { bookingPackagePath } from "../lib/bookingPackagePath";
 import { useBookingPackage, useBookingPackageView } from "../lib/bookingPackageParam";
 import { isValidEmail } from "../lib/emailValidation";
@@ -2209,7 +2209,6 @@ export default function BookingForm() {
     setErrorStep1("");
     if (recheckingPayment) setErrorStep2("");
     setLockingSlot(true);
-    const moment = eventMoment();
 
     const previousHoldId = myHold?.holdId || null;
     const previousHoldToken = myHold?.holdToken || null;
@@ -2304,7 +2303,7 @@ export default function BookingForm() {
         lead_time_hours: Number(
           Math.max(0, (new Date(selectedSlotId).getTime() - Date.now()) / 3_600_000).toFixed(1)
         ),
-      }, { moment });
+      });
       setStep(2);
     } finally {
       setLockingSlot(false);

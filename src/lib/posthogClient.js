@@ -2,12 +2,14 @@ import posthog from "posthog-js";
 import { readConsent } from "./consent";
 import { sanitizeAnalyticsEvent } from "./salesPaths";
 import { lastPopstate } from "./loadPostHog";
+import { followChoices } from "./consentSignals";
 
 const UI_HOST = "https://us.posthog.com";
 const CAMPAIGN_LABEL = /utm_(?:source|medium|campaign|content|term)$/;
 const MASKED = "<masked>";
 
 let sales = null;
+let acceptedAt = 0;
 
 const cleanUrl = (value) => {
   try {
@@ -75,8 +77,8 @@ const recordedOnPrivatePage = (timestamp) =>
 
 const scrubSnapshot = (event) => {
   const privateSince = cleanUrl(window.location.href) ? Infinity : Math.max(navigatedAt, lastPopstate());
-  const items = (event.properties?.$snapshot_data || [])
-    .filter((item) => item.timestamp < privateSince && !recordedOnPrivatePage(item.timestamp));
+  const items = (event.properties?.$snapshot_data || []).filter(({ timestamp }) =>
+    timestamp >= acceptedAt && timestamp < privateSince && !recordedOnPrivatePage(timestamp));
   return items.length ? { ...event, properties: { ...cleanProperties(event.properties), $snapshot_data: items } } : null;
 };
 
@@ -155,6 +157,9 @@ export const createPostHog = (key, apiHost, queued, salesAttribution) => {
     before_send: scrubEvent,
   });
   noteHistoryChanges();
+  followChoices((declined) => {
+    if (declined === false) acceptedAt = Date.now();
+  });
   let recording = publicPage;
   return {
     syncPage: () => {

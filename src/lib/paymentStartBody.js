@@ -1,5 +1,10 @@
-import { bookingSalesAttribution } from "./analyticsModules";
+import { loadSalesAttribution } from "./analyticsModules";
 import { reportRequestError } from "./clientRequest";
+
+const bookingSalesAttribution = async (stored) => {
+  const module = await loadSalesAttribution();
+  return module ? module.sanitizeSalesAttribution(stored) || module.captureSalesAttribution() : null;
+};
 
 export const paymentStartBody = async ({ operation, provider, quoteFingerprint, salesAttribution, buildPayload }) => {
   const attribution = await bookingSalesAttribution(salesAttribution);

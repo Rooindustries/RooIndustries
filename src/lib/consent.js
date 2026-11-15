@@ -3,7 +3,29 @@ import { CHOICES, keepUnsaved, readConsent } from "./consentChoice";
 
 export { readConsent };
 
+const DECLINED_KEY = "roo-consent-declined";
+const STORAGES = ["localStorage", "sessionStorage"];
+
 let followingOtherTabs = false;
+
+const keep = (key, value) => STORAGES.find((storage) => {
+  try {
+    window[storage].setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+});
+
+const keepDecline = () => keep(DECLINED_KEY, String(Date.now()));
+
+export const storedDecline = () => Math.max(...STORAGES.map((storage) => {
+  try {
+    return Number(window[storage].getItem(DECLINED_KEY)) || 0;
+  } catch {
+    return 0;
+  }
+}));
 
 const forgetChoice = (storage) => {
   try {
@@ -32,23 +54,17 @@ const followOtherTabs = () => {
 
 export const writeConsent = (value) => {
   if (!CHOICES.has(value) || typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(CONSENT_KEY, value);
-    forgetChoice("sessionStorage");
-  } catch {
-    forgetChoice("localStorage");
-    try {
-      window.sessionStorage.setItem(CONSENT_KEY, value);
-    } catch {}
-  }
+  if (value !== "granted") keepDecline();
+  const kept = keep(CONSENT_KEY, value);
+  STORAGES.filter((storage) => storage !== kept).forEach(forgetChoice);
   keepUnsaved(value);
   announce(value);
 };
 
 export const resetConsent = () => {
   if (typeof window === "undefined") return;
-  forgetChoice("localStorage");
-  forgetChoice("sessionStorage");
+  keepDecline();
+  STORAGES.forEach(forgetChoice);
   keepUnsaved("unset");
   announce("unset");
 };
