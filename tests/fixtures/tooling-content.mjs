@@ -10,6 +10,8 @@ import { referralEmail } from './api-routes.mjs';
 import fixturePorts from './fixture-ports.cjs';
 
 const posthogReceived = [];
+const heldPosthog = new Set();
+let posthogOrder = 0;
 
 export async function createToolingContentFixture({ origin, artifact, apiRoutes = false, clockFile, server: shared, instance }) {
   const target = new URL(localOrigin(origin));
@@ -196,9 +198,20 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
         res.end(instance);
         return;
       }
+      if (req.method === 'GET' && url.pathname === '/__held_posthog') {
+        json(res, 200, { held: heldPosthog.has(url.searchParams.get('id')) });
+        return;
+      }
+      const held = /^\/static\/held-([a-f0-9-]+)\.js$/.exec(url.pathname);
+      if (req.method === 'GET' && held) {
+        heldPosthog.add(held[1]);
+        res.on('close', () => heldPosthog.delete(held[1]));
+        return;
+      }
       if (req.method === 'GET' && url.pathname === '/__posthog') {
         const events = posthogReceived.filter(entry => entry.capture === url.searchParams.get('capture'))
-          .flatMap(({ events, receivedAt }) => events.map(event => ({ ...event, receivedAt })));
+          .flatMap(({ events, first, routed }) =>
+            events.map((event, index) => ({ ...event, fixtureOrder: first + index, fixtureRouted: routed })));
         json(res, 200, { events });
         return;
       }
@@ -222,8 +235,11 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
         const payload = JSON.parse(text);
         const events = Array.isArray(payload) ? payload : payload.batch || [payload];
         const capture = /(?:^|;\s*)roo_posthog_capture=([^;]*)/.exec(req.headers.cookie || '')?.[1];
-        posthogReceived.push({ capture, receivedAt: Date.now(), path: url.pathname, events });
-        json(res, 200, { status: 1 });
+        const first = posthogOrder;
+        posthogOrder += events.length;
+        const routed = req.headers['x-fixture-routed'] === '1';
+        posthogReceived.push({ capture, first, routed, events });
+        json(res, 200, { status: 1, first });
         return;
       }
       let raw = '';

@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const zlib = require("node:zlib");
+const { randomUUID } = require("node:crypto");
 const { expect } = require("@playwright/test");
 const { fixturePort } = require("./fixture-ports.cjs");
 
@@ -63,34 +64,54 @@ const ingest = async (route, seen) => {
     return route.fulfill({ json: remoteConfig });
   }
   const sender = request.frame().page();
-  for (const event of decode(request)) {
+  const events = decode(request);
+  const recorded = events.filter((event) => event.event !== "$snapshot");
+  let first;
+  if (recorded.length) {
+    const entry = seen.recording.then(async () => {
+      const url = `http://127.0.0.1:${fixturePort("TOOLING_CONTENT_PORT")}/batch`;
+      const { cookie } = await request.allHeaders();
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie, "x-fixture-routed": "1" },
+        body: JSON.stringify({ batch: recorded }),
+      });
+      if (!response.ok) throw new Error(`PostHog fixture returned ${response.status}`);
+      return (await response.json()).first;
+    });
+    seen.recording = entry.then(() => undefined);
+    first = await entry;
+  }
+  for (const event of events) {
     if (event.event === "$snapshot") {
       seen.snapshots.push(...event.properties.$snapshot_data.map(unpackSnapshot));
     } else {
-      seen.events.push(event);
       seen.senders.set(event, sender);
-      seen.arrived.set(event, Date.now());
+      seen.arrived.set(event, first++);
+      seen.events.push(event);
     }
   }
+  seen.events.sort((a, b) => seen.arrived.get(a) - seen.arrived.get(b));
   return route.fulfill({ json: { status: 1 } });
 };
 
 const stubPostHog = async (context, origin, capture) => {
   const seen = {
     events: [], snapshots: [], requests: [], posthogHosts: [], scripts: [], loading: new Set(), senders: new WeakMap(),
-    taken: 0, arrived: new Map(),
+    taken: 0, arrived: new Map(), recording: Promise.resolve(),
   };
   seen.received = async () => {
     const url = `http://127.0.0.1:${fixturePort("TOOLING_CONTENT_PORT")}/__posthog?capture=${capture}`;
     const response = await fetch(url);
     if (!response.ok) throw new Error(`PostHog fixture returned ${response.status}`);
     const { events } = await response.json();
-    for (const { receivedAt, ...event } of events.slice(seen.taken)) {
-      if (event.event === "$snapshot") continue;
+    for (const { fixtureOrder, fixtureRouted, ...event } of events.slice(seen.taken)) {
+      if (fixtureRouted || event.event === "$snapshot") continue;
       seen.events.push(event);
-      seen.arrived.set(event, receivedAt);
+      seen.arrived.set(event, fixtureOrder);
     }
     seen.taken = events.length;
+    seen.events.sort((a, b) => seen.arrived.get(a) - seen.arrived.get(b));
   };
   await context.addInitScript(() => Object.defineProperty(Navigator.prototype, "webdriver", { get: () => false }));
   await context.route((url) => url.hostname.endsWith("posthog.com"), (route) => {
@@ -137,14 +158,14 @@ const expectLeavesFollowViews = (seen) => {
     const view = named(seen, "$pageview").find((event) => event.properties.$pageview_id === id);
     expect(view, `Missing page view for ${id}`).toBeTruthy();
     expect(leave.properties.$prev_pageview_pathname).toBe(view.properties.$pathname);
-    expect(seen.arrived.get(view)).toBeLessThanOrEqual(seen.arrived.get(leave));
+    expect(seen.arrived.get(view)).toBeLessThan(seen.arrived.get(leave));
   }
 };
 const pageviews = (seen, keep = () => true) =>
   named(seen, "$pageview").filter(keep).map((event) => event.properties.$current_url);
 const posthogFixtures = {
   posthog: async ({ context, baseURL }, use, testInfo) => {
-    const capture = `pw-${testInfo.testId}`.replace(/[^A-Za-z0-9_-]/g, "_");
+    const capture = `pw-${testInfo.testId}-${testInfo.retry}-${randomUUID()}`.replace(/[^A-Za-z0-9_-]/g, "_");
     await context.addCookies([{ name: "roo_posthog_capture", value: capture, url: baseURL }]);
     await use(await stubPostHog(context, baseURL, capture));
   },

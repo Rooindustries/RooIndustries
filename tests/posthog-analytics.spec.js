@@ -4,7 +4,7 @@ const {
 } = require("./fixtures/booking-flow.cjs");
 const { posthogFixtures, postHogCode, named, pageviews, arrived, closeTab, expectLeavesFollowViews } =
   require("./fixtures/posthog.cjs");
-const { holdRoute, holdChunks } = require("./fixtures/held-routes.cjs");
+const { holdRoute, holdChunks, holdChunksOnServer } = require("./fixtures/held-routes.cjs");
 
 const eventId = "a".repeat(40);
 const desktopChrome = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36";
@@ -339,18 +339,18 @@ test.describe("production host", () => {
     expect(seen.posthogHosts).toEqual([]);
   });
 
-  test("leaving before PostHog downloads sends page views before page leaves", async ({
+  test("leaving while PostHog download is held sends page views before page leaves", async ({
     page, posthog: seen, productionHost,
   }) => {
     const hold = await holdPostHog(page, productionHost);
     await page.goto("/packages");
-    const acceptedAt = Date.now();
     await acceptCookies(page);
     await expect.poll(() => hold.held, { timeout: 20000 }).toBe(true);
     expect(await arrived(seen, "$pageview")).toEqual([]);
     expect(await arrived(seen, "$pageleave")).toEqual([]);
-    expect(Date.now() - acceptedAt).toBeLessThan(1000);
+    expect(hold.answered).toBeFalsy();
     await page.goto("/about");
+    expect(hold.answered).toBeFalsy();
     expect(await arrived(seen, "$pageview")).toEqual([]);
     expect(await arrived(seen, "$pageleave")).toEqual([]);
     hold.release();
@@ -359,6 +359,35 @@ test.describe("production host", () => {
     await closeTab(page);
     await expect.poll(async () => (await arrived(seen, "$pageleave"))
       .map((event) => event.properties.$prev_pageview_pathname)).toContain("/about");
+    expectLeavesFollowViews(seen);
+    expect(seen.posthogHosts).toEqual([]);
+  });
+
+  test("closing before any page view sends no page leave", async ({
+    page, context, posthog: seen, productionHost,
+  }) => {
+    const hold = await holdChunksOnServer(page, {
+      origin: productionHost.origin, fetchOrigin: productionHost.loopback,
+    }, (body) => body.includes("[PostHog.js]"));
+    await page.goto("/packages");
+    await acceptCookies(page);
+    await expect.poll(() => hold.held(), { timeout: 20000 }).toBe(true);
+    expect(await arrived(seen, "$pageview")).toEqual([]);
+    expect(await arrived(seen, "$pageleave")).toEqual([]);
+    const journeyId = await journeyOf(page);
+    expect(journeyId).toBeTruthy();
+    await closeTab(page);
+
+    const next = await context.newPage();
+    await next.goto("/about");
+    await expect.poll(async () => (await arrived(seen, "$pageview")).map((event) => event.properties.$pathname))
+      .toEqual(["/about"]);
+    expect(await journeyOf(next)).toBe(journeyId);
+    await closeTab(next);
+    await expect.poll(async () => (await arrived(seen, "$pageleave"))
+      .map((event) => event.properties.$prev_pageview_pathname)).toContain("/about");
+    expect(named(seen, "$pageleave").map((event) => event.properties.$prev_pageview_pathname))
+      .not.toContain("/packages");
     expectLeavesFollowViews(seen);
     expect(seen.posthogHosts).toEqual([]);
   });
@@ -1212,13 +1241,14 @@ test.describe("waiting list", () => {
     await expect.poll(() => hold.held, { timeout: 20000 }).toBe(true);
     await acceptCookies(page);
     await seeDetails(page);
-    await page.goto("/about");
+    await page.goto("/about", { waitUntil: "domcontentloaded" });
     hold.release();
     await page.goto("/packages");
 
     await expect.poll(() => named(seen, "view_item").length).toBe(1);
     await pastPostHogStart(page, seen);
     await settleIdle(page);
+    expect(pageviews(seen)).toContain(`${baseURL}/packages`);
     expect(named(seen, "view_item")).toHaveLength(1);
     expect(named(seen, "view_item")[0].properties.$current_url).toBe(`${baseURL}/packages`);
   });

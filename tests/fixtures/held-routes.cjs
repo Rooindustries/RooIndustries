@@ -1,3 +1,6 @@
+const { randomUUID } = require("node:crypto");
+const { fixturePort } = require("./fixture-ports.cjs");
+
 const owners = new WeakMap();
 
 const ownerOf = (target) => {
@@ -53,11 +56,12 @@ const holdRoute = async (target, url, answer, options) => {
   return hold;
 };
 
-const inspectChunks = (page, { origin, fetchOrigin = origin }, wait) =>
+const inspectChunks = (page, { origin, fetchOrigin = origin }, wait, answer = (route, response, body) =>
+  route.fulfill({ response, body })) =>
   ownRoute(page, `${origin}/_next/static/chunks/**`, async (route, live) => {
     const response = await route.fetch({ url: route.request().url().replace(origin, fetchOrigin) });
     const body = await response.body();
-    if (await live(wait(body))) await route.fulfill({ response, body });
+    if (await live(wait(body))) await answer(route, response, body);
   });
 
 const holdChunks = async (page, origins, matches) => {
@@ -66,8 +70,27 @@ const holdChunks = async (page, origins, matches) => {
     if (!matches(body)) return undefined;
     hold.held = true;
     return hold.gate;
+  }, (route, response, body) => {
+    if (matches(body)) hold.answered = true;
+    return route.fulfill({ response, body });
   });
   return hold;
 };
 
-module.exports = { heldRouteFixtures, holdRoute, inspectChunks, holdChunks };
+const holdChunksOnServer = async (page, origins, matches) => {
+  const id = randomUUID();
+  const path = `/ingest/static/held-${id}.js`;
+  await page.route(`**${path}`, (route) => route.continue());
+  await inspectChunks(page, origins, () => undefined, (route, response, body) =>
+    matches(body) ? route.fulfill({ status: 302, headers: { location: path }, body: "" })
+      : route.fulfill({ response, body }));
+  return {
+    held: async () => {
+      const url = `http://127.0.0.1:${fixturePort("TOOLING_CONTENT_PORT")}/__held_posthog?id=${id}`;
+      const response = await fetch(url);
+      return (await response.json()).held;
+    },
+  };
+};
+
+module.exports = { heldRouteFixtures, holdRoute, inspectChunks, holdChunks, holdChunksOnServer };
