@@ -1,6 +1,7 @@
 import "../src/roboto-latin.css";
 import "../src/index.css";
 import "../src/styles/sections.css";
+import "../src/styles/route-progress.css";
 import seo from "@/src/lib/seo";
 import AppClientRuntime from "@/src/next/AppClientRuntime";
 import { PublicContentProvider } from "@/src/next/PublicContentContext";
