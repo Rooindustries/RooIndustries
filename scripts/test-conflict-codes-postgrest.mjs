@@ -3,7 +3,6 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { createSweepPostgresFixture } from './lib/sweep-postgres-fixture.mjs';
 import { scenarios, controls } from './lib/conflict-code-scenarios.mjs';
-import { retrySqlPositions } from './lib/retry-sql-scan.mjs';
 
 const binary = process.env.POSTGREST_14_BIN;
 assert.ok(binary, 'POSTGREST_14_BIN must point to PostgREST 14.5');
@@ -81,11 +80,11 @@ try {
     assert.ok([200, 204].includes(result.status), `seed ${entry.rpc}: ${JSON.stringify(result)}`);
     return result;
   };
-  const functions = await sql.unsafe(`select ns.nspname||'.'||p.proname as name, p.prosrc as source
+  const census = await sql.unsafe(String.raw`select ns.nspname||'.'||p.proname as name
     from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
     where ns.nspname not in ('pg_catalog','information_schema')
+      and p.prosrc ~* $re$errcode\s*(:=|=)\s*(?:\(\s*)*'(40001|40P01|serialization_failure|deadlock_detected)'|raise\s+(?:(?:exception|warning|notice|info|log|debug)\s+)?sqlstate\s+'40[a-z0-9]{3}'|raise\s+(?:(?:exception|warning|notice|info|log|debug)\s+)?(serialization_failure|deadlock_detected)\M|errcode\s*(:=|=)\s*(?:\(\s*)*[a-z_]$re$
     order by 1`);
-  const census = functions.filter(({ source }) => retrySqlPositions(source, { handlers: false }).length > 0);
   const covered = new Set([...scenarios.map((scenario) => scenario.fn),
     'migration.block_legacy_discord_reauth', 'migration.finalize_inactive_noop_discord_assignments']);
   const missing = census.filter(({ name }) => !covered.has(name));
