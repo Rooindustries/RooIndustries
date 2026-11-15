@@ -1,4 +1,3 @@
-import { isWriteConflict } from "../../supabase/writeConflict.js";
 import envValue from "../../supabase/envValue.cjs";
 const { readOutsideEnvValue } = envValue;
 import crypto from "node:crypto";
@@ -8,6 +7,7 @@ import { buildResetEmailHtml } from "../../email/referralResetEmail.js";
 import { isIdempotencyPayloadConflict } from "../../email/resendOutcome.js";
 import { createSupabaseAdminClient } from "../../supabase/adminClient.js";
 import { getSafeErrorCode, logSafeError } from "../../safeErrorLog.js";
+import { isWriteConflict } from "../../supabase/writeConflict.js";
 
 const DISPATCH_KINDS = new Set([
   "registration_verification",

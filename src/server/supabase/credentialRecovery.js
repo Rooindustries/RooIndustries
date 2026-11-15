@@ -1,4 +1,3 @@
-import { WRITE_CONFLICT_CODE, isWriteConflict } from "./writeConflict.js";
 import envValue from "./envValue.cjs";
 const { resolveStoreBackend } = envValue;
 import bcrypt from "bcryptjs";
@@ -9,6 +8,7 @@ import {
   getSupabaseCredentialOperation,
   checkpointPreparedCredentialOperation,
 } from "./accounts.js";
+import { WRITE_CONFLICT_CODE, isWriteConflict } from "./writeConflict.js";
 
 const mark = (client, operationKey, status, errorCode = null) =>
   client.rpc("roo_mark_credential_operation_v2", {

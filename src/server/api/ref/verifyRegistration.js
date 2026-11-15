@@ -1,4 +1,3 @@
-import { isWriteConflict } from "../../supabase/writeConflict.js";
 import crypto from "node:crypto";
 import { createDataClient as createClient } from "../../data/documentClient.js";
 import {
@@ -10,6 +9,7 @@ import { hashShadowDocument } from "../../supabase/shadowStore.js";
 import { logSafeError } from "../../safeErrorLog.js";
 import { setReferralSessionCookie } from "./auth.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
+import { isWriteConflict } from "../../supabase/writeConflict.js";
 
 const client = createClient({}, { allowLegacyFallback: false });
 

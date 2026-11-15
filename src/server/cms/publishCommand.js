@@ -1,4 +1,3 @@
-import { isWriteConflict } from "../supabase/writeConflict.js";
 import crypto from "node:crypto";
 import { validateContentDocument, createContentDefaults } from "../../lib/cms/contentSchema.js";
 import { stableCmsJson } from "../../lib/globalCmsContract.js";
@@ -7,6 +6,7 @@ import { CMS_SYSTEM_FIELDS as system, preserveContentDocument, removedProtectedR
 import { contentType, documentId, loadDocument } from "./documents.js";
 import { cmsError, rpcData, validationError } from "./errors.js";
 import { assertGlobalCmsWritesAllowed } from "./writeControl.js";
+import { isWriteConflict } from "../supabase/writeConflict.js";
 
 const counters = new Set(["timesUsed", "activeReservations", "redemptionCount", "autoDeactivatedByRedemptionId", "autoDeactivatedAt"]);
 const hash = value => crypto.createHash("sha256").update(stableCmsJson(value)).digest("hex");

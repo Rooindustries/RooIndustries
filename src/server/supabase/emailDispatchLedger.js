@@ -1,5 +1,5 @@
-import { isWriteConflict } from "./writeConflict.js";
 import crypto from "node:crypto";
+import { isWriteConflict } from "./writeConflict.js";
 
 const normalizeDispatch = (value = {}) => ({
   claimed: value?.claimed === true,

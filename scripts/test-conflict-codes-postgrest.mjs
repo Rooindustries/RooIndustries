@@ -16,18 +16,30 @@ try {
   const { sql, scratch, token, postgrestUrl } = fixture;
   const logPath = `${scratch}/postgres.log`;
   const logSize = () => fs.statSync(logPath).size;
-  const logRuns = (message, start) => {
+  const logRuns = (message, start, fn) => {
     const fd = fs.openSync(logPath, 'r');
     try {
       const buffer = Buffer.alloc(1024 * 1024);
-      let position = start, remainder = '', count = 0, size;
+      let position = start, remainder = '', count = 0, verified = 0, pending = false, size;
+      const inspect = (line) => {
+        if (line.includes('ERROR:')) {
+          pending = line.includes(message);
+          if (pending) count++;
+        } else if (pending && line.includes('CONTEXT:')) {
+          const context = line.slice(line.indexOf('CONTEXT:') + 'CONTEXT:'.length).trim();
+          const name = fn?.startsWith('public.') ? fn.slice(7) : fn;
+          if (fn && (context.startsWith(`PL/pgSQL function ${fn}(`) || context.startsWith(`PL/pgSQL function ${name}(`))) verified++;
+          pending = false;
+        }
+      };
       while ((size = fs.readSync(fd, buffer, 0, buffer.length, position))) {
         position += size;
         const lines = (remainder + buffer.toString('utf8', 0, size)).split('\n');
         remainder = lines.pop();
-        count += lines.filter((line) => line.includes('ERROR:') && line.includes(message)).length;
+        lines.forEach(inspect);
       }
-      return count + Number(remainder.includes('ERROR:') && remainder.includes(message));
+      if (remainder) inspect(remainder);
+      return { count, verified };
     } finally { fs.closeSync(fd); }
   };
   const rpc = async (name, body, budget = 2000) => {
@@ -71,7 +83,7 @@ try {
   const census = await sql.unsafe(String.raw`select ns.nspname||'.'||p.proname as name
     from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
     where ns.nspname not in ('pg_catalog','information_schema')
-      and p.prosrc ~* $re$errcode\s*=\s*(?:\(\s*)*'(40001|40P01|serialization_failure|deadlock_detected)'|raise\s+sqlstate\s+'40|raise\s+(exception\s+)?(serialization_failure|deadlock_detected)\M|errcode\s*=\s*(?:\(\s*)*[a-z_]$re$
+      and p.prosrc ~* $re$errcode\s*(:=|=)\s*(?:\(\s*)*'(40001|40P01|serialization_failure|deadlock_detected)'|raise\s+(?:(?:exception|warning|notice|info|log|debug)\s+)?sqlstate\s+'40[a-z0-9]{3}'|raise\s+(?:(?:exception|warning|notice|info|log|debug)\s+)?(serialization_failure|deadlock_detected)\M|errcode\s*(:=|=)\s*(?:\(\s*)*[a-z_]$re$
     order by 1`);
   const covered = new Set([...scenarios.map((scenario) => scenario.fn),
     'migration.block_legacy_discord_reauth', 'migration.finalize_inactive_noop_discord_assignments']);
@@ -87,7 +99,8 @@ try {
       if (scenario.race) result = await scenario.race({ sql, rpc, tag });
       else { const call = scenario.call(tag); result = await rpc(call.rpc, call.body); }
       if (result.status === 'none') await unstick();
-      count = logRuns(scenario.msg, start);
+      const logged = logRuns(scenario.msg, start, scenario.fn);
+      count = logged.count;
       const expectedMessage = ['S01', 'S03', 'S04'].includes(scenario.id)
         ? `${scenario.msg}${tag}-${scenario.id.toLowerCase()}` : scenario.msg;
       let verdict;
@@ -95,6 +108,7 @@ try {
       else if (scenario.guard === 'race' && result.status === 200 && count === 1) verdict = 'rerun';
       else if (result.status === 409 && result.body?.code === 'PT409' && result.body.message === expectedMessage && count === 1) verdict = 'conflict';
       else verdict = 'wrong';
+      if (logged.verified !== count) verdict = 'wrong';
       if (verdict === 'conflict' && scenario.id === 'S05') {
         const [{ source_revision }] = await sql`select source_revision from migration.source_documents where legacy_sanity_id = ${`rateLimitBucket.${tag}-s05`}`;
         if (JSON.parse(result.body.details || '{}').currentRevision !== source_revision) verdict = 'wrong';
@@ -120,7 +134,7 @@ try {
       if (control.race) {
         assert.equal(result.status, 500);
         assert.equal(result.body?.code, '55000');
-        assert.equal(logRuns(control.msg, start), 1);
+        assert.equal(logRuns(control.msg, start).count, 1);
       } else assert.equal(result.status, 200);
       if (control.id === 'C12') {
         assert.equal(result.body?.status, 'resolved');

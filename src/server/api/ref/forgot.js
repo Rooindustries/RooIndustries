@@ -1,4 +1,3 @@
-import { isWriteConflict } from "../../supabase/writeConflict.js";
 import { createDataClient as createClient } from "../../data/documentClient.js";
 import crypto from "crypto";
 import { after } from "next/server";
@@ -10,6 +9,7 @@ import {
   sealReferralEmailToken,
   unsealReferralEmailToken,
 } from "./referralEmailTokenSeal.js";
+import { isWriteConflict } from "../../supabase/writeConflict.js";
 
 const client = createClient({}, { allowLegacyFallback: false });
 
@@ -35,7 +35,7 @@ const readReferralById = (id) =>
 
 const isMutationConflict = (error) =>
   isRevisionConflict(error) ||
-  (isWriteConflict(error) || String(error?.code || "") === "23505");
+  isWriteConflict(error) || String(error?.code || "") === "23505";
 
 const reportResetConflict = (error = Object.assign(
   new Error("Referral reset source changed."), { code: "RESET_TOKEN_CONFLICT" }

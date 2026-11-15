@@ -1,4 +1,3 @@
-import { isWriteConflict } from "../../../../src/server/supabase/writeConflict.js";
 import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 import { logSafeError } from "../../../../src/server/safeErrorLog";
@@ -9,6 +8,7 @@ import {
 } from "../../../../src/server/referrals/creatorTerms";
 import { createSupabaseAdminClient } from "../../../../src/server/supabase/adminClient";
 import { resolveSupabaseRuntimePolicy } from "../../../../src/server/supabase/runtime";
+import { isWriteConflict } from "../../../../src/server/supabase/writeConflict.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,7 +32,7 @@ const responseError = (error) => {
   const code = String(error?.code || "");
   const requestedStatus = Number(error?.status || error?.statusCode || 0);
   if (requestedStatus >= 400 && requestedStatus < 500) return requestedStatus;
-  if ((isWriteConflict(error) || code === "23505")) return 409;
+  if (isWriteConflict(error) || code === "23505") return 409;
   if (code === "P0002") return 404;
   if (code === "22023") return 400;
   return 503;
