@@ -11,11 +11,13 @@ tested=false
 tree="$(git rev-parse 'HEAD^{tree}')"
 before="${PUSH_BEFORE:-}"
 
-if [ -z "$before" ] || [ "$before" = 0000000000000000000000000000000000000000 ]; then
+if [ "$GITHUB_EVENT_NAME" = push ] && \
+  { [ -z "$before" ] || [ "$before" = 0000000000000000000000000000000000000000 ]; }; then
   say "No earlier main commit to compare this push against; running the full suite."
-elif ! git cat-file -e "$before^{commit}" 2>/dev/null && ! git fetch --quiet --no-tags --depth=1 origin "$before"; then
+elif [ "$GITHUB_EVENT_NAME" = push ] && ! git cat-file -e "$before^{commit}" 2>/dev/null \
+  && ! git fetch --quiet --no-tags --depth=1 origin "$before"; then
   say "Couldn't fetch the earlier main commit $before; running the full suite."
-elif ! git diff --quiet "$before" HEAD -- "${cache_inputs[@]}"; then
+elif [ "$GITHUB_EVENT_NAME" = push ] && ! git diff --quiet "$before" HEAD -- "${cache_inputs[@]}"; then
   say "This push changed ${cache_inputs[*]}; running the full suite so main refreshes its caches."
 elif ! runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=tested-tree-$tree&per_page=100" \
   --jq '.artifacts[] | select(.expired | not) | .workflow_run.id')"; then
@@ -23,19 +25,20 @@ elif ! runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=tested-tr
 else
   for run in $runs; do
     if ! passed="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run" --jq \
-      'select(.conclusion == "success" and .event == "pull_request" and .path == ".github/workflows/tests.yml"
+      'select(.conclusion == "success" and (.event | IN("pull_request", "merge_group", "push"))
+        and .path == ".github/workflows/tests.yml"
         and .head_repository.full_name == env.GITHUB_REPOSITORY) | .id')"; then
       say "Couldn't look up run $run; not counting it."
       continue
     fi
     if [ -n "$passed" ]; then
-      say "Pull request run $passed already passed on tree $tree; skipping the suite."
+      say "Run $passed already passed on tree $tree; skipping the suite."
       tested=true
       break
     fi
   done
   if [ "$tested" = false ]; then
-    say "No passed pull request run tested tree $tree; running the full suite."
+    say "No passed run tested tree $tree; running the full suite."
   fi
 fi
 
