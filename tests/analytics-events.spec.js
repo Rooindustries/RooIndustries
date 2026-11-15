@@ -1,7 +1,9 @@
 const {
   test: bookingTest, expect, cookieBanner: banner, settleIdle: settle, bookingEventId, routePaidStart: routeStart,
-  checkoutStartCases, declineCookies, acceptCookies, productionHostFixtures,
+  checkoutStartCases, declineCookies, acceptCookies, productionHostFixtures, recordCheckoutTimes, checkoutTimes,
+  withinAnalyticsWait,
 } = require("./fixtures/booking-flow.cjs");
+const { holdChunks } = require("./fixtures/held-routes.cjs");
 const { posthogFixtures, named, pageviews } = require("./fixtures/posthog.cjs");
 
 const safety = () => import("../scripts/lib/test-target-safety.mjs");
@@ -201,6 +203,43 @@ test("checkout_started fires once, only after the payment start succeeds", async
     package: overhaul, package_slug: "overhaul", provider: "dodo", value: 84.99, currency: "USD",
   });
   expect(JSON.stringify(vercel.calls)).not.toMatch(personalData);
+});
+
+test("a checkout count that never loads holds Razorpay back no longer than the wait limit, then counts once", async ({
+  page, flow, vercel, baseURL, productionHost,
+}) => {
+  const providers = {
+    dodo: { enabled: true, mode: "test" }, razorpay: { enabled: true, mode: "test" },
+    paypal: { enabled: false, mode: "disabled" },
+  };
+  await recordCheckoutTimes(page);
+  await page.route("https://checkout.razorpay.com/v1/checkout.js", (route) => route.fulfill({
+    contentType: "application/javascript",
+    body: "window.Razorpay = function () { return { open() { window.__checkoutTimes.opened = performance.now(); }, " +
+      "on() {} }; };",
+  }));
+  await page.route("**/api/payment/providers", (route) => route.fulfill({ json: { ok: true, providers } }));
+  await page.route("**/api/payment/quote", (route) => route.fulfill({ json: {
+    ok: true, quoteFingerprint: "fixture-quote", providers,
+    quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
+  } }));
+  await routeStart(page, baseURL);
+  const count = await holdChunks(page, { origin: productionHost.origin, fetchOrigin: productionHost.loopback },
+    (body) => body.includes("roo-checkouts-counted"));
+  await page.goto("/packages");
+  await declineCookies(page);
+  await flow.review("/booking?package=overhaul");
+  await flow.payment();
+  await expect.poll(() => count.held).toBe(true);
+  await page.getByRole("button", { name: "Pay with Razorpay", exact: true }).click();
+  await expect.poll(async () => (await checkoutTimes(page)).opened).toBeGreaterThan(0);
+  const { answered, opened } = await checkoutTimes(page);
+  withinAnalyticsWait(answered, opened);
+  expect(events(vercel, "checkout_started")).toEqual([]);
+
+  count.release();
+  const started = await sentOnce(page, vercel, "checkout_started");
+  expect(started.payload.data).toMatchObject({ package_slug: "overhaul", provider: "razorpay", value: 84.99 });
 });
 
 for (const [choice, chooseCookies] of [["declined", declineCookies], ["accepted", acceptCookies]]) {

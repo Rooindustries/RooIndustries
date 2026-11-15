@@ -385,6 +385,30 @@ const openFreePayment = async (page, flow) => {
   await expect(page.getByRole("button", { name: "Confirm Free Booking", exact: true })).toBeEnabled();
 };
 
+const analyticsWaitLimitMs = 300;
+const providerStepMarginMs = 500;
+
+const recordCheckoutTimes = (page) => page.addInitScript(() => {
+  const times = {};
+  window.__checkoutTimes = times;
+  document.addEventListener("click", (event) => {
+    if (event.target.closest?.("button")) times.pressed = performance.now();
+  }, true);
+  const send = window.fetch.bind(window);
+  window.fetch = (input, init) => {
+    const sent = send(input, init);
+    if (!String(input?.url || input).endsWith("/api/payment/start")) return sent;
+    times.started = performance.now();
+    sent.then(() => { times.answered = performance.now(); }, () => {});
+    return sent;
+  };
+});
+
+const checkoutTimes = (page) => page.evaluate(() => window.__checkoutTimes);
+
+const withinAnalyticsWait = (from, to) =>
+  expect(to - from).toBeLessThan(analyticsWaitLimitMs + providerStepMarginMs);
+
 const productionHostFixtures = {
   productionHost: [async ({}, use, workerInfo) => {
     const { loopbackProductionHost } = await import("../../scripts/lib/test-target-safety.mjs");
@@ -405,4 +429,5 @@ const productionHostFixtures = {
 module.exports = {
   test, expect, overhaulPrice, cookieBanner, declineCookies, acceptCookies, cookieSettingsReady, openCookieSettings,
   settleIdle, bookingEventId, routePaidStart, checkoutStartCases, productionHostFixtures, openFreePayment,
+  analyticsWaitLimitMs, recordCheckoutTimes, checkoutTimes, withinAnalyticsWait,
 };

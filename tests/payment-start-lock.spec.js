@@ -1,5 +1,8 @@
 const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
-const { test, expect } = require("./fixtures/booking-flow.cjs");
+const {
+  test, expect, analyticsWaitLimitMs, recordCheckoutTimes, checkoutTimes, withinAnalyticsWait,
+} = require("./fixtures/booking-flow.cjs");
+const { holdChunks, holdRoute } = require("./fixtures/held-routes.cjs");
 
 test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata" });
 
@@ -133,39 +136,54 @@ test("a newer start that fails fast does not unlock another method while an olde
   await expect(razorpay).toBeEnabled();
 });
 
-test("leaving checkout while sales attribution loads starts no payment", async ({ page, flow }) => {
-  let release;
-  const gate = new Promise(resolve => { release = resolve; });
-  const attribution = { held: false, delivered: false };
-  await page.route("**/_next/static/chunks/**", async route => {
-    const response = await route.fetch();
-    const body = await response.text();
-    if (body.includes("first_source")) {
-      attribution.held = true;
-      await gate;
-      await route.fulfill({ response, body });
-      attribution.delivered = true;
-      return;
-    }
-    await route.fulfill({ response, body });
-  });
+const payButton = (page) => page.getByRole("button", { name: "Pay your way", exact: true });
+
+const holdSalesAttribution = (page, baseURL) =>
+  holdChunks(page, { origin: new URL(baseURL).origin }, (body) => body.includes("first_source"));
+
+test("leaving checkout while sales attribution loads starts no payment", async ({ page, flow, baseURL }) => {
+  await recordCheckoutTimes(page);
+  const attribution = await holdSalesAttribution(page, baseURL);
   const starts = () => flow.state.calls.filter(({ path }) => path === "/api/payment/start");
 
   await flow.review();
   await flow.payment();
-  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Opening checkout...", exact: true })).toBeVisible();
   await expect.poll(() => attribution.held).toBe(true);
-  await page.goBack();
+  await payButton(page).evaluate((button) => {
+    button.click();
+    window.history.back();
+  });
   await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
-  release();
-  await expect.poll(() => attribution.delivered).toBe(true);
+  await page.waitForFunction(
+    (limit) => performance.now() - window.__checkoutTimes.pressed > limit, analyticsWaitLimitMs);
+  attribution.release();
   expect(starts()).toEqual([]);
 
   await flow.payment();
-  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  await payButton(page).click();
   await expect(page).toHaveURL(/checkout-handoff$/);
   expect(starts()).toHaveLength(1);
+});
+
+test("a sales attribution module that never loads holds the payment start back no longer than the wait limit", async ({
+  page, flow, baseURL,
+}) => {
+  await recordCheckoutTimes(page);
+  const attribution = await holdSalesAttribution(page, baseURL);
+  const starts = () => flow.state.calls.filter(({ path }) => path === "/api/payment/start");
+
+  await flow.review();
+  await flow.payment();
+  await expect.poll(() => attribution.held).toBe(true);
+  const start = await holdRoute(page, "**/api/payment/start", (route) => route.fallback(), { times: 1 });
+  await payButton(page).click();
+  await expect.poll(() => start.held).toBe(true);
+  const { pressed, started } = await checkoutTimes(page);
+  withinAnalyticsWait(pressed, started);
+  start.release();
+  await expect(page).toHaveURL(/checkout-handoff$/);
+  expect(starts()).toHaveLength(1);
+  expect(starts()[0].body.bookingPayload.salesAttribution).toBeNull();
 });
 
 const paypalSdkStub = `

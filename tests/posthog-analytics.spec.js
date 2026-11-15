@@ -926,10 +926,10 @@ test.describe("waiting list", () => {
     await page.route("**/api/payment/start", (route) => route.fulfill({ json: freeBooking }));
     await page.getByRole("button", { name: "Confirm Free Booking", exact: true }).click();
     await expect.poll(() => outbox(page)).toContain("free_booking_completed");
-    expect(new URL(page.url()).pathname).toBe("/payment");
+    await expect(page).toHaveURL((url) => url.pathname === "/thank-you");
+    expect(hold.held).toBe(true);
 
     hold.release();
-    await expect(page).toHaveURL((url) => url.pathname === "/thank-you");
     await expect.poll(() => named(seen, "free_booking_completed").length).toBe(1);
     await pastPostHogStart(page, seen);
     expect(named(seen, "free_booking_completed")).toHaveLength(1);

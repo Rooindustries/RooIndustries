@@ -2,11 +2,13 @@ import { reportRequestError } from "./clientRequest";
 import { DEFAULT_CURRENCY, metaTrack, packageFields, trackEvent } from "./analytics";
 import { keepPostHogEvent } from "./loadPostHog";
 import { lazyModule, preloadMetaPixel } from "./analyticsModules";
+import { preloadCheckoutStart } from "./paymentStartBody";
 
 const bookingAnalytics = lazyModule(() => import("./bookingAnalytics"));
 
 export const preloadPurchaseTracking = () => {
   bookingAnalytics.load().catch(reportRequestError);
+  preloadCheckoutStart();
   preloadMetaPixel();
 };
 

@@ -6,7 +6,7 @@ import { PayPalScriptProvider, PayPalButtons, usePayPalScriptReducer } from "@pa
 import { motion } from "framer-motion";
 import { WalletCards } from "lucide-react";
 import packagePricing from "../lib/packagePricing";
-import { checkoutStartCounted, paymentStartBody } from "../lib/paymentStartBody";
+import { countCheckoutStartOnce, paymentStartBody } from "../lib/paymentStartBody";
 import {
   preloadPurchaseTracking, trackCheckoutSessionStarted, trackConfirmedPurchase,
 } from "../lib/checkoutAnalytics";
@@ -1280,9 +1280,9 @@ export default function Payment({ hideFooter = false }) {
       const booked = response.ok && data?.ok &&
         ["booked", "email_partial"].includes(String(data.status || "").trim().toLowerCase());
       if (booked) trackConfirmedPurchase(data.analyticsReceipt);
-      if (response.ok && data?.ok && await checkoutStartCounted(data, provider)) {
-        const price = data.quote?.netAmount;
-        trackCheckoutSessionStarted({ packageTitle: bookingData.packageTitle, price, provider, moment });
+      if (response.ok && data?.ok) {
+        await countCheckoutStartOnce(data, provider, () => trackCheckoutSessionStarted({
+          packageTitle: bookingData.packageTitle, price: data.quote?.netAmount, provider, moment }));
       }
 
       if (!operation.current()) return { terminal: true, stale: true };
