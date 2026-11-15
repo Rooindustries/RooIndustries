@@ -126,6 +126,21 @@ const applyPackagePricing = (pkg) => {
   };
 };
 
+const getPackageSlug = (title = "") => {
+  if (isTopPackageTitle(title)) return "max";
+  return stripUpgradeSuffix(title)
+    .toLowerCase()
+    .replace(/^(?:performance vertex|vertex)\s+/, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+};
+
+const findPackageBySlug = (packages, slug = "") => {
+  const wanted = String(slug || "").trim().toLowerCase();
+  if (!wanted || !Array.isArray(packages)) return null;
+  return packages.find((pkg) => pkg?.title && getPackageSlug(pkg.title) === wanted) || null;
+};
+
 const applyPackagesPricing = (packages) =>
   Array.isArray(packages) ? packages.map(applyPackagePricing) : packages;
 
@@ -139,7 +154,9 @@ const api = {
   normalizePackageTitleForMatch,
   applyPackagePricing,
   applyPackagesPricing,
+  findPackageBySlug,
   getPackagePricePresentation,
+  getPackageSlug,
   toMoney,
 };
 

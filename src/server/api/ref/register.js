@@ -9,6 +9,7 @@ import crypto from "crypto";
 import { isValidNewPassword, NEW_PASSWORD_REQUIREMENT } from "../../../lib/passwordPolicy.js";
 import { setReferralSessionCookie } from "./auth.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
+import { CREATOR_CODE } from "./creatorCode.js";
 import { logSafeError } from "../../safeErrorLog.js";
 import {
   buildReferralIdentityClaim,
@@ -191,7 +192,7 @@ export default async function handler(req, res) {
       trimmedDiscordUsername.length > 80 ||
       trimmedEmail.length > 254 ||
       trimmedPaypalEmail.length > 254 ||
-      !/^[a-z0-9](?:[a-z0-9-]{1,48}[a-z0-9])$/.test(trimmedSlug)
+      !CREATOR_CODE.test(trimmedSlug)
     ) {
       return res.status(400).json({ ok: false, error: "Invalid registration details" });
     }

@@ -8,9 +8,17 @@ import { waitUntil } from "@vercel/functions";
 import { fetchPublicContentDocuments, readPublicContentRevision } from "../supabase/shadowStore.js";
 import { clearSupabaseAssetManifestCache, enrichSupabaseContentAssets } from "../supabase/assets.js";
 import policyContent from "../../lib/policyContent";
+import cookieNotice from "../../lib/cookieNotice";
 import { UPGRADE_LINK_SLUG_PATTERN } from "../../lib/globalCmsContract.js";
 
 const { applyPublicPolicyOverrides } = policyContent;
+const { withCookieNotice } = cookieNotice;
+
+const visitorContent = (resource, data) => {
+  if (resource === "tools") return stableToolDownloadLinks(data);
+  if (resource === "privacy-policy") return withCookieNotice(data);
+  return data;
+};
 
 const SUPABASE_CONTENT_CACHE_TTL_MS = 60 * 1000;
 const SUPABASE_CONTENT_STALE_TTL_MS = 10 * 60 * 1000;
@@ -330,7 +338,7 @@ export const fetchPublicContentEntry = async ({ resource, searchParams }) => {
         : {};
   const { data, revision, cacheable } = await loadSupabasePublicContent({ resource, query, params });
   return {
-    data: applyPublicPolicyOverrides(resource, resource === "tools" ? stableToolDownloadLinks(data) : data),
+    data: applyPublicPolicyOverrides(resource, visitorContent(resource, data)),
     revision,
     cacheable,
   };

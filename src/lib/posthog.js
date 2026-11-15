@@ -1,34 +1,45 @@
+import { readConsent } from "./consent";
+import { cleanOutsideValue } from "./outsideValue.cjs";
+import { postHogQueued, takePostHogQueue } from "./postHogOutbox";
+
 const DEFAULT_KEY = "phc_AqgCN7TfCu5fVECnkPCVjWAStC3grX4MmA3AmKXWu9qe";
 const PROXY_PATH = "/ingest";
 const COMPLETED_BOOKING = /^(?:free_)?booking_completed$/;
 const INTERNAL_ID = /^[a-f0-9]{40}$/;
-const JOURNEY_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
-const QUEUE_LIMIT = 100;
 
 let client = null;
+let sales = null;
 let loading = null;
-const pending = [];
 
-const projectKey = () => (process.env.NEXT_PUBLIC_POSTHOG_KEY || DEFAULT_KEY).trim();
+const granted = () => readConsent() === "granted";
 
-const flush = () => {
-  while (client && pending.length) {
-    const [method, ...args] = pending.shift();
-    client[method](...args);
-  }
+const projectKey = () => cleanOutsideValue(process.env.NEXT_PUBLIC_POSTHOG_KEY || DEFAULT_KEY);
+
+const deliver = (current) => ({ id, event, properties, attribution, path, at }) => {
+  const booking = COMPLETED_BOOKING.test(event);
+  if (booking && INTERNAL_ID.test(properties.event_id || "")) client.identify(properties.event_id);
+  const labels = booking ? sales.salesEventProperties(attribution ?? null) : current;
+  const page = { $current_url: `${window.location.origin}${path}`, $pathname: path };
+  const options = { uuid: id, timestamp: new Date(at), transport: "sendBeacon" };
+  client.capture(event, { ...labels, ...properties, ...page }, options);
 };
 
-const call = (method, ...args) => {
-  if (pending.length >= QUEUE_LIMIT) pending.shift();
-  pending.push([method, ...args]);
-  flush();
+const flush = () => {
+  if (!client) return;
+  const items = takePostHogQueue();
+  if (!items.length) return;
+  const current = sales.salesEventProperties(sales.journeySalesAttribution());
+  if (current.journey_id) client.useJourney(current.journey_id);
+  items.forEach(deliver(current));
 };
 
 export const startPostHog = () => {
-  if (client || loading || !projectKey()) return;
-  loading = import("./posthogClient")
-    .then(({ createPostHog }) => {
-      client = createPostHog(projectKey(), PROXY_PATH, pending.length > 0);
+  if (client || loading || !projectKey() || !granted()) return;
+  loading = Promise.all([import("./posthogClient"), import("./salesTracking")])
+    .then(([{ createPostHog }, salesAttribution]) => {
+      if (!granted()) return;
+      client = createPostHog(projectKey(), PROXY_PATH, postHogQueued(), salesAttribution);
+      sales = salesAttribution;
       flush();
     })
     .catch(() => {})
@@ -42,15 +53,9 @@ export const startPostHogWhenIdle = () => {
   else window.setTimeout(startPostHog, 1200);
 };
 
-export const syncPostHogPage = () => {
-  client?.syncPage();
-};
+export const syncPostHogPage = () => client?.syncPage();
 
-export const capturePostHog = (eventName, properties, { url, timestamp }) => {
-  if (JOURNEY_ID.test(properties.journey_id || "")) call("useJourney", properties.journey_id);
-  if (COMPLETED_BOOKING.test(eventName) && INTERNAL_ID.test(properties.event_id || "")) {
-    call("identify", properties.event_id);
-  }
-  call("capture", eventName, { ...properties, $current_url: url, $pathname: new URL(url).pathname }, { timestamp });
-  if (COMPLETED_BOOKING.test(eventName)) startPostHog();
+export const sendPostHog = (events) => {
+  if (client) flush();
+  else if (events.some((event) => COMPLETED_BOOKING.test(event))) startPostHog();
 };

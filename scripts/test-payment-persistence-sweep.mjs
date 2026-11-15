@@ -2,13 +2,15 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
-import { spawnSync } from 'node:child_process';
 import http from 'node:http';
 import https from 'node:https';
 import { once } from 'node:events';
 import { registerHooks, syncBuiltinESMExports } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { registerEnvScenarios } from './lib/payment-sweep-env-scenarios.mjs';
+import { registerBookingPaidScenarios } from './lib/payment-sweep-booking-paid-scenarios.mjs';
+import { registerAttributionScenarios } from './lib/payment-sweep-attribution-scenarios.mjs';
+import { psqlFile } from './lib/payment-sweep-ads-fixtures.mjs';
 
 const host=process.env.ROO_TEST_HOST||'127.0.0.1';
 const originalFetch=globalThis.fetch;
@@ -27,7 +29,7 @@ restores.push(() => { console.warn = originalWarn; });
 for(const key of Object.keys(process.env))if(/^(SANITY|SUPABASE|PAYPAL|RAZORPAY|DODO|REACT_APP_|NEXT_PUBLIC_|ALLOW_LIVE_|RESEND|BOOKING_EMAIL|FROM_EMAIL|OWNER_EMAIL|DATA_|COMMERCE_|VERCEL_ENV|REF_SESSION|CRON_|RATE_LIMIT_|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|http_proxy|https_proxy|all_proxy|NODE_USE_ENV_PROXY)/.test(key))delete process.env[key];
 process.env.RESEND_API_KEY='re_fixture';
 if(a1Mode||process.argv.includes('--a2'))Object.assign(process.env,{FROM_EMAIL:'noreply@example.invalid',OWNER_EMAIL:'owner@example.invalid'});
-Object.assign(process.env,{NODE_ENV:'test',VERCEL_ENV:'development',DATA_PRIMARY_BACKEND:'supabase',COMMERCE_PRIMARY_BACKEND:'supabase',COMMERCE_FAILOVER_GENERATION:'0',PAYPAL_ENV:'sandbox',PAYPAL_CLIENT_ID:'fixture-client',PAYPAL_CLIENT_SECRET:'fixture-secret',PAYPAL_WEBHOOK_ID:'fixture-webhook',RAZORPAY_KEY_ID:'rzp_test_fixture',RAZORPAY_KEY_SECRET:'fixture-secret',RAZORPAY_WEBHOOK_SECRET:'fixture-webhook-secret',PAYMENT_SESSION_SECRET:'fixture-session-secret',REF_SESSION_SECRET:'fixture-ref-session-secret',CRON_SECRET:'fixture-cron',DODO_PAYMENTS_ENVIRONMENT:'test_mode',DODO_PAYMENTS_API_KEY:'fixture-dodo',DODO_PAYMENTS_WEBHOOK_KEY:`whsec_${Buffer.from('fixture-dodo-secret').toString('base64')}`,DODO_PAYMENTS_PRODUCT_ID:'pdt_fixture',DODO_PAYMENTS_RETURN_URL:'https://example.invalid/checkout'});
+Object.assign(process.env,{NODE_ENV:'test',VERCEL_ENV:'development',DATA_PRIMARY_BACKEND:'supabase',COMMERCE_PRIMARY_BACKEND:'supabase',COMMERCE_FAILOVER_GENERATION:'0',PAYPAL_ENV:'sandbox',PAYPAL_CLIENT_ID:'fixture-client',PAYPAL_CLIENT_SECRET:'fixture-secret',PAYPAL_WEBHOOK_ID:'fixture-webhook',RAZORPAY_KEY_ID:'rzp_test_fixture',RAZORPAY_KEY_SECRET:'fixture-secret',RAZORPAY_WEBHOOK_SECRET:'fixture-webhook-secret',PAYMENT_SESSION_SECRET:'fixture-session-secret',REF_SESSION_SECRET:'fixture-ref-session-secret',CRON_SECRET:'fixture-cron',HOLD_TOKEN_SECRET:'fixture-hold-secret\\n ',DODO_PAYMENTS_ENVIRONMENT:'test_mode',DODO_PAYMENTS_API_KEY:'fixture-dodo',DODO_PAYMENTS_WEBHOOK_KEY:`whsec_${Buffer.from('fixture-dodo-secret').toString('base64')}`,DODO_PAYMENTS_PRODUCT_ID:'pdt_fixture',DODO_PAYMENTS_RETURN_URL:'https://example.invalid/checkout'});
 if(legacyVendorEnvironment)Object.assign(process.env,{SANITY_PROJECT_ID:'synthetic-ignored',SANITY_DATASET:'production',SANITY_READ_TOKEN:'synthetic-ignored-read',SANITY_WRITE_TOKEN:'synthetic-ignored-write',SANITY_API_VERSION:'2023-10-01',NEXT_PUBLIC_SANITY_PROJECT_ID:'synthetic-ignored',NEXT_PUBLIC_SANITY_DATASET:'synthetic-ignored',SANITY_PRIVATE_API_VERSION:'synthetic-ignored',SANITY_PRIVATE_DATASET:'synthetic-ignored',SANITY_PRIVATE_PROJECT_ID:'synthetic-ignored',SANITY_PRIVATE_READ_TOKEN:'synthetic-ignored',SANITY_PRIVATE_WRITE_TOKEN:'synthetic-ignored',SANITY_USER_API_VERSION:'synthetic-ignored',SANITY_WEBHOOK_SECRET:'synthetic-ignored',SANITY_REVERSE_MIRROR_WRITES:'1',SANITY_STUDIO_CMS_WRITES_PAUSED:'1'});
 if(process.argv.includes('--currency-config'))Object.assign(process.env,{PAYPAL_CURRENCY:'EUR',RAZORPAY_CURRENCY:'KWD'});
 const local=(value)=>{const url=new URL(value);assert.equal(url.protocol,'http:');assert.equal(url.hostname,host);assert.ok(url.port);assert.ok(!url.username&&!url.password);return url;};
@@ -40,6 +42,7 @@ for(const [module,protocol] of [[http,'http:'],[https,'https:']]){
 syncBuiltinESMExports();
 registerHooks({resolve(specifier,context,nextResolve){try{return nextResolve(specifier,context);}catch(error){if(specifier==='next/server')return nextResolve('next/server.js',context);if(!specifier.startsWith('.')||!context.parentURL?.startsWith('file:'))throw error;for(const suffix of ['.js','.ts','/index.js']){const candidate=new URL(`${specifier}${suffix}`,context.parentURL);if(fs.existsSync(fileURLToPath(candidate)))return nextResolve(candidate.href,context);}throw error;}}});
 const only=process.argv.find(v=>v.startsWith('--scenario='))?.slice(11).split(',');
+const onlyPrefix=process.argv.find(v=>v.startsWith('--scenario-prefix='))?.slice(18);
 const a2Mode=process.argv.includes('--a2');
 const currencyMode=process.argv.includes('--currency-config');
 const recoveryMode = process.argv.includes('--recovery');
@@ -103,7 +106,9 @@ const seed=async(provider='paypal',status='booked',changes={})=>{
 };
 const tokenFor=r=>access.createPaymentAccessToken({paymentRecordId:r._id,provider:r.provider,pricingFingerprint:r.pricingFingerprint,backend:'supabase',cutoverGeneration:0,expirySeconds:600});
 const paypalReq=(type,resource,id=`event-fixture-${scenarioNumber}`)=>{const body={id,event_type:type,resource};return{body,rawBody:JSON.stringify(body),headers:{'paypal-transmission-id':'fixture-transmission','paypal-transmission-time':new Date().toISOString(),'paypal-transmission-sig':'fixture-signature','paypal-cert-url':'https://example.invalid/cert','paypal-auth-algo':'SHA256withRSA'}};};
-const razorReq=(type,payload)=>{const body={event:type,payload};const rawBody=JSON.stringify(body);return{body,rawBody,headers:{'x-razorpay-signature':crypto.createHmac('sha256',process.env.RAZORPAY_WEBHOOK_SECRET).update(rawBody).digest('hex')}};};
+const razorpaySignature=rawBody=>crypto.createHmac('sha256','fixture-webhook-secret').update(rawBody).digest('hex');
+const razorReq=(type,payload)=>{const body={event:type,payload};const rawBody=JSON.stringify(body);
+  return{body,rawBody,headers:{'x-razorpay-signature':razorpaySignature(rawBody)}};};
 const dodoReq=(payment=dodoPayment,type='payment.succeeded')=>{const body={business_id:'business-fixture',type,timestamp:'2026-01-01T00:00:00.000Z',data:payment};const rawBody=JSON.stringify(body),timestamp=String(Math.floor(Date.now()/1000)),id=`dodo-fixture-${scenarioNumber}`;const signature=crypto.createHmac('sha256',Buffer.from('fixture-dodo-secret')).update(`${id}.${timestamp}.${rawBody}`).digest('base64');return{body,rawBody,headers:{'webhook-id':id,'webhook-timestamp':timestamp,'webhook-signature':`v1,${signature}`}};};
 const requestFlow=async(action,input={})=>{const response=await fetch(`${origin}/flow/${action}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(input),signal:AbortSignal.timeout(30000)});return{status:response.status,body:await response.json()};};
 const assertRefund=async({reversed=false}={})=>{
@@ -123,6 +128,7 @@ const a1RebuildProof=async(name)=>{
 };
 const run = async (name, fn) => {
   if (!supportedScenario(name) || (only && !only.includes(name))) return;
+  if (onlyPrefix && !name.startsWith(onlyPrefix)) return;
   const emailSettings = { FROM_EMAIL: process.env.FROM_EMAIL, OWNER_EMAIL: process.env.OWNER_EMAIL };
   if (name.startsWith('recovery-')) {
     Object.assign(process.env, { FROM_EMAIL: 'noreply@example.invalid', OWNER_EMAIL: 'owner@example.invalid' });
@@ -207,7 +213,7 @@ try{
       const args={...input,client:summaryClient};const action=req.url.slice(6);let result;
       if(action==='paypal')result=await flow.handlePayPalWebhook(args);else if(action==='razorpay')result=await flow.handleRazorpayWebhook(args);else if(action==='dodo')result=await flow.handleDodoWebhook(args);else if(action==='finalize')result=await flow.finalizePaymentSession(args);else if(action==='cancel')result=await flow.cancelPaymentSession(args);else if(action==='reconcile')result=await flow.reconcilePaymentSessions({client:commerce,req:{headers:{authorization:'Bearer fixture-cron'}}});else if(action==='start')result=await flow.startPaymentSession(args);else if(action==='status')result=await flow.getPaymentStatus(args);else throw new Error(`Unknown action ${action}`);res.writeHead(result.httpStatus,{'content-type':'application/json'});res.end(JSON.stringify(result.body));return;}
     if(req.url==='/booking'){const {default:handler}=await import('../src/server/api/ref/createBooking.js');const input=JSON.parse(raw),response={status(code){this.statusCode=code;return this;},json(body){res.writeHead(this.statusCode||200,{'content-type':'application/json'});res.end(JSON.stringify(body));return this;},setHeader(){}};await handler({method:'POST',headers:{},body:input.body,internalContext:input.internal?{documentClient:commerce,backendOwner:'supabase',cutoverGeneration:0,paymentFinalizeSource:'reconcile'}:undefined},response);return;}
-    if(req.url==='/reconcile-route'){const {default:handler}=await import('../src/server/api/payment/reconcile.js');const response={status(code){this.statusCode=code;return this;},json(body){res.writeHead(this.statusCode||200,{'content-type':'application/json'});res.end(JSON.stringify(body));return this;},setHeader(){}};await handler({method:'POST',headers:{authorization:'Bearer fixture-cron'}},response);return;}
+    if(req.url==='/reconcile-route'){const {default:handler}=await import('../src/server/api/payment/reconcile.js');const response={status(code){this.statusCode=code;return this;},json(body){res.writeHead(this.statusCode||200,{'content-type':'application/json'});res.end(JSON.stringify(body));return this;},setHeader(){}};await handler({method:'POST',headers:{authorization:req.headers.authorization||'Bearer fixture-cron'}},response);return;}
     if(req.url==='/identities'){const {POST}=await import('../app/api/auth/identities/route.js');const result=await POST(new Request(`${origin}/identities`,{method:req.method,headers:req.headers,body:raw}));res.writeHead(result.status,Object.fromEntries(result.headers));res.end(await result.text());return;}
     const request={method:req.method,path:req.url,body:raw?(String(req.headers['content-type']||'').includes('application/json')?JSON.parse(raw):raw):null};providerRequests.push({method:req.method,path:req.url});
     if(providerHook){const result=await providerHook(request,req,res);if(result===true)return;}
@@ -305,9 +311,10 @@ try{
     const bookingPayload={packageTitle,email:'customer@example.invalid',discord:'fixture',specs:'synthetic computer',mainGame:'fixture game',localTimeZone:'Asia/Kolkata',startTimeUTC:hold.startTimeUTC,slotHoldId:hold._id,slotHoldToken:issueHoldToken({holdId:hold._id,startTimeUTC:hold.startTimeUTC,expiresAt,holdNonce:hold.holdNonce,backend:'supabase',cutoverGeneration:0})};
     const {resolvePaymentQuote}=await import('../src/server/api/ref/pricing.js');const quote=await resolvePaymentQuote({packageTitle,client:commerce});const {buildQuoteFingerprint}=await import('../src/server/api/payment/paymentRecord.js');return{provider:'paypal',bookingPayload,quoteFingerprint:buildQuoteFingerprint({bookingPayload,quote})};
   };
-  const a1Start=async(provider='paypal',variant='normal')=>{
+  const a1Start=async(provider='paypal',variant='normal',bookingFields={})=>{
     fixture.setRequestHook(async(phase,request)=>{if(phase==='after'&&(request.status>=400||request.response?.ok===false||request.response?.error)){evidence.databaseErrors||=[];evidence.databaseErrors.push({scenario:scenarioNumber,response:request.response});}});
     const input=await startInput();input.provider=provider;input.bookingPayload.message='Original note';emailFailure=variant==='email-failure';
+    Object.assign(input.bookingPayload,bookingFields);
     if (variant === 'upgrade') {
       const original = { ...input.bookingPayload, _id: 'booking.original', _type: 'booking',
         backendOwner: 'supabase', cutoverGeneration: 0, status: 'captured',
@@ -332,9 +339,10 @@ try{
         upgradeIntentToken: issueUpgradeIntentToken({ bookingId: original._id, email: original.email, targetPackageTitle: target.title, backend: 'supabase', cutoverGeneration: 0 }) };
     }
     if(variant==='referral'){
-      const referral={_id:'referral.a1',_type:'referral',slug:{_type:'slug',current:'fixture'},registrationStatus:'verified',currentDiscountPercent:0,currentCommissionPercent:10,totalSales:0,totalEarnings:0,backendOwner:'supabase',cutoverGeneration:0};
+      const code=bookingFields.referralCode||'FIXTURE';
+      const referral={_id:'referral.a1',_type:'referral',slug:{_type:'slug',current:code.toLowerCase()},registrationStatus:'verified',currentDiscountPercent:0,currentCommissionPercent:10,totalSales:0,totalEarnings:0,backendOwner:'supabase',cutoverGeneration:0};
       const current=await documents.getDocument(referral._id);if(current)await documents.patch(referral._id).ifRevisionId(current._rev).set(referral).commit();else await documents.create(referral);
-      input.bookingPayload.referralCode='FIXTURE';
+      input.bookingPayload.referralCode=code;
     }
     if(variant==='coupon'||provider==='free'){
       const code=`A1${scenarioNumber}`,percent=provider==='free'?100:10;
@@ -1623,14 +1631,13 @@ try{
       const rollback = path.join(process.cwd(), 'supabase/rollbacks', recoveryMigration);
       const migrationSql = fs.readFileSync(migration, 'utf8');
       const rollbackSql = fs.readFileSync(rollback, 'utf8');
-      const psqlFile = file => spawnSync(path.join(fixture.pgBin, 'psql'), ['-X', '-q', '-v', 'ON_ERROR_STOP=0', '-h', fixture.host, '-p', String(fixture.pgPort), '-U', os.userInfo().username, '-d', 'postgres', '-f', file], { encoding: 'utf8' });
       const baselineHash = crypto.createHash('sha256').update(recoveryDefinitionBeforeMigration).digest('hex');
       const migratedDefinition = await definition();
       try {
         const driftedMigration = migratedDefinition.replace('updated_at, legacy_sanity_id)', 'updated_at, legacy_sanity_id asc)');
         assert.notEqual(driftedMigration, migratedDefinition);
         await sql.unsafe(driftedMigration);
-        const rejectedRollback = psqlFile(rollback);
+        const rejectedRollback = psqlFile(fixture, rollback);
         assert.match(rejectedRollback.stderr, /unexpected payment recovery candidate filter/);
         assert.equal(await definition(), driftedMigration);
         assert.notEqual(await helper(), null);
@@ -1641,16 +1648,16 @@ try{
         const driftedBaseline = recoveryDefinitionBeforeMigration.replace('updated_at, legacy_sanity_id)', 'updated_at, legacy_sanity_id asc)');
         assert.notEqual(driftedBaseline, recoveryDefinitionBeforeMigration);
         await sql.unsafe(driftedBaseline);
-        const rejectedMigration = psqlFile(migration);
+        const rejectedMigration = psqlFile(fixture, migration);
         assert.match(rejectedMigration.stderr, /unexpected payment recovery candidate filter/);
         assert.equal(await definition(), driftedBaseline);
         assert.equal(await helper(), null);
         await sql.unsafe(recoveryDefinitionBeforeMigration);
-        const applied = psqlFile(migration);
+        const applied = psqlFile(fixture, migration);
         assert.doesNotMatch(applied.stderr, /ERROR/);
         assert.equal(await definition(), migratedDefinition);
         assert.notEqual(await helper(), null);
-        const reverted = psqlFile(rollback);
+        const reverted = psqlFile(fixture, rollback);
         assert.doesNotMatch(reverted.stderr, /ERROR/);
         assert.equal(crypto.createHash('sha256').update(await definition()).digest('hex'), baselineHash);
         assert.equal(await helper(), null);
@@ -2756,6 +2763,10 @@ try{
     assert.equal(finalized.body.bookingSummary.bookingId, (await row(finalizing.id)).payload.bookingId);
     return { paymentRecord: payment, booking, cancelled, webhook, finalized };
   });
+  const ctx={run,seed,requestFlow,paypalReq,razorReq,dodoReq,sql,record,row,flow,commerce,fixture,origin,
+    a1Start,a1Hook};
+  for(const register of [registerEnvScenarios,registerBookingPaidScenarios,registerAttributionScenarios])
+    await register(ctx);
   assert.ok(evidence.scenarios.length,'Unknown named scenario');if(only)assert.equal(evidence.scenarios.length,new Set(only).size,'Unknown selected payment scenario');assert.equal(blockedNetwork,0);
   evidence.modules=Object.fromEntries(['@supabase/supabase-js','@supabase/ssr','postgres','dodopayments'].map(name=>[name,JSON.parse(fs.readFileSync(path.join(process.cwd(),'node_modules',name,'package.json'),'utf8')).version]));
   evidence.sourceHashes=Object.fromEntries(['src/server/api/payment/flow.js','src/server/api/payment/providerClients.js','src/server/api/payment/dodoProvider.js','src/server/api/ref/createBooking.js','src/server/api/ref/bookingCommit.js','src/server/api/payment/reconcile.js','src/server/api/ref/bookingEmails.js','src/components/Payment.jsx','src/server/api/ref/bookingRefunds.js','scripts/test-payment-persistence-sweep.mjs','scripts/lib/sweep-postgres-fixture.mjs','supabase/migrations/20261005000500_project_booking_payment_currency_subunits.sql'].map(name=>[name,crypto.createHash('sha256').update(sourceText(name)).digest('hex')]));

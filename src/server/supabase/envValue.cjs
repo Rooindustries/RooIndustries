@@ -1,14 +1,20 @@
+const { cleanOutsideValue } = require("../../lib/outsideValue.cjs");
 const readEnvValue = (env, key) => {
   const value = env?.[key];
   return value === undefined || value === null ? "" : String(value).trim();
 };
-const readFirstEnvValue = (env, keys = []) => {
+const firstValue = (read) => (env, keys = []) => {
   for (const key of keys) {
-    const value = readEnvValue(env, key);
+    const value = read(env, key);
     if (value) return value;
   }
   return "";
 };
+const readFirstEnvValue = firstValue(readEnvValue);
+const readOutsideEnvValue = (env, key) => cleanOutsideValue(env?.[key]);
+const readFirstOutsideEnvValue = firstValue(readOutsideEnvValue);
+const outsideSetting = key => readOutsideEnvValue(process.env, key);
+const firstOutsideSetting = (...keys) => readFirstOutsideEnvValue(process.env, keys);
 const resolveStoreBackend = value => {
   if (value === undefined || value === null || value === "") return "supabase";
   if (typeof value === "string" && ["", "sanity", "supabase"].includes(value.trim().toLowerCase())) return "supabase";
@@ -17,4 +23,13 @@ const resolveStoreBackend = value => {
   error.status = 503;
   throw error;
 };
-module.exports = { resolveStoreBackend, normalizeBackend: resolveStoreBackend, readEnvValue, readFirstEnvValue };
+module.exports = {
+  resolveStoreBackend,
+  normalizeBackend: resolveStoreBackend,
+  readEnvValue,
+  readFirstEnvValue,
+  readOutsideEnvValue,
+  readFirstOutsideEnvValue,
+  outsideSetting,
+  firstOutsideSetting,
+};

@@ -12,11 +12,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
-jest.mock("@formspree/react", () => ({
-  useForm: () => [{ succeeded: false, submitting: false, errors: null }, jest.fn()],
-  ValidationError: () => null,
-}));
-
 describe("Public company content", () => {
   test("requires an explicit target before making endpoint requests", () => {
     const env = { ...process.env };

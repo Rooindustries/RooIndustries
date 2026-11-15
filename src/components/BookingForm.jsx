@@ -37,7 +37,8 @@ import {
   toMoney,
 } from "../lib/checkoutCodes";
 import { trackEvent } from "../lib/analytics";
-import { captureSalesAttribution } from "../lib/salesAttribution";
+import { bookingPackagePath } from "../lib/bookingPackagePath";
+import { useBookingPackage, useBookingPackageView } from "../lib/bookingPackageParam";
 import { isValidEmail } from "../lib/emailValidation";
 import { classifyHoldResponse } from "../lib/holdResponse";
 
@@ -53,10 +54,6 @@ const loadPackage = (title, apply) =>
   getPublicContent("package", { title })
     .then((data) => apply(preparePackage(data)))
     .catch(reportRequestError);
-const DEFAULT_VERTEX_PACKAGE = preparePackage({
-  title: "Performance Vertex Overhaul",
-  price: "$79.95",
-});
 
 const IST_OFFSET_MINUTES = 330;
 const FORM_PREFILL_KEY = "booking_form_prefill";
@@ -559,23 +556,10 @@ export default function BookingForm() {
   const [preventHoldAutoload, setPreventHoldAutoload] = useState(false);
   const [drafts, setDrafts] = useState({});
 
-  const navigationPackage = useMemo(() => {
-    const direct = location.state?.bookingPackage;
-    if (direct?.title) return direct;
-    const bookingData = location.state?.bookingData;
-    if (!bookingData?.packageTitle) return null;
-    return {
-      title: bookingData.packageTitle,
-      price: bookingData.packagePrice || "",
-      tag: bookingData.packageTag || "",
-    };
-  }, [location.state]);
-
-  const selectedPackage = useMemo(() => {
-    if (navigationPackage?.title) return preparePackage(navigationPackage);
-    if (persistedPackage) return preparePackage(persistedPackage);
-    return DEFAULT_VERTEX_PACKAGE;
-  }, [navigationPackage, persistedPackage]);
+  const { navigationPackage, bookingPackage, pricesReady, pricesError, retryPrices } =
+    useBookingPackage(location, persistedPackage);
+  const selectedPackage = useMemo(() => preparePackage(bookingPackage), [bookingPackage]);
+  useBookingPackageView(navigationPackage && selectedPackage);
 
   const prevPackageRef = useRef(selectedPackage.title);
   const prevPackageDataRef = useRef(selectedPackage);
@@ -921,7 +905,7 @@ export default function BookingForm() {
 
   const displayPackage = modalPackage || vertexPackage;
   const displayFeatureItems = getPackageFeatureItems(
-    displayPackage || DEFAULT_VERTEX_PACKAGE
+    displayPackage || {}
   );
   const isStep2Complete = useMemo(() => {
     return Boolean(
@@ -2365,7 +2349,6 @@ export default function BookingForm() {
     const finalCouponCode = String(appliedCoupon?.code || "").trim();
 
     const payload = {
-      salesAttribution: captureSalesAttribution(),
       displayDate,
       displayTime,
 
@@ -2418,8 +2401,6 @@ export default function BookingForm() {
     } catch {
       console.error("Failed to persist checkout state");
     }
-
-    trackEvent("checkout_started", { package: selectedPackage.title });
 
     navigate("/payment", {
       state: {
@@ -2509,15 +2490,15 @@ export default function BookingForm() {
           pageFadeIn ? "opacity-100" : "opacity-0"
         }`}
       >
-        {!settings || (step === 1 && !availabilityReady && !earliestAvailableSlot) ? (
+        {!settings || !pricesReady || (step === 1 && !availabilityReady && !earliestAvailableSlot) ? (
           <div className="mt-20 flex flex-col items-center gap-3 text-center">
             <div className="text-accent">
-              {settingsError || "Loading..."}
+              {settingsError || pricesError || "Loading..."}
             </div>
-            {settingsError && (
+            {(settingsError || pricesError) && (
               <button
                 type="button"
-                onClick={reloadAvailability}
+                onClick={settingsError ? reloadAvailability : retryPrices}
                 className="rounded-lg border border-info-border bg-info-soft px-4 py-2 text-sm font-semibold text-info-text transition hover:bg-surface-hover-accent focus:outline-none focus:ring-2 focus:ring-[color:var(--color-focus-ring)]"
               >
                 Retry
@@ -3406,7 +3387,7 @@ export default function BookingForm() {
                     variants={itemVariants}
                     className="text-2xl font-bold text-info-text"
                   >
-                    {displayPackage?.title || DEFAULT_VERTEX_PACKAGE.title}
+                    {displayPackage.title}
                   </motion.h3>
 
                   <motion.div
@@ -3414,7 +3395,7 @@ export default function BookingForm() {
                     className="mt-2"
                   >
                     <PriceDisplay
-                      pkg={displayPackage || DEFAULT_VERTEX_PACKAGE}
+                      pkg={displayPackage}
                       size="modal"
                     />
                   </motion.div>
@@ -3457,11 +3438,9 @@ export default function BookingForm() {
                           try {
                             const nextPackage = {
                               title:
-                                displayPackage?.title ||
-                                DEFAULT_VERTEX_PACKAGE.title,
+                                displayPackage.title,
                               price:
-                                displayPackage?.price ||
-                                DEFAULT_VERTEX_PACKAGE.price,
+                                displayPackage.price,
                               tag: displayPackage?.tag || "",
                             };
                             persistDraft({
@@ -3473,7 +3452,7 @@ export default function BookingForm() {
                             console.error("Failed to store booking form draft");
                           }
                           navigate(
-                            "/booking",
+                            bookingPackagePath(displayPackage.title),
                             location.state?.backgroundLocation
                               ? {
                                   state: {
@@ -3481,11 +3460,9 @@ export default function BookingForm() {
                                       location.state.backgroundLocation,
                                     bookingPackage: {
                                       title:
-                                        displayPackage?.title ||
-                                        DEFAULT_VERTEX_PACKAGE.title,
+                                        displayPackage.title,
                                       price:
-                                        displayPackage?.price ||
-                                        DEFAULT_VERTEX_PACKAGE.price,
+                                        displayPackage.price,
                                       tag: displayPackage?.tag || "",
                                     },
                                   },
@@ -3494,11 +3471,9 @@ export default function BookingForm() {
                                   state: {
                                     bookingPackage: {
                                       title:
-                                        displayPackage?.title ||
-                                        DEFAULT_VERTEX_PACKAGE.title,
+                                        displayPackage.title,
                                       price:
-                                        displayPackage?.price ||
-                                        DEFAULT_VERTEX_PACKAGE.price,
+                                        displayPackage.price,
                                       tag: displayPackage?.tag || "",
                                     },
                                   },

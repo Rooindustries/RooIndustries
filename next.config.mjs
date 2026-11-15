@@ -3,6 +3,9 @@ import { readdirSync, lstatSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { isProductionDeployment } from "./src/lib/monitoring/deployment.mjs";
 import { makeBuildReproducible } from "./scripts/lib/reproducible-build.mjs";
+import outsideValue from "./src/lib/outsideValue.cjs";
+
+const { cleanOutsideValue } = outsideValue;
 
 export function validateDistDir(value, { isolated = false } = {}) {
   if (typeof value !== "string" || !/^\.next(?:-[a-zA-Z0-9_-]+)?$/.test(value) ||
@@ -12,11 +15,12 @@ export function validateDistDir(value, { isolated = false } = {}) {
 }
 
 export function getSupabaseAssetOrigin(env = process.env) {
-  return new URL(env.NEXT_PUBLIC_SUPABASE_ASSET_URL || "https://ntezmxzaibrrsgtujgxu.supabase.co").origin;
+  const configured = cleanOutsideValue(env.NEXT_PUBLIC_SUPABASE_ASSET_URL);
+  return new URL(configured || "https://ntezmxzaibrrsgtujgxu.supabase.co").origin;
 }
 
 export function getPostHogProxyRewrites(env = process.env) {
-  const ingest = new URL(env.NEXT_PUBLIC_POSTHOG_HOST || "https://us.i.posthog.com");
+  const ingest = new URL(cleanOutsideValue(env.NEXT_PUBLIC_POSTHOG_HOST) || "https://us.i.posthog.com");
   const assets = new URL(ingest.origin);
   assets.hostname = ingest.hostname.replace(/^([a-z]+)\.i\.posthog\.com$/, "$1-assets.i.posthog.com");
   return [
@@ -31,8 +35,8 @@ const isProduction = process.env.NODE_ENV === "production";
 const DEFAULT_SUPABASE_ASSET_ORIGIN =
   "https://ntezmxzaibrrsgtujgxu.supabase.co";
 const configuredSupabaseAuthUrl =
-  process.env.NEXT_PUBLIC_SUPABASE_URL ||
-  process.env.SUPABASE_URL ||
+  cleanOutsideValue(process.env.NEXT_PUBLIC_SUPABASE_URL) ||
+  cleanOutsideValue(process.env.SUPABASE_URL) ||
   DEFAULT_SUPABASE_ASSET_ORIGIN;
 const supabaseAuthOrigin = new URL(configuredSupabaseAuthUrl).origin;
 const supabaseAssetOrigin = getSupabaseAssetOrigin();
@@ -54,13 +58,30 @@ const contentSecurityPolicy = [
   "base-uri 'self'",
   "object-src 'none'",
   "frame-ancestors 'none'",
-  "form-action 'self' https://formspree.io",
-  `script-src 'self' 'unsafe-inline'${isProduction ? "" : " 'unsafe-eval'"} https://scripts.seorce.com https://widget.intercom.io https://js.intercomcdn.com https://www.googletagmanager.com https://www.paypal.com https://www.paypalobjects.com https://checkout.razorpay.com https://cdn.razorpay.com`,
+  "form-action 'self'",
+  [
+    `script-src 'self' 'unsafe-inline'${isProduction ? "" : " 'unsafe-eval'"}`,
+    "https://scripts.seorce.com https://widget.intercom.io https://js.intercomcdn.com",
+    "https://www.googletagmanager.com https://www.paypal.com https://www.paypalobjects.com",
+    "https://checkout.razorpay.com https://cdn.razorpay.com https://connect.facebook.net",
+  ].join(" "),
   "style-src 'self' 'unsafe-inline'",
   "font-src 'self' data: https://js.intercomcdn.com",
-  `img-src 'self' data: blob: ${supabaseAssetOrigin} https://razorpay.com https://*.razorpay.com https://www.paypalobjects.com https://*.paypal.com https://static.intercomassets.com https://*.intercomcdn.com https://static-cdn.jtvnw.net https://d15f34w2p8l1cc.cloudfront.net https://overfast-api.tekrop.fr`,
+  [
+    `img-src 'self' data: blob: ${supabaseAssetOrigin}`,
+    "https://razorpay.com https://*.razorpay.com https://www.paypalobjects.com https://*.paypal.com",
+    "https://static.intercomassets.com https://*.intercomcdn.com https://static-cdn.jtvnw.net",
+    "https://d15f34w2p8l1cc.cloudfront.net https://overfast-api.tekrop.fr https://www.facebook.com",
+  ].join(" "),
   `media-src 'self' blob: ${supabaseAssetOrigin} https://js.intercomcdn.com`,
-  `connect-src 'self' ${supabaseAuthOrigin} https://formspree.io https://scripts.seorce.com https://fixes.seorce.com https://www.google-analytics.com https://www.paypal.com https://api.razorpay.com https://checkout.razorpay.com https://checkout-static-next.razorpay.com https://lumberjack.razorpay.com https://api-iam.intercom.io https://api-iam.eu.intercom.io wss://nexus-websocket-a.intercom.io`,
+  [
+    `connect-src 'self' ${supabaseAuthOrigin}`,
+    "https://scripts.seorce.com https://fixes.seorce.com https://www.google-analytics.com",
+    "https://www.paypal.com https://api.razorpay.com https://checkout.razorpay.com",
+    "https://checkout-static-next.razorpay.com https://lumberjack.razorpay.com",
+    "https://api-iam.intercom.io https://api-iam.eu.intercom.io wss://nexus-websocket-a.intercom.io",
+    "https://www.facebook.com https://connect.facebook.net",
+  ].join(" "),
   "frame-src https://www.paypal.com https://checkout.razorpay.com https://api.razorpay.com",
   "worker-src 'self' blob:",
   ...(isProduction ? ["upgrade-insecure-requests"] : []),

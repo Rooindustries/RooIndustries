@@ -10,39 +10,17 @@ const { ALL_PUBLIC_ROUTES, PREBUILT_ROUTES } = require("../src/lib/routes.js");
 const { MONEY_BACK_FAQ_QUESTION, MONEY_BACK_FAQ_ANSWER } = require("../src/lib/policyContent.js");
 const fieldContract = require("./fixtures/cms-field-contract.cjs");
 const { withoutCanonicalUrl } = require("../scripts/lib/rsc-canonical-url.cjs");
+const {
+  ADMIN_KEY, EMAIL, PASSWORD, cms, login, choose, evidence, prepareAdminContext,
+} = require("./fixtures/admin-content.cjs");
 
-const ADMIN_KEY = "synthetic-admin-key";
-const EMAIL = "content-admin@example.invalid";
-const PASSWORD = "Synthetic-Content-Password-123";
 const HERO_ID = "tooling-hero";
 const FAQ_ID = "tooling-contact";
 
-const cms = async (request, path, body) => {
-  const response = await request.fetch(path, {
-    method: body === undefined ? "GET" : "POST",
-    headers: { "x-admin-key": ADMIN_KEY },
-    ...(body === undefined ? {} : { data: body }),
-  });
-  expect(response.ok(), await response.text()).toBe(true);
-  return (await response.json()).data;
-};
 const contentCounts = async (request, control) => {
   const response = await request.get(`${control}/content-counts`);
   expect(response.ok()).toBe(true);
   return response.json();
-};
-const login = async page => {
-  await page.goto("/admin/content");
-  await page.getByLabel("Email", { exact: true }).fill(EMAIL);
-  await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await expect(page.getByRole("navigation", { name: "Content types" })).toBeVisible();
-};
-const choose = async (page, title) => {
-  const navigation = page.getByRole("navigation", { name: "Content types", includeHidden: true });
-  await expect(navigation).toBeAttached();
-  if (!await navigation.isVisible()) await page.getByRole("button", { name: "Types", exact: true }).first().click();
-  await navigation.getByRole("button", { name: title, exact: true }).click();
 };
 const hero = async page => {
   await choose(page, "Hero Section");
@@ -88,33 +66,8 @@ const hold = async (page, pattern, { forward = true, method, reply } = {}) => {
   await page.route(pattern, handler);
   return { arrived, release: async () => { release(); await completed; await page.unroute(pattern, handler); } };
 };
-const evidence = async (page, testInfo, details) => {
-  const json = testInfo.outputPath("result.json");
-  await fs.writeFile(json, JSON.stringify(details, null, 2));
-  await testInfo.attach("result", { path: json, contentType: "application/json" });
-  await page.screenshot({ path: testInfo.outputPath("result.png"), fullPage: true });
-};
 
-test.beforeEach(async ({ context, page, request, baseURL }) => {
-  page.setDefaultTimeout(10000);
-  const { guardBrowserContext, localOrigin } = await import("../scripts/lib/test-target-safety.mjs");
-  const origin = localOrigin(baseURL);
-  const control = localOrigin(`http://127.0.0.1:${fixturePort("TOOLING_ADMIN_CONTROL_PORT")}`);
-  const markerResponse = await request.get(`${control}/fixture`);
-  expect(markerResponse.ok(), "The native fixture must attest before admin I/O").toBe(true);
-  const marker = await markerResponse.json();
-  expect(marker).toMatchObject({ version: 1, isolated: true, baseURL: origin });
-  expect(marker.versions.postgres).toContain("17.");
-  await guardBrowserContext(context, marker.origins);
-  expect((await request.post(`${control}/reset-rate-limits`)).ok()).toBe(true);
-  // Secure cookies are preserved in the product. Synthetic fixture HTTP needs this on private-IP hosts.
-  await context.route("**/api/admin/content/session", async route => {
-    const response = await route.fetch();
-    const headers = response.headers();
-    if (headers["set-cookie"]) headers["set-cookie"] = headers["set-cookie"].replace(/; Secure(?=;|$)/gi, "");
-    await route.fulfill({ response, headers });
-  });
-});
+test.beforeEach(prepareAdminContext);
 
 test("ROO-66 public fixture HTML and API stay identical", async ({ page, request }, testInfo) => {
   test.skip(process.env.ROO_TEST_DEV === "1", "Public byte comparison requires a production build.");

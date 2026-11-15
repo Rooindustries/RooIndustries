@@ -3,6 +3,7 @@
 import process from "node:process";
 import { createDocumentWriteClient } from "../src/server/data/documentClient.js";
 import operatorEnvironment from "./lib/operator-environment.cjs";
+import envValue from "../src/server/supabase/envValue.cjs";
 
 const explicitEnv = (() => {
   const index = process.argv.indexOf("--env");
@@ -156,7 +157,7 @@ const main = async () => {
       {
         ok,
         backend: "supabase",
-        supabaseOrigin: new URL(process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL).origin,
+        supabaseOrigin: new URL(envValue.firstOutsideSetting("SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL")).origin,
         counts: {
           bookings: bookings.length,
           paymentRecords: payments.length,

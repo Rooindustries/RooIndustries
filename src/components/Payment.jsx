@@ -6,8 +6,11 @@ import { PayPalScriptProvider, PayPalButtons, usePayPalScriptReducer } from "@pa
 import { motion } from "framer-motion";
 import { WalletCards } from "lucide-react";
 import packagePricing from "../lib/packagePricing";
-import { captureSalesAttribution, sanitizeSalesAttribution } from "../lib/salesAttribution";
-import { trackConfirmedPurchase } from "../lib/analytics";
+import { countCheckoutStartOnce, paymentStartBody } from "../lib/paymentStartBody";
+import {
+  preloadPurchaseTracking, trackCheckoutSessionStarted, trackConfirmedPurchase,
+} from "../lib/checkoutAnalytics";
+import { eventMoment } from "../lib/loadPostHog";
 import { preloadConfirmationPage, preloadConfirmationPages } from "../lib/confirmationPages";
 import { useBookingDialogPending } from "../lib/bookingDialogHold";
 import { beginCheckoutConfirmation } from "../lib/checkoutConfirmation";
@@ -21,6 +24,7 @@ import {
   toMoney,
 } from "../lib/checkoutCodes";
 import { requestDeadline } from "../lib/clientRequest";
+import { cleanOutsideValue } from "../lib/outsideValue.cjs";
 
 const { applyPackagePricing } = packagePricing;
 const PAYMENT_FETCH_TIMEOUT_MS = 15_000;
@@ -112,6 +116,7 @@ function PayPalCheckout({ children }) {
 
 export default function Payment({ hideFooter = false }) {
   useEffect(() => { clearBookingConfirmation(); }, []);
+  useEffect(preloadPurchaseTracking, []);
   useEffect(() => {
     preloadConfirmationPages().catch(() => {});
   }, []);
@@ -229,7 +234,6 @@ export default function Payment({ hideFooter = false }) {
   };
 
   const buildConfirmationNavigationState = (responseBody = {}) => {
-    trackConfirmedPurchase(responseBody.analyticsReceipt);
     const baseState = getModalFlowState();
     const bookingId = String(responseBody?.bookingId || "").trim();
 
@@ -522,11 +526,8 @@ export default function Payment({ hideFooter = false }) {
     : !lockedProvider && providerConfig.dodo?.enabled;
   const providerIsAvailableForSession = (provider) =>
     !lockedProvider || lockedProvider === provider;
-  const paypalClientIdFromEnv = (
-    process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID ||
-    process.env.REACT_APP_PAYPAL_CLIENT_ID ||
-    ""
-  ).trim();
+  const paypalClientIdFromEnv = cleanOutsideValue(process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID) ||
+    cleanOutsideValue(process.env.REACT_APP_PAYPAL_CLIENT_ID);
   const paypalClientId = (
     providerConfig?.paypal?.clientId || paypalClientIdFromEnv
   ).trim();
@@ -543,9 +544,9 @@ export default function Payment({ hideFooter = false }) {
     !!providerConfig?.paypal?.enabled || showInternalPayments;
   const canDisplayPaypalMethod = shouldRenderPaypalBlock && canUsePaypal;
 
-  const buildCheckoutPayload = () => ({
+  const buildCheckoutPayload = (salesAttribution) => ({
     ...bookingData,
-    salesAttribution: sanitizeSalesAttribution(bookingData.salesAttribution) || captureSalesAttribution(),
+    salesAttribution,
     packageTitle,
     packagePrice,
     email: bookingData.email || "",
@@ -1101,7 +1102,7 @@ export default function Payment({ hideFooter = false }) {
     return buildConfirmationNavigationState(responseBody);
   };
 
-  const navigateToConfirmation = async (kind, responseBody, operation) => {
+  const showConfirmation = async (kind, responseBody, operation) => {
     await Promise.race([
       preloadConfirmationPage(kind).catch(() => {}),
       new Promise(resolve => setTimeout(resolve, CONFIRMATION_PRELOAD_WAIT_MS)),
@@ -1111,6 +1112,11 @@ export default function Payment({ hideFooter = false }) {
       ? buildFinalizeNavigation(responseBody, operation)
       : buildConfirmationNavigationState(responseBody);
     navigate(kind === "paid" ? "/payment-success" : "/thank-you", { state, replace: true });
+  };
+
+  const navigateToConfirmation = (kind, responseBody, operation) => {
+    trackConfirmedPurchase(responseBody.analyticsReceipt);
+    return showConfirmation(kind, responseBody, operation);
   };
 
   const fetchJson = async (
@@ -1262,15 +1268,22 @@ export default function Payment({ hideFooter = false }) {
         throw new Error("Checkout price is still being confirmed. Please try again.");
       }
 
+      const body = await paymentStartBody({ operation, provider, quoteFingerprint,
+        salesAttribution: bookingData.salesAttribution, buildPayload: buildCheckoutPayload });
+      if (!body) return { terminal: true, stale: true };
       const { response, data } = await fetchJson("/api/payment/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider,
-          quoteFingerprint,
-          bookingPayload: buildCheckoutPayload(),
-        }),
+        body,
       });
+      const moment = eventMoment();
+      const booked = response.ok && data?.ok &&
+        ["booked", "email_partial"].includes(String(data.status || "").trim().toLowerCase());
+      if (booked) trackConfirmedPurchase(data.analyticsReceipt);
+      if (response.ok && data?.ok) {
+        await countCheckoutStartOnce(data, provider, () => trackCheckoutSessionStarted({
+          packageTitle: bookingData.packageTitle, price: data.quote?.netAmount, provider, moment }));
+      }
 
       if (!operation.current()) return { terminal: true, stale: true };
 
@@ -1335,12 +1348,8 @@ export default function Payment({ hideFooter = false }) {
         sessionExpiresAt: String(data.sessionExpiresAt || "").trim(),
         result: data,
       };
-      const returnedStatus = String(data.status || "").trim().toLowerCase();
-      if (
-        provider !== "free" &&
-        (returnedStatus === "booked" || returnedStatus === "email_partial")
-      ) {
-        await navigateToConfirmation("paid", data, operation);
+      if (provider !== "free" && booked) {
+        await showConfirmation("paid", data, operation);
         return { ...nextSession, terminal: true };
       }
       if (provider !== "free") {
@@ -1646,7 +1655,7 @@ export default function Payment({ hideFooter = false }) {
         throw new Error(data.error || "Could not save your free booking.");
       }
 
-      await navigateToConfirmation("free", data, operation);
+      await showConfirmation("free", data, operation);
     } catch (err) {
       if (!operation.current()) return;
       console.error("Free booking failed");

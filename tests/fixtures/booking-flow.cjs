@@ -1,5 +1,7 @@
+const { createHash } = require("node:crypto");
 const { test: base, expect } = require("@playwright/test");
 const { fixturePort } = require("./fixture-ports.cjs");
+const { heldRouteFixtures } = require("./held-routes.cjs");
 
 const providers = {
   dodo: { enabled: true, mode: "test" },
@@ -7,7 +9,21 @@ const providers = {
   paypal: { enabled: false, mode: "disabled" },
 };
 
+const overhaulPrice = 84.99;
+
+const startedCheckout = (baseURL, checkouts, request) => {
+  const holdId = request.postDataJSON()?.bookingPayload?.slotHoldId || "";
+  const checkoutCreated = !checkouts.has(holdId);
+  checkouts.add(holdId);
+  return {
+    ok: true, paymentAccessToken: "fixture-payment", status: "started", checkoutCreated,
+    providerPayload: { checkoutUrl: `${baseURL}/__test/checkout-handoff`, orderId: `fixture-order-${holdId}` },
+    sessionExpiresAt: new Date(Date.now() + 20 * 60 * 1000).toISOString(),
+  };
+};
+
 const test = base.extend({
+  ...heldRouteFixtures,
   cpuThrottling: [async ({ page, browserName }, use, testInfo) => {
     const rate = Number(process.env.PW_CPU_THROTTLING_RATE || 1);
     if (!Number.isFinite(rate) || rate < 1) throw new Error("Invalid CPU throttling rate.");
@@ -40,6 +56,7 @@ const test = base.extend({
       holdMs: 20 * 60 * 1000,
       holdCount: 0,
       holds: new Map(),
+      checkouts: new Set(),
       collision: false,
     };
     page.on("requestfailed", (request) => state.aborted.push(new URL(request.url()).pathname));
@@ -136,30 +153,25 @@ const test = base.extend({
         const referralCode = String(body.referralCode || "").toLowerCase();
         const cents = (value) => Math.round(value * 100) / 100;
         const couponDiscountAmount =
-          couponCode === "save20" || (couponCode === "friend" && state.collision) ? cents(84.99 * 0.2) : 0;
+          couponCode === "save20" || (couponCode === "friend" && state.collision) ? cents(overhaulPrice * 0.2) : 0;
         const referralDiscountPercent =
           referralCode === "friend" || (referralCode === "save20" && state.collision) ? 10 : 0;
-        const referralDiscountAmount = cents((84.99 - couponDiscountAmount) * referralDiscountPercent / 100);
+        const referralDiscountAmount = cents((overhaulPrice - couponDiscountAmount) * referralDiscountPercent / 100);
+        const netAmount = cents(overhaulPrice - couponDiscountAmount - referralDiscountAmount);
         return json(route, { ok: true, quoteFingerprint: "fixture-quote", providers, quote: {
-          grossAmount: 84.99, netAmount: cents(84.99 - couponDiscountAmount - referralDiscountAmount), isFree: false,
+          grossAmount: overhaulPrice, netAmount, isFree: false,
           couponDiscountAmount, referralDiscountAmount, referralDiscountPercent,
         } });
       }
-      if (path === "/api/payment/start") {
-        return json(route, {
-          ok: true, paymentAccessToken: "fixture-payment", status: "started",
-          providerPayload: { checkoutUrl: `${baseURL}/__test/checkout-handoff` },
-          sessionExpiresAt: new Date(Date.now() + 20 * 60 * 1000).toISOString(),
-        });
-      }
+      if (path === "/api/payment/start") return json(route, startedCheckout(baseURL, state.checkouts, request));
       return route.fallback();
     });
-    const booking = async () => {
-      await page.goto("/booking");
+    const booking = async (path = "/booking") => {
+      await page.goto(path);
       await page.getByRole("button", { name: /^Earliest available:/ }).click();
     };
-    const reserve = async () => {
-      await booking();
+    const reserve = async (path) => {
+      await booking(path);
       await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
       await page.getByRole("button", { name: "Next", exact: true }).last().click();
       await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toBeVisible();
@@ -170,12 +182,15 @@ const test = base.extend({
       await page.getByRole("textbox", { name: "PC specifications", exact: true }).fill("Ryzen 7700 / RTX 4070");
       await page.getByRole("textbox", { name: "Main game or application", exact: true }).fill("CS2");
     };
-    const review = async () => {
-      await reserve();
+    const review = async (path) => {
+      await reserve(path);
       await details();
       await page.getByRole("button", { name: "Review before payment", exact: true }).click();
       await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
     };
+    const startBodies = () => state.calls
+      .filter((call) => call.path === "/api/payment/start")
+      .map((call) => call.body);
     const payment = async () => {
       await page.getByRole("button", { name: "Continue to payment", exact: true }).click();
       await expect(page.getByRole("heading", { name: "Complete Payment", exact: true })).toBeVisible();
@@ -195,7 +210,7 @@ const test = base.extend({
       await page.getByPlaceholder("e.g. 1a2b3c4d5e6f7g8h9i", { exact: true }).fill("fixture-order");
     };
     try {
-      await use({ state, booking, reserve, details, review, payment, codeInput, upgrade });
+      await use({ state, booking, reserve, details, review, payment, codeInput, upgrade, startBodies });
     } finally {
       await testInfo.attach("requests", { body: JSON.stringify({ calls: state.calls, aborted: state.aborted }, null, 2), contentType: "application/json" });
       if (!page.isClosed()) {
@@ -206,4 +221,213 @@ const test = base.extend({
   },
 });
 
-module.exports = { test, expect };
+const cookieBanner = (page) => page.getByRole("region", { name: "Cookie choice", exact: true });
+
+const cookieChoice = (name) => (page) => cookieBanner(page).getByRole("button", { name, exact: true }).click();
+const declineCookies = cookieChoice("Decline");
+const acceptCookies = cookieChoice("Accept");
+
+const cookieSettingsReady = async (page) => {
+  const button = page.getByRole("button", { name: "Cookie settings", exact: true });
+  await expect.poll(() => button.evaluate((node) => Object.entries(node).some(([key, props]) =>
+    key.startsWith("__reactProps$") && typeof props.onClick === "function"))).toBe(true);
+  return button;
+};
+
+const openCookieSettings = async (page) => (await cookieSettingsReady(page)).click();
+
+const settleIdle = (page) => page.evaluate(() => new Promise((resolve) => {
+  window.requestIdleCallback(() => setTimeout(resolve, 400), { timeout: 5000 });
+}));
+
+const bookingEventId = (paymentRecordId) =>
+  createHash("sha256").update(`booking-confirmed:${paymentRecordId}`).digest("hex").slice(0, 40);
+
+const routePaidStart = async (page, baseURL, { lose = 0, hold = 0 } = {}) => {
+  const checkouts = new Set();
+  const gate = { held: [] };
+  let losing = lose;
+  let holding = hold;
+  gate.release = () => Promise.all(gate.held.splice(0).map((answer) => answer()));
+  await page.context().route("**/api/payment/start", (route) => {
+    const json = {
+      ...startedCheckout(baseURL, checkouts, route.request()),
+      quote: { grossAmount: overhaulPrice, netAmount: overhaulPrice, isFree: false },
+    };
+    if (losing > 0) {
+      losing -= 1;
+      return route.abort("failed");
+    }
+    const answer = () => route.fulfill({ json });
+    if (holding < 1) return answer();
+    holding -= 1;
+    gate.held.push(answer);
+    return null;
+  });
+  return gate;
+};
+
+const routeStartedStatus = (context) =>
+  context.route("**/api/payment/status", (route) => route.fulfill({ json: { ok: true, status: "started" } }));
+
+const payButton = (tab) => tab.getByRole("button", { name: "Pay your way", exact: true });
+
+const handedOff = (tab) => expect(tab).toHaveURL(/\/__test\/checkout-handoff$/);
+
+const resumeCheckout = async (page) => {
+  await page.goto("/payment");
+  await page.getByRole("button", { name: "Resume checkout", exact: true }).click();
+  await handedOff(page);
+};
+
+const openPayment = async (page, flow, baseURL, options) => {
+  const gate = await routePaidStart(page, baseURL, options);
+  await routeStartedStatus(page.context());
+  await flow.review("/booking?package=overhaul");
+  await flow.payment();
+  return gate;
+};
+
+const secondPaymentTab = async (page) => {
+  const opened = page.context().waitForEvent("page");
+  await page.evaluate(() => { window.open("/payment"); });
+  const second = await opened;
+  await expect(second.getByRole("heading", { name: "Complete Payment", exact: true })).toBeVisible();
+  return second;
+};
+
+const inTwoTabs = (hold, order) => async (page, flow, baseURL) => {
+  const gate = await openPayment(page, flow, baseURL, { hold });
+  const tabs = [page, await secondPaymentTab(page)];
+  await order(tabs, gate);
+  for (const tab of tabs) await settleIdle(tab);
+};
+
+const inOneTab = (options, steps) => async (page, flow, baseURL) => {
+  await openPayment(page, flow, baseURL, options);
+  await steps(page);
+  await settleIdle(page);
+};
+
+const heldStarts = (gate, count) => expect.poll(() => gate.held.length).toBe(count);
+
+const reusedAnswerFirst = inTwoTabs(1, async ([first, second], gate) => {
+  await payButton(first).click();
+  await heldStarts(gate, 1);
+  await payButton(second).click();
+  await handedOff(second);
+  await gate.release();
+  await handedOff(first);
+});
+
+const blockLocalStorage = (page) => page.context().addInitScript(() => {
+  Object.defineProperty(window, "localStorage", {
+    configurable: true, get: () => { throw new DOMException("Storage is blocked.", "SecurityError"); },
+  });
+});
+
+const withoutWebLocks = (page) => page.context().addInitScript(() => {
+  Object.defineProperty(Navigator.prototype, "locks", { configurable: true, get: () => undefined });
+});
+
+const checkoutStartCases = [
+  ["created, then reused in another tab", null, inTwoTabs(0, async (tabs) => {
+    for (const tab of tabs) {
+      await payButton(tab).click();
+      await handedOff(tab);
+    }
+  })],
+  ["the reused answer arrives before the created one", null, reusedAnswerFirst],
+  ["the created answer is lost, then a retry reuses it", null, inOneTab({ lose: 1 }, async (page) => {
+    const lost = page.waitForEvent("requestfailed", (request) => request.url().endsWith("/api/payment/start"));
+    await payButton(page).click();
+    await lost;
+    await expect(payButton(page)).toBeEnabled();
+    await payButton(page).click();
+    await handedOff(page);
+  })],
+  ["two tabs race", null, inTwoTabs(2, async (tabs, gate) => {
+    for (const tab of tabs) await payButton(tab).click();
+    await heldStarts(gate, 2);
+    await gate.release();
+    for (const tab of tabs) await handedOff(tab);
+  })],
+  ["created, then reused after a reload", null, inOneTab({}, async (page) => {
+    await payButton(page).click();
+    await handedOff(page);
+    await resumeCheckout(page);
+  })],
+  ["browser storage is blocked", blockLocalStorage, reusedAnswerFirst],
+  ["the Web Locks API is missing", withoutWebLocks, reusedAnswerFirst],
+].map(([name, prepare, run]) => ({ name, prepare: prepare || (() => null), run }));
+
+const productionOnlyScripts = ["https://scripts.seorce.com/api?**", "https://widget.intercom.io/widget/**"];
+
+const openFreePayment = async (page, flow) => {
+  await page.route("**/api/ref/validateCoupon?code=free100*", route => route.fulfill({
+    json: {
+      ok: true,
+      coupon: { code: "free100", discountType: "percent", discountPercent: 100, canCombineWithReferral: true },
+    },
+  }));
+  await page.route("**/api/payment/quote", route => {
+    const free = route.request().postDataJSON().couponCode === "free100";
+    return route.fulfill({ json: {
+      ok: true,
+      quoteFingerprint: free ? "fixture-approved-free" : "fixture-paid",
+      quote: { grossAmount: 84.99, netAmount: free ? 0 : 84.99, isFree: free },
+    } });
+  });
+  await flow.review();
+  await flow.codeInput("free100");
+  await expect(page.getByRole("button", { name: "Remove coupon code free100", exact: true })).toBeVisible();
+  await flow.payment();
+  await expect(page.getByRole("button", { name: "Confirm Free Booking", exact: true })).toBeEnabled();
+};
+
+const analyticsWaitLimitMs = 300;
+const providerStepMarginMs = 500;
+
+const recordCheckoutTimes = (page) => page.addInitScript(() => {
+  const times = {};
+  window.__checkoutTimes = times;
+  document.addEventListener("click", (event) => {
+    if (event.target.closest?.("button")) times.pressed = performance.now();
+  }, true);
+  const send = window.fetch.bind(window);
+  window.fetch = (input, init) => {
+    const sent = send(input, init);
+    if (!String(input?.url || input).endsWith("/api/payment/start")) return sent;
+    times.started = performance.now();
+    sent.then(() => { times.answered = performance.now(); }, () => {});
+    return sent;
+  };
+});
+
+const checkoutTimes = (page) => page.evaluate(() => window.__checkoutTimes);
+
+const withinAnalyticsWait = (from, to) =>
+  expect(to - from).toBeLessThan(analyticsWaitLimitMs + providerStepMarginMs);
+
+const productionHostFixtures = {
+  productionHost: [async ({}, use, workerInfo) => {
+    const { loopbackProductionHost } = await import("../../scripts/lib/test-target-safety.mjs");
+    const { baseURL, launchOptions } = workerInfo.project.use;
+    await use(loopbackProductionHost(baseURL, launchOptions?.args));
+  }, { scope: "worker" }],
+  launchOptions: [async ({ launchOptions, productionHost }, use) =>
+    use({ ...launchOptions, args: productionHost.args }), { scope: "worker" }],
+  baseURL: async ({ productionHost }, use) => use(productionHost.origin),
+  productionOnlyScriptStubs: [async ({ context, flow }, use) => {
+    for (const script of productionOnlyScripts) {
+      await context.route(script, (route) => route.fulfill({ contentType: "application/javascript", body: "" }));
+    }
+    await use(flow);
+  }, { auto: true }],
+};
+
+module.exports = {
+  test, expect, overhaulPrice, cookieBanner, declineCookies, acceptCookies, cookieSettingsReady, openCookieSettings,
+  settleIdle, bookingEventId, routePaidStart, checkoutStartCases, productionHostFixtures, openFreePayment,
+  analyticsWaitLimitMs, recordCheckoutTimes, checkoutTimes, withinAnalyticsWait,
+};

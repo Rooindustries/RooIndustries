@@ -83,22 +83,22 @@ for (const origin of ["/packages", "/reviews"]) {
     const background = origin === "/packages" ? "/packages" : "/";
     const delayed = await holdChunk(page, "Schedule Your Session");
     try {
-      await page.locator('a[href="/booking"]').first().click();
+      await page.locator('a[href="/booking?package=overhaul"]').first().click();
       await expect.poll(() => delayed.chunks.length).toBeGreaterThan(0);
       await page.waitForTimeout(500);
       expect(page.__routeErrors).toEqual([]);
       await expect(page.getByRole("heading", { name: "We couldn’t load this page.", exact: true })).toHaveCount(0);
       delayed.release();
-      await expect(page).toHaveURL(/\/booking$/);
+      await expect(page).toHaveURL(/\/booking\?package=overhaul$/);
       await expect(page.getByRole("dialog").getByRole("heading", { name: "Schedule Your Session", exact: true })).toBeVisible();
-      await expect(page.locator('#main-content a[href="/booking"]').first()).toBeAttached();
+      await expect(page.locator('#main-content a[href="/booking?package=overhaul"]').first()).toBeAttached();
       expect(await page.evaluate(() => window.__flowDocument)).toBe(true);
       expect(await page.evaluate(() => JSON.parse(sessionStorage.getItem("flow_background_location")))).toMatchObject({ pathname: background });
       await page.goBack();
       await expect(page.getByRole("dialog")).toHaveCount(0);
       await expect(page).toHaveURL(background === "/" ? /\/#packages$/ : /\/packages$/);
       await page.goForward();
-      await expect(page).toHaveURL(/\/booking$/);
+      await expect(page).toHaveURL(/\/booking\?package=overhaul$/);
       await expect(page.getByRole("dialog").getByRole("heading", { name: "Schedule Your Session", exact: true })).toBeVisible();
       expect(await page.evaluate(() => window.__flowDocument)).toBe(true);
       expect(page.__routeErrors).toEqual([]);
@@ -153,7 +153,7 @@ test("a home section link in View My Plan closes booking and adds its section en
   });
   await page.goto("/");
   await waitForRouteCommitted(page);
-  await page.locator('#packages a[href="/booking"]').first().click();
+  await page.locator('#packages a[href="/booking?package=overhaul"]').first().click();
   const dialog = page.getByRole("dialog", { name: "Schedule your session", exact: true });
   await expect(dialog).toBeVisible();
   const startLength = await page.evaluate(() => window.history.length);
@@ -166,7 +166,7 @@ test("a home section link in View My Plan closes booking and adds its section en
   )).toBeLessThanOrEqual(160);
   expect(await page.evaluate(() => window.history.length)).toBe(startLength + 1);
   await page.goBack();
-  await expect(page).toHaveURL(/\/booking$/);
+  await expect(page).toHaveURL(/\/booking\?package=overhaul$/);
   await expect(dialog).toBeVisible();
   await expect(page.locator("#services")).toBeAttached();
 });

@@ -10,6 +10,8 @@ import { reconcileBookingEmailDispatches } from "../ref/bookingEmails.js";
 import { reconcileReferralEmailDispatches } from "../ref/referralEmailDispatches.js";
 
 import { reconcileCredentialOperations } from "../../supabase/credentialRecovery.js";
+import { reportBookingPaidEvents } from "../../analytics/bookingPaidEvents.js";
+import { retryContactMessages } from "../../contact/contactMessages.js";
 
 import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
 
@@ -51,12 +53,22 @@ export default async function handler(req, res) {
 
   if (scope === "mirror-only" || scope === "parity-only") return res.status(200).json({ok:true,skipped:true,reason:"retired"});
   const policy = resolveSupabaseRuntimePolicy();
+  const socialAuthEnabled = ["1","true","yes","on"].includes(
+    String(process.env.SUPABASE_SOCIAL_AUTH_ENABLED || "").trim().toLowerCase()
+  );
   let client;
   const summary = {};
   const duty = async (name, run) => {
+    const timeoutMs = name === "paymentSessions" ? 120000 : 30000;
+    const deadline = Date.now() + timeoutMs;
     let timer;
     try {
-      summary[name] = await Promise.race([Promise.resolve().then(run),new Promise((_,reject) => { timer=setTimeout(() => reject(Object.assign(new Error("Reconciliation duty timed out."),{code:"RECONCILIATION_TIMEOUT"})),name === "paymentSessions" ? 120000 : 30000); })]);
+      const timedOut = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(Object.assign(new Error("Reconciliation duty timed out."), {
+          code: "RECONCILIATION_TIMEOUT",
+        })), timeoutMs);
+      });
+      summary[name] = await Promise.race([Promise.resolve().then(() => run(deadline)), timedOut]);
     } catch (error) {
       logSafeError(`${name} reconciliation failed`,error);
       summary[name] = {pending:true,errorCode:String(error?.code || "RECONCILIATION_FAILED").slice(0,128)};
@@ -74,6 +86,8 @@ export default async function handler(req, res) {
     duty("referralEmailRecovery",() => reconcileReferralEmailDispatches({limit:10})),
     duty("credentialRecovery",() => reconcileCredentialOperations({limit:10})),
     duty("rateLimitBucketsCleaned",() => cleanupExpiredRateLimitBuckets()),
+    duty("bookingPaidEvents",() => reportBookingPaidEvents()),
+    duty("contactMessages",(deadline) => retryContactMessages({limit:20,deadline})),
     duty("emailOnlyRecovery",async () => ({supabase:await reconcileBookingEmailDispatches({client:client || createPaymentBackendClient("supabase")})})),
     duty("commerceMetricsCleaned",async () => {
       const result=await createSupabaseAdminClient().rpc("roo_cleanup_commerce_metrics",{});if(result.error)throw result.error;return Number(result.data || 0);
@@ -81,7 +95,10 @@ export default async function handler(req, res) {
     duty("typedGapSnapshot",async () => {
       const result=await createSupabaseAdminClient().rpc("roo_commerce_typed_gap_summary",{});if(result.error)throw result.error;return result.data || {};
     }),
-    ...(["1","true","yes","on"].includes(String(process.env.SUPABASE_SOCIAL_AUTH_ENABLED || "").trim().toLowerCase()) ? [duty("accountSecurity",async () => {const result=await createSupabaseAdminClient().rpc("roo_reconcile_account_security",{p_guild_id:null});if(result.error)throw result.error;return result.data || {};})] : []),
+    ...(socialAuthEnabled ? [duty("accountSecurity",async () => {
+      const result=await createSupabaseAdminClient().rpc("roo_reconcile_account_security",{p_guild_id:null});
+      if(result.error)throw result.error;return result.data || {};
+    })] : []),
   ]);
   summary.backendReconciliation={supabase:{ok:paymentResult?.httpStatus === 200,pending:paymentResult?.httpStatus !== 200}};
   await duty("reconciliationCheckpoint",async () => {

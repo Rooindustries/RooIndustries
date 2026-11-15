@@ -12,7 +12,22 @@ import { withNodeOption } from "./lib/node-options.mjs";
 if (process.argv.includes('--contact-e2e-server')) {
   const { registerHooks } = await import('node:module');
   const failureRoute = "        if (resource === 'contact' && state.mode === 'contact-failed') { json(res, {ok:false,error:'Synthetic content failure'},503); return true; }\n";
-  const failureScenario = "await run('contact-failed', async () => {\n  await load('/contact', {mode:'contact-failed'}); await call('/api/content/contact');\n  await wait(() => text().includes('The contact form is temporarily unavailable.'), 'Content failure is silently disabling the form');\n  assert(button('Send Message').disabled, 'Unconfigured form is enabled');\n  const email = doc().querySelector('a[href^=\"mailto:\"]'); assert(email && email.href.includes('@'), 'Email fallback is missing');\n  const calls = (await control()).calls; assert(!calls.some(item=>item.path==='/__ui/formspree'), 'Unconfigured form submitted');\n  return {rendered:text(),email:email.href,disabled:true,calls,externalSends:0};\n});\n";
+  const failureScenario = [
+    "await run('contact-failed', async () => {",
+    "  await load('/contact', {mode:'contact-failed'}); await call('/api/content/contact');",
+    "  assert(!button('Send Message').disabled, 'Content failure disabled the form');",
+    "  const email = doc().querySelector('a[href^=\"mailto:\"]');",
+    "  assert(email && email.href.includes('@'), 'Email fallback is missing');",
+    "  input('input[name=name]', 'Synthetic name');",
+    "  input('input[name=email]', 'ui@fixture.invalid');",
+    "  input('textarea[name=message]', 'Synthetic message');",
+    "  submit();",
+    "  await call('/api/contact');",
+    "  await wait(() => text().includes('Thanks, your message is in.'), 'Form did not send after a content failure');",
+    "  return {rendered:text(),email:email.href,disabled:false,calls:(await control()).calls,externalSends:0};",
+    "});",
+    "",
+  ].join("\n");
   registerHooks({ load(url, context, nextLoad) {
     const loaded = nextLoad(url, context);
     if (url.endsWith('/tests/fixtures/ui-repairs-server.mjs')) {

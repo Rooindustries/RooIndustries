@@ -1,4 +1,5 @@
 const crypto = require("node:crypto");
+const { readFirstOutsideEnvValue, readOutsideEnvValue } = require("./envValue.cjs");
 
 const TARGET_ENVIRONMENTS = new Set(["preview", "production"]);
 const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
@@ -156,11 +157,11 @@ const selectedTargetValues = (env = process.env) => {
       environment,
       legacyDatabaseUrl: normalize(env.TOURNEY_PREVIEW_DATABASE_URL),
       supabaseDatabaseUrl: normalize(env.SUPABASE_PREVIEW_DATABASE_URL),
-      supabaseUrl: normalize(env.SUPABASE_PREVIEW_URL),
-      supabaseSecret: firstNonEmpty(
-        env.SUPABASE_PREVIEW_SECRET_KEY,
-        env.SUPABASE_PREVIEW_SERVICE_ROLE_KEY
-      ),
+      supabaseUrl: readOutsideEnvValue(env, "SUPABASE_PREVIEW_URL"),
+      supabaseSecret: readFirstOutsideEnvValue(env, [
+        "SUPABASE_PREVIEW_SECRET_KEY",
+        "SUPABASE_PREVIEW_SERVICE_ROLE_KEY",
+      ]),
     };
   }
   return {
@@ -170,14 +171,8 @@ const selectedTargetValues = (env = process.env) => {
       env.POSTGRES_URL
     ),
     supabaseDatabaseUrl: normalize(env.SUPABASE_DATABASE_URL),
-    supabaseUrl: firstNonEmpty(
-      env.SUPABASE_URL,
-      env.NEXT_PUBLIC_SUPABASE_URL
-    ),
-    supabaseSecret: firstNonEmpty(
-      env.SUPABASE_SECRET_KEY,
-      env.SUPABASE_SERVICE_ROLE_KEY
-    ),
+    supabaseUrl: readFirstOutsideEnvValue(env, ["SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL"]),
+    supabaseSecret: readFirstOutsideEnvValue(env, ["SUPABASE_SECRET_KEY", "SUPABASE_SERVICE_ROLE_KEY"]),
   };
 };
 
@@ -377,10 +372,7 @@ const inheritedProductionTargets = ({ env, actual, environment, values }) => {
       env.POSTGRES_URL
     ),
     supabaseDatabaseUrl: normalize(env.SUPABASE_DATABASE_URL),
-    supabaseUrl: firstNonEmpty(
-      env.SUPABASE_URL,
-      env.NEXT_PUBLIC_SUPABASE_URL
-    ),
+    supabaseUrl: readFirstOutsideEnvValue(env, ["SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL"]),
   };
   const inherited = [];
   if (sameComputedTarget(legacyFingerprint, values, genericValues)) {

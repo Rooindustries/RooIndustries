@@ -21,6 +21,7 @@ const COMMERCE_KEY_PREFIXES = [
   "validate-coupon:",
   "get-upgrade-info:",
   "download-validate:",
+  "contact-message:",
 ];
 
 const isCommerceKey = (key) =>
@@ -31,10 +32,10 @@ const loadWriteClient = async () => {
   return createRefWriteClient();
 };
 
-const getHashSecret = () =>
+export const getHashSecret = (env = process.env) =>
   String(
-    process.env.RATE_LIMIT_HASH_SECRET ||
-      (process.env.NODE_ENV === "test" ? "test-rate-limit-secret" : "")
+    env.RATE_LIMIT_HASH_SECRET ||
+      (env.NODE_ENV === "test" ? "test-rate-limit-secret" : "")
   ).trim();
 
 const buildBucketId = ({ key, windowStart }) => {

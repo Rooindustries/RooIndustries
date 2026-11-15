@@ -1,3 +1,5 @@
+import envValue from "../../supabase/envValue.cjs";
+const { readOutsideEnvValue } = envValue;
 import crypto from "node:crypto";
 import { Resend } from "resend";
 import { buildReferralVerificationEmailHtml } from "../../email/referralVerificationEmail.js";
@@ -57,7 +59,7 @@ const normalizeDispatchKind = (value) => {
 };
 
 const createResendClient = (env = process.env) => {
-  const apiKey = String(env.RESEND_API_KEY || "").trim();
+  const apiKey = readOutsideEnvValue(env, "RESEND_API_KEY");
   return apiKey ? new Resend(apiKey) : null;
 };
 

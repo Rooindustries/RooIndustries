@@ -1,4 +1,4 @@
-const { test, expect } = require("./fixtures/booking-flow.cjs");
+const { test, expect, overhaulPrice } = require("./fixtures/booking-flow.cjs");
 const fs = require("node:fs/promises");
 
 test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata", reducedMotion: "reduce", viewport: { width: 1440, height: 900 } });
@@ -170,10 +170,15 @@ const serverQuote = (page, quoteFor) => page.route("**/api/payment/quote", async
   await route.fulfill({ json: { ok: true, quoteFingerprint: "fixture-quoted-discounts", quote, providers: quoteProviders } });
 });
 
+const usd = value => `$${value.toFixed(2)}`;
+const listPrice = usd(overhaulPrice);
+const couponTotal = usd(overhaulPrice - 5.5);
+
 const quotedDiscounts = body => {
   const coupon = body.couponCode === "save20" ? 5.5 : 0;
   const referral = body.referralCode === "friend" ? 3.25 : 0;
-  return { grossAmount: 54.95, netAmount: Math.round((54.95 - coupon - referral) * 100) / 100, isFree: false,
+  const netAmount = Math.round((overhaulPrice - coupon - referral) * 100) / 100;
+  return { grossAmount: overhaulPrice, netAmount, isFree: false,
     couponDiscountAmount: coupon, referralDiscountAmount: referral, referralDiscountPercent: referral ? 10 : 0 };
 };
 
@@ -187,11 +192,11 @@ test("the payment page shows the discounts the server quoted", async ({ page, fl
   await ui.coupon.fill("save20");
   await ui.couponApply.click();
   await expect(line(page, "Coupon")).toHaveText("save20 · −$5.50");
-  await expect(line(page, "Total|Subtotal")).toHaveText("$54.95$49.45 USD");
+  await expect(line(page, "Total|Subtotal")).toHaveText(`${listPrice}${couponTotal} USD`);
   await ui.referral.fill("friend");
   await ui.referralApply.click();
   await expect(line(page, "Referral")).toHaveText("friend · −$3.25");
-  await expect(line(page, "Total|Subtotal")).toHaveText("$54.95$46.20 USD");
+  await expect(line(page, "Total|Subtotal")).toHaveText(`${listPrice}${usd(overhaulPrice - 5.5 - 3.25)} USD`);
 });
 
 test("the review step shows the discounts the server quoted", async ({ page, flow }) => {
@@ -202,7 +207,7 @@ test("the review step shows the discounts the server quoted", async ({ page, flo
   await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
   await flow.codeInput("save20");
   await expect(line(page, "Coupon")).toContainText("save20 · −$5.50");
-  await expect(line(page, "Total|Subtotal")).toContainText("$49.45");
+  await expect(line(page, "Total|Subtotal")).toContainText(couponTotal);
 });
 
 test("removing a coupon never shows the old quoted total", async ({ page, flow }) => {
@@ -217,19 +222,19 @@ test("removing a coupon never shows the old quoted total", async ({ page, flow }
   const ui = fields(page);
   await ui.coupon.fill("save20");
   await ui.couponApply.click();
-  await expect(line(page, "Total|Subtotal")).toHaveText("$54.95$49.45 USD");
+  await expect(line(page, "Total|Subtotal")).toHaveText(`${listPrice}${couponTotal} USD`);
   release.armed = true;
   await page.getByRole("button", { name: "Remove coupon", exact: true }).click();
   await expect(line(page, "Coupon")).toHaveCount(0);
-  await expect(line(page, "Total|Subtotal")).toHaveText("$54.95 USD");
+  await expect(line(page, "Total|Subtotal")).toHaveText(`${listPrice} USD`);
   release();
   await expect(page.getByText("Price confirmed for this session.", { exact: true })).toBeVisible();
-  await expect(line(page, "Total|Subtotal")).toHaveText("$54.95 USD");
+  await expect(line(page, "Total|Subtotal")).toHaveText(`${listPrice} USD`);
 });
 
 test("a quote without line amounts never shows browser-estimated discounts", async ({ page, flow }) => {
   await serverQuote(page, body => body.couponCode === "save20"
-    ? { grossAmount: 54.95, netAmount: 0, isFree: true }
+    ? { grossAmount: overhaulPrice, netAmount: 0, isFree: true }
     : quotedDiscounts(body));
   await flow.review();
   await flow.payment();
@@ -237,6 +242,6 @@ test("a quote without line amounts never shows browser-estimated discounts", asy
   await ui.coupon.fill("save20");
   await ui.couponApply.click();
   await expect(line(page, "Total|Subtotal")).toHaveText("$0.00 USD");
-  await expect(page.getByText("−$10.99")).toHaveCount(0);
+  await expect(page.getByText(`−${usd(overhaulPrice * 0.2)}`)).toHaveCount(0);
   await expect(line(page, "Coupon")).toHaveCount(0);
 });

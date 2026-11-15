@@ -1,3 +1,5 @@
+import envValue from "../../supabase/envValue.cjs";
+const { outsideSetting } = envValue;
 import { createDataClient as createClient } from "../../data/documentClient.js";
 import { Resend } from "resend";
 import crypto from "crypto";
@@ -39,10 +41,10 @@ const DEFAULT_LOGO_URL = "https://www.rooindustries.com/embed_logo.png";
 
 const hasEmailDeliveryConfig = () =>
   !!String(process.env.FROM_EMAIL || "").trim() &&
-  !!String(process.env.RESEND_API_KEY || "").trim();
+  !!outsideSetting("RESEND_API_KEY");
 
 const createResendClient = () => {
-  const apiKey = String(process.env.RESEND_API_KEY || "").trim();
+  const apiKey = outsideSetting("RESEND_API_KEY");
   return apiKey ? new Resend(apiKey) : null;
 };
 

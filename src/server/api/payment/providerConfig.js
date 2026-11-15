@@ -1,4 +1,8 @@
 const { normalizePackageTitleForMatch } = require("../../../lib/packagePricing");
+const {
+  outsideSetting: env,
+  firstOutsideSetting: firstEnv,
+} = require("../../supabase/envValue.cjs");
 
 const TRUTHY_ENV_VALUES = ["1", "true", "yes", "on"];
 const KNOWN_RUNTIMES = new Set(["production", "preview", "development"]);
@@ -118,7 +122,7 @@ const allowProviderModeInRuntime = (
 };
 
 const resolveDodoProductIds = () => {
-  const raw = String(process.env.DODO_PAYMENTS_PRODUCT_IDS || "").trim();
+  const raw = env("DODO_PAYMENTS_PRODUCT_IDS");
   if (!raw) return {};
   try {
     const parsed = JSON.parse(raw);
@@ -138,16 +142,12 @@ const resolveDodoProductId = (packageTitle) => {
   if (!products) return "";
   return Object.keys(products).length
     ? products[normalizePackageTitleForMatch(packageTitle)] || ""
-    : String(process.env.DODO_PAYMENTS_PRODUCT_ID || "").trim();
+    : env("DODO_PAYMENTS_PRODUCT_ID");
 };
 
 const resolvePayPalMode = (runtimePolicy = resolvePaymentRuntimePolicy()) => {
   const policy = normalizeRuntimePolicy(runtimePolicy);
-  const explicit = String(
-    process.env.PAYPAL_ENV || process.env.NEXT_PUBLIC_PAYPAL_ENV || ""
-  )
-    .trim()
-    .toLowerCase();
+  const explicit = firstEnv("PAYPAL_ENV", "NEXT_PUBLIC_PAYPAL_ENV").toLowerCase();
 
   if (explicit === "live" || explicit === "production") return "live";
   if (explicit === "sandbox" || explicit === "test") return "sandbox";
@@ -164,8 +164,8 @@ const resolveRazorpayMode = (keyId = "") => {
 const resolvePaymentProviders = () => {
   const runtimePolicy = resolvePaymentRuntimePolicy();
 
-  const razorpayKeyId = String(process.env.RAZORPAY_KEY_ID || "").trim();
-  const razorpayKeySecret = String(process.env.RAZORPAY_KEY_SECRET || "").trim();
+  const razorpayKeyId = env("RAZORPAY_KEY_ID");
+  const razorpayKeySecret = env("RAZORPAY_KEY_SECRET");
   const razorpayMode = resolveRazorpayMode(razorpayKeyId);
   const razorpayCheckoutDisabled = isTruthyEnv(
     process.env.DISABLE_RAZORPAY_CHECKOUT
@@ -176,26 +176,21 @@ const resolvePaymentProviders = () => {
     !!razorpayKeySecret &&
     allowProviderModeInRuntime(razorpayMode, runtimePolicy);
 
-  const paypalClientId = String(
-    process.env.PAYPAL_CLIENT_ID ||
-      process.env.REACT_APP_PAYPAL_CLIENT_ID ||
-      process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID ||
-      ""
-  ).trim();
-  const paypalClientSecret = String(process.env.PAYPAL_CLIENT_SECRET || "").trim();
+  const paypalClientId = firstEnv("PAYPAL_CLIENT_ID", "REACT_APP_PAYPAL_CLIENT_ID", "NEXT_PUBLIC_PAYPAL_CLIENT_ID");
+  const paypalClientSecret = env("PAYPAL_CLIENT_SECRET");
   const paypalMode = resolvePayPalMode(runtimePolicy);
   const paypalEnabled =
     !!paypalClientId &&
     !!paypalClientSecret &&
     allowProviderModeInRuntime(paypalMode, runtimePolicy);
 
-  const dodoEnvironment = String(process.env.DODO_PAYMENTS_ENVIRONMENT || "").trim();
+  const dodoEnvironment = env("DODO_PAYMENTS_ENVIRONMENT");
   const dodoMode = dodoEnvironment === "test_mode" ? "test" : dodoEnvironment === "live_mode" ? "live" : "missing";
   const dodoProducts = resolveDodoProductIds();
   const dodoEnabled = dodoProducts !== null &&
-    (Object.keys(dodoProducts).length > 0 || !!String(process.env.DODO_PAYMENTS_PRODUCT_ID || "").trim()) &&
+    (Object.keys(dodoProducts).length > 0 || !!env("DODO_PAYMENTS_PRODUCT_ID")) &&
     ["DODO_PAYMENTS_API_KEY", "DODO_PAYMENTS_WEBHOOK_KEY", "DODO_PAYMENTS_RETURN_URL"]
-      .every((key) => !!String(process.env[key] || "").trim()) && allowProviderModeInRuntime(dodoMode, runtimePolicy);
+      .every((key) => !!env(key)) && allowProviderModeInRuntime(dodoMode, runtimePolicy);
 
   return {
     dodo: { enabled: dodoEnabled, mode: dodoMode },

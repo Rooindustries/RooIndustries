@@ -3,7 +3,7 @@ const config = require("./playwright.config");
 
 module.exports = defineConfig({
   ...config,
-  testMatch: /(admin-cms|content-revision|content-publish-purge|app-idle-connections)\.spec\.js$/,
+  testMatch: /(admin-cms|admin-privacy-notice|content-revision|content-publish-purge|app-idle-connections)\.spec\.js$/,
   outputDir: "test-results/admin-e2e",
   retries: 0,
   projects: [{

@@ -2,7 +2,7 @@ import { buildBrowserCompletionBody } from "./bookingSummary.js";
 import envValue from "../../supabase/envValue.cjs";
 import { calculateCreatorCommission, originalBookingCommission } from "../../referrals/commissionMoney.js";
 import { isTerminalDisputeStatus, resolveDisputeReferralAccounting } from "../../referrals/disputeAccounting.js";
-const { resolveStoreBackend } = envValue;
+const { resolveStoreBackend, outsideSetting } = envValue;
 import {
   createDodoCheckout,
   inspectDodoCheckout,
@@ -1044,7 +1044,7 @@ const verifyProviderCapture = async ({
         orderId,
         paymentId,
         signature,
-        secret: String(process.env.RAZORPAY_KEY_SECRET || "").trim(),
+        secret: outsideSetting("RAZORPAY_KEY_SECRET"),
       });
       if (!validSignature) {
         return { ok: false, retryable: false, reason: "razorpay_signature_invalid" };
@@ -3015,7 +3015,12 @@ const createOrReusePaymentRecordForStart = async ({
     attemptCount: 0,
     lastAttemptAt: "",
     source: "start",
-    providerPublicData: provider === "dodo" ? { currency: "USD", productId: resolveDodoProductId(bookingPayload.packageTitle), taxInclusive: false, environment: String(process.env.DODO_PAYMENTS_ENVIRONMENT || "").trim() } : {},
+    providerPublicData: provider === "dodo" ? {
+      currency: "USD",
+      productId: resolveDodoProductId(bookingPayload.packageTitle),
+      taxInclusive: false,
+      environment: outsideSetting("DODO_PAYMENTS_ENVIRONMENT"),
+    } : {},
     orderState: provider === "free" ? "not_required" : "creating",
     orderCreationLeaseId,
     orderCreationLeaseExpiresAt:
@@ -3101,14 +3106,14 @@ const createOrReusePaymentRecordForStart = async ({
     throw error;
   }
   if (provider === "free" || String(record.providerOrderId || "").trim()) {
-    return record;
+    return { record, checkoutCreated: false };
   }
   if (
     !orderCreationLeaseId ||
     String(record.orderCreationLeaseId || "").trim() !== orderCreationLeaseId
   ) {
     const current = (await getPaymentRecordById(client, record._id)) || record;
-    if (String(current.providerOrderId || "").trim()) return current;
+    if (String(current.providerOrderId || "").trim()) return { record: current, checkoutCreated: false };
     const error = new Error("This payment session is already creating its provider order.");
     error.status = 409;
     error.code = "provider_order_creation_in_progress";
@@ -3125,7 +3130,9 @@ const createOrReusePaymentRecordForStart = async ({
       client, record, leaseField: "orderCreationLeaseId",
     });
     if (!operation.owned) {
-      if (String(operation.record.providerOrderId || "").trim()) return operation.record;
+      if (String(operation.record.providerOrderId || "").trim()) {
+        return { record: operation.record, checkoutCreated: false };
+      }
       error.status = Number(error?.status) >= 400 ? Number(error.status) : 503;
       throw error;
     }
@@ -3153,7 +3160,7 @@ const createOrReusePaymentRecordForStart = async ({
   }
 
   record = await attachImmutableProviderOrder({ client, record, providerPayload });
-  return record;
+  return { record, checkoutCreated: true };
 };
 
 export const startPaymentSession = async ({
@@ -3370,7 +3377,7 @@ export const startPaymentSession = async ({
     }
 
     const { holdDoc } = await assertStartableHold({ client, bookingPayload });
-    const record = await createOrReusePaymentRecordForStart({
+    const { record, checkoutCreated } = await createOrReusePaymentRecordForStart({
       client,
       provider,
       bookingPayload,
@@ -3439,6 +3446,7 @@ export const startPaymentSession = async ({
       body: {
         ok: true,
         status: PAYMENT_STATUS_STARTED,
+        checkoutCreated,
         bookingSummary: null,
         provider,
         quote: buildQuotePayload(quote),

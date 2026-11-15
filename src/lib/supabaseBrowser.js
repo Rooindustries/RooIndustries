@@ -1,4 +1,5 @@
 import { createBrowserClient, parseCookieHeader, serializeCookieHeader } from "@supabase/ssr";
+import { cleanOutsideValue } from "./outsideValue.cjs";
 
 let browserClient = null;
 let recoveryQueue = Promise.resolve();
@@ -11,12 +12,9 @@ export const getSupabaseBrowserCookieOptions = (env = process.env) => ({
 });
 
 const createConfiguredClient = (options = {}) => {
-  const url = String(process.env.NEXT_PUBLIC_SUPABASE_URL || "").trim();
-  const publishableKey = String(
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-      ""
-  ).trim();
+  const url = cleanOutsideValue(process.env.NEXT_PUBLIC_SUPABASE_URL);
+  const publishableKey = cleanOutsideValue(process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY) ||
+    cleanOutsideValue(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
   if (!url || !publishableKey) {
     throw new Error("Supabase browser Auth is not configured.");
   }

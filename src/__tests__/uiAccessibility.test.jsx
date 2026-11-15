@@ -22,14 +22,6 @@ import { SectionNavigationProvider } from "../lib/sectionNavigator";
 import Tools from "../components/Tools";
 import { getPublicContent } from "../lib/publicContentClient";
 
-jest.mock("@formspree/react", () => ({
-  ValidationError: () => null,
-  useForm: () => [
-    { errors: null, submitting: false, succeeded: false },
-    jest.fn(),
-  ],
-}));
-
 jest.mock("../lib/publicContentClient", () => ({
   getPublicContent: jest.fn(),
 }));

@@ -230,6 +230,10 @@
       "js": 6144,
       "css": 1024
     },
+    "src/components/Footer.jsx -> ../lib/consent": {
+      "js": 1024,
+      "css": 1024
+    },
     "src/components/Packages.jsx -> ./PackageDetailsModal": {
       "js": 41984,
       "css": 1024
@@ -242,7 +246,19 @@
       "js": 4096,
       "css": 1024
     },
-    "src/lib/analytics.js -> ./posthog": {
+    "src/lib/analyticsModules.js -> ./metaPixel": {
+      "js": 3072,
+      "css": 1024
+    },
+    "src/lib/analyticsModules.js -> ./postHogOutbox": {
+      "js": 2048,
+      "css": 1024
+    },
+    "src/lib/analyticsModules.js -> ./salesTracking": {
+      "js": 6144,
+      "css": 1024
+    },
+    "src/lib/checkoutAnalytics.js -> ./bookingAnalytics": {
       "js": 2048,
       "css": 1024
     },
@@ -254,16 +270,32 @@
       "js": 6144,
       "css": 1024
     },
-    "src/lib/loadPostHog.js -> ./posthog": {
-      "js": 2048,
-      "css": 1024
-    },
     "src/lib/monitoring/client.js -> ./browser": {
       "js": 147456,
       "css": 1024
     },
+    "src/lib/paymentStartBody.js -> ./checkoutStartCount": {
+      "js": 2048,
+      "css": 1024
+    },
+    "src/lib/postHogOutbox.js -> ./posthog": {
+      "js": 2048,
+      "css": 1024
+    },
     "src/lib/posthog.js -> ./posthogClient": {
       "js": 109568,
+      "css": 1024
+    },
+    "src/lib/posthog.js -> ./salesTracking": {
+      "js": 6144,
+      "css": 1024
+    },
+    "src/next/AppClientRuntime.jsx -> ../lib/postHogOutbox": {
+      "js": 2048,
+      "css": 1024
+    },
+    "src/next/AppClientRuntime.jsx -> ./ConsentRuntime": {
+      "js": 4096,
       "css": 1024
     },
     "src/next/NotFoundEntry.jsx -> ./LegacyRoutePage": {

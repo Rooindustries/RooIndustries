@@ -7,6 +7,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
 import migrationTargetSafety from "../src/server/supabase/migrationTargetSafety.cjs";
+import envValue from "../src/server/supabase/envValue.cjs";
 import {
   defaultExportRoot,
   decryptJsonExport,
@@ -99,7 +100,7 @@ export const runCommerceEncryptedExport = async ({
     prefixes: ["SUPABASE_", "NEXT_PUBLIC_SUPABASE_", "TOURNEY_CUTOVER_"],
     env,
   });
-  const supabaseUrl = readEnv(env, "SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL");
+  const supabaseUrl = envValue.readFirstOutsideEnvValue(env, ["SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL"]);
   const expectedFingerprint = readEnv(
     env,
     "SUPABASE_COMMERCE_EXPORT_EXPECTED_FINGERPRINT",
@@ -114,7 +115,7 @@ export const runCommerceEncryptedExport = async ({
   if (args.printTargetFingerprint) {
     return { SUPABASE_COMMERCE_EXPORT_EXPECTED_FINGERPRINT: target.fingerprint };
   }
-  const secret = readEnv(env, "SUPABASE_SECRET_KEY", "SUPABASE_SERVICE_ROLE_KEY");
+  const secret = envValue.readFirstOutsideEnvValue(env, ["SUPABASE_SECRET_KEY", "SUPABASE_SERVICE_ROLE_KEY"]);
   if (!secret) throw new Error("Supabase server credentials are required.");
   const client = clientFactory(supabaseUrl, secret, {
     auth: {

@@ -1,0 +1,345 @@
+import assert from "node:assert/strict";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import http from "node:http";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { freeTcpPort } from "./free-tcp-port.mjs";
+import { spawnContained, stopChild } from "./start-on-port.mjs";
+import {
+  fixtureMail,
+  fixturePackage,
+  fixtureStart,
+  postPayPalCaptureWebhook,
+  recordProviderCalls,
+  sandboxOrigin,
+  seedFixtureSlot,
+  startPayPalCheckout,
+  sweepRoot,
+  withEnv,
+} from "./payment-sweep-ads-fixtures.mjs";
+
+const paddedPayPal = {
+  PAYPAL_ENV: "sandbox\\n ",
+  PAYPAL_WEBHOOK_ID: " fixture-webhook\\n",
+  PAYPAL_CLIENT_ID: "fixture-client\\n",
+  PAYPAL_CLIENT_SECRET: "fixture-secret\\n",
+};
+const paddedRazorpay = {
+  RAZORPAY_KEY_ID: "rzp_test_fixture\\n ",
+  RAZORPAY_KEY_SECRET: " fixture-secret\\n",
+  RAZORPAY_WEBHOOK_SECRET: "fixture-webhook-secret \\n",
+};
+const paddedDodo = {
+  DODO_PAYMENTS_ENVIRONMENT: "test_mode\\n ",
+  DODO_PAYMENTS_API_KEY: " fixture-dodo\\n",
+  DODO_PAYMENTS_WEBHOOK_KEY: `whsec_${Buffer.from("fixture-dodo-secret").toString("base64")}\\n `,
+  DODO_PAYMENTS_PRODUCT_ID: "pdt_fixture \\n",
+  DODO_PAYMENTS_RETURN_URL: "https://example.invalid/checkout\\n",
+};
+const paddedBackend = { DATA_PRIMARY_BACKEND: " supabase\\n", COMMERCE_PRIMARY_BACKEND: "supabase\\n " };
+const supabaseOrigin = "https://ntezmxzaibrrsgtujgxu.supabase.co";
+const paddedSupabase = {
+  SUPABASE_URL: `${supabaseOrigin}\\n `,
+  NEXT_PUBLIC_SUPABASE_URL: ` ${supabaseOrigin}\\n`,
+  SUPABASE_SECRET_KEY: `${"s".repeat(40)}\\n`,
+  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ` ${"p".repeat(24)}\\n `,
+};
+const toolingPublishableKey = "fixture-only-tooling-browser-publishable-key";
+const paddedSelfIssued = { PAYMENT_SESSION_SECRET: "fixture-session-secret\\n ", CRON_SECRET: "fixture-cron\\n" };
+const releaseSecret = "x".repeat(40);
+const pastCutoff = "2000-01-01T00:00:00.000Z";
+const productionRelease = {
+  CI: "true",
+  VERCEL: "1",
+  VERCEL_ENV: "production",
+  NODE_ENV: "production",
+  SUPABASE_URL: "https://ntezmxzaibrrsgtujgxu.supabase.co",
+  SUPABASE_SECRET_KEY: "s".repeat(40),
+  SUPABASE_PUBLISHABLE_KEY: "p".repeat(24),
+  SUPABASE_CUTOVER_ENABLED: "1",
+  COMMERCE_CUTOVER_ENABLED: "1",
+  COMMERCE_FAILOVER_GENERATION: "1",
+  COMMERCE_FAILOVER_LEASE: `eyJ2ZXJzaW9uIjoxfQ.${"a".repeat(43)}`,
+  COMMERCE_FAILOVER_LEASE_SECRET: releaseSecret,
+  COMMERCE_DEPLOYMENT_ID: "runtime-env-scenario",
+  SUPABASE_CONTENT_CANARY_PERCENT: "0",
+  SUPABASE_COMMERCE_CANARY_PERCENT: "0",
+  ...Object.fromEntries([
+    "REF_SESSION_SECRET", "PAYMENT_SESSION_SECRET", "HOLD_TOKEN_SECRET", "BOOKING_EMAIL_TOKEN_SECRET",
+    "UPGRADE_INTENT_SECRET", "DOWNLOAD_TOKEN_SECRET", "REF_ADMIN_KEY", "CRON_SECRET", "RAZORPAY_WEBHOOK_SECRET",
+    "RATE_LIMIT_HASH_SECRET",
+  ].map((key) => [key, releaseSecret])),
+  RESEND_API_KEY: "re_fixture",
+  FROM_EMAIL: "Roo Industries <noreply@example.invalid>",
+  PAYMENT_LEGACY_COMPLETION_UNTIL: pastCutoff,
+  PAYMENT_LEGACY_CHECKOUT_UNTIL: pastCutoff,
+  PAYMENT_LEGACY_STATUS_GET_UNTIL: pastCutoff,
+  LEGACY_UPGRADE_GET_UNTIL: pastCutoff,
+  CMS_WRITES_PAUSED: "0",
+  SANITY_STUDIO_CMS_WRITES_PAUSED: "0",
+  DOWNLOAD_STORAGE_BACKEND: "supabase",
+  DOWNLOAD_CATALOG_JSON: JSON.stringify([{
+    slug: "utilities",
+    fileName: "utilities.zip",
+    blobPath: "downloads/utilities.zip",
+    storageBackend: "supabase",
+    storageBucket: "optimization-builds-private",
+    sizeBytes: 3_692_474_026,
+    sha256: "5".repeat(64),
+    blobEtag: '"verified-blob-etag"',
+  }]),
+};
+
+const runValidateRuntimeEnv = (values) => {
+  const result = spawnSync(process.execPath, ["scripts/validate-runtime-env.js"], {
+    cwd: sweepRoot,
+    env: { PATH: process.env.PATH, ...values },
+    encoding: "utf8",
+    timeout: 60_000,
+  });
+  const runtimeLine = String(result.stdout || "").match(/^\[env\] Payment runtime: .*$/m)?.[0] || "";
+  return { status: result.status, runtimeLine, stderr: String(result.stderr || "").slice(-2000) };
+};
+
+const servePaddedSite = async (check) => {
+  const port = await freeTcpPort("127.0.0.1");
+  const baseURL = `http://127.0.0.1:${port}`;
+  const dist = `.next-e2e-padded-${process.pid}`;
+  const child = spawnContained(process.execPath, ["scripts/test-tooling-sweep-server.mjs"], {
+    cwd: sweepRoot,
+    stdio: ["ignore", "pipe", "pipe"],
+    env: {
+      PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR, ROO_TEST_HOST: "127.0.0.1",
+      BASE_URL: baseURL, PW_PORT: String(port), NEXT_DIST_DIR: dist, TOOLING_PADDED_SETTINGS: "1",
+    },
+  });
+  let log = "";
+  const ready = new Promise((resolve, reject) => {
+    child.stdout.on("data", (chunk) => { log += chunk; if (log.includes("Ready in")) resolve(); });
+    child.stderr.on("data", (chunk) => { log += chunk; });
+    child.once("close", (code) => reject(new Error(`The padded site stopped (${code}): ${log.slice(-4000)}`)));
+  });
+  try {
+    await ready;
+    const { contentURL } = JSON.parse(fs.readFileSync(path.join(sweepRoot, dist, "tooling-build.json"), "utf8"));
+    return await check(baseURL, contentURL);
+  } finally {
+    await stopChild(child);
+    const output = path.join(sweepRoot, dist);
+    for (const leftover of [output, `${output}.build-lock`]) fs.rmSync(leftover, { recursive: true, force: true });
+  }
+};
+
+const localGet = (url) => new Promise((resolve, reject) => {
+  http.get(url, (response) => {
+    let body = "";
+    response.setEncoding("utf8");
+    response.on("data", (chunk) => { body += chunk; });
+    response.on("end", () => resolve({ status: response.statusCode, body }));
+  }).on("error", reject);
+});
+
+const browserRecoveryRequest = async (baseURL, contentURL) => {
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    const request = page.waitForRequest((entry) => entry.url().startsWith(`${contentURL}/`));
+    await page.goto(`${baseURL}/referrals/reset?token_hash=fixture-recovery&type=recovery`);
+    const sent = await request;
+    return { path: new URL(sent.url()).pathname, apikey: (await sent.allHeaders()).apikey };
+  } finally {
+    await browser.close();
+  }
+};
+
+const assertOneBooking = async (ctx, paymentId) => {
+  const payment = (await ctx.row(paymentId)).payload;
+  assert.equal(payment.status, "booked", JSON.stringify(payment));
+  assert.ok(payment.bookingId, JSON.stringify(payment));
+  const bookings = await ctx.sql`
+    select b.legacy_sanity_id, b.status from commerce.bookings b
+    join commerce.payment_records p on p.id = b.payment_record_id
+    where p.legacy_sanity_id = ${payment._id}`;
+  assert.equal(bookings.length, 1, JSON.stringify(bookings));
+  assert.equal(bookings[0].legacy_sanity_id, payment.bookingId);
+  assert.equal(bookings[0].status, "captured");
+  return { payment, booking: { ...bookings[0] } };
+};
+
+const authorizations = (calls) => [...new Set(calls.map((call) => call.authorization))];
+
+const signedAsMain = (token, stored) => {
+  const [payload, signature] = String(token).split(".");
+  return crypto.createHmac("sha256", stored.trim()).update(payload).digest("base64url") === signature;
+};
+
+const holdThroughRoute = async (ctx) => {
+  await seedFixtureSlot(ctx);
+  const { default: holdSlot } = await import("../../src/server/booking/holdSlot.js");
+  const reply = { status: 200, body: null };
+  const res = {
+    status(code) { reply.status = code; return this; },
+    setHeader() { return this; },
+    json(body) { reply.body = body; return this; },
+  };
+  const body = { startTimeUTC: fixtureStart, packageTitle: fixturePackage };
+  await holdSlot({ method: "POST", headers: {}, body }, res);
+  return reply;
+};
+
+export async function registerEnvScenarios(ctx) {
+  await ctx.run("ads-env-razorpay-padded-capture", () => withEnv({
+    ...paddedRazorpay, ...paddedBackend, ...fixtureMail,
+  }, async () => {
+    const { result, calls } = await recordProviderCalls(async () => {
+      const checkout = await ctx.a1Start("razorpay");
+      const finalized = await ctx.requestFlow("finalize", {
+        paymentAccessToken: checkout.started.body.paymentAccessToken,
+        body: checkout.proof,
+      });
+      return { checkout, finalized, webhook: await ctx.a1Hook("razorpay") };
+    }, ["razorpay.com"]);
+    assert.equal(result.finalized.status, 200, JSON.stringify(result.finalized));
+    assert.ok(result.finalized.body.analyticsReceipt, JSON.stringify(result.finalized.body));
+    assert.equal(result.webhook.status, 200, JSON.stringify(result.webhook));
+    const basic = `Basic ${Buffer.from("rzp_test_fixture:fixture-secret").toString("base64")}`;
+    assert.ok(calls.some((call) => call.url.pathname === "/v1/orders"), JSON.stringify(calls));
+    assert.deepEqual(authorizations(calls), [basic]);
+    const { booking } = await assertOneBooking(ctx, result.checkout.id);
+    return {
+      finalizeStatus: result.finalized.status,
+      webhookStatus: result.webhook.status,
+      booking,
+      razorpayCalls: calls.map((call) => `${call.url.origin}${call.url.pathname}`),
+      exactBasicAuth: true,
+    };
+  }));
+
+  await ctx.run("ads-env-dodo-padded-webhook", () => withEnv({
+    ...paddedDodo, ...paddedBackend, ...fixtureMail,
+  }, async () => {
+    const { result, calls } = await recordProviderCalls(async () => {
+      const checkout = await ctx.a1Start("dodo");
+      return { checkout, webhook: await ctx.a1Hook("dodo") };
+    }, ["dodopayments.com"]);
+    assert.equal(result.webhook.status, 200, JSON.stringify(result.webhook));
+    assert.deepEqual(authorizations(calls), ["Bearer fixture-dodo"]);
+    const session = calls.find((call) => call.url.pathname === "/checkouts");
+    assert.ok(session, JSON.stringify(calls.map((call) => call.url.href)));
+    const returnUrl = new URL(JSON.parse(session.body).return_url);
+    assert.equal(`${returnUrl.origin}${returnUrl.pathname}`, "https://example.invalid/checkout");
+    const { payment, booking } = await assertOneBooking(ctx, result.checkout.id);
+    assert.equal(payment.providerPublicData.environment, "test_mode");
+    assert.equal(payment.providerPublicData.productId, "pdt_fixture");
+    return {
+      webhookStatus: result.webhook.status,
+      booking,
+      dodoCalls: calls.map((call) => `${call.url.origin}${call.url.pathname}`),
+      environment: payment.providerPublicData.environment,
+      returnUrl: returnUrl.href,
+    };
+  }));
+
+  await ctx.run("ads-env-paypal-padded-webhook", async () => {
+    const paypal = { ...paddedPayPal, ...fixtureMail };
+    const { result, calls } = await withEnv(paypal, () => recordProviderCalls(async () => {
+      const started = await startPayPalCheckout(ctx);
+      assert.equal(started.status, 200, JSON.stringify(started));
+      const bookingsBefore = await ctx.sql`select legacy_sanity_id from commerce.bookings`;
+      return { started, bookingsBefore, webhook: await postPayPalCaptureWebhook(ctx) };
+    }));
+    assert.equal(result.webhook.status, 200, JSON.stringify(result.webhook));
+    assert.equal(result.bookingsBefore.length, 0);
+    const token = calls.find((call) => call.url.pathname === "/v1/oauth2/token");
+    const verify = calls.find((call) => call.url.pathname === "/v1/notifications/verify-webhook-signature");
+    const callUrls = JSON.stringify(calls.map((call) => call.url.href));
+    assert.ok(token && verify, callUrls);
+    assert.ok(calls.every((call) => call.url.origin === sandboxOrigin), callUrls);
+    assert.equal(token.authorization, `Basic ${Buffer.from("fixture-client:fixture-secret").toString("base64")}`);
+    const verifyBody = JSON.parse(verify.body);
+    assert.equal(verifyBody.webhook_id, "fixture-webhook");
+    assert.equal(verifyBody.webhook_event.resource.id, "capture-fixture");
+    const order = calls.find((call) => call.url.pathname === "/v2/checkout/orders");
+    const { booking } = await assertOneBooking(ctx, JSON.parse(order.body).purchase_units[0].custom_id);
+    return {
+      startStatus: result.started.status,
+      webhookStatus: result.webhook.status,
+      booking,
+      paypalCalls: calls.map((call) => `${call.url.origin}${call.url.pathname}`),
+      verifiedWebhookId: verifyBody.webhook_id,
+      exactBasicAuth: true,
+    };
+  });
+
+  await ctx.run("ads-env-runtime-script", async () => {
+    const sandbox = runValidateRuntimeEnv(paddedPayPal);
+    assert.equal(sandbox.status, 0, JSON.stringify(sandbox));
+    assert.match(sandbox.runtimeLine, /paypalEnabled=true, paypalMode=sandbox$/, JSON.stringify(sandbox));
+    const sandboxOverLive = runValidateRuntimeEnv({ ...paddedPayPal, ALLOW_LIVE_PAYMENTS_IN_DEVELOPMENT: "1" });
+    assert.equal(sandboxOverLive.status, 0, JSON.stringify(sandboxOverLive));
+    assert.match(sandboxOverLive.runtimeLine, /livePaymentsEnabled=true,/, JSON.stringify(sandboxOverLive));
+    const sandboxOverLiveProof = JSON.stringify(sandboxOverLive);
+    assert.match(sandboxOverLive.runtimeLine, /paypalEnabled=true, paypalMode=sandbox$/, sandboxOverLiveProof);
+    const live = runValidateRuntimeEnv({ ...productionRelease, ...paddedPayPal, PAYPAL_ENV: "live\\n" });
+    assert.equal(live.status, 0, JSON.stringify(live));
+    assert.match(live.runtimeLine, /runtime=production,/, JSON.stringify(live));
+    assert.match(live.runtimeLine, /paypalEnabled=true, paypalMode=live$/, JSON.stringify(live));
+    const paddedStore = runValidateRuntimeEnv({ ...paddedPayPal, ...paddedBackend });
+    assert.equal(paddedStore.status, 0, JSON.stringify(paddedStore));
+    const unsupportedStore = runValidateRuntimeEnv({ ...paddedPayPal, DATA_PRIMARY_BACKEND: "mysql\\n" });
+    assert.equal(unsupportedStore.status, 1, JSON.stringify(unsupportedStore));
+    const { resolveSupabaseRuntimePolicy } = await import("../../src/server/supabase/runtime.js");
+    const runtimePolicy = resolveSupabaseRuntimePolicy(paddedBackend);
+    assert.equal(runtimePolicy.primaryBackend, "supabase");
+    assert.equal(runtimePolicy.commercePrimaryBackend, "supabase");
+    assert.throws(() => resolveSupabaseRuntimePolicy({ DATA_PRIMARY_BACKEND: "mysql\\n" }),
+      (error) => error.code === "UNSUPPORTED_STORE_BACKEND");
+    return {
+      sandbox: sandbox.runtimeLine,
+      sandboxOverLive: sandboxOverLive.runtimeLine,
+      live: live.runtimeLine,
+      paddedStore: { prebuild: paddedStore.status, runtime: runtimePolicy.primaryBackend },
+      unsupportedStore: unsupportedStore.status,
+    };
+  });
+
+  await ctx.run("ads-env-padded-supabase-site", async () => {
+    const release = runValidateRuntimeEnv({ ...productionRelease, ...paddedBackend, ...paddedSupabase });
+    assert.equal(release.status, 0, JSON.stringify(release));
+    return servePaddedSite(async (baseURL, contentURL) => {
+      const home = await localGet(`${baseURL}/`);
+      assert.equal(home.status, 200, home.body.slice(0, 2000));
+      assert.match(home.body, new RegExp(`<link rel="preconnect" href="${contentURL}"`));
+      const content = await localGet(`${baseURL}/api/content/reviews`);
+      const body = JSON.parse(content.body);
+      assert.equal(content.status, 200, JSON.stringify(body));
+      assert.equal(body.ok, true, JSON.stringify(body));
+      const recovery = await browserRecoveryRequest(baseURL, contentURL);
+      assert.deepEqual(recovery, { path: "/auth/v1/verify", apikey: toolingPublishableKey });
+      return { release: release.status, home: home.status, content: content.status, recovery };
+    });
+  });
+
+  const selfIssued = { ...paddedSelfIssued, ...fixtureMail };
+  await ctx.run("ads-env-self-issued-secrets-as-main", () => withEnv(selfIssued, async () => {
+    const hold = await holdThroughRoute(ctx);
+    assert.equal(hold.status, 200, JSON.stringify(hold));
+    const slotHold = { slotHoldId: hold.body.holdId, slotHoldToken: hold.body.holdToken };
+    const { result: started } = await recordProviderCalls(() => startPayPalCheckout(ctx, {}, slotHold));
+    assert.equal(started.status, 200, JSON.stringify(started));
+    const status = await ctx.requestFlow("status", { paymentAccessToken: started.body.paymentAccessToken });
+    assert.equal(status.status, 200, JSON.stringify(status));
+    assert.ok(signedAsMain(hold.body.holdToken, process.env.HOLD_TOKEN_SECRET), "hold token differs from main");
+    const sessionToken = started.body.paymentAccessToken;
+    assert.ok(signedAsMain(sessionToken, paddedSelfIssued.PAYMENT_SESSION_SECRET), "session token differs from main");
+    const cron = async (authorization) =>
+      (await fetch(`${ctx.origin}/reconcile-route`, { method: "POST", headers: { authorization } })).status;
+    const storedBearer = await cron(`Bearer ${paddedSelfIssued.CRON_SECRET}`);
+    const strippedBearer = await cron("Bearer fixture-cron");
+    assert.equal(storedBearer, 200);
+    assert.equal(strippedBearer, 403);
+    return { hold: hold.status, start: started.status, status: status.status, storedBearer, strippedBearer };
+  }));
+}

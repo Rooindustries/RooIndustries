@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const { outsideSetting } = require("../../supabase/envValue.cjs");
 const { resolvePaymentProviders } = require("../payment/providerConfig.js");
 const { logSafeError } = require("../../safeErrorLog.js");
 
@@ -42,7 +43,7 @@ module.exports = async function handler(req, res) {
 
     const body = razorpay_order_id + "|" + razorpay_payment_id;
 
-    const keySecret = String(process.env.RAZORPAY_KEY_SECRET || "").trim();
+    const keySecret = outsideSetting("RAZORPAY_KEY_SECRET");
     const expectedSignature = crypto
       .createHmac("sha256", keySecret)
       .update(body.toString())

@@ -1,6 +1,17 @@
 import { isProductionBrowser } from "./productionBrowser";
-import { track } from "@vercel/analytics/react";
-import { salesEventProperties, sanitizeSalesAttribution } from "./salesAttribution";
+import { withMetaPixel, withSalesAttribution } from "./analyticsModules";
+import packagePricing from "./packagePricing";
+import { keepPostHogEvent } from "./loadPostHog";
+
+const { getPackageSlug, toMoney } = packagePricing;
+export const DEFAULT_CURRENCY = "USD";
+
+export const metaTrack = (event, data, options) => withMetaPixel((pixel) => pixel.metaTrack(event, data, options));
+
+export const packageFields = (title, price) => {
+  const name = String(title || "").trim();
+  return name ? { name, slug: getPackageSlug(name), value: toMoney(price) } : null;
+};
 
 const ensureAnalyticsQueue = () => {
   if (typeof window === "undefined" || window.va) return;
@@ -13,45 +24,41 @@ const ensureAnalyticsQueue = () => {
 export const trackEvent = (eventName, data = {}, options = {}) => {
   try {
     if (!isProductionBrowser()) return false;
+    if (options.postHog !== false) keepPostHogEvent(eventName, data, options);
     ensureAnalyticsQueue();
-    const attribution = Object.hasOwn(options, "attribution")
-      ? salesEventProperties(options.attribution)
-      : salesEventProperties();
-    track(eventName, { ...attribution, ...data });
-    const origin = { url: window.location.href, timestamp: new Date() };
-    import("./posthog").then(({ capturePostHog }) => capturePostHog(eventName, { ...attribution, ...data }, origin)).catch(() => {});
+    const attributed = Object.hasOwn(options, "attribution");
+    withSalesAttribution(({ salesEventProperties, track }) => {
+      const attribution = attributed ? salesEventProperties(options.attribution) : salesEventProperties();
+      track(eventName, { ...attribution, ...data });
+    });
     return true;
   } catch {
     return false;
   }
 };
 
-const completedPurchases = new Set();
+export const trackPageView = (signal) =>
+  withMetaPixel((pixel) => pixel.metaTrackWhenGranted("PageView", {}, {}, signal));
 
-export const trackConfirmedPurchase = (receipt) => {
+export const trackPackageView = ({ title, price, surface } = {}) => {
   try {
-    if (!receipt || !/^[a-f0-9]{40}$/.test(receipt.eventId || "")) return false;
-    if (!["paid", "free"].includes(receipt.paymentType) || !Number.isFinite(receipt.amount) || receipt.amount < 0) return false;
-    const key = `booking_completion_tracked:${receipt.eventId}`;
-    try {
-      if (completedPurchases.has(receipt.eventId) || sessionStorage.getItem(key)) return false;
-    } catch {}
-    const attribution = sanitizeSalesAttribution(receipt.attribution);
-    const tracked = trackEvent("booking_completed", {
-      ...salesEventProperties(attribution),
-      event_id: receipt.eventId,
-      package: receipt.packageTitle,
-      payment_type: receipt.paymentType,
-      payment_provider: receipt.provider,
-      amount: receipt.amount,
-      currency: receipt.currency,
-      referral_code: receipt.referralCode || "",
-    }, { attribution });
-    if (tracked) {
-      completedPurchases.add(receipt.eventId);
-      try { sessionStorage.setItem(key, "1"); } catch {}
-    }
-    return tracked;
+    const pkg = packageFields(title, price);
+    if (!pkg?.slug) return false;
+    trackEvent("view_item", {
+      package: pkg.name,
+      package_slug: pkg.slug,
+      value: pkg.value,
+      currency: DEFAULT_CURRENCY,
+      surface: String(surface || ""),
+    });
+    metaTrack("ViewContent", {
+      content_name: pkg.name,
+      content_ids: [pkg.slug],
+      content_type: "product",
+      value: pkg.value,
+      currency: DEFAULT_CURRENCY,
+    });
+    return true;
   } catch {
     return false;
   }

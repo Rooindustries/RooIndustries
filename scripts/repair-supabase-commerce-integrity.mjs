@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import process from "node:process";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import operatorEnvironment from "./lib/operator-environment.cjs";
+import envValue from "../src/server/supabase/envValue.cjs";
 import { SupabaseDocumentClient } from "../src/server/supabase/documentClient.js";
 
 const argument = (name) => {
@@ -34,11 +35,8 @@ if (apply && (!envPath || !confirmedDigest)) {
   );
 }
 
-const supabaseUrl = readEnv("SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL");
-const supabaseSecret = readEnv(
-  "SUPABASE_SECRET_KEY",
-  "SUPABASE_SERVICE_ROLE_KEY"
-);
+const supabaseUrl = envValue.firstOutsideSetting("SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL");
+const supabaseSecret = envValue.firstOutsideSetting("SUPABASE_SECRET_KEY", "SUPABASE_SERVICE_ROLE_KEY");
 if (!supabaseUrl || !supabaseSecret) {
   throw new Error("Supabase server credentials are required.");
 }

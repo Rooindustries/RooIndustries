@@ -4,6 +4,8 @@ import { FaDiscord } from "react-icons/fa";
 import PaymentMethods from "./PaymentMethods";
 import { scrollWindowTo } from "../lib/scrollWindowTo";
 
+const openCookieSettings = () => import("../lib/consent").then(({ resetConsent }) => resetConsent());
+
 export default function Footer() {
   const scrollToTop = () => {
     scrollWindowTo(0);
@@ -84,6 +86,14 @@ export default function Footer() {
                   <Link to={to} className="whitespace-nowrap hover:text-[color:var(--color-link-hover)] transition-colors">{label}</Link>
                 </React.Fragment>
               ))}
+              <span aria-hidden="true" className="mx-2">·</span>
+              <button
+                type="button"
+                onClick={openCookieSettings}
+                className="whitespace-nowrap hover:text-[color:var(--color-link-hover)] transition-colors"
+              >
+                Cookie settings
+              </button>
             </p>
 
             <p className="text-[13px] text-ink-secondary">
