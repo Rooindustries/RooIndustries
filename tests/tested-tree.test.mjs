@@ -86,6 +86,7 @@ const runResponse = (overrides = {}) => ({
   event: "pull_request",
   path: ".github/workflows/tests.yml",
   head_repository: { full_name: repository },
+  head_sha: "a".repeat(40),
   id: 77,
   ...overrides,
 });
@@ -95,6 +96,7 @@ const responsesFor = (tree, run, { expired = false } = {}) => ({
     artifacts: [{ expired, workflow_run: { id: 77 } }],
   },
   [`repos/${repository}/actions/runs/77`]: run,
+  [`repos/${repository}/git/commits/${run.head_sha}`]: { tree: { sha: tree } },
 });
 
 const checkQueue = (dir, responses) => {
@@ -157,6 +159,42 @@ test("a merge queue rejects a run from another workflow", () => {
 test("a merge queue reuses a green push run", () => {
   const { dir, tree } = workspace();
   assert.equal(checkQueue(dir, responsesFor(tree, runResponse({ event: "push" }))).tested, "tested=true");
+});
+
+for (const event of ["merge_group", "push", "pull_request"]) {
+  test(`a ${event} run cannot vouch for a different tree`, () => {
+    const { dir, tree } = workspace();
+    const run = runResponse({ event });
+    const responses = responsesFor(tree, run);
+    responses[`repos/${repository}/git/commits/${run.head_sha}`].tree.sha = git(dir, "rev-parse", "HEAD~1^{tree}");
+    assert.equal(checkQueue(dir, responses).tested, "tested=false");
+  });
+}
+
+test("an unreadable commit is refused and the next good run is accepted", () => {
+  const { dir, tree } = workspace();
+  const responses = responsesFor(tree, runResponse());
+  responses[recordsEndpoint(tree)].artifacts.unshift({ expired: false, workflow_run: { id: 66 } });
+  responses[`repos/${repository}/actions/runs/66`] = runResponse({ id: 66, head_sha: "b".repeat(40) });
+  const result = checkQueue(dir, responses);
+  assert.equal(result.tested, "tested=true", result.log);
+  assert.match(result.log, /Couldn't read the commit of run 66/);
+  const calls = fs.readFileSync(path.join(dir, "calls"), "utf8");
+  assert.match(calls, /actions\/runs\/77/);
+  assert.match(calls, /git\/commits\/a{40}/);
+});
+
+test("a commit without a tree is refused", () => {
+  const { dir, tree } = workspace();
+  const run = runResponse();
+  const responses = responsesFor(tree, run);
+  responses[`repos/${repository}/git/commits/${run.head_sha}`] = { tree: {} };
+  assert.equal(checkQueue(dir, responses).tested, "tested=false");
+});
+
+test("a run without a head commit is refused", () => {
+  const { dir, tree } = workspace();
+  assert.equal(checkQueue(dir, responsesFor(tree, runResponse({ head_sha: null }))).tested, "tested=false");
 });
 
 test("a tree a passed pull request run recorded skips main's suite", () => {

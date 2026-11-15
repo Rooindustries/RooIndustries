@@ -24,18 +24,28 @@ elif ! runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=tested-tr
   say "Couldn't look up which runs tested tree $tree; running the full suite."
 else
   for run in $runs; do
-    if ! passed="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run" --jq \
+    if ! head_sha="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run" --jq \
       'select(.conclusion == "success" and (.event | IN("pull_request", "merge_group", "push"))
         and .path == ".github/workflows/tests.yml"
-        and .head_repository.full_name == env.GITHUB_REPOSITORY) | .id')"; then
+        and .head_repository.full_name == env.GITHUB_REPOSITORY) | (.head_sha // "missing")')"; then
       say "Couldn't look up run $run; not counting it."
       continue
     fi
-    if [ -n "$passed" ]; then
-      say "Run $passed already passed on tree $tree; skipping the suite."
-      tested=true
-      break
+    if [ -z "$head_sha" ]; then
+      continue
     fi
+    if [ "$head_sha" = missing ] || ! run_tree="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$head_sha" \
+      --jq '.tree.sha // empty')"; then
+      say "Couldn't read the commit of run $run; not counting it."
+      continue
+    fi
+    if [ "$run_tree" != "$tree" ]; then
+      say "Run $run tested tree $run_tree, not $tree; not counting it."
+      continue
+    fi
+    say "Run $run already passed on tree $tree; skipping the suite."
+    tested=true
+    break
   done
   if [ "$tested" = false ]; then
     say "No passed run tested tree $tree; running the full suite."
