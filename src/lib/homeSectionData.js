@@ -147,14 +147,14 @@ const writeHomeSectionData = (key, value) => {
   } catch {}
 };
 
-export const fetchHomeSectionData = (key) => {
+export const fetchHomeSectionData = (key, { cached = true } = {}) => {
   if (!homeSectionResources.has(key)) {
     return Promise.reject(new Error(`Unknown home section key: ${key}`));
   }
 
-  const cached = readHomeSectionData(key);
-  if (cached !== null) {
-    return Promise.resolve(cached);
+  const stored = cached ? readHomeSectionData(key) : null;
+  if (stored !== null) {
+    return Promise.resolve(stored);
   }
 
   if (inflightCache.has(key)) {

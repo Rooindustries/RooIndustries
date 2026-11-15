@@ -274,33 +274,42 @@ test.describe("a held slot on a package link", () => {
       .toHaveValue("Ryzen 7700 / RTX 4070");
   });
 
-  test("a packages list that fails to load shows no price and a retry that keeps the slot and details", async ({
-    page, flow,
-  }) => {
-    const hold = await reserveFromPackages(page);
-    await flow.details("held@example.invalid");
-    await expect.poll(() => page.evaluate(() => sessionStorage.getItem("booking_draft")))
-      .toContain("held@example.invalid");
-    await page.evaluate(() => sessionStorage.removeItem("roo-home-data:packages-list"));
-    const list = { failing: true, requests: 0 };
-    await page.route("**/api/content/packages-list*", (route) => {
-      list.requests += 1;
-      return list.failing ? route.fulfill({ status: 503, json: { ok: false } }) : route.fallback();
+  const unusableLists = [
+    ["fails to load", (route) => route.fulfill({ status: 503, json: { ok: false } })],
+    ["arrives empty", (route) => route.fulfill({ json: { ok: true, data: [] } })],
+    ["has no bookable package", (route) => route.fulfill({ json: { ok: true, data: [{ title: "Gift Card" }] } })],
+  ];
+  for (const [problem, answer] of unusableLists) {
+    test(`a packages list that ${problem} shows no price and a retry that keeps the slot and details`, async ({
+      page, flow,
+    }) => {
+      const hold = await reserveFromPackages(page);
+      await flow.details("held@example.invalid");
+      await expect.poll(() => page.evaluate(() => sessionStorage.getItem("booking_draft")))
+        .toContain("held@example.invalid");
+      await page.evaluate(() => sessionStorage.removeItem("roo-home-data:packages-list"));
+      const list = { failing: true, requests: 0 };
+      await page.route("**/api/content/packages-list*", (route) => {
+        list.requests += 1;
+        return list.failing ? answer(route) : route.fallback();
+      });
+      await page.reload();
+      const dialog = page.getByRole("dialog");
+      await expect(dialog).toContainText("We couldn't load package prices.");
+      await expect(dialog).not.toContainText(/\$\d/);
+      await expect(email(page)).toHaveCount(0);
+      expect(await readHold(page)).toMatchObject({ holdId: hold.holdId, holdToken: hold.holdToken });
+      const failedRequests = list.requests;
+      expect(failedRequests).toBeGreaterThan(0);
+      list.failing = false;
+      await dialog.getByRole("button", { name: "Retry", exact: true }).click();
+      await expectHeld(page, flow, hold, "held@example.invalid");
+      await expect(page.getByRole("textbox", { name: "PC specifications", exact: true }))
+        .toHaveValue("Ryzen 7700 / RTX 4070");
+      expect(list.requests).toBeGreaterThan(failedRequests);
+      await page.getByRole("button", { name: "Review before payment", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
+      await page.unrouteAll({ behavior: "wait" });
     });
-    await page.reload();
-    const dialog = page.getByRole("dialog");
-    await expect(dialog).toContainText("We couldn't load package prices.");
-    await expect(dialog).not.toContainText(/\$\d/);
-    await expect(email(page)).toHaveCount(0);
-    expect(await readHold(page)).toMatchObject({ holdId: hold.holdId, holdToken: hold.holdToken });
-    const failedRequests = list.requests;
-    expect(failedRequests).toBeGreaterThan(0);
-    list.failing = false;
-    await dialog.getByRole("button", { name: "Retry", exact: true }).click();
-    await expectHeld(page, flow, hold, "held@example.invalid");
-    await expect(page.getByRole("textbox", { name: "PC specifications", exact: true }))
-      .toHaveValue("Ryzen 7700 / RTX 4070");
-    expect(list.requests).toBeGreaterThan(failedRequests);
-    await page.unrouteAll({ behavior: "wait" });
-  });
+  }
 });

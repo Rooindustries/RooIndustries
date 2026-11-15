@@ -19,18 +19,21 @@ const slugFromSearch = (search) => {
   return TITLE_BY_SLUG.has(slug) ? slug : "";
 };
 
+const bookable = (list) =>
+  BOOKABLE_TITLES.some((title) => findPackageBySlug(list, getPackageSlug(title))) ? list : null;
+
 function usePackagesOfRecord(needed) {
   const hydrating = useHydrating();
   const [fetched, setFetched] = useState(null);
   const [failed, setFailed] = useState(false);
-  const packages = hydrating || !needed ? null : fetched || readHomeSectionData(PACKAGES);
+  const packages = hydrating || !needed ? null : fetched || bookable(readHomeSectionData(PACKAGES));
   const loading = needed && !packages && !failed;
   useEffect(() => {
     if (hydrating || !loading) return undefined;
     let active = true;
-    fetchHomeSectionData(PACKAGES).then((list) => {
+    fetchHomeSectionData(PACKAGES, { cached: false }).then((list) => {
       if (!active) return;
-      if (Array.isArray(list)) setFetched(list);
+      if (bookable(list)) setFetched(list);
       else setFailed(true);
     }, (error) => {
       reportRequestError(error);
