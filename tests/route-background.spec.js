@@ -180,7 +180,7 @@ test("reopening payment restores the visited page without a hydration error", as
     name: "Community Reviews", exact: true,
   })).toBeVisible();
   await expect(page.getByRole("dialog").getByRole("heading", { name: "Complete Payment", exact: true })).toBeVisible();
-  expect(page.__routeErrors.filter(error => /hydrat|didn't match|server rendered/i.test(error))).toEqual([]);
   await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click();
   await expect(page).toHaveURL(/\/reviews$/);
+  expect(page.__routeErrors).toEqual([]);
 });
