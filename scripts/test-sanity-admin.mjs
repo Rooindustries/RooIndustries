@@ -163,7 +163,7 @@ try {
   await scenario('admin-session-login-and-origin', async () => {
     const { provisionContentAdmin } = await import('./provision-content-admin.mjs');
     const { issueAdminSessionCookie } = await import('../src/server/cms/adminSession.js');
-    assert.equal(sessionRoute.preferredRegion,'dub1');
+    execFileSync(process.execPath, ['scripts/check-content-regions.mjs']);
     let sessionAddress=1;
     const address=()=> '127.0.70.'+(sessionAddress++);
     const sessionCall=async(method,body,headers={})=>{const response=await sessionRoute[method](new Request(fixture.origin+'/api/admin/content/session',{method,headers:{'content-type':'application/json','x-forwarded-for':address(),host:new URL(fixture.origin).host,...headers},...(body===undefined?{}:{body:JSON.stringify(body)})}),{});const result={status:response.status,...await response.json()};observed('session '+method,{...result,cookieSet:Boolean(response.headers.get('set-cookie'))});return {result,response};};
@@ -562,7 +562,28 @@ try {
   });
   await scenario('R10-admin-key-attempts-and-R12-region',async()=>{
     const saved=process.env.NODE_ENV;process.env.NODE_ENV='development';process.env.RATE_LIMIT_HASH_SECRET='synthetic-fix2-rate-secret';const proofs=[];
-    try {let index=1;for(const [name,module]of Object.entries(modules)){assert.equal(module.preferredRegion,'dub1');const address=`10.9.0.${index++}`,body=module.POST?{}:undefined;for(let attempt=1;attempt<=6;attempt++){const result=await call(name,body,{},'wrong-key',address);assertError(result,attempt<=5?401:429,attempt<=5?'ADMIN_UNAUTHORIZED':'ADMIN_RATE_LIMITED');}const valid=await call('documents',undefined,{type:'tool'},'synthetic-admin-key',address);assert.equal(valid.status,200);proofs.push({name,wrongAttempts:6,statuses:[401,401,401,401,401,429],validAfterLimit:200});}assert.equal(tools.preferredRegion,'dub1');const actual=fixture.requestLog.filter(row=>row.rpc==='roo_consume_rate_limit');assert.ok(actual.length>=42);observed('R10 durable wrong-key bound and R12 region',{proofs,nativeRateLimitCalls:actual.length,region:'dub1'});}finally{if(saved===undefined)delete process.env.NODE_ENV;else process.env.NODE_ENV=saved;}
+    try {
+      execFileSync(process.execPath, ['scripts/check-content-regions.mjs']);
+      let index = 1;
+      for (const [name, module] of Object.entries(modules)) {
+        const address = `10.9.0.${index++}`, body = module.POST ? {} : undefined;
+        for (let attempt = 1; attempt <= 6; attempt++) {
+          const result = await call(name, body, {}, 'wrong-key', address);
+          assertError(result, attempt <= 5 ? 401 : 429, attempt <= 5 ? 'ADMIN_UNAUTHORIZED' : 'ADMIN_RATE_LIMITED');
+        }
+        const valid = await call('documents', undefined, { type: 'tool' }, 'synthetic-admin-key', address);
+        assert.equal(valid.status, 200);
+        proofs.push({ name, wrongAttempts: 6, statuses: [401, 401, 401, 401, 401, 429], validAfterLimit: 200 });
+      }
+      const actual = fixture.requestLog.filter(row => row.rpc === 'roo_consume_rate_limit');
+      assert.ok(actual.length >= 42);
+      observed('R10 durable wrong-key bound and R12 region', {
+        proofs, nativeRateLimitCalls: actual.length, configuredRegion: 'dub1',
+      });
+    } finally {
+      if (saved === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = saved;
+    }
   });
   await scenario('R9-hosted-tool-without-file-keeps-fallback',async()=>{
     const id='tool.legacy-no-file',fallback='https://example.com/legacy-tool';const saved=await fixture.client.rpc('roo_apply_document_mutations',{p_mutations:[{operation:'create',document:{_id:id,_type:'tool',title:'Legacy no attached file',downloadMode:'hosted',downloadUrl:fallback}}]});assert.equal(saved.error,null);const {clearSupabasePublicContentCache}=await import('../src/server/content/publicContent.js');clearSupabasePublicContentCache();const response=await publicRoute.GET(new Request(`${fixture.origin}/api/content/tools`),{params:Promise.resolve({resource:'tools'})});assert.equal(response.status,200);const row=(await response.json()).data.find(row=>row._id===id);assert.equal(row.fileUrl,null);assert.equal(row.downloadUrl,fallback);const {stableToolDownloadLinks}=await import('../src/server/cms/toolDownload.js');assert.equal(stableToolDownloadLinks([{_id:'attached',downloadMode:'hosted',downloadFile:{asset:{_ref:'file-fixture-zip'}}}])[0].fileUrl,'/api/tools/attached/download');observed('R9 actual public legacy fallback',row);

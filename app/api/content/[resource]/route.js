@@ -3,7 +3,6 @@ import { fetchPublicContentEntry, PUBLIC_CONTENT_CACHE_TAG } from "@/src/server/
 
 
 export const runtime = "nodejs";
-export const preferredRegion = "dub1";
 export const dynamic = "force-dynamic";
 
 const PUBLIC_BROWSER_CACHE = "public, max-age=0, must-revalidate, s-maxage=60";

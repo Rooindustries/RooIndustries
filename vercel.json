@@ -1,6 +1,26 @@
 {
   "framework": "nextjs",
   "functions": {
+    "app/api/admin/content/**/*": {
+      "regions": [
+        "dub1"
+      ]
+    },
+    "app/api/admin/referral-creators/route.js": {
+      "regions": [
+        "dub1"
+      ]
+    },
+    "app/api/content/**/*": {
+      "regions": [
+        "dub1"
+      ]
+    },
+    "app/api/tools/*/download/route.js": {
+      "regions": [
+        "dub1"
+      ]
+    },
     "app/api/admin/commerce-readiness/route.js": {
       "regions": [
         "dub1"
