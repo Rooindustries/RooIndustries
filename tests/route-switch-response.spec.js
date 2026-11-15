@@ -5,7 +5,7 @@ const { heldRouteFixtures } = require("./fixtures/held-routes.cjs");
 const { navLink } = require("./fixtures/nav-link.cjs");
 const {
   targets, holdTarget, holdTargets, installMeasurement, armMeasurement, openPage, proofClick, finishSuperseded,
-  openBooking, watchBar, barWasSeen,
+  openBooking, measuredResponse, watchBar, barWasSeen,
 } = require("./fixtures/route-switch-response.cjs");
 
 const test = base.extend(heldRouteFixtures);
@@ -117,7 +117,7 @@ test("Reduced motion shows a static loading line", async ({ page, baseURL }, inf
     await page.locator("#desktop-proof-menu").getByRole("link", { name: "Benchmarks" }).click();
     await held.waiting;
     expect(held.chunk.held).toBe(true);
-    await page.waitForFunction(() => window.routeSwitchMeasurement.measured);
+    await measuredResponse(page);
     const response = await page.evaluate(() => window.routeSwitchMeasurement.response);
     expect(response, "the reduced-motion line is visible within 300 ms").not.toBeNull();
     expect(response).toBeLessThanOrEqual(300);
@@ -150,7 +150,7 @@ test("A held switch keeps the navigation row fixed without layout shift", async 
     await page.locator("#desktop-proof-menu").getByRole("link", { name: "Benchmarks" }).click();
     await held.waiting;
     expect(held.chunk.held).toBe(true);
-    await page.waitForFunction(() => window.routeSwitchMeasurement.measured);
+    await measuredResponse(page);
     const during = await row.evaluate(node => ({ top: node.getBoundingClientRect().top, height: node.offsetHeight }));
     const shifts = await page.evaluate(() => {
       const observer = window.routeLayoutObserver;
@@ -182,10 +182,10 @@ test.describe("Scored page switches", () => {
 
   test.afterAll(async () => {
     const state = readState();
-    if (Object.keys(state.results).length !== entries.length + 4) return;
+    if (Object.keys(state.results).length !== entries.length + 6) return;
     const failures = Object.entries(state.results).filter(([, passed]) => !passed).map(([name]) => name);
     fs.writeFileSync(scoreFile, JSON.stringify({ failures }, null, 2));
-    console.log(`ROUTE SWITCH FAILURES: ${failures.length}/34`);
+    console.log(`ROUTE SWITCH FAILURES: ${failures.length}/${entries.length + 6}`);
   });
 
   for (const entry of entries) {
@@ -233,7 +233,7 @@ test.describe("Scored page switches", () => {
         }
         await held.waiting;
         expect(held.chunk.held, "the first page file is held").toBe(true);
-        await page.waitForFunction(() => window.routeSwitchMeasurement.measured);
+        await measuredResponse(page);
         const second = entry.target === "benchmarks" ? "reviews" : "benchmarks";
         await proofClick(page, second === "reviews" ? "Reviews" : "Benchmarks", entry.mobile);
         await finishSuperseded(page, held, targets[second].route);
@@ -251,7 +251,7 @@ test.describe("Scored page switches", () => {
       await page.locator(".ri-package-book-button").first().click();
       await held.waiting;
       expect(held.chunk.held, "the booking page file is held").toBe(true);
-      await page.waitForFunction(() => window.routeSwitchMeasurement.measured);
+      await measuredResponse(page);
       await expect(page.locator("#booking-modal-close")).toBeVisible();
       await page.locator("#booking-modal-close").click();
       await finishSuperseded(page, held, "/packages", "h2");
@@ -270,7 +270,7 @@ test.describe("Scored page switches", () => {
       await page.getByRole("link", { name: "Future Upgrade Path" }).click();
       await held.waiting;
       expect(held.chunk.held, "the home page file is held").toBe(true);
-      await page.waitForFunction(() => window.routeSwitchMeasurement.measured);
+      await measuredResponse(page);
       await page.locator("#booking-modal-close").click();
       await finishSuperseded(page, held, "/packages", "h2");
     } finally {
@@ -289,7 +289,7 @@ test.describe("Scored page switches", () => {
       await page.getByRole("link", { name: "Contact us", exact: true }).click();
       await held.waiting;
       expect(held.chunk.held, "the contact page file is held").toBe(true);
-      await page.waitForFunction(() => window.routeSwitchMeasurement.measured);
+      await measuredResponse(page);
       await page.locator("#booking-modal-close").click();
       await finishSuperseded(page, held, "/packages", "h2");
     } finally {
@@ -333,4 +333,49 @@ test.describe("Scored page switches", () => {
     }
   });
 
+  test("35. Package details: Future Upgrade Path", async ({ page, baseURL }, info) => {
+    const held = await holdTarget(page, baseURL, "home", info.config.metadata.toolingDistDir);
+    try {
+      await page.route("**/packages", async route => {
+        const response = await route.fetch();
+        const body = (await response.text()).replaceAll("Synthetic feature", "Future Upgrade Path");
+        await route.fulfill({ response, body });
+      });
+      await openPage(page, "/packages");
+      await page.locator(".ri-package-details-button").first().click();
+      const dialog = page.getByRole("dialog");
+      await expect(dialog.getByRole("link", { name: "Future Upgrade Path" })).toBeVisible();
+      await expect(dialog.locator("..")).toHaveCSS("opacity", "1");
+      await armMeasurement(page, "home");
+      await dialog.getByRole("link", { name: "Future Upgrade Path" }).click();
+      await held.waiting;
+      expect(held.chunk.held, "the home page file is held").toBe(true);
+      await measuredResponse(page);
+      await dialog.getByRole("button", { name: "Close" }).click();
+      await proofClick(page, "Benchmarks");
+      await finishSuperseded(page, held, "/benchmarks");
+    } finally {
+      held.release();
+    }
+  });
+
+  test("36. Account dialog: Create account", async ({ page, baseURL }, info) => {
+    const held = await holdTarget(page, baseURL, "register", info.config.metadata.toolingDistDir);
+    try {
+      await openPage(page, "/about");
+      await page.goto("/referrals/login?oauth=unlinked&provider=discord");
+      const dialog = page.getByRole("dialog");
+      await expect(dialog).toBeVisible();
+      await armMeasurement(page, "register");
+      await dialog.getByRole("button", { name: "Create account", exact: true }).click();
+      await held.waiting;
+      expect(held.chunk.held, "the registration page file is held").toBe(true);
+      await measuredResponse(page);
+      await dialog.getByRole("button", { name: "Log in and link" }).click();
+      await proofClick(page, "Benchmarks");
+      await finishSuperseded(page, held, "/benchmarks");
+    } finally {
+      held.release();
+    }
+  });
 });

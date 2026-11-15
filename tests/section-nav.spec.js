@@ -746,3 +746,82 @@ test("an old section marker does not replace the next page in history", async ({
   await page.goBack();
   await expect(page).toHaveURL(/\/referrals\/reset$/);
 });
+
+for (const origin of ["/reviews", "/about"]) {
+  for (const surface of ["desktop", "mobile", "bar"]) {
+    for (const action of ACTIONS.filter(item => surface !== "bar" || item.target === "plans")) {
+      test(`held Home section keeps ${action.label} active from ${origin} on ${surface}`, async ({ page, baseURL }) => {
+        await page.setViewportSize(surface === "desktop" ? { width: 1440, height: 900 } : { width: 390, height: 844 });
+        const held = await holdHome(page, baseURL);
+        try {
+          await openPage(page, origin);
+          if (surface === "mobile") await page.getByRole("button", { name: "Open menu" }).click();
+          const linkSurface = surface === "desktop" && action.target === "plans" ? "bar" : surface;
+          const selector = `[data-nav-surface="${linkSurface}"][data-nav-target="${action.target}"]`;
+          await page.evaluate(() => {
+            window.sectionSamples = [];
+            window.sectionSampling = true;
+            const sample = () => {
+              if (!window.sectionSampling) return;
+              window.sectionSamples.push([...document.querySelectorAll('[data-nav-target][aria-current="location"]')]
+                .map(element => element.dataset.navTarget));
+              requestAnimationFrame(sample);
+            };
+            document.addEventListener("click", () => requestAnimationFrame(sample), { once: true, capture: true });
+          });
+          await page.locator(selector).click();
+          await held.waiting;
+          await expect(page.locator(selector)).toHaveAttribute("aria-current", "location", { timeout: 3000 });
+          await expect(page.locator('#main-content [data-route-key="/"]')).toHaveCount(0);
+          held.release();
+          await expect(page.locator('#main-content [data-route-key="/"]')).toBeVisible();
+          await expect(page.locator(selector)).toHaveAttribute("aria-current", "location");
+          await page.evaluate(() => new Promise(resolve => {
+            requestAnimationFrame(() => requestAnimationFrame(resolve));
+          }));
+          const samples = await page.evaluate(() => {
+            window.sectionSampling = false;
+            return window.sectionSamples;
+          });
+          expect(samples.length).toBeGreaterThan(1);
+          expect(samples.every(active => active.length > 0 && active.every(item => item === action.target))).toBe(true);
+        } finally {
+          held.release();
+        }
+      });
+    }
+  }
+}
+
+const holdHome = async (page, baseURL) => {
+  let reached;
+  const waiting = new Promise(resolve => { reached = resolve; });
+  const held = await holdChunks(page, { origin: baseURL }, body => {
+    const match = body.toString().startsWith('"use strict";') && body.includes(targets.home.marker);
+    if (match) reached();
+    return match;
+  });
+  return { waiting, release: held.release };
+};
+
+for (const [label, origin, selector, viewport] of [
+  ["desktop logo", "/reviews", '[data-nav-row] a[href="/"]:visible', { width: 1440, height: 900 }],
+  ["phone logo", "/reviews", '[data-nav-row] a[href="/"]:visible', { width: 390, height: 844 }],
+  ["Home link", "/no-such-page", 'a:has-text("Back to Home")', { width: 1440, height: 900 }],
+]) {
+  test(`held ${label} leaves home sections inactive`, async ({ page, baseURL }) => {
+    await page.setViewportSize(viewport);
+    const held = await holdHome(page, baseURL);
+    try {
+      await openPage(page, origin);
+      await page.locator(selector).click();
+      await held.waiting;
+      await expect(page.locator('[data-nav-target][aria-current="location"]')).toHaveCount(0);
+      held.release();
+      await expect(page.locator('#main-content [data-route-key="/"]')).toBeVisible();
+      await expect(page.locator('[data-nav-target][aria-current="location"]')).toHaveCount(0);
+    } finally {
+      held.release();
+    }
+  });
+}

@@ -76,7 +76,7 @@ const applyTheme = (theme, { persist = true } = {}) => {
 
 export default function Navbar() {
   const location = useLocation();
-  const { target } = useRouteSwitch();
+  const { pending, target } = useRouteSwitch();
   const activeHomeHash = useActiveHomeSection();
   const {
     goToSection,
@@ -100,7 +100,7 @@ export default function Navbar() {
 
   const isActive = (path) => target.pathname === path;
 
-  const isHomeSectionActive = (...hashes) => isActive("/") && hashes.includes(activeHomeHash);
+  const isHomeSectionActive = (...hashes) => isActive("/") && hashes.includes(pending ? target.hash : activeHomeHash);
   const isBenefitsActive = isHomeSectionActive(SECTION_HASHES.benefits);
   const isPlansActive = isActive("/packages") || isHomeSectionActive(SECTION_HASHES.plans);
   const isFaqActive =
@@ -576,8 +576,11 @@ export default function Navbar() {
               href="/#packages"
               data-nav-surface="bar"
               data-nav-target="plans"
+              aria-current={isActive("/packages") ? "page" : isPlansActive ? "location" : undefined}
               onClick={(event) => handleSectionLinkClick(event, SECTION_HASHES.plans)}
-              className="nav-cta inline-flex items-center gap-2 px-2 py-1.5 text-[11px] min-[360px]:px-2.5 min-[360px]:text-xs sm:px-5 sm:py-3 sm:text-base font-semibold whitespace-nowrap rounded-full text-white transition"
+              className={`nav-cta inline-flex items-center gap-2 px-2 py-1.5 text-[11px] min-[360px]:px-2.5
+                min-[360px]:text-xs sm:px-5 sm:py-3 sm:text-base font-semibold whitespace-nowrap rounded-full
+                text-white transition ${isPlansActive ? "ring-2 ring-[color:var(--color-focus-ring)]" : ""}`}
             >
               Packages
             </a>

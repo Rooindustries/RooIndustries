@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const sharp = require("sharp");
 const { expect } = require("@playwright/test");
 const { holdChunks, holdRoute, inspectChunks } = require("./held-routes.cjs");
 const { waitForHydrated } = require("./react-hydration.cjs");
@@ -107,47 +108,68 @@ const holdTargets = async (page, baseURL, names, distDir) => {
   return holds;
 };
 
-const installMeasurement = page => page.addInitScript(() => {
-  window.routeSwitchMeasurement = null;
-  document.addEventListener("click", () => {
-    const state = window.routeSwitchMeasurement;
-    if (!state || state.clicked !== null) return;
-    state.clicked = performance.now();
-    const observe = () => {
-      if (document.querySelector(state.heading)) state.mounted = true;
-      const headings = [...document.querySelectorAll("h1, h2")];
-      if (headings.some(node => /we couldn.t load this page/i.test(node.textContent))) {
-        state.error = true;
-      }
-    };
-    new MutationObserver(observe).observe(document.documentElement, { childList: true, subtree: true });
-    const frame = () => {
-      const now = performance.now();
-      const bar = document.querySelector('[role="progressbar"][aria-label="Loading page"]');
-      const style = bar && getComputedStyle(bar);
-      const heading = document.querySelector(state.heading);
-      const visible = element => {
-        if (!element || !element.checkVisibility({ opacityProperty: true, visibilityProperty: true })) return false;
-        const box = element.getBoundingClientRect();
-        return box.width > 0 && box.height > 0 && box.bottom > 0 && box.top < innerHeight &&
-          box.right > 0 && box.left < innerWidth;
-      };
-      if (state.response === null && ((visible(bar) && Number(style.opacity) >= 0.5) || visible(heading))) {
-        state.response = now - state.clicked;
-      }
-      if (now - state.clicked >= 300) state.measured = true;
-      else requestAnimationFrame(frame);
-    };
-    requestAnimationFrame(frame);
-  }, true);
-});
+const measurements = new WeakMap();
 
-const armMeasurement = (page, target) => page.evaluate(({ route, heading, selector }) => {
-  window.routeSwitchMeasurement = {
-    clicked: null, response: null, measured: false, mounted: false, error: false,
-    heading: selector || `#main-content [data-route-key="${route}"] ${heading || "h1"}`,
-  };
-}, targets[target]);
+const installMeasurement = async page => {
+  const session = await page.context().newCDPSession(page);
+  const measurement = { session, frames: [] };
+  measurements.set(page, measurement);
+  session.on("Page.screencastFrame", ({ data, metadata, sessionId }) => {
+    measurement.frames.push({ data, timestamp: metadata.timestamp * 1000 });
+    session.send("Page.screencastFrameAck", { sessionId });
+  });
+  await page.addInitScript(() => {
+    window.routeSwitchMeasurement = null;
+    document.addEventListener("click", () => {
+      const state = window.routeSwitchMeasurement;
+      if (!state || state.clicked !== null) return;
+      state.clicked = performance.now();
+      const observe = () => {
+        if (document.querySelector(state.heading)) state.mounted = true;
+        const headings = [...document.querySelectorAll("h1, h2")];
+        if (headings.some(node => /we couldn.t load this page/i.test(node.textContent))) {
+          state.error = true;
+        }
+      };
+      new MutationObserver(observe).observe(document.documentElement, { childList: true, subtree: true });
+      const frame = () => {
+        const now = performance.now();
+        const bar = document.querySelector('[role="progressbar"][aria-label="Loading page"]');
+        const style = bar && getComputedStyle(bar);
+        const heading = document.querySelector(state.heading);
+        const visible = element => {
+          if (!element || !element.checkVisibility({ opacityProperty: true, visibilityProperty: true })) return false;
+          const box = element.getBoundingClientRect();
+          return box.width > 0 && box.height > 0 && box.bottom > 0 && box.top < innerHeight &&
+            box.right > 0 && box.left < innerWidth;
+        };
+        if (state.response === null && ((visible(bar) && Number(style.opacity) >= 0.5) || visible(heading))) {
+          state.response = now - state.clicked;
+          state.responseKind = visible(heading) ? "heading" : "bar";
+        }
+        if (now - state.clicked >= 300) {
+          state.measured = true;
+        } else requestAnimationFrame(frame);
+      };
+      requestAnimationFrame(frame);
+    }, true);
+  });
+};
+
+const armMeasurement = async (page, target) => {
+  const measurement = measurements.get(page);
+  measurement.frames = [];
+  measurement.accent = await page.evaluate(() =>
+    getComputedStyle(document.documentElement).getPropertyValue("--color-accent").trim());
+  await measurement.session.send("Page.startScreencast", { format: "png", everyNthFrame: 1 });
+  await page.evaluate(({ route, heading, selector }) => {
+    window.routeSwitchMeasurement = {
+      clicked: null, response: null, responseKind: null, pixels: null, pixelAt: null,
+      measured: false, mounted: false, error: false,
+      heading: selector || `#main-content [data-route-key="${route}"] ${heading || "h1"}`,
+    };
+  }, targets[target]);
+};
 
 const openPage = async (page, route) => {
   await page.goto(route);
@@ -160,6 +182,41 @@ const proofClick = async (page, label, mobile = false) => {
   const surface = mobile ? "mobile" : "desktop";
   await page.locator(`button[aria-controls="${surface}-proof-menu"]`).click();
   await page.locator(`#${surface}-proof-menu`).getByRole("link", { name: label, exact: true }).click();
+};
+
+const measuredResponse = async page => {
+  await page.waitForFunction(() => window.routeSwitchMeasurement.measured);
+  const measurement = measurements.get(page);
+  await measurement.session.send("Page.stopScreencast");
+  const state = await page.evaluate(() => ({
+    ...window.routeSwitchMeasurement, origin: performance.timeOrigin,
+  }));
+  if (state.responseKind !== "bar") return;
+  const color = measurement.accent.match(/^#([0-9a-f]{6})$/i);
+  if (!color) throw new Error(`Unexpected accent color: ${measurement.accent}`);
+  const rgb = [0, 2, 4].map(offset => parseInt(color[1].slice(offset, offset + 2), 16));
+  let pixelAt = null;
+  for (const frame of measurement.frames) {
+    const elapsed = frame.timestamp - state.origin - state.clicked;
+    if (!Number.isFinite(elapsed) || elapsed < 0 || elapsed > 300) continue;
+    const image = sharp(Buffer.from(frame.data, "base64"));
+    const { width } = await image.metadata();
+    const pixels = await image.extract({ left: 0, top: 0, width, height: 3 }).removeAlpha().raw().toBuffer();
+    let run = 0;
+    for (let offset = 0; offset < pixels.length; offset += 3) {
+      const match = rgb.every((channel, index) => Math.abs(channel - pixels[offset + index]) <= 8);
+      run = match ? run + 1 : 0;
+      if (run >= 10) break;
+    }
+    if (run >= 10) {
+      pixelAt = elapsed;
+      break;
+    }
+  }
+  await page.evaluate(pixelAt => {
+    window.routeSwitchMeasurement.pixels = pixelAt !== null;
+    window.routeSwitchMeasurement.pixelAt = pixelAt;
+  }, pixelAt);
 };
 
 const finishSuperseded = async (page, held, second, heading = "h1") => {
@@ -175,6 +232,10 @@ const finishSuperseded = async (page, held, second, heading = "h1") => {
   await expect(page).toHaveURL(new RegExp(`${second}$`));
   await expect(page.locator(`#main-content [data-route-key="${second}"] ${heading}`).first()).toBeVisible();
   await expect(page.getByRole("heading", { name: /We couldn.t load this page/ })).toHaveCount(0);
+  if (result.responseKind === "bar") {
+    expect(result.pixels, "the accent segment is visible on screen").toBe(true);
+    expect(result.pixelAt, "the accent segment appears within 300 ms").toBeLessThanOrEqual(300);
+  }
   expect(result.response, "a response is visible within 300 ms").not.toBeNull();
   expect(result.response, "a response is visible within 300 ms").toBeLessThanOrEqual(300);
 };
@@ -219,6 +280,6 @@ const barWasSeen = page => page.evaluate(() => new Promise(resolve => {
 
 module.exports = {
   targets, holdTarget, holdTargets, installMeasurement, armMeasurement, openPage, proofClick, finishSuperseded,
-  openBooking,
+  openBooking, measuredResponse,
   watchBar, barWasSeen,
 };
