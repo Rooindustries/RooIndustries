@@ -1,4 +1,5 @@
 .route-progress {
+  z-index: 10049;
   height: 3px;
   background: var(--color-accent-soft);
   clip-path: inset(0 0 -12px);

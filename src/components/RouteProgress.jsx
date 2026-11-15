@@ -37,7 +37,7 @@ export default function RouteProgress() {
 
   return (
     <div
-      className="route-progress fixed inset-x-0 top-0 z-[100] pointer-events-none"
+      className="route-progress fixed inset-x-0 top-0 pointer-events-none"
       data-state={loading ? "loading" : "idle"}
       role={loading ? "progressbar" : undefined}
       aria-label={loading ? "Loading page" : undefined}
