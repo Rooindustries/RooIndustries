@@ -6,6 +6,7 @@ const { expect } = require("@playwright/test");
 const { fixturePort } = require("./fixture-ports.cjs");
 
 const recorderDir = path.dirname(require.resolve("posthog-js/dist/lazy-recorder.js"));
+const SENDS_KEY = "roo-test-posthog-sends";
 const POSTHOG_CODE = /\[PostHog\.js\]|phc_[A-Za-z0-9]{20,}/;
 const MUTATION_FIELDS = ["texts", "attributes", "removes", "adds"];
 const remoteConfig = {
@@ -151,6 +152,38 @@ const closeTab = async (page) => {
   await page.context().unrouteAll({ behavior: "wait" });
   await page.close({ runBeforeUnload: true });
 };
+const recordSends = (page) => page.addInitScript((key) => {
+  if (localStorage.getItem(key) === null) localStorage.setItem(key, "[]");
+  const note = (transport, url) => {
+    const path = new URL(String(url), location.href).pathname;
+    if (!path.startsWith("/ingest/")) return;
+    const sends = JSON.parse(localStorage.getItem(key));
+    sends.push({ transport, path });
+    localStorage.setItem(key, JSON.stringify(sends));
+  };
+  const beacon = Navigator.prototype.sendBeacon;
+  Navigator.prototype.sendBeacon = function (url, ...args) {
+    note("sendBeacon", url);
+    return beacon.call(this, url, ...args);
+  };
+  const fetchRequest = window.fetch;
+  window.fetch = function (input, ...args) {
+    note("fetch", input instanceof Request ? input.url : input);
+    return fetchRequest.call(this, input, ...args);
+  };
+  const urls = new WeakMap();
+  const open = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function (method, url, ...args) {
+    urls.set(this, url);
+    return open.call(this, method, url, ...args);
+  };
+  const send = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.send = function (...args) {
+    note("xhr", urls.get(this));
+    return send.call(this, ...args);
+  };
+}, SENDS_KEY);
+const sendsFrom = (page) => page.evaluate((key) => JSON.parse(localStorage.getItem(key)), SENDS_KEY);
 const expectLeavesFollowViews = (seen) => {
   for (const leave of named(seen, "$pageleave")) {
     const id = leave.properties.$prev_pageview_id;
@@ -171,4 +204,6 @@ const posthogFixtures = {
   },
 };
 
-module.exports = { posthogFixtures, postHogCode, named, pageviews, arrived, closeTab, expectLeavesFollowViews };
+module.exports = {
+  posthogFixtures, postHogCode, named, pageviews, arrived, closeTab, expectLeavesFollowViews, recordSends, sendsFrom,
+};

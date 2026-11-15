@@ -166,12 +166,12 @@ const test = base.extend({
       if (path === "/api/payment/start") return json(route, startedCheckout(baseURL, state.checkouts, request));
       return route.fallback();
     });
-    const booking = async (path = "/booking") => {
-      await page.goto(path);
+    const booking = async (path = "/booking", options) => {
+      await page.goto(path, options);
       await page.getByRole("button", { name: /^Earliest available:/ }).click();
     };
-    const reserve = async (path) => {
-      await booking(path);
+    const reserve = async (path, options) => {
+      await booking(path, options);
       await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
       await page.getByRole("button", { name: "Next", exact: true }).last().click();
       await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toBeVisible();
@@ -182,8 +182,8 @@ const test = base.extend({
       await page.getByRole("textbox", { name: "PC specifications", exact: true }).fill("Ryzen 7700 / RTX 4070");
       await page.getByRole("textbox", { name: "Main game or application", exact: true }).fill("CS2");
     };
-    const review = async (path) => {
-      await reserve(path);
+    const review = async (path, options) => {
+      await reserve(path, options);
       await details();
       await page.getByRole("button", { name: "Review before payment", exact: true }).click();
       await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
@@ -363,7 +363,7 @@ const checkoutStartCases = [
 
 const productionOnlyScripts = ["https://scripts.seorce.com/api?**", "https://widget.intercom.io/widget/**"];
 
-const openFreePayment = async (page, flow) => {
+const openFreePayment = async (page, flow, options) => {
   await page.route("**/api/ref/validateCoupon?code=free100*", route => route.fulfill({
     json: {
       ok: true,
@@ -378,7 +378,7 @@ const openFreePayment = async (page, flow) => {
       quote: { grossAmount: 84.99, netAmount: free ? 0 : 84.99, isFree: free },
     } });
   });
-  await flow.review();
+  await flow.review(undefined, options);
   await flow.codeInput("free100");
   await expect(page.getByRole("button", { name: "Remove coupon code free100", exact: true })).toBeVisible();
   await flow.payment();
