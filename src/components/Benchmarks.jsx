@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { urlFor } from "../lib/cmsImageUrl";
 import { imageSrcSet } from "../lib/imageSizeLadder";
+import { recordedShape } from "../lib/recordedShape";
 import { reportRequestError } from "../lib/clientRequest";
 import { getPublicContent } from "../lib/publicContentClient";
 import { Link } from "react-router-dom";
@@ -103,11 +104,12 @@ export default function Benchmarks({ initialData = null, setIsModalOpen = () => 
                         alt={beforeAlt}
                         width={beforeDims?.width}
                         height={beforeDims?.height}
+                        style={recordedShape(beforeDims)}
                         loading={i === 0 ? "eager" : "lazy"}
                         fetchPriority={i === 0 ? "high" : "auto"}
                         decoding="async"
                         sizes="(min-width: 1280px) 576px, (min-width: 768px) calc(50vw - 64px), calc(100vw - 84px)"
-                        className="rounded w-full cursor-pointer shadow-lg border border-danger-border group-hover:border-danger group-hover:shadow-danger-soft transition duration-300"
+                        className="rounded box-content w-[calc(100%-2px)] cursor-pointer shadow-lg border border-danger-border group-hover:border-danger group-hover:shadow-danger-soft transition duration-300"
                       />
                     </button>
                     <figcaption className="sr-only">{beforeAlt}</figcaption>
@@ -133,11 +135,12 @@ export default function Benchmarks({ initialData = null, setIsModalOpen = () => 
                         alt={afterAlt}
                         width={afterDims?.width}
                         height={afterDims?.height}
+                        style={recordedShape(afterDims)}
                         loading={i === 0 ? "eager" : "lazy"}
                         fetchPriority={i === 0 ? "high" : "auto"}
                         decoding="async"
                         sizes="(min-width: 1280px) 576px, (min-width: 768px) calc(50vw - 64px), calc(100vw - 84px)"
-                        className="rounded w-full cursor-pointer shadow-lg border border-success-border group-hover:border-success group-hover:shadow-success-soft transition duration-300"
+                        className="rounded box-content w-[calc(100%-2px)] cursor-pointer shadow-lg border border-success-border group-hover:border-success group-hover:shadow-success-soft transition duration-300"
                       />
                     </button>
                     <figcaption className="sr-only">{afterAlt}</figcaption>
@@ -162,10 +165,11 @@ export default function Benchmarks({ initialData = null, setIsModalOpen = () => 
                         alt={reviewAlt}
                         width={reviewDims?.width}
                         height={reviewDims?.height}
+                        style={recordedShape(reviewDims)}
                         loading="lazy"
                         decoding="async"
                         sizes={reviewImageSizes(reviewDims?.width)}
-                        className="rounded-lg shadow-lg mx-auto cursor-pointer border border-line-strong group-hover:border-success group-hover:shadow-success-soft transition duration-300"
+                        className="rounded-lg box-content max-w-[calc(100%-2px)] shadow-lg mx-auto cursor-pointer border border-line-strong group-hover:border-success group-hover:shadow-success-soft transition duration-300"
                       />
                     </button>
                     <figcaption className="sr-only">{reviewAlt}</figcaption>

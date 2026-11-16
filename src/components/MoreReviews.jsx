@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { urlFor } from "../lib/cmsImageUrl";
 import { imageSrcSet } from "../lib/imageSizeLadder";
+import { recordedShape } from "../lib/recordedShape";
 import { reportRequestError } from "../lib/clientRequest";
 import { getPublicContent } from "../lib/publicContentClient";
 import ImageZoomModal from "./ImageZoomModal";
@@ -116,11 +117,7 @@ export default function Reviews({ initialData = null }) {
                     alt={reviewAlt}
                     width={reviewDims?.width}
                     height={reviewDims?.height}
-                    style={
-                      reviewDims?.width && reviewDims?.height
-                        ? { aspectRatio: `${reviewDims.width} / ${reviewDims.height}` }
-                        : undefined
-                    }
+                    style={recordedShape(reviewDims)}
                     loading="lazy"
                     decoding="async"
                     fetchPriority="auto"
