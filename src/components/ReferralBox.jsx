@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { getPublicContent } from "../lib/publicContentClient";
+import { REFERRAL_BOX_DEFAULTS } from "../lib/referralBoxDefaults";
 
 const normalizeReferralLoginPath = (path) =>
   !path || path === "/login" ? "/referrals/login" : path;
@@ -15,14 +16,7 @@ export default function ReferralBox({ initialData = null }) {
   const [email, setEmail] = useState("");
 
   const [content, setContent] = useState(() => ({
-    heading: "Join the Referral Program",
-    description:
-      "Are you a creator? Enter your email to get started with registration.",
-    emailPlaceholder: "Enter your email...",
-    startButtonText: "Get Started",
-    loginButtonText: "Login",
-    loginPath: "/referrals/login",
-    registerPath: "/referrals/register",
+    ...REFERRAL_BOX_DEFAULTS,
     ...presentEntries(initialData),
   }));
 
