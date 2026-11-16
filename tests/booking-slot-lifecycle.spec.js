@@ -52,10 +52,10 @@ const nativeRoutes = /\/api\/(holdSlot|releaseHold|payment\/quote|payment\/start
 const routeToNative = async (context, native, date) => {
   const answers = [];
   const forward = async request => {
-    const path = new URL(request.url()).pathname;
+    const endpoint = new URL(request.url()).pathname;
     const token = (request.headers().authorization || "").replace(/^Bearer /, "");
-    const response = await native.post(path, request.postDataJSON(), token);
-    answers.push({ path, ...response });
+    const response = await native.post(endpoint, request.postDataJSON(), token);
+    answers.push({ endpoint, ...response });
     return response;
   };
   await context.route(nativeRoutes, async route => fulfillJson(route, await forward(route.request())));
@@ -68,7 +68,7 @@ const routeToNative = async (context, native, date) => {
   await context.route("https://test.checkout.dodopayments.com/session/**", route => route.fulfill({
     contentType: "text/html", body: "<h1>Fixture provider checkout</h1>",
   }));
-  return { forward, answered: path => answers.filter(answer => answer.path === path) };
+  return { forward, answered: endpoint => answers.filter(answer => answer.endpoint === endpoint) };
 };
 const readHold = page => page.evaluate(() => JSON.parse(sessionStorage.getItem("my_slot_hold")));
 const selectSlot = async (page, flow) => {
@@ -165,18 +165,23 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       const slot = await native.freeSlot();
       await routeToNative(context, native, slot.date);
       await selectSlot(page, flow);
-      const original = await native.book(slot);
-      await native.activeUpgrade(original);
-      await native.markRefunded(original.bookingId);
-      expect(await native.document(slot.lockId)).toMatchObject({ status: "active", bookingId: original.bookingId });
-      await pressNext(page);
-      await expectDetailsStep(page);
-      await expectReserved(page, native, slot);
-      expect(await native.document(slot.lockId)).toMatchObject({ status: "released", releaseReason: "booking_status_repair" });
-      await page.getByRole("button", { name: "Back", exact: true }).last().click();
-      await page.getByRole("button", { name: "Release Slot", exact: true }).click();
-      await expect.poll(() => readHold(page)).toBeNull();
-      expect(await native.document(slot.holdId)).toMatchObject({ phase: "released" });
+      try {
+        const original = await native.book(slot);
+        await native.activeUpgrade(original);
+        await native.markRefunded(original.bookingId);
+        expect(await native.document(slot.lockId)).toMatchObject({ status: "active", bookingId: original.bookingId });
+        await pressNext(page);
+        await expectDetailsStep(page);
+        await expectReserved(page, native, slot);
+        expect(await native.document(slot.lockId)).toMatchObject({ status: "released", releaseReason: "booking_status_repair" });
+        await page.getByRole("button", { name: "Back", exact: true }).last().click();
+        await page.getByRole("button", { name: "Release Slot", exact: true }).click();
+        await expect.poll(() => readHold(page)).toBeNull();
+        expect(await native.document(slot.holdId)).toMatchObject({ phase: "released" });
+      } finally {
+        const held = await readHold(page);
+        if (held) await native.post("/api/releaseHold", { holdId: held.holdId, holdToken: held.holdToken });
+      }
     });
 
     test("a cancelled booking cannot be restored over the slot a customer has just reserved", async ({ page, context, flow, native }) => {

@@ -445,7 +445,7 @@ jobs:
       - uses: ./.github/actions/hold-ports
         with:
           playwright-ports: "3281"
-      - name: Run native booking-hold, payment recovery and coupon browser cases
+      - name: Run native booking-hold, payment recovery, coupon and slot lifecycle browser cases
         env:
           PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/native-booking-hold.json
         run: |

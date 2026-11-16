@@ -9,6 +9,8 @@ const { buildBookingSlotId, buildSlotHoldId } = await import("../../src/server/b
 const { verifyHoldToken } = await import("../../src/server/booking/holdToken.js");
 
 const packageTitle = "Vertex Essentials";
+const slotTimeUTC = "T04:30:00.000Z";
+const latePartialSubunits = 100;
 const adminStatus = (bookingId, status) =>
   fixture.post("/api/ref/updateBookingStatus", { bookingId, status }, "", { "x-admin-key": "fixture-only-admin" });
 const paymentSucceeded = (orderId, delivery) =>
@@ -26,9 +28,9 @@ const operations = {
   document: id => commerce.getDocument(id),
   referral: id => content.getDocument(id),
   freeSlot() {
-    const day = new Date(Date.UTC(2099, 0, 240 - seeded++)).toISOString().slice(0, 10);
-    const startTimeUTC = `${day}T04:30:00.000Z`;
-    return { startTimeUTC, date: day, lockId: buildBookingSlotId(startTimeUTC), holdId: buildSlotHoldId(startTimeUTC) };
+    const { date } = fixture.dateSlots.at(-1 - seeded++);
+    const startTimeUTC = `${date}${slotTimeUTC}`;
+    return { startTimeUTC, date, lockId: buildBookingSlotId(startTimeUTC), holdId: buildSlotHoldId(startTimeUTC) };
   },
   async book(slot, codes) {
     const held = await fixture.post("/api/holdSlot", { startTimeUTC: slot.startTimeUTC, packageTitle });
@@ -80,7 +82,7 @@ const operations = {
     await commerce.patch(bookingId).set({ status: "refunded" }).commit();
   },
   latePartialRefund: ({ paymentId }) => fixture.refundPayment(paymentId, [{
-    refund_id: `late_partial_${paymentId}`, payment_id: paymentId, amount: 100, currency: "USD", status: "succeeded", is_partial: true,
+    refund_id: `late_partial_${paymentId}`, payment_id: paymentId, amount: latePartialSubunits, currency: "USD", status: "succeeded", is_partial: true,
   }], `lifecycle_late_partial_${paymentId}`),
   async bookingsAt(startTimeUTC) {
     const bookings = await commerce.fetch('*[_type == "booking" && startTimeUTC == $startTimeUTC]', { startTimeUTC });
@@ -135,10 +137,13 @@ process.on("message", async ({ id, method, args }) => {
     if (method === "stop") {
       await fixture.stop();
       process.send({ id, value: true });
-      endOwnChannel();
       return;
     }
     process.send({ id, value: await operations[method](...args) });
-  } catch (error) { process.send({ id, error: error.stack || error.message }); }
+  } catch (error) {
+    process.send({ id, error: error.stack || error.message });
+  } finally {
+    if (method === "stop") endOwnChannel();
+  }
 });
 process.send({ ready: true, operations: Object.keys(operations) });
