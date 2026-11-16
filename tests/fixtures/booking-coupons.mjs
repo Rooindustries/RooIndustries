@@ -45,8 +45,6 @@ const methods = {
   setPrice: price => fixture.content.patch('package.fixture.1').set({ price }).commit(),
   rows: async type => (await fixture.database.sql`select payload from migration.source_documents
     where document_type = ${type} and not tombstoned order by legacy_sanity_id`).map(row => row.payload),
-  bookingsFor: async code => (await fixture.database.sql`select payload from migration.source_documents
-    where document_type = 'booking' and not tombstoned and payload->>'couponCode' = ${code}`).map(row => row.payload),
   webhook: (paymentId, type, id) => fixture.dodoWebhook(paymentId, type, id),
   refund: bookingId => fixture.post('/api/ref/updateBookingStatus', { bookingId, status: 'refunded' }, '', { 'x-admin-key': 'fixture-only-admin' }),
   disableLater: async id => {
@@ -66,11 +64,14 @@ process.on('message', async ({ id, method, args = [] }) => {
       await methods.unlockCommerce();
       await fixture.stop();
       process.send({ id, value: true });
-      endOwnChannel();
       return;
     }
     process.send({ id, value: (await methods[method](...args)) ?? null });
-  } catch (error) { process.send({ id, error: error.stack || error.message }); }
+  } catch (error) {
+    process.send({ id, error: error.stack || error.message });
+  } finally {
+    if (method === 'stop') endOwnChannel();
+  }
 });
 process.once('disconnect', () => fixture.stop());
 process.send({ ready: true });

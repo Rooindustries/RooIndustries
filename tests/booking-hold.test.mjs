@@ -387,12 +387,12 @@ test('booking rejects a coupon targeted at another package', async () => {
     discountAmount: 10, eligiblePackages: [{ _ref: 'package.fixture.2' }], canCombineWithReferral: true,
     isActive: true, timesUsed: 0 });
   const payload = await couponCall('hold');
+  const existing = await couponCall('rows', 'booking');
   const response = await couponCall('post', '/api/ref/createBooking', { ...payload, status: 'captured',
     paymentProvider: 'paypal', paypalOrderId: 'targeted-order', couponCode: 'TARGETED' });
   assert.equal(response.status, 400);
   assert.deepEqual(response.body, { error: 'This coupon is not valid for the selected package.' });
-  const bookings = await couponCall('bookingsFor', 'TARGETED');
-  assert.deepEqual(bookings, []);
+  assert.deepEqual(await couponCall('rows', 'booking'), existing);
 });
 
 test('booking rejects a coupon that cannot be combined with a referral', async () => {
@@ -401,10 +401,10 @@ test('booking rejects a coupon that cannot be combined with a referral', async (
   await couponCall('create', { _id: 'coupon.noclub', _type: 'coupon', code: 'NOCLUB', discountType: 'percent',
     discountPercent: 5, canCombineWithReferral: false, isActive: true, timesUsed: 0 });
   const payload = await couponCall('hold');
+  const existing = await couponCall('rows', 'booking');
   const response = await couponCall('post', '/api/ref/createBooking', { ...payload, status: 'captured',
     paymentProvider: 'paypal', paypalOrderId: 'noclub-order', couponCode: 'NOCLUB', referralCode: 'noclub' });
   assert.equal(response.status, 400);
   assert.deepEqual(response.body, { error: "This coupon can't be combined with a referral discount." });
-  const bookings = await couponCall('bookingsFor', 'NOCLUB');
-  assert.deepEqual(bookings, []);
+  assert.deepEqual(await couponCall('rows', 'booking'), existing);
 });
