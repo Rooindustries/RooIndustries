@@ -2,6 +2,7 @@ const { test, expect } = require("@playwright/test");
 const sharp = require("sharp");
 const { createHash, randomBytes } = require("node:crypto");
 const { adminControl, login, choose, prepareAdminContext } = require("./fixtures/admin-content.cjs");
+const { createContentGate } = require("./fixtures/content-store-gate.cjs");
 
 const LADDER = [128, 320, 640, 960, 1280];
 const ONE_YEAR = "max-age=31536000";
@@ -230,6 +231,28 @@ test("an image whose pixels cannot be read is refused like any other bad file", 
   expect(await sizesInBucket(request, sha1, 800)).toEqual({});
   const original = await request.get(`${await storageOrigin(request)}/storage/v1/object/public/site-content-public/images/${sha1}.png`);
   expect(original.ok()).toBe(false);
+});
+
+test("a published review image reaches visitors from its stored sizes", async ({ page, request, baseURL }) => {
+  const file = await png(800, 500);
+  const sha1 = sha1Of(file.buffer);
+  const asset = await openReviewImage(page);
+  try {
+    const outcome = await upload(page, asset, file);
+    expect(outcome.ok).toBe(true);
+    await page.getByRole("button", { name: "Publish", exact: true }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible();
+    const gallery = (await (await request.get("/api/content/reviews-gallery")).json()).data;
+    const published = gallery.find(review => review.image?.asset?._ref === outcome.data.assetId);
+    expect(published.image.sizes).toEqual([128, 320, 640, 800]);
+    await createContentGate(request, baseURL).rebuild(["/reviews"]);
+    await page.goto("/reviews");
+    const shown = page.locator(`img[src*="${sha1}"]`);
+    await expect(shown).toHaveAttribute("src", new RegExp(`/object/public/site-content-public/images/${sha1}-w800\\.webp$`));
+    expect((await shown.getAttribute("srcset")).split(", ").map(source => source.split(" ")[1])).toEqual(["128w", "320w", "640w", "800w"]);
+    await shown.scrollIntoViewIfNeeded();
+    await expect.poll(() => shown.evaluate(image => image.naturalWidth > 0 && image.currentSrc.split("/").pop())).toMatch(new RegExp(`^${sha1}-w(128|320|640|800)\\.webp$`));
+  } finally { expect((await request.post(`${adminControl()}/reset-content`)).ok()).toBe(true); }
 });
 
 test("a vector image and an animated image are stored as before and record no sizes", async ({ page, request }) => {

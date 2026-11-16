@@ -578,9 +578,10 @@ jobs:
           build-dirs: |
             .next-e2e-revalidation-benchmarks/cache/webpack
             .next-e2e-revalidation-static/cache/webpack
+            .next-e2e-image-sizes/cache/webpack
       - uses: ./.github/actions/hold-ports
         with:
-          playwright-ports: "3251 3261"
+          playwright-ports: "3251 3261 3271"
       - name: Run benchmarks revalidation suite
         id: benchmarks-revalidation
         env:
@@ -593,11 +594,18 @@ jobs:
           PW_PORT: "3261"
           PW_SERVER_ID: revalidation-static
         run: xvfb-run -a npm run test:static:revalidation -- --output=test-results/static-revalidation
+      - name: Run stored image sizes suite
+        if: ${{ !cancelled() }}
+        env:
+          PW_PORT: "3271"
+          PW_SERVER_ID: image-sizes
+        run: xvfb-run -a npm run test:image-sizes -- --output=test-results/image-sizes
       - uses: ./.github/actions/save-caches
         with:
           build-dirs: |
             .next-e2e-revalidation-benchmarks/cache/webpack
             .next-e2e-revalidation-static/cache/webpack
+            .next-e2e-image-sizes/cache/webpack
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
