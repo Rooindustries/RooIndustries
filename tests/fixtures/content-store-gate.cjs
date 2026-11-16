@@ -76,15 +76,19 @@ const createContentGate = (request, baseURL) => {
     },
     rebuild: async (paths) => {
       const writes = await get("/test-page-writes");
-      await Promise.all(paths.map(async (path) => {
-        const count = writes.filter((entry) => entry.key === path).length;
-        const response = await request.get(path, { headers: { accept: "text/html" } });
-        expect(response.ok()).toBe(true);
-        if (response.headers()["x-nextjs-cache"] === "STALE") {
-          const query = new URLSearchParams({ kind: "write", key: path, count: String(count + 1) });
-          expect((await request.get(`${control}/await-test-event?${query}`)).ok()).toBe(true);
-        }
+      const results = await Promise.allSettled(paths.map(async (path) => {
+        try {
+          const count = writes.filter((entry) => entry.key === path).length;
+          const response = await request.get(path, { headers: { accept: "text/html" } });
+          expect(response.ok()).toBe(true);
+          if (response.headers()["x-nextjs-cache"] === "STALE") {
+            const query = new URLSearchParams({ kind: "write", key: path, count: String(count + 1) });
+            expect((await request.get(`${control}/await-test-event?${query}`)).ok()).toBe(true);
+          }
+        } catch (error) { throw new Error(`rebuild ${path}: ${error.message}`, { cause: error }); }
       }));
+      const failed = results.find(result => result.status === "rejected");
+      if (failed) throw failed.reason;
     },
     cleanup: async (...actions) => {
       let failure;

@@ -65,6 +65,7 @@ const waitForEvent = (response, ready) => {
     response.writeHead(200, { "Content-Type": "application/json" });
     response.end(JSON.stringify(value));
   };
+  finish.description = response.req.url;
   finish.cancel = () => {
     eventWaiters.delete(finish);
     if (!response.destroyed && !response.writableEnded) {
@@ -440,13 +441,6 @@ try {
     await execute([next, "build"]);
   }
   await releaseTcpPorts(target.hostname, [port]);
-  const appPath = path.join(dist, "server/app");
-  const fetchPath = path.join(dist, "cache/fetch-cache");
-  const savedPath = path.join(dist, "case-baseline");
-  fs.mkdirSync(savedPath, { recursive: true });
-  if (fs.existsSync(appPath)) fs.cpSync(appPath, path.join(savedPath, "app"), { recursive: true });
-  if (fs.existsSync(fetchPath)) fs.cpSync(fetchPath, path.join(savedPath, "fetch-cache"), { recursive: true });
-  let restarting = false;
   let finish, fail;
   const lifetime = new Promise((resolve, reject) => { finish = resolve; fail = reject; });
   const startApp = () => new Promise((resolve, reject) => {
@@ -467,36 +461,54 @@ try {
     child.once("error", error => { if (!ready) reject(error); else fail(error); });
     child.once("exit", (code, signal) => {
       if (!ready) reject(new Error(`Admin fixture server exited ${signal || code}.`));
-      else if (!restarting) (stopped || code === 0 ? finish : fail)(new Error(`Admin fixture server exited ${signal || code}.`));
+      else (stopped || code === 0 ? finish : fail)(new Error(`Admin fixture server exited ${signal || code}.`));
     });
   });
   resetIsolation = async () => {
-    fixture.pause();
-    restarting = true;
-    try { await stopActive(); } finally { restarting = false; }
+    const started = Date.now();
+    const step = async (name, action) => {
+      try { return await action(); } catch (error) { throw new Error(`reset: ${name}: ${error.message}`, { cause: error }); }
+    };
+    const hook = async (header, extra = {}) => {
+      const response = await fetch(baseURL, { headers: { [header]: "1", ...extra } });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response;
+    };
+    const controls = await step("inspect controls", async () => (await hook("x-roo-test-inspect-controls")).json());
+    const leftovers = [
+      ...storeHolds.map(({ trace, rpc }) => `held store ${trace}/${rpc}`),
+      ...[...eventWaiters].map(waiter => `pending waiter ${waiter.description}`),
+      ...controls.active.map(({ trace, content, pages, holds }) => `hang control ${trace}/${[content && "content purge", pages && "page mark", holds && `${holds} holds`].filter(Boolean).join(", ")}`),
+      ...controls.failures.map(({ trace, content, pages }) => `forced failure ${trace}/${[content && "content purge", pages && "page mark"].filter(Boolean).join(", ")}`),
+      ...(controls.storeDelayMs ? [`store delay ${controls.storeDelayMs}ms`] : []),
+    ];
+    await step("clear controls", () => hook("x-roo-test-reset-all-controls", { "x-roo-test-clear-rounds": "1" }));
     for (const hold of storeHolds.splice(0)) hold.release();
     for (const waiter of eventWaiters) waiter.cancel();
-    storeRules.clear(); closedStores.clear();
-    storeCalls.length = 0; purges.length = 0; pageRefusals.length = 0;
-    refreshEvents.length = 0; refreshErrors.length = 0; keptAlive.length = 0; pageWrites.length = 0;
-    adminFixture.sessions.clear(); adminFixture.requests.length = 0;
-    adminFixture.setLoginReply(null); adminFixture.setLogoutReply(null);
-    emails.length = 0; notificationSequence = 0;
-    await databaseSnapshot.cancelPending();
-    await fixture.drain();
-    await databaseSnapshot.restore();
-    const changed = await databaseSnapshot.differences();
-    if (changed.length) throw new Error(`Fixture database differs: ${changed.join(", ")}`);
-    fs.rmSync(appPath, { recursive: true, force: true });
-    if (fs.existsSync(path.join(savedPath, "app"))) fs.cpSync(path.join(savedPath, "app"), appPath, { recursive: true });
-    fs.rmSync(fetchPath, { recursive: true, force: true });
-    if (fs.existsSync(path.join(savedPath, "fetch-cache"))) fs.cpSync(path.join(savedPath, "fetch-cache"), fetchPath, { recursive: true });
-    fixture.resume();
-    await startApp();
-    const inspected = await fetch(baseURL, { headers: { "x-roo-test-inspect-controls": "1" } });
-    const { contentReads, ...controls } = await inspected.json();
-    if (!inspected.ok || Object.values(controls).some(Boolean)) throw new Error("Fixture controls did not reset.");
-    return { database: changed.length, rules: storeRules.size, holds: storeHolds.length, waiters: eventWaiters.size, closed: closedStores.size, ...controls };
+    const clearRecords = () => {
+      storeRules.clear(); closedStores.clear();
+      storeCalls.length = 0; purges.length = 0; pageRefusals.length = 0;
+      refreshEvents.length = 0; refreshErrors.length = 0; keptAlive.length = 0; pageWrites.length = 0;
+      adminFixture.sessions.clear(); adminFixture.requests.length = 0;
+      adminFixture.setLoginReply(null); adminFixture.setLogoutReply(null);
+      emails.length = 0; notificationSequence = 0;
+    };
+    fixture.pause();
+    let comparisonFailure;
+    try {
+      await step("cancel pending database requests", () => databaseSnapshot.cancelPending());
+      await step("drain requests", () => fixture.drain());
+      const revision = await step("read revision", () => databaseSnapshot.revision());
+      await step("restore database", () => databaseSnapshot.restore());
+      try {
+        const changed = await step("compare database", () => databaseSnapshot.differences());
+        if (changed.length) throw new Error(`reset: compare database: ${changed.join(", ")}`);
+      } catch (error) { comparisonFailure = error; }
+      await step("advance revision", () => databaseSnapshot.advanceRevision(revision));
+    } finally { fixture.resume(); clearRecords(); }
+    await step("mark pages", () => hook("x-roo-test-mark-pages"));
+    if (comparisonFailure) throw comparisonFailure;
+    return { leftovers, durationMs: Date.now() - started };
   };
   await startApp();
   await lifetime;

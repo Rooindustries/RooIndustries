@@ -355,18 +355,20 @@ for (const [kind, header, expected] of [
     const gate = createContentGate(request, baseURL);
     const original = await gate.document(PACKAGE);
     const attempt = gate.traced();
-    const response = await request.post("/api/admin/content/publish", {
-      headers: { ...attempt.headers, "x-admin-key": "synthetic-admin-key", [header]: "1" },
-      data: gate.replaceCommand(original, { price: `$${400 + Math.floor(Math.random() * 400)}.79` }),
-    });
-    expect(response.status()).toBe(200);
-    expect((await response.json()).data.refresh).toEqual(expected);
-    await waitForEvents(gate, "refresh", attempt.trace, 3);
-    await waitForEvents(gate, "refresh-error", attempt.trace, 3);
-    const events = (await (await request.get(`${gate.control}/refresh-events?trace=${attempt.trace}`)).json()).map(({ event }) => event);
-    const errors = (await (await request.get(`${gate.control}/refresh-errors?trace=${attempt.trace}`)).json()).map(({ label }) => label);
-    expect(events).toEqual(["now", "5s", "60s"].map((round) => ({ event: "public_pages_refresh", round, pages: kind === "pages" ? "failed" : "marked", content: kind === "content" ? "failed" : "purged" })));
-    expect(errors).toEqual(Array(3).fill(kind === "pages" ? "Public pages mark failed" : "Public content CDN purge failed"));
-    console.log(`REFRESH_FAILURE ${JSON.stringify({ kind, events, errors })}`);
+    try {
+      const response = await request.post("/api/admin/content/publish", {
+        headers: { ...attempt.headers, "x-admin-key": "synthetic-admin-key", [header]: "1" },
+        data: gate.replaceCommand(original, { price: `$${400 + Math.floor(Math.random() * 400)}.79` }),
+      });
+      expect(response.status()).toBe(200);
+      expect((await response.json()).data.refresh).toEqual(expected);
+      await waitForEvents(gate, "refresh", attempt.trace, 3);
+      await waitForEvents(gate, "refresh-error", attempt.trace, 3);
+      const events = (await (await request.get(`${gate.control}/refresh-events?trace=${attempt.trace}`)).json()).map(({ event }) => event);
+      const errors = (await (await request.get(`${gate.control}/refresh-errors?trace=${attempt.trace}`)).json()).map(({ label }) => label);
+      expect(events).toEqual(["now", "5s", "60s"].map((round) => ({ event: "public_pages_refresh", round, pages: kind === "pages" ? "failed" : "marked", content: kind === "content" ? "failed" : "purged" })));
+      expect(errors).toEqual(Array(3).fill(kind === "pages" ? "Public pages mark failed" : "Public content CDN purge failed"));
+      console.log(`REFRESH_FAILURE ${JSON.stringify({ kind, events, errors })}`);
+    } finally { await attempt.reset(); }
   });
 }

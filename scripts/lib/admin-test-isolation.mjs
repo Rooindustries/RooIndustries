@@ -26,6 +26,18 @@ export async function snapshotDatabase(client) {
     [sequence.value] = await sql.unsafe(`select last_value, is_called from ${sequence.source}`);
   }
   return {
+    async revision() {
+      const [row] = await sql`select count(*)::int as count from migration.cms_publish_commands where status = 'committed'`;
+      return row.count;
+    },
+    async advanceRevision(previous) {
+      const baseline = await this.revision();
+      const count = previous - baseline + 1;
+      if (count < 1) throw new Error(`Receipt count ${previous} is below the snapshot count ${baseline}.`);
+      await sql`insert into migration.cms_publish_commands (command_id, request_hash, actor, operation, status, result, committed_at)
+        select 'cms:' || hash, hash, 'admin:test-reset', 'replace', 'committed', '{}'::jsonb, now()
+        from (select encode(sha256(convert_to(gen_random_uuid()::text || n::text, 'UTF8')), 'hex') as hash from generate_series(1, ${count}) n) receipts`;
+    },
     async cancelPending() {
       await sql`select pg_cancel_backend(pid) from pg_stat_activity
         where datname = current_database() and pid <> pg_backend_pid()

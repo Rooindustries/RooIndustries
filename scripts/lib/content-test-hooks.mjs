@@ -26,8 +26,28 @@ if (control) {
       const controls = globalThis[Symbol.for("roo.test.controls")];
       const response = rest[0];
       response.writeHead(200, { "Content-Type": "application/json" });
-      response.end(JSON.stringify({ failures: failures.size, active: activeControls.size, timers: scheduledRounds.size, storeDelayMs: controls?.storeDelayMs || 0, contentReads }));
+      response.end(JSON.stringify({ failures: [...failures].map(([trace, failure]) => ({ trace, ...failure })), active: [...activeControls].map(([trace, active]) => ({ trace, content: active.hangContentPurge, pages: active.hangPageMark, holds: active.holds.size })), timers: scheduledRounds.size, storeDelayMs: controls?.storeDelayMs || 0, contentReads }));
       return true;
+    }
+    if (request?.headers?.["x-roo-test-reset-all-controls"] === "1") {
+      if (request.headers["x-roo-test-clear-rounds"] === "1") {
+        for (const timer of scheduledRounds) clearTimeout(timer);
+        scheduledRounds.clear();
+      }
+      failures.clear();
+      for (const active of activeControls.values()) {
+        active.hangContentPurge = false;
+        active.hangPageMark = false;
+        for (const release of active.holds) release();
+        active.holds.clear();
+      }
+      activeControls.clear();
+      (globalThis[Symbol.for("roo.test.controls")] ||= { storeDelayMs: 0 }).storeDelayMs = 0;
+      rest[0].writeHead(200); rest[0].end("ok"); return true;
+    }
+    if (request?.headers?.["x-roo-test-mark-pages"] === "1") {
+      globalThis[Symbol.for("roo.test.pageMarks")].at = Date.now();
+      rest[0].writeHead(200); rest[0].end("ok"); return true;
     }
     const trace = request?.headers?.["x-roo-test-trace"];
     if (typeof trace === "string" && (request?.headers?.["x-roo-test-fail-content-purge"] === "1" || request?.headers?.["x-roo-test-fail-page-mark"] === "1")) {
