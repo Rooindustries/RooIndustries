@@ -371,12 +371,12 @@ jobs:
           NEXT_DIST_DIR: .next-e2e-native-booking
           PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/native-booking-hold.json
         run: |
-          xvfb-run -a npx playwright test tests/booking-hold.spec.js tests/booking-payment-recovery.spec.js --project=chromium --workers=1 --retries=0 --output=test-results/booking-hold-e2e --reporter=line,json
+          xvfb-run -a npx playwright test tests/booking-hold.spec.js tests/booking-payment-recovery.spec.js tests/booking-coupons.spec.js --project=chromium --workers=1 --retries=0 --output=test-results/booking-hold-e2e --reporter=line,json
           node - <<'NODE'
           const assert = require('node:assert/strict');
           const { stats } = require('./test-results/native-booking-hold.json');
           assert.equal(stats.skipped, 0, 'Native booking-hold cases must not skip');
-          assert.equal(stats.expected, 8, 'All eight native booking cases must pass');
+          assert.equal(stats.expected, 20, 'All native booking cases must pass');
           assert.equal(stats.unexpected, 0);
           assert.equal(stats.flaky, 0);
           NODE
