@@ -368,7 +368,13 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
         let rows = documents.filter(row => !contentMissing.includes(row._type) && (!body.p_document_types || body.p_document_types.includes(row._type)) && (!body.p_ids || body.p_ids.includes(row._id)));
         for (const filter of body.p_filters) {
           if (!['eq', 'ieq', 'in'].includes(filter.op) || typeof filter.path !== 'string') throw new Error('Unsupported fixture filter.');
-          rows = rows.filter(row => { const value = filter.path.split('.').reduce((item, key) => item?.[key], row); return filter.op === 'in' ? Array.isArray(filter.value) && filter.value.includes(value) : filter.op === 'ieq' ? String(value).toLowerCase() === String(filter.value).toLowerCase() : value === filter.value; });
+          rows = rows.filter(row => {
+            const found = filter.path.split('.').reduce((item, key) => item !== null && typeof item === 'object' && !Array.isArray(item) ? item[key] : undefined, row);
+            const actual = found ?? null, expected = filter.value ?? null;
+            if (filter.op === 'in') return Array.isArray(expected) && expected.includes(actual);
+            if (filter.op === 'ieq') return typeof actual === 'string' ? actual.toLowerCase() === expected : expected === null;
+            return actual === expected;
+          });
         }
         rows = rows.sort((a, b) => a._id < b._id ? -1 : a._id > b._id ? 1 : 0).slice(0, body.p_limit); call.status = 200; call.rows = rows.length; json(res, 200, url.pathname.endsWith('/roo_fetch_public_content_documents') ? { revision: contentRevision, documents: rows } : rows);
       } else if (req.method === 'POST' && url.pathname === '/rest/v1/rpc/roo_asset_manifest_for_refs') {
