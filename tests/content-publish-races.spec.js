@@ -71,6 +71,8 @@ test("R2 a revision checked before publish cannot cache an old price after the s
   const after = await read(request, "/packages");
   const result = { calls: await render.calls(), firstCache: first.cache, cache: after.cache, maxAge: after.maxAge, showsA: after.body.includes(priceA), showsB: after.body.includes(priceB) };
   report("R2", result);
+  expect(first.status).toBe(200);
+  expect(after.status).toBe(200);
   expect(after.cache === "HIT" && after.maxAge >= 60 && result.showsA, "pre-publish price cached as fresh").toBe(false);
   } finally {
     await gate.cleanup(
