@@ -48,9 +48,9 @@ export async function snapshotDatabase(client) {
       const changed = [];
       for (const table of tables) {
         const [result] = await sql.unsafe(`select exists (
-          (select to_jsonb(t) from ${table.source} t except all select to_jsonb(s) from ${table.copy} s)
+          (select to_jsonb(t) from (select ${table.columns} from ${table.source}) t except all select to_jsonb(s) from (select ${table.columns} from ${table.copy}) s)
           union all
-          (select to_jsonb(s) from ${table.copy} s except all select to_jsonb(t) from ${table.source} t)
+          (select to_jsonb(s) from (select ${table.columns} from ${table.copy}) s except all select to_jsonb(t) from (select ${table.columns} from ${table.source}) t)
         ) as changed`);
         if (result.changed) changed.push(`${table.schema}.${table.name}`);
       }
