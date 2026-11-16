@@ -17,7 +17,7 @@ const createPublicContentFetcher = async ({ confirmed = false } = {}) => {
       });
   }
   return async (resource) => {
-    const entry = await fetchPublicContentEntry({ resource, backend, searchParams: new URLSearchParams() });
+    const entry = await fetchPublicContentEntry({ resource, searchParams: new URLSearchParams() });
     if (!entry.confirmed) {
       throw Object.assign(new Error("Public content was not confirmed at the current revision."), { code: "PUBLIC_CONTENT_UNCONFIRMED" });
     }
@@ -90,7 +90,7 @@ const loadAtOneRevision = async (resources, required) => {
 
 const HOME_RESOURCES = ["hero", "reviews", "about", "services", "packages-list", "packages-settings", "how-it-works", "supported-games", "faq-settings", "faq-questions", "referral-box"];
 
-const buildHomePageData = (parts, part) => applyHomePageCopyOverrides({
+const buildHomePageData = (part) => applyHomePageCopyOverrides({
   hero: resolveHeroCopy(part("hero", null)),
   reviews: part("reviews", null),
   about: part("about", null),
@@ -119,13 +119,12 @@ async function fetchHomePageData({
       await refuse(error);
     }
     contentConfirmed(page, mark);
-    return buildHomePageData(parts, (resource, fallback) => (resource in parts ? parts[resource] : fallback));
+    return buildHomePageData((resource, fallback) => (resource in parts ? parts[resource] : fallback));
   }
   let fetchContent;
   try {
-    fetchContent = await createPublicContentFetcher({ confirmed: requireContent });
-  } catch (error) {
-    if (requireContent) await refuse(error);
+    fetchContent = await createPublicContentFetcher();
+  } catch {
     console.warn("[content] home fetch failed");
     fetchContent = async () => null;
   }
@@ -139,46 +138,11 @@ async function fetchHomePageData({
     }
   };
 
-  const [
-    hero,
-    reviews,
-    about,
-    services,
-    packagesList,
-    packagesSettings,
-    howItWorks,
-    supportedGames,
-    faqSettings,
-    faqQuestions,
-    referralBox,
-  ] = await Promise.all([
-    safeFetch("hero", null),
-    safeFetch("reviews", null),
-    safeFetch("about", null),
-    safeFetch("services", null),
-    safeFetch("packages-list", []),
-    safeFetch("packages-settings", null),
-    safeFetch("how-it-works", null),
-    safeFetch("supported-games", null),
-    safeFetch("faq-settings", null),
-    safeFetch("faq-questions", []),
-    safeFetch("referral-box", null),
-  ]);
-  return applyHomePageCopyOverrides({
-    hero: resolveHeroCopy(hero),
-    reviews,
-    about,
-    services,
-    packagesList: buildPackageOffers(packagesList),
-    packagesSettings,
-    howItWorks,
-    supportedGames,
-    faqSettings,
-    faqQuestions: normalizeFaqQuestions(
-      Array.isArray(faqQuestions) ? faqQuestions : []
-    ),
-    referralBox,
-  });
+  const values = await Promise.all(HOME_RESOURCES.map((resource) =>
+    safeFetch(resource, resource === "packages-list" || resource === "faq-questions" ? [] : null)
+  ));
+  const parts = Object.fromEntries(HOME_RESOURCES.map((resource, index) => [resource, values[index]]));
+  return buildHomePageData((resource) => parts[resource]);
 }
 
 const PER_REQUEST_CONTENT_WAIT_MS = 1000;
@@ -228,7 +192,7 @@ async function fetchPrivacyPolicy() {
   }
 }
 
-async function fetchStaticPageContent(resource, { requireContent = false, confirmed = requireContent } = {}) {
+async function fetchStaticPageContent(resource, { requireContent = false, confirmed } = {}) {
   const mark = refusalMark(resource);
   if (requireContent) {
     try {
@@ -240,13 +204,8 @@ async function fetchStaticPageContent(resource, { requireContent = false, confir
   }
   try {
     const fetchContent = await createPublicContentFetcher({ confirmed });
-    const content = await fetchContent(resource);
-    if (requireContent && content == null) {
-      throw Object.assign(new Error(`No published ${resource} document.`), { code: "PAGE_CONTENT_MISSING" });
-    }
-    return requireContent ? contentConfirmed(resource, mark, content) : content;
-  } catch (error) {
-    if (requireContent) await refuseContentFallback(resource, "Page content unavailable; keeping the previous page", error);
+    return await fetchContent(resource);
+  } catch {
     return null;
   }
 }
@@ -262,12 +221,10 @@ async function fetchContentList(resource, label, { requireContent = false } = {}
     }
   }
   try {
-    const fetchContent = await createPublicContentFetcher({ confirmed: requireContent });
+    const fetchContent = await createPublicContentFetcher();
     const rows = await fetchContent(resource);
-    const content = Array.isArray(rows) ? rows : [];
-    return requireContent ? contentConfirmed(resource, mark, content) : content;
-  } catch (error) {
-    if (requireContent) await refuseContentFallback(resource, `${label} content unavailable; keeping the previous page`, error);
+    return Array.isArray(rows) ? rows : [];
+  } catch {
     return null;
   }
 }
@@ -291,16 +248,14 @@ async function fetchPackagesPageData({ requireContent = false } = {}) {
   }
   let fetchContent;
   try {
-    fetchContent = await createPublicContentFetcher({ confirmed: requireContent });
-  } catch (error) {
-    if (requireContent) await refuse(error);
+    fetchContent = await createPublicContentFetcher();
+  } catch {
     return { packagesList: null, packagesSettings: null };
   }
   const read = async (resource) => {
     try {
       return await fetchContent(resource);
-    } catch (error) {
-      if (requireContent) await refuse(error);
+    } catch {
       return null;
     }
   };
@@ -308,7 +263,6 @@ async function fetchPackagesPageData({ requireContent = false } = {}) {
     read("packages-list"),
     read("packages-settings"),
   ]);
-  if (requireContent) contentConfirmed("/packages", mark);
   return { packagesList, packagesSettings };
 }
 
