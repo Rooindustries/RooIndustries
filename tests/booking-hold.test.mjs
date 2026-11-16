@@ -53,18 +53,11 @@ const paymentMessage = "This slot already has a payment session in progress.";
 const holdDocuments = async () => (await fixture.commerce.dataset({ documentTypes: ["slotHold"] }))
   .sort((left, right) => left._id.localeCompare(right._id));
 const withConfiguredSlot = async (startTimeUTC, run) => {
-  const { createSupabaseAdminClient } = await import("../src/server/supabase/adminClient.js");
-  const { createSupabaseDocumentClient } = await import("../src/server/supabase/documentClient.js");
-  const { BOOKING_SETTINGS_ID, getOwnerSlotDetails } = await import("../src/server/booking/slotPolicy.js");
-  const content = createSupabaseDocumentClient({ shadowClient: createSupabaseAdminClient() });
-  const settings = await content.getDocument(BOOKING_SETTINGS_ID);
-  const slot = getOwnerSlotDetails(startTimeUTC);
-  const time = `${String(slot.hour).padStart(2, "0")}:${String(slot.minute).padStart(2, "0")}`;
   try {
-    await content.patch(BOOKING_SETTINGS_ID).set({ dateSlots: [...settings.dateSlots, { date: slot.dateKey, times: [time] }] }).commit();
+    await fixture.slotAt(startTimeUTC);
     await run();
   } finally {
-    await content.patch(BOOKING_SETTINGS_ID).set({ dateSlots: settings.dateSlots }).commit();
+    await fixture.restoreSettings();
   }
 };
 
@@ -230,8 +223,8 @@ test("environment and database pauses prevent new holds", async () => {
 });
 
 test("a configured slot two minutes ahead can be reserved", async () => {
-  const startTimeUTC = new Date(Math.ceil((Date.now() + 120_000) / 60_000) * 60_000).toISOString();
-  await withConfiguredSlot(startTimeUTC, async () => {
+  try {
+    const { startTimeUTC } = await fixture.nearSlot(120_000);
     const response = await fixture.post("/api/holdSlot", { startTimeUTC, packageTitle: "Performance Vertex Overhaul" },
       "", { "x-forwarded-for": "192.0.2.57" });
     assert.equal(response.status, 200);
@@ -239,7 +232,9 @@ test("a configured slot two minutes ahead can be reserved", async () => {
     const hold = await fixture.commerce.getDocument(response.body.holdId);
     assert.equal(hold.startTimeUTC, startTimeUTC);
     assert.equal(hold.phase, "active");
-  });
+  } finally {
+    await fixture.restoreSettings();
+  }
 });
 
 test("a configured slot in the past cannot be reserved", async () => {
@@ -290,14 +285,14 @@ test("an unreachable database refuses a reservation without writing", async () =
   const before = await fixture.snapshot(startTimeUTC);
   let response;
   try {
-    fixture.setRequestHook(phase => { if (phase === "before") throw new Error("fixture database unreachable"); });
+    await fixture.setFault("unreachable");
     response = await fetch(`${fixture.baseURL}/api/holdSlot`, {
       method: "POST", headers: { "content-type": "application/json", origin: fixture.baseURL,
         "x-forwarded-for": "192.0.2.61" },
       body: JSON.stringify({ startTimeUTC, packageTitle: "Performance Vertex Overhaul" }),
     });
   } finally {
-    fixture.setRequestHook(null);
+    await fixture.clearFault("unreachable");
   }
   assert.equal(response.status, 503);
   assert.equal(response.headers.get("retry-after"), "60");
@@ -309,16 +304,13 @@ test("an unreachable database refuses a reservation without writing", async () =
 test("a refused hold write leaves no reservation behind", async () => {
   const startTimeUTC = `${fixture.nextSlotDate()}T04:30:00.000Z`;
   const before = await fixture.snapshot(startTimeUTC);
-  await fixture.sql.unsafe(`create function migration.fixture_refuse_hold_write() returns trigger
-    language plpgsql as $$ begin raise exception 'fixture hold write refused'; end; $$;
-    create trigger fixture_refuse_hold_write before insert or update on migration.source_documents
-    for each row when (new.document_type = 'slotHold') execute function migration.fixture_refuse_hold_write();`);
+  await fixture.setFault("write");
   let response;
   try {
     response = await fixture.post("/api/holdSlot", { startTimeUTC, packageTitle: "Performance Vertex Overhaul" },
       "", { "x-forwarded-for": "192.0.2.62" });
   } finally {
-    await fixture.sql.unsafe("drop trigger fixture_refuse_hold_write on migration.source_documents; drop function migration.fixture_refuse_hold_write();");
+    await fixture.clearFault("write");
   }
   assert.equal(response.status, 500);
   assert.deepEqual(response.body, { ok: false, message: "Failed to reserve this slot. Please try again." });
@@ -327,9 +319,7 @@ test("a refused hold write leaves no reservation behind", async () => {
 
 test("missing booking settings refuse a reservation without writing", async () => {
   const startTimeUTC = `${fixture.nextSlotDate()}T04:30:00.000Z`;
-  const id = "6d8a3646-0ed2-44b5-ad45-c5c9d578126a";
-  const settings = await fixture.content.getDocument(id);
-  await fixture.content.delete(id);
+  await fixture.setFault("settings");
   try {
     const before = await fixture.snapshot(startTimeUTC);
     const response = await fixture.post("/api/holdSlot", { startTimeUTC, packageTitle: "Performance Vertex Overhaul" },
@@ -338,7 +328,7 @@ test("missing booking settings refuse a reservation without writing", async () =
     assert.deepEqual(response.body, { ok: false, message: "Failed to reserve this slot. Please try again." });
     assert.deepEqual(await fixture.snapshot(startTimeUTC), before);
   } finally {
-    await fixture.content.createOrReplace(settings);
+    await fixture.clearFault("settings");
   }
 });
 

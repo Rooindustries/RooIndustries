@@ -129,15 +129,17 @@ export async function createBookingHoldFixture() {
     const restoreSettings = () => content.createOrReplace(originalSettings);
     const setSlots = (date, times) => content.createOrReplace({ ...originalSettings,
       dateSlots: [{ date, times }], packageDateSlots: [] });
-    let nearMinute = 0;
-    const nearSlot = async () => {
-      nearMinute = Math.max(nearMinute + 60_000, Math.ceil((Date.now() + 300_000) / 60_000) * 60_000);
-      const startTimeUTC = new Date(nearMinute).toISOString();
+    const slotAt = async startTimeUTC => {
       const { getOwnerSlotDetails } = await import("../../src/server/booking/slotPolicy.js");
       const slot = getOwnerSlotDetails(startTimeUTC);
       const time = `${String(slot.hour).padStart(2, "0")}:${String(slot.minute).padStart(2, "0")}`;
       await setSlots(slot.dateKey, [time]);
       return { startTimeUTC, date: slot.dateKey, time };
+    };
+    let nearMinute = 0;
+    const nearSlot = (leadMs = 300_000) => {
+      nearMinute = Math.max(nearMinute + 60_000, Math.ceil((Date.now() + leadMs) / 60_000) * 60_000);
+      return slotAt(new Date(nearMinute).toISOString());
     };
     let extraDate = 0;
     const extraSlot = async () => {
@@ -227,8 +229,8 @@ export async function createBookingHoldFixture() {
         res.end(body);
       } catch (error) { res.writeHead(500, { "content-type": "application/json" }); res.end(JSON.stringify({ error: error.message })); }
     });
-    const post = async (route, body, authorization = "", headers = {}) => {
-      globalThis.__rooRateLimitBuckets?.clear();
+    const post = async (route, body, authorization = "", headers = {}, { counted = false } = {}) => {
+      if (!counted) globalThis.__rooRateLimitBuckets?.clear();
       const response = await fetch(`${baseURL}${route}`, {
         method: "POST",
         headers: {
@@ -239,11 +241,6 @@ export async function createBookingHoldFixture() {
         },
         body: JSON.stringify(body),
       });
-      return { status: response.status, body: await response.json() };
-    };
-    const countedPost = async (route, body, headers = {}) => {
-      const response = await fetch(`${baseURL}${route}`, { method: "POST",
-        headers: { "content-type": "application/json", origin: baseURL, ...headers }, body: JSON.stringify(body) });
       return { status: response.status, body: await response.json() };
     };
     const get = async route => {
@@ -259,8 +256,7 @@ export async function createBookingHoldFixture() {
     globalThis.Date = ShiftedDate;
     const restoreClock = () => { clockShiftMs = 0; };
     const setPaymentStatus = status => { paymentStatus = status; };
-    const holdRunsOut = async holdId => {
-      clockShiftMs = 21 * 60_000;
+    const expireHold = async holdId => {
       const expiresAt = new RealDate(RealDate.now() - 1000).toISOString();
       await database.sql.begin(async sql => {
         await sql`set local session_replication_role = replica`;
@@ -271,6 +267,10 @@ export async function createBookingHoldFixture() {
         await sql`update commerce.slot_claims set expires_at = ${expiresAt}
           where hold_id = (select id from commerce.slot_holds where legacy_sanity_id = ${holdId})`;
       });
+    };
+    const holdRunsOut = async holdId => {
+      clockShiftMs = 21 * 60_000;
+      await expireHold(holdId);
     };
     const reconcile = () => post("/api/payment/reconcile", {}, "Bearer fixture-only-cron");
     const paymentSucceeded = async holdId => {
@@ -302,10 +302,9 @@ export async function createBookingHoldFixture() {
       assert.equal(quote.status, 200, JSON.stringify(quote));
       return post("/api/payment/start", { provider: "dodo", bookingPayload, quoteFingerprint: quote.body.quoteFingerprint });
     };
-    return { baseURL, post, get, hold, start, nextSlotDate, commerce, content, sql: database.sql,
-      setRequestHook: database.setRequestHook, details, evidence, save, stop,
+    return { baseURL, post, get, hold, start, nextSlotDate, commerce, content, sql: database.sql, details, evidence, save, stop,
       setPaymentStatus, holdRunsOut, restoreClock, reconcile, paymentSucceeded, setPackageSlots, restoreSettings,
-      createBooking, setHoldPhase, snapshot, setSlots, nearSlot, extraSlot, resetRateLimits, rateWindow, countedPost,
+      createBooking, setHoldPhase, snapshot, setSlots, slotAt, nearSlot, extraSlot, resetRateLimits, rateWindow, expireHold,
       commandCount, setFault, clearFault };
   } catch (error) { await stop(); throw error; }
 }
@@ -318,7 +317,7 @@ if (process.argv.includes("--worker")) {
   process.once("disconnect", () => { fixture.stop(); });
   const forwardedMethods = ["get", "setPaymentStatus", "holdRunsOut", "restoreClock", "reconcile", "paymentSucceeded",
     "setPackageSlots", "restoreSettings", "createBooking", "setHoldPhase", "snapshot", "setSlots", "nearSlot", "extraSlot",
-    "resetRateLimits", "rateWindow", "countedPost", "commandCount", "setFault", "clearFault"];
+    "resetRateLimits", "rateWindow", "expireHold", "commandCount", "setFault", "clearFault"];
   process.on("message", async ({ id, method, args = [] }) => {
     try {
       let value;

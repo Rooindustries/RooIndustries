@@ -34,12 +34,12 @@ const test = base.extend({
       await ready;
       await use({ post: (...args) => call("post", ...args), get: route => call("get", route), nextSlotDate: () => call("nextSlotDate"),
         getHold: id => call("getHold", id), verifyHold: hold => call("verifyHold", hold),
-        holdRunsOut: id => call("holdRunsOut", id), restoreClock: () => call("restoreClock"),
+        expireHold: id => call("expireHold", id),
         setPaymentStatus: status => call("setPaymentStatus", status), paymentSucceeded: id => call("paymentSucceeded", id),
         setPackageSlots: date => call("setPackageSlots", date), restoreSettings: () => call("restoreSettings"),
         createBooking: start => call("createBooking", start), setHoldPhase: (id, phase) => call("setHoldPhase", id, phase),
         snapshot: start => call("snapshot", start), evidence: () => call("evidence"),
-        countedPost: (...args) => call("countedPost", ...args), resetRateLimits: () => call("resetRateLimits"),
+        resetRateLimits: () => call("resetRateLimits"),
         rateWindow: () => call("rateWindow"), extraSlot: () => call("extraSlot"), nearSlot: () => call("nearSlot"),
         setSlots: (date, times) => call("setSlots", date, times), setFault: mode => call("setFault", mode),
         clearFault: mode => call("clearFault", mode) });
@@ -56,6 +56,12 @@ const test = base.extend({
 test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata", reducedMotion: "reduce", trace: "off" });
 test.skip(nativeBinariesMissing, "Needs PG_BIN and POSTGREST_BIN for the native PostgreSQL 17 fixture.");
 const readHold = page => page.evaluate(() => JSON.parse(sessionStorage.getItem("my_slot_hold")));
+const expectNoSelection = async (page, hold = null) => {
+  await expect(page.getByRole("button", { name: "Next", exact: true }).last()).toHaveAttribute("aria-disabled", "true");
+  await expect(page.locator(".booking-slot-grid .bg-accent-strong")).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toHaveCount(0);
+  expect(await readHold(page)).toEqual(hold);
+};
 const startPayment = async (native, hold) => {
   const bookingPayload = { packageTitle: "Performance Vertex Overhaul", startTimeUTC: hold.startTimeUTC,
     slotHoldId: hold.holdId, slotHoldToken: hold.holdToken, email: "visitor@example.invalid",
@@ -67,19 +73,18 @@ const startPayment = async (native, hold) => {
     quoteFingerprint: quote.body.quoteFingerprint });
   expect(payment.status).toBe(200);
 };
-const routeToNative = async (context, native, date, packageSlots = false, counted = false) => {
+const routeToNative = async (context, native, date, { serverSettings = false, counted = false } = {}) => {
   await context.route(/\/api\/(holdSlot|releaseHold|payment\/quote|payment\/start)(?:\?|$)/, async route => {
     const request = route.request();
     const pathname = new URL(request.url()).pathname;
     const headers = { "x-forwarded-for": `192.0.2.${Number(date.slice(-2))}` };
-    const response = counted && pathname === "/api/holdSlot"
-      ? await native.countedPost(pathname, request.postDataJSON(), headers)
-      : await native.post(pathname, request.postDataJSON(), "", headers);
+    const response = await native.post(pathname, request.postDataJSON(), "", headers,
+      { counted: counted && pathname === "/api/holdSlot" });
     return route.fulfill({ status: response.status, contentType: "application/json", body: JSON.stringify(response.body) });
   });
   await context.route(/\/api\/bookingAvailability(?:\?|$)/, async route => {
     const response = await native.get("/api/bookingAvailability");
-    if (packageSlots) return route.fulfill({ status: response.status, contentType: "application/json", body: JSON.stringify(response.body) });
+    if (serverSettings) return route.fulfill({ status: response.status, contentType: "application/json", body: JSON.stringify(response.body) });
     const dateSlots = response.body.settings.dateSlots.filter(slot => slot.date === date);
     const settings = { ...response.body.settings, dateSlots, xocDateSlots: dateSlots,
       vertexEssentialsDateSlots: dateSlots, packageDateSlots: [] };
@@ -98,7 +103,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
           await page.evaluate(() => sessionStorage.clear());
           await native.resetRateLimits();
           const date = await native.extraSlot();
-          await routeToNative(context, native, date, false, true);
+          await routeToNative(context, native, date, { counted: true });
           await flow.booking();
           let posts = 0;
           const count = request => { if (new URL(request.url()).pathname === "/api/holdSlot") posts += 1; };
@@ -159,7 +164,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     test("a slot a few minutes ahead can be reserved", async ({ page, context, flow, native }) => {
       const slot = await native.nearSlot();
       try {
-        await routeToNative(context, native, slot.date, true);
+        await routeToNative(context, native, slot.date, { serverSettings: true });
         await flow.booking();
         const label = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Kolkata", hour: "numeric", minute: "2-digit" }).format(new Date(slot.startTimeUTC));
         const button = page.getByRole("button", { name: label, exact: true });
@@ -220,7 +225,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     test("a removed time cannot be reserved from an open page", async ({ page, context, flow, native }) => {
       const date = await native.extraSlot();
       try {
-        await routeToNative(context, native, date, true);
+        await routeToNative(context, native, date, { serverSettings: true });
         await flow.booking();
         await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
         await native.setSlots(date, ["11:00"]);
@@ -231,10 +236,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         expect((await response).status()).toBe(400);
         await expect(page.getByRole("alert").filter({ hasText: "This time is not available for the selected package." }))
           .toHaveText("This time is not available for the selected package.");
-        await expect(page.getByRole("button", { name: "Next", exact: true }).last()).toHaveAttribute("aria-disabled", "true");
-        await expect(page.locator(".booking-slot-grid .bg-accent-strong")).toHaveCount(0);
-        await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toHaveCount(0);
-        expect(await readHold(page)).toBeNull();
+        await expectNoSelection(page);
         expect(await native.snapshot(start)).toEqual(before);
       } finally {
         await native.restoreSettings();
@@ -300,10 +302,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await other.getByRole("button", { name: "Next", exact: true }).last().click();
         expect((await response).status()).toBe(409);
         await expect(other.getByText("This slot already has a payment session in progress.", { exact: true })).toBeVisible();
-        await expect(other.getByRole("button", { name: "Next", exact: true }).last()).toHaveAttribute("aria-disabled", "true");
-        await expect(other.locator(".booking-slot-grid .bg-accent-strong")).toHaveCount(0);
-        await expect(other.getByRole("textbox", { name: "Booking email", exact: true })).toHaveCount(0);
-        expect(await readHold(other)).toBeNull();
+        await expectNoSelection(other);
         expect(await native.snapshot(original.startTimeUTC)).toEqual(before);
         expect(await native.verifyHold({ token: refreshed.holdToken, holdId: refreshed.holdId })).toBe(true);
         expect(posts).toBe(1);
@@ -336,10 +335,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await other.getByRole("button", { name: "Next", exact: true }).last().click();
       expect((await rejected).status()).toBe(409);
       await expect(other.getByText("This slot is currently reserved by someone else.", { exact: true })).toBeVisible();
-      await expect(other.getByRole("button", { name: "Next", exact: true }).last()).toHaveAttribute("aria-disabled", "true");
-      await expect(other.locator(".booking-slot-grid .bg-accent-strong")).toHaveCount(0);
-      await expect(other.getByRole("textbox", { name: "Booking email", exact: true })).toHaveCount(0);
-      expect(await readHold(other)).toBeNull();
+      await expectNoSelection(other);
       expect(await native.verifyHold({ token: original.holdToken, holdId: original.holdId })).toBe(true);
       const stored = await native.getHold(original.holdId);
       expect(stored).toEqual(before);
@@ -379,7 +375,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       const date = await native.nextSlotDate();
       await native.setPackageSlots(date);
       try {
-        await routeToNative(context, native, date, true);
+        await routeToNative(context, native, date, { serverSettings: true });
         await flow.booking();
         await page.getByRole("button", { name: "12:00 PM", exact: true }).click();
         await page.getByRole("button", { name: "Next", exact: true }).last().click();
@@ -413,10 +409,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await other.getByRole("button", { name: "10:00 AM", exact: true }).click();
       await other.getByRole("button", { name: "Next", exact: true }).last().click();
       await expect(other.getByText("This slot already has a payment session in progress.", { exact: true })).toBeVisible();
-      await expect(other.getByRole("button", { name: "Next", exact: true }).last()).toHaveAttribute("aria-disabled", "true");
-      await expect(other.locator(".booking-slot-grid .bg-accent-strong")).toHaveCount(0);
-      await expect(other.getByRole("textbox", { name: "Booking email", exact: true })).toHaveCount(0);
-      expect(await readHold(other)).toBeNull();
+      await expectNoSelection(other);
       await page.getByRole("button", { name: "11:00 AM", exact: true }).click();
       const released = page.waitForResponse(response => new URL(response.url()).pathname === "/api/releaseHold");
       const moved = page.waitForResponse(response => new URL(response.url()).pathname === "/api/holdSlot");
@@ -424,10 +417,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       expect((await released).status()).toBe(409);
       expect((await moved).status()).toBe(409);
       await expect(page.getByText("The existing payment session must finish before changing slots.", { exact: true })).toBeVisible();
-      await expect(page.getByRole("button", { name: "Next", exact: true }).last()).toHaveAttribute("aria-disabled", "true");
-      await expect(page.locator(".booking-slot-grid .bg-accent-strong")).toHaveCount(0);
-      await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toHaveCount(0);
-      expect(await readHold(page)).toEqual(original);
+      await expectNoSelection(page, original);
       expect(await native.getHold(original.holdId)).toEqual(before);
       expect(await native.snapshot(original.startTimeUTC)).toEqual(beforeSnapshot);
       expect(await native.verifyHold({ token: original.holdToken, holdId: original.holdId })).toBe(true);
@@ -447,10 +437,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await page.getByRole("button", { name: "Next", exact: true }).last().click();
       expect((await rejected).status()).toBe(409);
       await expect(page.getByText("This slot is already booked.", { exact: true })).toBeVisible();
-      await expect(page.getByRole("button", { name: "Next", exact: true }).last()).toHaveAttribute("aria-disabled", "true");
-      await expect(page.locator(".booking-slot-grid .bg-accent-strong")).toHaveCount(0);
-      await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toHaveCount(0);
-      expect(await readHold(page)).toBeNull();
+      await expectNoSelection(page);
       expect(await native.snapshot(startTimeUTC)).toEqual(before);
     });
 
@@ -461,50 +448,45 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await flow.reserve();
       expect((await firstReservation).status()).toBe(200);
       const original = await readHold(page);
-      try {
-        await native.holdRunsOut(original.holdId);
-        const other = await context.newPage();
-        await other.goto("/booking");
-        await other.getByRole("button", { name: /^Earliest available:/ }).click();
-        await other.getByRole("button", { name: "10:00 AM", exact: true }).click();
-        const secondReservation = other.waitForResponse(response => new URL(response.url()).pathname === "/api/holdSlot");
-        await other.getByRole("button", { name: "Next", exact: true }).last().click();
-        expect((await secondReservation).status()).toBe(200);
-        await expect(other.getByRole("textbox", { name: "Booking email", exact: true })).toBeVisible();
-        const replacement = await readHold(other);
-        expect(replacement.holdId).toBe(original.holdId);
-        expect(replacement.holdToken).not.toBe(original.holdToken);
-        await native.restoreClock();
-        const emailsBefore = (await native.evidence()).providerRequests.filter(request => request.path === "/emails");
-        await flow.details();
-        await page.getByRole("button", { name: "Review before payment", exact: true }).click();
-        await flow.payment();
-        const payment = page.waitForResponse(response => new URL(response.url()).pathname === "/api/payment/start");
-        await page.getByRole("button", { name: "Pay your way", exact: true }).click();
-        expect((await payment).status()).toBe(403);
-        const legacy = await native.post("/api/ref/createBooking", {
-          discord: "fixture_visitor", email: "visitor@example.invalid", specs: "Ryzen 7700 / RTX 4070",
-          mainGame: "CS2", message: "Fixture booking", packageTitle: "Performance Vertex Overhaul",
-          packagePrice: "$54.95", status: "captured", paymentProvider: "razorpay",
-          razorpayOrderId: "order_fixture", razorpayPaymentId: "payment_fixture", razorpaySignature: "fixture",
-          localTimeZone: "Asia/Kolkata", startTimeUTC: original.startTimeUTC,
-          displayDate: date, displayTime: "10:00 AM", slotHoldId: original.holdId,
-          slotHoldToken: original.holdToken, slotHoldExpiresAt: original.expiresAt,
-        });
-        expect(legacy.status).toBe(409);
-        expect((await native.evidence()).providerRequests.filter(request => request.path === "/emails")).toEqual(emailsBefore);
-        await page.goto("/");
-        const before = await native.snapshot(original.startTimeUTC);
-        const released = page.waitForResponse(response => new URL(response.url()).pathname === "/api/releaseHold");
-        await page.getByRole("button", { name: "Release", exact: true }).click();
-        expect((await released).status()).toBe(403);
-        expect((await native.getHold(replacement.holdId)).phase).toBe("active");
-        expect(await native.snapshot(original.startTimeUTC)).toEqual(before);
-        expect(await native.verifyHold({ token: replacement.holdToken, holdId: replacement.holdId })).toBe(true);
-        await other.close();
-      } finally {
-        await native.restoreClock();
-      }
+      await native.expireHold(original.holdId);
+      const other = await context.newPage();
+      await other.goto("/booking");
+      await other.getByRole("button", { name: /^Earliest available:/ }).click();
+      await other.getByRole("button", { name: "10:00 AM", exact: true }).click();
+      const secondReservation = other.waitForResponse(response => new URL(response.url()).pathname === "/api/holdSlot");
+      await other.getByRole("button", { name: "Next", exact: true }).last().click();
+      expect((await secondReservation).status()).toBe(200);
+      await expect(other.getByRole("textbox", { name: "Booking email", exact: true })).toBeVisible();
+      const replacement = await readHold(other);
+      expect(replacement.holdId).toBe(original.holdId);
+      expect(replacement.holdToken).not.toBe(original.holdToken);
+      const emailsBefore = (await native.evidence()).providerRequests.filter(request => request.path === "/emails");
+      await flow.details();
+      await page.getByRole("button", { name: "Review before payment", exact: true }).click();
+      await flow.payment();
+      const payment = page.waitForResponse(response => new URL(response.url()).pathname === "/api/payment/start");
+      await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+      expect((await payment).status()).toBe(403);
+      const legacy = await native.post("/api/ref/createBooking", {
+        discord: "fixture_visitor", email: "visitor@example.invalid", specs: "Ryzen 7700 / RTX 4070",
+        mainGame: "CS2", message: "Fixture booking", packageTitle: "Performance Vertex Overhaul",
+        packagePrice: "$54.95", status: "captured", paymentProvider: "razorpay",
+        razorpayOrderId: "order_fixture", razorpayPaymentId: "payment_fixture", razorpaySignature: "fixture",
+        localTimeZone: "Asia/Kolkata", startTimeUTC: original.startTimeUTC,
+        displayDate: date, displayTime: "10:00 AM", slotHoldId: original.holdId,
+        slotHoldToken: original.holdToken, slotHoldExpiresAt: original.expiresAt,
+      });
+      expect(legacy.status).toBe(409);
+      expect((await native.evidence()).providerRequests.filter(request => request.path === "/emails")).toEqual(emailsBefore);
+      await page.goto("/");
+      const before = await native.snapshot(original.startTimeUTC);
+      const released = page.waitForResponse(response => new URL(response.url()).pathname === "/api/releaseHold");
+      await page.getByRole("button", { name: "Release", exact: true }).click();
+      expect((await released).status()).toBe(403);
+      expect((await native.getHold(replacement.holdId)).phase).toBe("active");
+      expect(await native.snapshot(original.startTimeUTC)).toEqual(before);
+      expect(await native.verifyHold({ token: replacement.holdToken, holdId: replacement.holdId })).toBe(true);
+      await other.close();
     });
 
     for (const phase of ["released", "consumed"]) {
