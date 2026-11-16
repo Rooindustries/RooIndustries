@@ -6,24 +6,37 @@ test.skip(process.env.TOOLING_IMAGE_SIZES !== "1", "Needs fixture content with s
 
 const SCREENS = [
   { width: 390, height: 844, deviceScaleFactor: 3 },
+  { width: 390, height: 844, deviceScaleFactor: 2 },
   { width: 1440, height: 900, deviceScaleFactor: 1 },
 ];
 const PAGES = ["/", "/reviews", "/benchmarks"];
 const STORAGE_PATH = "/storage/v1/";
 const RESIZE_PATH = "/storage/v1/render/image/";
-const LAYOUT_STEP = 1 / 64;
+const SHAPE_TOLERANCE = 1 / 32;
 
 const shownImages = (page, loadedOnly) => page.evaluate(({ storagePath, loadedOnly }) => [...document.images]
   .filter(image => (image.getAttribute("src") || "").includes(storagePath))
   .map(image => ({ image, box: image.getBoundingClientRect() }))
   .filter(({ box }) => box.width > 0 && box.height > 0 && box.bottom > 0 && box.top < innerHeight && box.right > 0 && box.left < innerWidth)
   .filter(({ image }) => !loadedOnly || image.currentSrc)
-  .map(({ image, box }) => ({ address: image.currentSrc, loaded: image.complete && image.naturalWidth > 0, boxWidth: box.width, boxHeight: box.height, declaredWidth: Number(image.getAttribute("width")), declaredHeight: Number(image.getAttribute("height")), alt: image.alt })),
+  .map(({ image, box }) => {
+    const edge = getComputedStyle(image);
+    return {
+      address: image.currentSrc,
+      loaded: image.complete && image.naturalWidth > 0,
+      boxWidth: box.width,
+      pictureWidth: box.width - parseFloat(edge.borderLeftWidth) - parseFloat(edge.borderRightWidth),
+      pictureHeight: box.height - parseFloat(edge.borderTopWidth) - parseFloat(edge.borderBottomWidth),
+      declaredWidth: Number(image.getAttribute("width")),
+      declaredHeight: Number(image.getAttribute("height")),
+      alt: image.alt,
+    };
+  }),
 { storagePath: STORAGE_PATH, loadedOnly });
 const waitForShownImages = page => expect.poll(async () => (await shownImages(page, false)).every(image => image.loaded)).toBe(true);
 
 for (const screen of SCREENS) {
-  test.describe(`${screen.width} wide`, () => {
+  test.describe(`${screen.width} wide at ${screen.deviceScaleFactor}x`, () => {
     test.use({ viewport: { width: screen.width, height: screen.height }, deviceScaleFactor: screen.deviceScaleFactor, javaScriptEnabled: true });
     for (const path of PAGES) {
       test(`${path} loads stored image sizes that fit their boxes`, async ({ page, request, baseURL }) => {
@@ -65,15 +78,15 @@ for (const screen of SCREENS) {
         const oversized = sized.filter(image => image.fileWidth > image.fitting).map(image => image.label);
         const blurry = sized.filter(image => image.fileWidth < image.need && image.fileWidth !== image.widest).map(image => image.label);
 
-        console.log(`${path} at ${screen.width}: ${resizeRequests.length} resize requests, ${oversized.length} oversized images, ${blurry.length} blurry images, ${originalRequests.length} original files, first screen ${firstScreenBytes} image bytes in ${firstScreen.length} files`);
+        console.log(`${path} at ${screen.width} (${screen.deviceScaleFactor}x): ${resizeRequests.length} resize requests, ${oversized.length} oversized images, ${blurry.length} blurry images, ${originalRequests.length} original files, first screen ${firstScreenBytes} image bytes in ${firstScreen.length} files`);
         for (const line of oversized) console.log(`  oversized ${line}`);
         for (const line of blurry) console.log(`  blurry ${line}`);
 
+        const reshaped = images.filter(image => image.declaredWidth && Math.abs(image.pictureHeight - (image.pictureWidth * image.declaredHeight) / image.declaredWidth) > SHAPE_TOLERANCE)
+          .map(image => `${image.alt}: ${image.pictureWidth} by ${image.pictureHeight} picture for a ${image.declaredWidth} by ${image.declaredHeight} image`);
+        for (const line of reshaped) console.log(`  reshaped ${line}`);
+        expect(reshaped).toEqual([]);
         if (path === "/reviews") {
-          const reshaped = images.filter(image => Math.abs(image.boxHeight - (image.boxWidth * image.declaredHeight) / image.declaredWidth) > LAYOUT_STEP)
-            .map(image => `${image.alt}: ${image.boxWidth} by ${image.boxHeight} box for a ${image.declaredWidth} by ${image.declaredHeight} image`);
-          for (const line of reshaped) console.log(`  reshaped ${line}`);
-          expect(reshaped).toEqual([]);
           const shown = address => images.find(image => assetOf(image.address) === assetOf(address) && image.address.includes(address));
           expect(images.find(image => assetOf(image.address) === unfilled && image.address.includes(RESIZE_PATH))).toMatchObject({ loaded: true });
           expect(shown(`/object/public/site-content-public/${vector.storagePath}`)).toMatchObject({ loaded: true });
