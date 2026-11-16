@@ -17,10 +17,14 @@ export const makeImageSizes = async ({ bytes, extension, width }) => {
   const { pages = 1 } = await decode(bytes).metadata();
   if (pages > 1) return [];
   const widest = Math.min(width, IMAGE_SIZE_WIDTHS.at(-1));
-  return Promise.all(
-    [...IMAGE_SIZE_WIDTHS.filter((step) => step < widest), widest].map(async (step) => ({
+  const { data, info } = await decode(bytes).autoOrient().resize({ width: widest }).raw().toBuffer({ resolveWithObject: true });
+  const raw = { width: info.width, height: info.height, channels: info.channels };
+  const sizes = [];
+  for (const step of [...IMAGE_SIZE_WIDTHS.filter((candidate) => candidate < widest), widest]) {
+    sizes.push({
       width: step,
-      bytes: await decode(bytes).autoOrient().resize({ width: step }).webp({ quality: IMAGE_SIZE_QUALITY }).toBuffer(),
-    })),
-  );
+      bytes: await sharp(data, { raw }).resize({ width: step }).webp({ quality: IMAGE_SIZE_QUALITY }).toBuffer(),
+    });
+  }
+  return sizes;
 };
