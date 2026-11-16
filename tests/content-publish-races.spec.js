@@ -1,5 +1,5 @@
 const { randomUUID } = require("node:crypto");
-const { test, expect } = require("@playwright/test");
+const { test, expect } = require("./fixtures/isolated-content-test.cjs");
 const { createContentGate } = require("./fixtures/content-store-gate.cjs");
 
 const read = async (request, path, headers = {}) => {

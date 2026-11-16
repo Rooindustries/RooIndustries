@@ -18,6 +18,13 @@ if (control) {
   const emit = http.Server.prototype.emit;
   http.Server.prototype.emit = function (event, request, ...rest) {
     if (event !== "request") return emit.call(this, event, request, ...rest);
+    if (request?.headers?.["x-roo-test-inspect-controls"] === "1") {
+      const controls = globalThis[Symbol.for("roo.test.controls")];
+      const response = rest[0];
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ failures: failures.size, active: activeControls.size, timers: scheduledRounds.size, storeDelayMs: controls?.storeDelayMs || 0 }));
+      return true;
+    }
     const trace = request?.headers?.["x-roo-test-trace"];
     if (typeof trace === "string" && (request?.headers?.["x-roo-test-fail-content-purge"] === "1" || request?.headers?.["x-roo-test-fail-page-mark"] === "1")) {
       failures.set(trace, { content: request.headers["x-roo-test-fail-content-purge"] === "1", pages: request.headers["x-roo-test-fail-page-mark"] === "1" });

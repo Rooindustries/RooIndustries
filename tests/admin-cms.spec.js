@@ -1,5 +1,5 @@
 const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
-const { test, expect } = require("@playwright/test");
+const { test, expect } = require("./fixtures/isolated-content-test.cjs");
 const { fixturePort } = require("./fixtures/fixture-ports.cjs");
 const fs = require("node:fs/promises");
 const path = require("node:path");

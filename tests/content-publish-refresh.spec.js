@@ -1,6 +1,6 @@
 const { randomUUID } = require("node:crypto");
 const { get } = require("node:http");
-const { test, expect } = require("@playwright/test");
+const { test, expect } = require("./fixtures/isolated-content-test.cjs");
 const { login, choose, prepareAdminContext } = require("./fixtures/admin-content.cjs");
 const { createContentGate } = require("./fixtures/content-store-gate.cjs");
 

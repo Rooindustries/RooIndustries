@@ -10,6 +10,7 @@ import { listenOnPort, nextTestKeepAliveTimeout, portFromEnv, releaseTcpPorts, r
 import fixturePorts from "../tests/fixtures/fixture-ports.cjs";
 import { lockBuildDirectory } from "./lib/build-lock.mjs";
 import { withNodeOption } from "./lib/node-options.mjs";
+import { snapshotDatabase } from "./lib/admin-test-isolation.mjs";
 
 refuseEnvFiles();
 const root = process.cwd();
@@ -41,7 +42,7 @@ const fixture = await start({
   ...(process.env.POSTGREST_BIN ? { postgrestBin: process.env.POSTGREST_BIN } : {}),
   ...(process.env.LD_LIBRARY_PATH ? { libraryPath: process.env.LD_LIBRARY_PATH } : {}),
 });
-let active, restoreEmailFetch;
+let active, restoreEmailFetch, databaseSnapshot, resetIsolation;
 const emails = [];
 let notificationSequence = 0;
 const storeRules = new Map();
@@ -64,6 +65,13 @@ const waitForEvent = (response, ready) => {
     response.writeHead(200, { "Content-Type": "application/json" });
     response.end(JSON.stringify(value));
   };
+  finish.cancel = () => {
+    eventWaiters.delete(finish);
+    if (!response.destroyed && !response.writableEnded) {
+      response.writeHead(503, { "Content-Type": "application/json" });
+      response.end("{}");
+    }
+  };
   eventWaiters.add(finish);
   response.once("close", () => eventWaiters.delete(finish));
   finish();
@@ -74,9 +82,7 @@ const readJson = async request => {
   return JSON.parse(raw || "{}");
 };
 let stopped = false;
-const stop = async () => {
-  if (stopped) return;
-  stopped = true;
+const stopActive = async () => {
   if (active && active.exitCode === null && active.signalCode === null) {
     const child = active;
     await new Promise(resolve => {
@@ -85,8 +91,15 @@ const stop = async () => {
       child.kill("SIGTERM");
     });
   }
+  active = null;
+};
+const stop = async () => {
+  if (stopped) return;
+  stopped = true;
+  await stopActive();
   if (control.listening) { control.closeAllConnections(); await new Promise(resolve => control.close(resolve)); }
   restoreEmailFetch?.();
+  databaseSnapshot?.release();
   const cleanup = await fixture.stop();
   fs.mkdirSync("test-results/admin", { recursive: true });
   fs.writeFileSync("test-results/admin/cleanup.json", JSON.stringify(cleanup, null, 2));
@@ -94,7 +107,7 @@ const stop = async () => {
 for (const signal of ["SIGTERM", "SIGINT"]) process.on(signal, () => { void stop().then(() => process.exit(0)); });
 try {
   const { seedContentAdmin } = await import("./lib/content-admin-fixture.mjs");
-  await seedContentAdmin(fixture);
+  const adminFixture = await seedContentAdmin(fixture);
   Object.assign(process.env, {
     DATA_PRIMARY_BACKEND: "supabase", COMMERCE_PRIMARY_BACKEND: "supabase", COMMERCE_FAILOVER_GENERATION: "0",
     SUPABASE_CUTOVER_ENABLED: "1", COMMERCE_CUTOVER_ENABLED: "1",
@@ -166,9 +179,19 @@ try {
     if (result.error) throw new Error(`Creator seed: ${result.error.message}`);
     await fixture.sql`update accounts.creator_profiles set commission_basis_points=1000,discount_basis_points=500,total_basis_points=1500,successful_referrals=${index} where user_id=${user.id}`;
   }
+  databaseSnapshot = await snapshotDatabase(fixture.sql);
   const marker = { version: 1, isolated: true, baseURL, origins: [baseURL, fixture.origin], versions: fixture.versions };
   const instance = fixturePorts.fixtureInstance();
-  control.on("request", async (request, response) => {
+  const handleControl = async (request, response) => {
+    if (request.method === "POST" && request.url === "/reset-isolation") {
+      try {
+        const result = await resetIsolation();
+        response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(result));
+      } catch (error) {
+        response.writeHead(500, { "Content-Type": "application/json" }); response.end(JSON.stringify({ error: error.message }));
+      }
+      return;
+    }
     if (request.method === "GET" && request.url === fixturePorts.INSTANCE_PATH) {
       response.writeHead(200, { "Content-Type": "text/plain", "Cache-Control": "no-store" }); response.end(instance); return;
     }
@@ -382,6 +405,12 @@ try {
       response.writeHead(200); response.end("ok"); return;
     }
     response.writeHead(404); response.end();
+  };
+  control.on("request", (request, response) => {
+    void handleControl(request, response).catch(error => {
+      if (!response.headersSent) response.writeHead(500, { "Content-Type": "application/json" });
+      if (!response.writableEnded) response.end(JSON.stringify({ error: error.message }));
+    });
   });
   fixturePorts.writeFixturePorts(baseURL, instance, { TOOLING_ADMIN_CONTROL_PORT: controlPort });
   const env = withNodeOption({
@@ -394,7 +423,7 @@ try {
     ROO_CONTENT_TEST_CONTROL_URL: controlOrigin,
     NEXT_CACHE_HANDLER_PATH: path.join(root, "tests/fixtures/stale-mark-cache-handler.cjs"),
     ROO_TEST_NETWORK_ORIGINS: JSON.stringify([baseURL, fixture.origin, fixture.storageUrl, fixture.postgrestUrl, controlOrigin]),
-  }, "--import", path.join(root, "scripts/lib/test-target-safety.mjs"), path.join(root, "scripts/lib/content-test-hooks.mjs"));
+  }, "--import", pathToFileURL(path.join(root, "scripts/lib/test-target-safety.mjs")).href, path.join(root, "scripts/lib/admin-test-imports.mjs"));
   const execute = args => new Promise((resolve, reject) => {
     const stdio = ["inherit", "inherit", "inherit", lock.fd];
     active = spawn(process.execPath, args, { env: lock.childEnv(env), stdio });
@@ -405,13 +434,70 @@ try {
   console.log(`Guarded native CMS fixture: ${baseURL}`);
   await execute(["scripts/generate-sitemap.js"]);
   await execute(["scripts/generate-robots.js"]);
-  if (process.env.ROO_TEST_DEV === "1") {
-    await releaseTcpPorts(target.hostname, [port]);
-    await execute([next, "dev", "--hostname", target.hostname, "--port", target.port]);
-  } else {
+  const development = process.env.ROO_TEST_DEV === "1";
+  if (!development) {
     await execute(["scripts/validate-runtime-env.js"]);
     await execute([next, "build"]);
-    await releaseTcpPorts(target.hostname, [port]);
-    await execute([next, "start", "--hostname", target.hostname, "--port", target.port, "--keepAliveTimeout", String(nextTestKeepAliveTimeout)]);
   }
+  await releaseTcpPorts(target.hostname, [port]);
+  const appPath = path.join(dist, "server/app");
+  const fetchPath = path.join(dist, "cache/fetch-cache");
+  const savedPath = path.join(dist, "case-baseline");
+  fs.mkdirSync(savedPath, { recursive: true });
+  if (fs.existsSync(appPath)) fs.cpSync(appPath, path.join(savedPath, "app"), { recursive: true });
+  if (fs.existsSync(fetchPath)) fs.cpSync(fetchPath, path.join(savedPath, "fetch-cache"), { recursive: true });
+  let restarting = false;
+  let finish, fail;
+  const lifetime = new Promise((resolve, reject) => { finish = resolve; fail = reject; });
+  const startApp = () => new Promise((resolve, reject) => {
+    const args = [next, development ? "dev" : "start", "--hostname", target.hostname, "--port", target.port];
+    if (!development) args.push("--keepAliveTimeout", String(nextTestKeepAliveTimeout));
+    const child = spawn(process.execPath, args, {
+      env: lock.childEnv(env), stdio: ["inherit", "pipe", "pipe", lock.fd],
+    });
+    active = child;
+    let ready = false;
+    let output = "";
+    child.stdout.on("data", chunk => {
+      output += String(chunk);
+      process.stdout.write(chunk);
+      if (!ready && /Ready in/.test(output)) { ready = true; resolve(); }
+    });
+    child.stderr.on("data", chunk => process.stderr.write(chunk));
+    child.once("error", error => { if (!ready) reject(error); else fail(error); });
+    child.once("exit", (code, signal) => {
+      if (!ready) reject(new Error(`Admin fixture server exited ${signal || code}.`));
+      else if (!restarting) (stopped || code === 0 ? finish : fail)(new Error(`Admin fixture server exited ${signal || code}.`));
+    });
+  });
+  resetIsolation = async () => {
+    fixture.pause();
+    restarting = true;
+    try { await stopActive(); } finally { restarting = false; }
+    for (const hold of storeHolds.splice(0)) hold.release();
+    for (const waiter of eventWaiters) waiter.cancel();
+    storeRules.clear(); closedStores.clear();
+    storeCalls.length = 0; purges.length = 0; pageRefusals.length = 0;
+    refreshEvents.length = 0; refreshErrors.length = 0; keptAlive.length = 0; pageWrites.length = 0;
+    adminFixture.sessions.clear(); adminFixture.requests.length = 0;
+    adminFixture.setLoginReply(null); adminFixture.setLogoutReply(null);
+    emails.length = 0; notificationSequence = 0;
+    await databaseSnapshot.cancelPending();
+    await fixture.drain();
+    await databaseSnapshot.restore();
+    const changed = await databaseSnapshot.differences();
+    if (changed.length) throw new Error(`Fixture database differs: ${changed.join(", ")}`);
+    fs.rmSync(appPath, { recursive: true, force: true });
+    if (fs.existsSync(path.join(savedPath, "app"))) fs.cpSync(path.join(savedPath, "app"), appPath, { recursive: true });
+    fs.rmSync(fetchPath, { recursive: true, force: true });
+    if (fs.existsSync(path.join(savedPath, "fetch-cache"))) fs.cpSync(path.join(savedPath, "fetch-cache"), fetchPath, { recursive: true });
+    fixture.resume();
+    await startApp();
+    const inspected = await fetch(baseURL, { headers: { "x-roo-test-inspect-controls": "1" } });
+    const controls = await inspected.json();
+    if (!inspected.ok || Object.values(controls).some(Boolean)) throw new Error("Fixture controls did not reset.");
+    return { database: changed.length, rules: storeRules.size, holds: storeHolds.length, waiters: eventWaiters.size, closed: closedStores.size, ...controls };
+  };
+  await startApp();
+  await lifetime;
 } finally { await stop(); }

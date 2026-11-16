@@ -80,6 +80,10 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
   let postgresVersion, postgrestVersion;
   const manifest = [];
   const requestLog = [];
+  let runningRequests = 0;
+  let paused = false;
+  const requestDrainers = new Set();
+  const drain = () => runningRequests ? new Promise(resolve => requestDrainers.add(resolve)) : Promise.resolve();
   let sql;
   let proxy;
   let restProcess;
@@ -209,6 +213,7 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
       },
     }));
     proxy=http.createServer(async(req,res)=>{
+      runningRequests += 1;
       try {
         const parts=[];for await(const chunk of req)parts.push(chunk);
         const body=Buffer.concat(parts);
@@ -227,12 +232,14 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
         }
         assert.ok(req.url.startsWith('/rest/v1/'),'transparent proxy only supports REST/Auth paths');
         if(requestHook)await requestHook('before',request);
+        if (paused) { res.writeHead(503); res.end(); return; }
         const headers={...req.headers};delete headers.host;delete headers.connection;delete headers['content-length'];
         const response=await upstreamFetch(`http://${host}:${restPort}${req.url.slice(8)}`,{method:req.method,headers,body:['GET','HEAD'].includes(req.method)?undefined:body,signal:AbortSignal.timeout(30000)});
         const responseBody=await response.text();
         if(requestHook)await requestHook('after',{...request,status:response.status,response:responseBody?JSON.parse(responseBody):null});
         res.writeHead(response.status,{'content-type':response.headers.get('content-type')||'application/json'});res.end(responseBody);
-      }catch(error){res.writeHead(500,{'content-type':'application/json'});res.end(JSON.stringify({code:'FIXTURE_PROXY_ERROR',message:error.message}));}
+      }catch(error){if(!res.destroyed){res.writeHead(500,{'content-type':'application/json'});res.end(JSON.stringify({code:'FIXTURE_PROXY_ERROR',message:error.message}));}}
+      finally { runningRequests -= 1; if (!runningRequests) { for (const resolve of requestDrainers) resolve(); requestDrainers.clear(); } }
     });
     await listenOnPort(proxy, host, ports.proxy ?? 0);
     const origin=`http://${host}:${proxy.address().port}`;
@@ -240,6 +247,6 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
     const payload=Buffer.from(JSON.stringify({role:'service_role',iat:Math.floor(Date.now()/1000),exp:Math.floor(Date.now()/1000)+3600})).toString('base64url');
     const token=`${header}.${payload}.${crypto.createHmac('sha256',jwtSecret).update(`${header}.${payload}`).digest('base64url')}`;
     const client=createClient(origin,token,{auth:{autoRefreshToken:false,persistSession:false,detectSessionInUrl:false}});
-    return {sql,client,origin,token,scratch,manifest,requestLog,pgBin,host,postgresVersion,postgrestVersion,postgrestUrl:`http://${host}:${restPort}`,pgPort,restPort,postgresPid:postgresProcess.pid,postgrestPid:restProcess.pid,stop,apply,setRequestHook(fn){requestHook=fn;},setAuthHandler(fn){authHandler=fn;},setProviderHandler(fn){providerHandler=fn;}};
+    return {sql,client,origin,token,scratch,manifest,requestLog,pgBin,host,postgresVersion,postgrestVersion,postgrestUrl:`http://${host}:${restPort}`,pgPort,restPort,postgresPid:postgresProcess.pid,postgrestPid:restProcess.pid,stop,drain,apply,pause(){paused=true;},resume(){paused=false;},setRequestHook(fn){requestHook=fn;},setAuthHandler(fn){authHandler=fn;},setProviderHandler(fn){providerHandler=fn;}};
   } catch(error) {await stop();throw Object.assign(error,{scratch,manifest});}
 };
