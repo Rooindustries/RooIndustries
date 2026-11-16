@@ -22,7 +22,6 @@ const VERIFY_INTERVAL_MS = Number(process.env.ROLLBACK_VERIFY_INTERVAL_MS || 300
 const VERIFY_TIMEOUT_MS = Number(process.env.ROLLBACK_VERIFY_TIMEOUT_MS || 120000);
 const CANDIDATE_PAGES = 10;
 let mutationAccepted = false;
-let promotionConfirmed = false;
 
 class Refusal extends Error {}
 class RebuildFailed extends Error {}
@@ -385,7 +384,6 @@ const main = async () => {
     if (deploymentId(freshTarget) !== deploymentId(fresh.live)) checkTarget(freshTarget, fresh, { rollback: false });
     await postMutation(api, fresh, options.domain, `/v10/projects/${encodeURIComponent(fresh.project.id)}/promote/${encodeURIComponent(deploymentId(freshTarget))}`, { teamId: fresh.teamId });
     await waitForDomain(api, fresh, options.domain, deploymentId(freshTarget), { autoAssign: true, expectedFrom: deploymentId(fresh.live) });
-    promotionConfirmed = true;
     console.log(`${options.domain} now serves ${deploymentId(target)}, and new production deployments go live automatically again.`);
     await rebuildPages(api, fresh.project.id, fresh.teamId);
     return;
@@ -416,7 +414,6 @@ const main = async () => {
     description: options.reason || "npm run deploy:rollback",
   });
   await waitForDomain(api, fresh, options.domain, deploymentId(freshTarget), { expectedFrom: deploymentId(fresh.live) });
-  promotionConfirmed = true;
   console.log(`${options.domain} now serves ${deploymentId(target)}.`);
   console.log("New production deployments stay off the domain until you run `npm run deploy:rollback -- --undo`.");
   await rebuildPages(api, fresh.project.id, fresh.teamId);
@@ -424,6 +421,6 @@ const main = async () => {
 
 main().catch((error) => {
   console.error(error instanceof Refusal ? `Refusing: ${error.message.replace(/^Refusing /, "")}` : error.message);
-  if (error instanceof RebuildFailed && process.env.GITHUB_ACTIONS === "true") console.log(`::error::${error.message}`);
-  process.exitCode = error instanceof RebuildFailed ? (error.nothingCalled && !promotionConfirmed ? 1 : 3) : mutationAccepted ? 2 : 1;
+  if (error instanceof RebuildFailed && process.env.GITHUB_ACTIONS === "true") console.log(`::error::${error.message.replace(/[\r\n]+/g, " ").replaceAll("%", "%25")}`);
+  process.exitCode = error instanceof RebuildFailed ? (error.nothingCalled ? 1 : 3) : mutationAccepted ? 2 : 1;
 });

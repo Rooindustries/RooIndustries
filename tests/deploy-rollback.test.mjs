@@ -89,6 +89,19 @@ for (const undo of [false, true]) {
   }));
 }
 
+for (const [name, detail, escaped] of [["newline", "cache\nunavailable", "cache unavailable"], ["percent", "cache 50% full", "cache 50%25 full"]]) {
+  test(`rebuild error annotation keeps the recovery command after a ${name}`, () => withVercel({
+    invalidateError: { status: 503, message: detail },
+  }, async (vercel, exec) => {
+    const result = await exec(["--rebuild-pages"], { GITHUB_ACTIONS: "true", VERCEL_TEAM_ID: TEAM_ID, VERCEL_PROJECT_ID: PROJECT_ID });
+    assert.equal(result.code, 3, result.output);
+    assert.equal(invalidations(vercel.requests).length, 1);
+    const annotations = result.output.split("\n").filter(line => line.startsWith("::error::"));
+    assert.deepEqual(annotations, [`::error::${rebuildMessage(`Vercel answered 503: ${escaped}`)}`]);
+    assert.ok(annotations[0].endsWith("npm run deploy:rollback -- --rebuild-pages"));
+  }));
+}
+
 test("rollback reports a lost invalidation answer after the confirmed move", () => withVercel({ invalidateDropWithoutApply: true }, async (vercel, exec) => {
   const result = await exec([]);
   assert.equal(result.code, 3, result.output);

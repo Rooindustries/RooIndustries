@@ -88,7 +88,7 @@ const main = async () => {
     return { code: 1 };
   }
   if (rollback.code === 3) {
-    annotate("error", "The money-path smoke failed, production was rolled back, but the page rebuild did not run.");
+    annotate("error", "The money-path smoke failed, production was rolled back, but the page rebuild did not run. Fix forward, then run npm run deploy:rollback -- --undo so new deployments go live again.");
     return { code: 1, rebuildHandled: true };
   }
   if (rollback.code !== 0) {

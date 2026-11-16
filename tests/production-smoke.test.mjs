@@ -265,7 +265,7 @@ const expectSuccess = output => {
 const expectMovedWithoutRebuild = (output, annotated = false) => {
   const lines = output.split("\n").filter(line => line.startsWith("error: The money-path smoke failed, production was rolled back") || line.startsWith("::error::The money-path smoke failed, production was rolled back"));
   const prefix = annotated ? "::error::" : "error: ";
-  assert.deepEqual(lines, [`${prefix}The money-path smoke failed, production was rolled back, but the page rebuild did not run.`]);
+  assert.deepEqual(lines, [`${prefix}The money-path smoke failed, production was rolled back, but the page rebuild did not run. Fix forward, then run npm run deploy:rollback -- --undo so new deployments go live again.`]);
   assert.doesNotMatch(lines[0], /\bdpl_[a-zA-Z0-9]+\b|https?:\/\/\S+|\b[a-zA-Z0-9.-]+\.vercel\.app\b/);
   assert.doesNotMatch(output, /automatic rollback did not run/);
 };
