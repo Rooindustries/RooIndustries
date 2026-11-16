@@ -1,12 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { urlFor } from "../lib/cmsImageUrl";
+import { imageSrcSet } from "../lib/imageSizeLadder";
 import { reportRequestError } from "../lib/clientRequest";
 import { getPublicContent } from "../lib/publicContentClient";
 import { Link } from "react-router-dom";
 import ImageZoomModal from "../components/ImageZoomModal";
-
-const BENCHMARK_IMAGE_WIDTHS = [480, 768, 960, 1280];
-const REVIEW_IMAGE_WIDTHS = [480, 768, 960];
 
 export default function Benchmarks({ initialData = null, setIsModalOpen = () => {} }) {
   const [benchmarks, setBenchmarks] = useState(() => (Array.isArray(initialData) ? initialData : []));
@@ -27,16 +25,6 @@ export default function Benchmarks({ initialData = null, setIsModalOpen = () => 
     image
       ? urlFor(image).width(width).format("webp").quality(60).url()
       : "";
-
-  const buildImageSrcSet = (image, widths) => {
-    if (!image) return undefined;
-    const sources = widths.map((width) => ({
-      url: buildImageSrc(image, width),
-      width,
-    }));
-    if (new Set(sources.map(({ url }) => url)).size < 2) return undefined;
-    return sources.map(({ url, width }) => `${url} ${width}w`).join(", ");
-  };
 
   useEffect(() => {
     getPublicContent("benchmarks")
@@ -108,17 +96,14 @@ export default function Benchmarks({ initialData = null, setIsModalOpen = () => 
                     >
                       <img
                         src={buildImageSrc(b.beforeImage, 1280)}
-                        srcSet={buildImageSrcSet(
-                          b.beforeImage,
-                          BENCHMARK_IMAGE_WIDTHS
-                        )}
+                        srcSet={imageSrcSet(b.beforeImage, buildImageSrc)}
                         alt={beforeAlt}
                         width={beforeDims?.width}
                         height={beforeDims?.height}
                         loading={i === 0 ? "eager" : "lazy"}
                         fetchPriority={i === 0 ? "high" : "auto"}
                         decoding="async"
-                        sizes="(max-width: 768px) 94vw, 46vw"
+                        sizes="(min-width: 1280px) 576px, (min-width: 768px) calc(50vw - 64px), calc(100vw - 84px)"
                         className="rounded w-full cursor-pointer shadow-lg border border-danger-border group-hover:border-danger group-hover:shadow-danger-soft transition duration-300"
                       />
                     </button>
@@ -141,17 +126,14 @@ export default function Benchmarks({ initialData = null, setIsModalOpen = () => 
                     >
                       <img
                         src={buildImageSrc(b.afterImage, 1280)}
-                        srcSet={buildImageSrcSet(
-                          b.afterImage,
-                          BENCHMARK_IMAGE_WIDTHS
-                        )}
+                        srcSet={imageSrcSet(b.afterImage, buildImageSrc)}
                         alt={afterAlt}
                         width={afterDims?.width}
                         height={afterDims?.height}
                         loading={i === 0 ? "eager" : "lazy"}
                         fetchPriority={i === 0 ? "high" : "auto"}
                         decoding="async"
-                        sizes="(max-width: 768px) 94vw, 46vw"
+                        sizes="(min-width: 1280px) 576px, (min-width: 768px) calc(50vw - 64px), calc(100vw - 84px)"
                         className="rounded w-full cursor-pointer shadow-lg border border-success-border group-hover:border-success group-hover:shadow-success-soft transition duration-300"
                       />
                     </button>
@@ -173,10 +155,7 @@ export default function Benchmarks({ initialData = null, setIsModalOpen = () => 
                     >
                       <img
                         src={buildImageSrc(b.reviewImage, 960)}
-                        srcSet={buildImageSrcSet(
-                          b.reviewImage,
-                          REVIEW_IMAGE_WIDTHS
-                        )}
+                        srcSet={imageSrcSet(b.reviewImage, buildImageSrc)}
                         alt={reviewAlt}
                         width={reviewDims?.width}
                         height={reviewDims?.height}

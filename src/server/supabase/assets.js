@@ -173,6 +173,7 @@ const replaceUrls = (value, manifest, resolved, field = "", assetContext = false
       aspectRatio: width / height,
     };
   }
+  if (Array.isArray(linkedAsset?.sizes)) next.sizes = linkedAsset.sizes;
   return next;
 };
 

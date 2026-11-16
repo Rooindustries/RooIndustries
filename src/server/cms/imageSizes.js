@@ -1,6 +1,6 @@
 import sharp from "sharp";
+import { IMAGE_SIZE_WIDTHS, imageSizeFile } from "../../lib/imageSizeLadder.js";
 
-export const IMAGE_SIZE_WIDTHS = Object.freeze([128, 320, 640, 960, 1280]);
 export const IMAGE_SIZE_QUALITY = 75;
 export const IMAGE_SIZE_MIME_TYPE = "image/webp";
 export const IMAGE_SIZE_CACHE_SECONDS = 365 * 24 * 60 * 60;
@@ -9,7 +9,7 @@ const TIMEOUT_MESSAGE = /timeout: \d+% complete/;
 const SIZED_EXTENSIONS = new Set(["png", "jpg", "gif", "webp", "avif"]);
 
 export const isImageSizeTimeout = (error) => TIMEOUT_MESSAGE.test(String(error?.message));
-export const imageSizePath = (sha1, width) => `images/${sha1}-w${width}.webp`;
+export const imageSizePath = (sha1, width) => imageSizeFile(`images/${sha1}`, width);
 
 const decode = (bytes) =>
   sharp(bytes, { failOn: "error", limitInputPixels: 100000000 }).timeout({ seconds: IMAGE_SIZE_TIMEOUT_SECONDS });

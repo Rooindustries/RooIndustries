@@ -1,23 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { urlFor } from "../lib/cmsImageUrl";
+import { imageSrcSet } from "../lib/imageSizeLadder";
 import { reportRequestError } from "../lib/clientRequest";
 import { getPublicContent } from "../lib/publicContentClient";
 import ImageZoomModal from "./ImageZoomModal";
 
 const localDiscordReviews = [];
-const REVIEW_IMAGE_WIDTHS = [320, 480, 640, 800];
 
 const buildReviewImageUrl = (image, width) =>
   urlFor(image).width(width).format("webp").quality(85).url();
-
-const buildReviewImageSrcSet = (image) => {
-  const sources = REVIEW_IMAGE_WIDTHS.map((width) => ({
-    url: buildReviewImageUrl(image, width),
-    width,
-  }));
-  if (new Set(sources.map(({ url }) => url)).size < 2) return undefined;
-  return sources.map(({ url, width }) => `${url} ${width}w`).join(", ");
-};
 
 export default function Reviews({ initialData = null }) {
   const [selectedImage, setSelectedImage] = useState(null);
@@ -97,7 +88,7 @@ export default function Reviews({ initialData = null }) {
             : "";
           const reviewSrcSet =
             !rev.src && rev.image
-              ? buildReviewImageSrcSet(rev.image)
+              ? imageSrcSet(rev.image, buildReviewImageUrl)
               : undefined;
           const reviewZoomSrc = rev.src
             ? rev.src
@@ -128,7 +119,7 @@ export default function Reviews({ initialData = null }) {
                     loading="lazy"
                     decoding="async"
                     fetchPriority="auto"
-                    sizes="(max-width: 1023px) 90vw, 46vw"
+                    sizes="(min-width: 1280px) 616px, (min-width: 1024px) calc(50vw - 24px), calc(100vw - 32px)"
                     className="w-full h-auto rounded-xl cursor-pointer shadow-lg group-hover:shadow-cyan-400/30 transition duration-300 object-contain"
                   />
                 </button>
