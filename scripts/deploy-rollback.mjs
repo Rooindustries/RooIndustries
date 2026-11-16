@@ -5,12 +5,14 @@ const USAGE = `Usage: npm run deploy:rollback -- [options]
   --undo                  Promote the newest ready production deployment and turn
                           automatic production domains back on.
   --status                Print the live deployment and rollback state as JSON.
+  --rebuild-pages           Mark every production page stale so it rebuilds on its next visit (needs VERCEL_PROJECT_ID and VERCEL_TEAM_ID).
   --if-live <url-or-id>   Roll back only if that deployment is live, is the newest
                           production deployment and production is not already rolled back.
   --reason <text>         Reason recorded with the rollback in Vercel.
   --domain <host>         Production domain to check (default www.rooindustries.com).
 
-The Vercel token is read from VERCEL_TOKEN only.`;
+The Vercel token is read from VERCEL_TOKEN only.
+Exit 0: done; 1: refused, nothing changed; 2: sent but not confirmed; 3: production moved or pages marked, but the page rebuild call failed.`;
 
 const VERCEL_API = "https://api.vercel.com";
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
@@ -20,24 +22,30 @@ const VERIFY_INTERVAL_MS = Number(process.env.ROLLBACK_VERIFY_INTERVAL_MS || 300
 const VERIFY_TIMEOUT_MS = Number(process.env.ROLLBACK_VERIFY_TIMEOUT_MS || 120000);
 const CANDIDATE_PAGES = 10;
 let mutationAccepted = false;
+let promotionConfirmed = false;
 
 class Refusal extends Error {}
+class RebuildFailed extends Error {}
+
+const REBUILD_NOT_RUN = (reason) => `The page rebuild did not run: ${reason}. Production has moved: see the lines above, or run \`npm run deploy:rollback -- --status\`, for what it serves. Its pages can be stale until their timer expires (at most an hour). Finish with: npm run deploy:rollback -- --rebuild-pages`;
 
 class ApiError extends Error {
   constructor(method, pathname, status, detail) {
     super(`Vercel API ${method} ${pathname} answered ${status}${detail ? `: ${detail}` : ""}`);
     this.status = status;
+    this.detail = detail;
   }
 }
 
 const parseArgs = (argv) => {
-  const options = { dryRun: false, undo: false, status: false, ifLive: null, reason: null, domain: "www.rooindustries.com" };
+  const options = { dryRun: false, undo: false, status: false, rebuildPages: false, ifLive: null, reason: null, domain: "www.rooindustries.com" };
   const valueFlags = { "--if-live": "ifLive", "--reason": "reason", "--domain": "domain" };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--dry-run") options.dryRun = true;
     else if (arg === "--undo") options.undo = true;
     else if (arg === "--status") options.status = true;
+    else if (arg === "--rebuild-pages") options.rebuildPages = true;
     else if (arg === "--help" || arg === "-h") options.help = true;
     else if (valueFlags[arg]) {
       const value = argv[index + 1];
@@ -48,17 +56,18 @@ const parseArgs = (argv) => {
       throw new Refusal(`Unknown option "${arg}".`);
     }
   }
+  if (options.rebuildPages && (options.undo || options.status || options.dryRun || options.ifLive || options.reason)) throw new Refusal("--rebuild-pages can't be combined with other actions.");
   if (options.status && (options.undo || options.ifLive || options.dryRun)) throw new Refusal("--status can't be combined with other actions.");
   if (options.undo && options.ifLive) throw new Refusal("--if-live only applies to a rollback, not to --undo.");
   return options;
 };
 
-const readScope = () => {
+const readScope = ({ allowMissing = false } = {}) => {
   const teamId = String(process.env.VERCEL_TEAM_ID || "").trim();
   const projectId = String(process.env.VERCEL_PROJECT_ID || "").trim();
   if (teamId && !/^team_[a-zA-Z0-9]+$/.test(teamId)) throw new Refusal("VERCEL_TEAM_ID must start with team_ and contain only letters and digits after it.");
   if (projectId && !/^prj_[a-zA-Z0-9]+$/.test(projectId)) throw new Refusal("VERCEL_PROJECT_ID must start with prj_ and contain only letters and digits after it.");
-  if (process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true") {
+  if (!allowMissing && (process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true")) {
     const missing = [...(!teamId ? ["VERCEL_TEAM_ID"] : []), ...(!projectId ? ["VERCEL_PROJECT_ID"] : [])];
     if (missing.length) throw new Refusal(`${missing.join(" and ")} ${missing.length === 1 ? "is" : "are"} not set. Set ${missing.join(" and ")} as repository variable${missing.length === 1 ? "" : "s"}.`);
   }
@@ -103,6 +112,18 @@ const createClient = (token, base) => async (method, pathname, query = {}, paylo
     throw new ApiError(method, url.pathname, response.status, body?.error?.message || body?.error?.code || text.slice(0, 200));
   }
   return { status: response.status, body };
+};
+
+const rebuildPages = async (api, projectId, teamId) => {
+  try {
+    await api("POST", "/v1/edge-cache/invalidate-by-tags", { projectIdOrName: projectId, teamId }, { tags: "_N_T_/layout" });
+  } catch (error) {
+    const reason = error instanceof ApiError
+      ? `Vercel answered ${error.status}${error.detail ? `: ${error.detail}` : ""}`
+      : `the call got no answer (${error.message}), so whether Vercel applied it is unknown`;
+    throw new RebuildFailed(REBUILD_NOT_RUN(reason));
+  }
+  console.log("Production pages marked stale; each rebuilds on its next visit.");
 };
 
 const createdAt = (deployment) => Number(deployment?.created ?? deployment?.createdAt ?? 0);
@@ -305,8 +326,14 @@ const main = async () => {
     console.log(USAGE);
     return;
   }
-  const scope = readScope();
+  const scope = readScope({ allowMissing: options.rebuildPages });
   const token = String(process.env.VERCEL_TOKEN || "").trim();
+  if (options.rebuildPages) {
+    const missing = !token ? "VERCEL_TOKEN is not set" : !scope.projectId || !scope.teamId ? "VERCEL_PROJECT_ID and VERCEL_TEAM_ID are not set" : null;
+    if (missing) throw Object.assign(new RebuildFailed(REBUILD_NOT_RUN(missing)), { nothingCalled: true });
+    await rebuildPages(createClient(token, resolveApiBase()), scope.projectId, scope.teamId);
+    return;
+  }
   if (!token) throw new Refusal("VERCEL_TOKEN is not set. Create a Vercel token for the team and export it first.");
   const api = createClient(token, resolveApiBase());
   const state = await loadState(api, options.domain, scope);
@@ -358,7 +385,9 @@ const main = async () => {
     if (deploymentId(freshTarget) !== deploymentId(fresh.live)) checkTarget(freshTarget, fresh, { rollback: false });
     await postMutation(api, fresh, options.domain, `/v10/projects/${encodeURIComponent(fresh.project.id)}/promote/${encodeURIComponent(deploymentId(freshTarget))}`, { teamId: fresh.teamId });
     await waitForDomain(api, fresh, options.domain, deploymentId(freshTarget), { autoAssign: true, expectedFrom: deploymentId(fresh.live) });
+    promotionConfirmed = true;
     console.log(`${options.domain} now serves ${deploymentId(target)}, and new production deployments go live automatically again.`);
+    await rebuildPages(api, fresh.project.id, fresh.teamId);
     return;
   }
 
@@ -387,11 +416,14 @@ const main = async () => {
     description: options.reason || "npm run deploy:rollback",
   });
   await waitForDomain(api, fresh, options.domain, deploymentId(freshTarget), { expectedFrom: deploymentId(fresh.live) });
+  promotionConfirmed = true;
   console.log(`${options.domain} now serves ${deploymentId(target)}.`);
   console.log("New production deployments stay off the domain until you run `npm run deploy:rollback -- --undo`.");
+  await rebuildPages(api, fresh.project.id, fresh.teamId);
 };
 
 main().catch((error) => {
   console.error(error instanceof Refusal ? `Refusing: ${error.message.replace(/^Refusing /, "")}` : error.message);
-  process.exitCode = mutationAccepted ? 2 : 1;
+  if (error instanceof RebuildFailed && process.env.GITHUB_ACTIONS === "true") console.log(`::error::${error.message}`);
+  process.exitCode = error instanceof RebuildFailed ? (error.nothingCalled && !promotionConfirmed ? 1 : 3) : mutationAccepted ? 2 : 1;
 });

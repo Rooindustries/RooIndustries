@@ -230,23 +230,101 @@ const runGate = (env) => new Promise(resolve => {
 
 const withGate = async ({ site: siteOverrides, vercel: vercelOptions } = {}, body) => {
   const site = await startSite(siteOverrides);
-  const vercel = await startVercel(vercelOptions);
+  let smokeRequestsAtInvalidation = null;
+  const vercel = await startVercel({ ...vercelOptions, onInvalidate: info => { smokeRequestsAtInvalidation = site.requests.length; vercelOptions?.onInvalidate?.(info); } });
   try {
-    const exec = (env = {}) => runGate({ VERCEL_TOKEN: TOKEN, VERCEL_API_URL: vercel.origin, SMOKE_BASE_URL: site.base, DEPLOYMENT_URL: LIVE_URL, ...env });
-    await body({ site, vercel, exec });
+    const exec = async (env = {}) => {
+      const result = await runGate({ VERCEL_TOKEN: TOKEN, VERCEL_TEAM_ID: "team_rooFixture", VERCEL_PROJECT_ID: "prj_rooFixture", VERCEL_API_URL: vercel.origin, SMOKE_BASE_URL: site.base, DEPLOYMENT_URL: LIVE_URL, ...env });
+      assert.doesNotMatch(result.output, new RegExp(TOKEN));
+      return result;
+    };
+    await body({ site, vercel, exec, smokeRequestsAtInvalidation: () => smokeRequestsAtInvalidation });
   } finally {
     await site.close();
     await vercel.close();
   }
 };
 
-const vercelChanges = vercel => vercel.requests.filter(request => request.method !== "GET");
+const vercelChanges = vercel => vercel.requests.filter(request => request.method !== "GET" && request.path !== "/v1/edge-cache/invalidate-by-tags");
+const invalidations = vercel => vercel.requests.filter(request => request.path === "/v1/edge-cache/invalidate-by-tags");
+const rebuildMessage = reason => `The page rebuild did not run: ${reason}. Production has moved: see the lines above, or run \`npm run deploy:rollback -- --status\`, for what it serves. Its pages can be stale until their timer expires (at most an hour). Finish with: npm run deploy:rollback -- --rebuild-pages`;
+const expectInvalidate = request => {
+  assert.equal(request.method, "POST");
+  assert.deepEqual(request.query, { projectIdOrName: "prj_rooFixture", teamId: "team_rooFixture" });
+  assert.deepEqual(request.body, { tags: "_N_T_/layout" });
+};
+
+test("deploy gate: a passing smoke marks pages stale once after its last request", () => withGate({}, async ({ site, vercel, exec, smokeRequestsAtInvalidation }) => {
+  const result = await exec();
+  assert.equal(result.code, 0, result.output);
+  assert.equal(invalidations(vercel).length, 1);
+  expectInvalidate(invalidations(vercel)[0]);
+  assert.equal(vercelChanges(vercel).length, 0);
+  assert.ok(smokeRequestsAtInvalidation() > 0);
+  assert.equal(smokeRequestsAtInvalidation(), site.requests.length);
+  assert.match(result.output, /Production pages marked stale; each rebuilds on its next visit\./);
+}));
+
+test("deploy gate: a passing smoke fails on an invalidation error without rolling back", () => withGate({ vercel: { invalidateError: { status: 503, message: "cache unavailable" } } }, async ({ vercel, exec }) => {
+  const result = await exec();
+  assert.equal(result.code, 1, result.output);
+  assert.equal(invalidations(vercel).length, 1);
+  expectInvalidate(invalidations(vercel)[0]);
+  assert.equal(vercelChanges(vercel).length, 0);
+  assert.ok(result.output.includes(rebuildMessage("Vercel answered 503: cache unavailable")));
+}));
+
+for (const failed of [false, true]) {
+  test(`deploy gate: a failed smoke rolls back and ${failed ? "reports the child's failed rebuild without repeating it" : "rebuilds once in the rollback child"}`, () => withGate({
+    site: { status: { "/payment": 500 } },
+    vercel: failed ? { invalidateError: { status: 503, message: "cache unavailable" } } : {},
+  }, async ({ vercel, exec }) => {
+    const result = await exec();
+    assert.equal(result.code, 1, result.output);
+    assert.equal(vercelChanges(vercel).length, 1);
+    assert.match(vercelChanges(vercel)[0].path, /\/rollback\/dpl_previous$/);
+    assert.equal(invalidations(vercel).length, 1);
+    expectInvalidate(invalidations(vercel)[0]);
+    assert.ok(invalidations(vercel)[0].index > vercelChanges(vercel)[0].index);
+    if (failed) assert.equal(result.output.split(rebuildMessage("Vercel answered 503: cache unavailable")).length - 1, 1);
+    else assert.match(result.output, /so production was rolled back\. Fix forward/);
+  }));
+}
+
+test("deploy gate: a failed smoke on another deployment still marks pages stale", () => withGate({ site: { status: { "/payment": 500 } } }, async ({ vercel, exec }) => {
+  const result = await exec({ DEPLOYMENT_URL: PREVIOUS_URL });
+  assert.equal(result.code, 1, result.output);
+  assert.equal(vercelChanges(vercel).length, 0);
+  assert.equal(invalidations(vercel).length, 1);
+  expectInvalidate(invalidations(vercel)[0]);
+}));
+
+test("deploy gate: a smoke that cannot run still marks pages stale", () => withGate({}, async ({ vercel, exec }) => {
+  const result = await exec({ SMOKE_BASE_URL: "https://example.com" });
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /The money-path smoke could not run/);
+  assert.equal(vercelChanges(vercel).length, 0);
+  assert.equal(invalidations(vercel).length, 1);
+  expectInvalidate(invalidations(vercel)[0]);
+}));
+
+test("deploy gate: a failed live lookup with a passing smoke still marks pages stale", () => withGate({
+  vercel: { tweak: state => { state.aliases[DOMAIN].projectId = "prj_other"; } },
+}, async ({ vercel, exec }) => {
+  const result = await exec();
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /Automatic rollback was unavailable because the live deployment could not be read/);
+  assert.equal(vercelChanges(vercel).length, 0);
+  assert.equal(invalidations(vercel).length, 1);
+  expectInvalidate(invalidations(vercel)[0]);
+}));
 
 test("deploy gate: a healthy live deployment passes and nothing is rolled back", () => withGate({}, async ({ site, vercel, exec }) => {
   const result = await exec();
   assert.equal(result.code, 0, result.output);
   assert.ok(site.requests.length > 0);
   assert.deepEqual(vercelChanges(vercel), []);
+  assert.equal(invalidations(vercel).length, 1);
 }));
 
 test("deploy gate: a money-path failure on the live deployment rolls production back once", () => withGate({
@@ -285,6 +363,7 @@ test("deploy gate: a deployment that never serves production still gets producti
   assert.match(result.output, /nothing was rolled back/);
   assert.ok(site.requests.length > 0);
   assert.deepEqual(vercelChanges(vercel), []);
+  assert.equal(invalidations(vercel).length, 1);
   assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_live");
 }));
 
@@ -294,6 +373,7 @@ test("deploy gate: a healthy production passes even when this deployment isn't t
   assert.match(result.output, /not serving production/);
   assert.equal(vercel.requests.filter(request => request.path === `/v4/aliases/${DOMAIN}`).length, 2);
   assert.deepEqual(vercelChanges(vercel), []);
+  assert.equal(invalidations(vercel).length, 1);
 }));
 
 test("deploy gate: a later lookup can confirm the deployment went live", () => withGate({
@@ -304,6 +384,7 @@ test("deploy gate: a later lookup can confirm the deployment went live", () => w
   assert.doesNotMatch(result.output, /not serving production/);
   assert.equal(vercel.requests.filter(request => request.path === `/v4/aliases/${DOMAIN}`).length, 2);
   assert.deepEqual(vercelChanges(vercel), []);
+  assert.equal(invalidations(vercel).length, 1);
 }));
 
 test("deploy gate: a passing smoke fails the gate when the live deployment lookup fails", () => withGate({}, async ({ site, vercel, exec }) => {
@@ -315,6 +396,7 @@ test("deploy gate: a passing smoke fails the gate when the live deployment looku
   assert.ok(site.requests.length > 0);
   assert.equal(vercel.requests.filter(request => request.path === `/v4/aliases/${DOMAIN}`).length, 2);
   assert.deepEqual(vercelChanges(vercel), []);
+  assert.equal(invalidations(vercel).length, 1);
 }));
 
 test("deploy gate: a failed smoke and failed live lookup both report errors without a rollback", () => withGate({
@@ -328,6 +410,7 @@ test("deploy gate: a failed smoke and failed live lookup both report errors with
   assert.doesNotMatch(result.output, /not serving production/);
   assert.ok(site.requests.length > 0);
   assert.deepEqual(vercelChanges(vercel), []);
+  assert.equal(invalidations(vercel).length, 1);
 }));
 
 test("deploy gate: a failed final lookup takes precedence over an earlier different live deployment", () => withGate({
@@ -344,6 +427,7 @@ test("deploy gate: a failed final lookup takes precedence over an earlier differ
   assert.doesNotMatch(result.output, /not serving production/);
   assert.equal(vercel.requests.filter(request => request.path === `/v4/aliases/${DOMAIN}`).length, 2);
   assert.deepEqual(vercelChanges(vercel), []);
+  assert.equal(invalidations(vercel).length, 1);
 }));
 
 test("deploy gate: a successful final lookup clears an earlier lookup failure", () => withGate({
@@ -359,6 +443,7 @@ test("deploy gate: a successful final lookup clears an earlier lookup failure", 
   assert.doesNotMatch(result.output, /Automatic rollback was unavailable/);
   assert.equal(vercel.requests.filter(request => request.path === `/v4/aliases/${DOMAIN}`).length, 2);
   assert.deepEqual(vercelChanges(vercel), []);
+  assert.equal(invalidations(vercel).length, 1);
 }));
 
 test("deploy gate: a failed lookup is reported even when the smoke cannot run", async () => {
@@ -376,10 +461,11 @@ test("deploy gate: a failed lookup is reported even when the smoke cannot run", 
   assert.doesNotMatch(result.output, /not serving production/);
 });
 
-test("deploy gate: without VERCEL_TOKEN a healthy smoke passes with a warning", () => withGate({}, async ({ vercel, exec }) => {
+test("deploy gate: without VERCEL_TOKEN a healthy smoke reports that the rebuild did not run", () => withGate({}, async ({ vercel, exec }) => {
   const result = await exec({ VERCEL_TOKEN: undefined });
-  assert.equal(result.code, 0, result.output);
+  assert.equal(result.code, 1, result.output);
   assert.match(result.output, /warning: VERCEL_TOKEN is not set/);
+  assert.ok(result.output.includes(rebuildMessage("VERCEL_TOKEN is not set")));
   assert.deepEqual(vercel.requests, []);
 }));
 
@@ -387,6 +473,7 @@ test("deploy gate: without VERCEL_TOKEN a failure is reported but nothing is rol
   const result = await exec({ VERCEL_TOKEN: undefined });
   assert.equal(result.code, 1, result.output);
   assert.match(result.output, /not rolled back/);
+  assert.ok(result.output.includes(rebuildMessage("VERCEL_TOKEN is not set")));
   assert.deepEqual(vercel.requests, []);
 }));
 
@@ -406,6 +493,7 @@ test("deploy gate: a connection that drops mid-page rolls nothing back", () => w
   const result = await exec();
   assert.equal(result.code, 1, result.output);
   assert.deepEqual(vercelChanges(vercel), []);
+  assert.equal(invalidations(vercel).length, 1);
 }));
 
 test("a page script the runner couldn't download is a smoke that could not run, and the gate rolls nothing back", async () => {
@@ -421,6 +509,7 @@ test("a page script the runner couldn't download is a smoke that could not run, 
     assert.equal(result.code, 1, result.output);
     assert.match(result.output, /couldn't load \/referral\.js/);
     assert.deepEqual(vercelChanges(vercel), []);
+    assert.equal(invalidations(vercel).length, 1);
   });
 });
 
@@ -428,6 +517,7 @@ test("deploy gate: a runner that can't reach production rolls nothing back", () 
   const result = await exec();
   assert.equal(result.code, 1, result.output);
   assert.deepEqual(vercelChanges(vercel), []);
+  assert.equal(invalidations(vercel).length, 1);
 }));
 
 test("only successful Production deployments share the smoke queue, so a Preview event can't replace a pending Production smoke", () => {
@@ -448,6 +538,7 @@ test("deploy gate: a smoke that can't run doesn't roll anything back", () => wit
   const result = await exec({ SMOKE_BASE_URL: "https://example.com" });
   assert.equal(result.code, 1, result.output);
   assert.deepEqual(vercelChanges(vercel), []);
+  assert.equal(invalidations(vercel).length, 1);
 }));
 
 test("deploy gate: an already rolled-back production is never rolled back further", () => withGate({
@@ -457,6 +548,7 @@ test("deploy gate: an already rolled-back production is never rolled back furthe
   const result = await exec();
   assert.equal(result.code, 1, result.output);
   assert.deepEqual(vercelChanges(vercel), []);
+  assert.equal(invalidations(vercel).length, 1);
   assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_live");
 }));
 
@@ -467,6 +559,7 @@ test("deploy gate: an accepted rollback that is not confirmed says the request w
   const result = await exec();
   assert.equal(result.code, 1, result.output);
   assert.equal(vercelChanges(vercel).length, 1);
+  assert.equal(invalidations(vercel).length, 1);
   assert.match(result.output, /rollback was sent, but production was not confirmed/);
   assert.doesNotMatch(result.output, /did not run/);
 }));
