@@ -63,6 +63,7 @@ const forceFailedRebuild = async ({ request, baseURL, label, mode }) => {
   }
   await new Promise((resolve) => setTimeout(resolve, 2000));
   for (const page of await Promise.all(PAGES.map((path) => read(request, path)))) {
+    judge(page, "after", pageLife);
     if (showsOld(page)) { tally.stillOldAfterRecovery += 1; tally.examples.push(`after ${page.path} ${page.cache} s-maxage=${page.maxAge}`); }
   }
   tally.refusals = (await refusals()) - beforeRefusals;
