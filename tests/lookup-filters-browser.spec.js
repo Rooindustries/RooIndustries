@@ -23,6 +23,11 @@ const paidBooking = (id, date, fields) => ({ _id: `booking.${id}`, _type: 'booki
   status: 'captured', startTimeUTC: `${date}T04:30:00.000Z`, displayDate: 'Fixture date', displayTime: '10:00 AM',
   localTimeZone: 'Asia/Kolkata', ...fields });
 
+const earlierCreators = [
+  { title: 'an earlier creator has no reset pending', key: 'reset', fields: () => ({}) },
+  { title: 'an unverified creator holds the same reset link', key: 'sharedreset', fields: link => ({ registrationStatus: 'pending_email', ...link }) },
+];
+
 const routeNative = (context, native) => context.route(/\/api\/ref\/(reset|verifyRegistration|login|getUpgradeInfo)(?:\?|$)/, async route => {
   const request = route.request();
   const response = await native('post', new URL(request.url()).pathname, request.postDataJSON());
@@ -45,11 +50,12 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
   test.describe(`${viewport.width}px`, () => {
     test.use({ viewport });
 
-    test('a reset link works when an earlier creator has no reset pending', async ({ page, context, flow, native }) => {
-      const token = sha256(`reset${viewport.width}`);
-      const code = `resetcreator${viewport.width}`;
-      const earlier = creator(`aaa-reset${viewport.width}`, `earliercreator${viewport.width}`);
-      const real = creator(`zzz-reset${viewport.width}`, code, { resetTokenHash: sha256(token), resetTokenExpiresAt: inAnHour() });
+    for (const { title, key, fields } of earlierCreators) test(`a reset link works when ${title}`, async ({ page, context, flow, native }) => {
+      const token = sha256(`${key}${viewport.width}`);
+      const code = `${key}creator${viewport.width}`;
+      const link = { resetTokenHash: sha256(token), resetTokenExpiresAt: inAnHour() };
+      const earlier = creator(`aaa-${key}${viewport.width}`, `earliercreator${viewport.width}`, fields(link));
+      const real = creator(`zzz-${key}${viewport.width}`, code, link);
       await seeded(context, native, [earlier, real], [real.creatorEmail], async () => {
         await native('account', real._id);
         await page.goto(`/referrals/reset#token=${token}`);

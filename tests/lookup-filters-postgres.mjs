@@ -105,6 +105,34 @@ const referralPair = [
   { name: 'by id, a referral without slug.current or registrationStatus', real: {}, query: referralById, expected: true },
 ];
 
+const callerLookup = caller => callerLookups.find(lookup => lookup.caller === caller);
+const resetLink = { resetTokenHash: 'h1', resetTokenExpiresAt: LATER };
+const confirmationLink = { registrationVerificationTokenHash: 'v1', registrationVerificationExpiresAt: LATER };
+const dodoIds = { dodoPaymentId: 'pay_b', dodoCheckoutSessionId: 'cks_b' };
+const unseenConditionLookups = [
+  { caller: 'validateReferral.js and pricing.js referral by code', type: 'referral', query: referralByCode, params: { code: 'realcode' },
+    decoy: { registrationStatus: 'pending_email', slug: realSlug }, real: { registrationStatus: 'active', slug: realSlug } },
+  { ...callerLookup('forgot.js referral by creator email'),
+    decoy: { registrationStatus: 'pending_email', creatorEmail: 'creator@example.invalid' },
+    real: { registrationStatus: 'active', creatorEmail: 'creator@example.invalid' } },
+  { ...callerLookup('reset.js referral by reset token'),
+    decoy: { registrationStatus: 'pending_email', ...resetLink }, real: { registrationStatus: 'active', ...resetLink } },
+  { ...callerLookup('verifyRegistration.js referral by verification token'),
+    decoy: { registrationStatus: 'active', ...confirmationLink }, real: { registrationStatus: 'pending_email', ...confirmationLink } },
+  { ...callerLookup('createBooking.js PayPal record by order id'),
+    decoy: { provider: 'razorpay', providerOrderId: 'pp_ord' }, real: { provider: 'paypal', providerOrderId: 'pp_ord' } },
+  { caller: 'createBooking.js Razorpay record by payment id', type: 'paymentRecord',
+    decoy: { provider: 'paypal', providerPaymentId: 'rzp_pay' }, real: { provider: 'razorpay', providerPaymentId: 'rzp_pay' },
+    query: '*[_type == $type && provider == "razorpay" && providerPaymentId == $providerPaymentId][0]',
+    params: { type: 'paymentRecord', providerPaymentId: 'rzp_pay' } },
+  { caller: 'createBooking.js Razorpay record by order id', type: 'paymentRecord',
+    decoy: { provider: 'paypal', providerOrderId: 'rzp_ord' }, real: { provider: 'razorpay', providerOrderId: 'rzp_ord' },
+    query: '*[_type == $type && provider == "razorpay" && providerOrderId == $providerOrderId][0]',
+    params: { type: 'paymentRecord', providerOrderId: 'rzp_ord' } },
+  { ...callerLookup('createBooking.js booking by Dodo payment and session'),
+    decoy: { paymentProvider: 'paypal', ...dodoIds }, real: { paymentProvider: 'dodo', ...dodoIds } },
+];
+
 const fieldValues = [undefined, null, 'abc', 'Abc', 'ABC', '', '5', 5, 5.0, 6, -1.5, true, false, { a: 1 }, ['abc'], [], {},
   '2026-01-01T00:00:00Z', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.5Z', '2026-01-02', 'ÉCOLE', 'école',
   'ΣΑΣ', 'σας', 'İstanbul', 'STRASSE', 'straße', 'ǅ', 'b'];
@@ -130,7 +158,7 @@ test('targeted lookups return only real matches', async t => {
   const migration = fs.readdirSync(path.join(root, 'supabase/migrations')).find(name => name.endsWith(MIGRATION_SUFFIX));
   const fixture = await createSweepPostgresFixture({ fullMigrationChain: true, excludedMigrations: migration ? [migration] : [] });
   const { sql } = fixture;
-  const counts = { wrongLookups: 0, nonMatchingRows: 0, tableDisagreements: 0, tableNulls: 0, pathDisagreements: 0, referralPairWrong: 0 };
+  const counts = { wrongLookups: 0, nonMatchingRows: 0, tableDisagreements: 0, tableNulls: 0, pathDisagreements: 0, referralPairWrong: 0, cutBeforeUnseenCondition: 0 };
   const applyFile = async file => {
     const connection = await sql.reserve();
     try { await connection.unsafe(fs.readFileSync(path.join(root, file), 'utf8')); } finally { connection.release(); }
@@ -189,6 +217,20 @@ test('targeted lookups return only real matches', async t => {
       }
     });
 
+    await t.test('every caller finds its document behind one that only an unseen condition rejects', async () => {
+      for (const [index, lookup] of unseenConditionLookups.entries()) {
+        const prefix = `${lookup.type}.unseen${index}.`;
+        const realId = `${prefix}zzz-real`;
+        await seed(lookup.type, [[`${prefix}aaa-rejected`, lookup.decoy], [realId, lookup.real]]);
+        try {
+          if (!byId(await client.fetch(lookup.query, lookup.params), realId)) {
+            counts.cutBeforeUnseenCondition += 1;
+            t.diagnostic(`wrong: ${lookup.caller}`);
+          }
+        } finally { await unseed(prefix); }
+      }
+    });
+
     await t.test('the matcher answers what GROQ answers for every operator, value and path shape', async () => {
       const cases = [];
       for (const op of Object.keys(tableGroq)) for (const value of op === 'in' ? inValues : filterValues) for (const actual of fieldValues) for (const shape of pathShapes) {
@@ -241,7 +283,7 @@ test('targeted lookups return only real matches', async t => {
     });
 
     console.log(JSON.stringify(counts));
-    assert.deepEqual(counts, { wrongLookups: 0, nonMatchingRows: 0, tableDisagreements: 0, tableNulls: 0, pathDisagreements: 0, referralPairWrong: 0 });
+    assert.deepEqual(counts, { wrongLookups: 0, nonMatchingRows: 0, tableDisagreements: 0, tableNulls: 0, pathDisagreements: 0, referralPairWrong: 0, cutBeforeUnseenCondition: 0 });
   } finally {
     await fixture.stop();
     fs.rmSync(fixture.scratch, { recursive: true, force: true });
