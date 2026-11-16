@@ -453,7 +453,7 @@ jobs:
           const assert = require('node:assert/strict');
           const { stats } = require('./test-results/native-booking-hold.json');
           assert.equal(stats.skipped, 0, 'Native booking-hold cases must not skip');
-          assert.equal(stats.expected, 24, 'All native booking cases must pass');
+          assert.equal(stats.expected, 26, 'All native booking cases must pass');
           assert.equal(stats.unexpected, 0);
           assert.equal(stats.flaky, 0);
           NODE
@@ -470,7 +470,7 @@ jobs:
           assert.equal(stats.unexpected, 0);
           assert.equal(stats.flaky, 0);
           NODE
-      - name: Run all six native lookup browser cases
+      - name: Run all eight native lookup browser cases
         env:
           PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/native-lookup-filters.json
         run: |
@@ -479,7 +479,7 @@ jobs:
           const assert = require('node:assert/strict');
           const { stats } = require('./test-results/native-lookup-filters.json');
           assert.equal(stats.skipped, 0);
-          assert.equal(stats.expected, 6);
+          assert.equal(stats.expected, 8);
           assert.equal(stats.unexpected, 0);
           assert.equal(stats.flaky, 0);
           NODE

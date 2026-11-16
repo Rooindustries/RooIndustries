@@ -72,9 +72,11 @@ const referral = (id, code, fields = {}) => ({ _id: `referral.${id}`, _type: 're
   slug: { _type: 'slug', current: code }, registrationStatus: 'active',
   currentCommissionPercent: 20, currentDiscountPercent: 10, successfulReferrals: 0, ...fields });
 const REFERRAL_DISCOUNT = '5.50';
-const behindCodelessReferral = async (native, id, run) => {
+const codeless = { name: 'a referral that has no code', id: 'link', earlier: { slug: null }, real: { registrationStatus: undefined } };
+const unverified = { name: 'an unverified creator with the same code', id: 'unverified', earlier: { registrationStatus: 'pending_email' }, real: {} };
+const behindEarlierReferral = async (native, { earlier, real }, id, run) => {
   const code = `realcode${id}`;
-  const docs = [referral(`aaa-${id}`, null, { slug: null }), referral(`zzz-${id}`, code, { registrationStatus: undefined })];
+  const docs = [referral(`aaa-${id}`, code, earlier), referral(`zzz-${id}`, code, real)];
   for (const doc of docs) await native('create', doc);
   try { await run(code, docs[1]._id); } finally { await native('remove', docs.map(doc => doc._id)); }
 };
@@ -196,11 +198,11 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       } finally { await other.close(); }
     });
 
-    test('a creator link keeps its discount and credit behind a referral that has no code', async ({ page, context, flow, native }) => {
+    for (const decoy of [codeless, unverified]) test(`a creator link keeps its discount and credit behind ${decoy.name}`, async ({ page, context, flow, native }) => {
       const date = await native('nextDate');
-      const id = `link${viewport.width}`;
+      const id = `${decoy.id}${viewport.width}`;
       await native('create', coupon(id, id.toUpperCase(), { canCombineWithReferral: false }));
-      await behindCodelessReferral(native, id, async (code, referralId) => {
+      await behindEarlierReferral(native, decoy, id, async (code, referralId) => {
         await routeNative(context, native, date);
         await page.goto(`/?ref=${code}`);
         await expect.poll(() => page.evaluate(() => sessionStorage.getItem('referral_session'))).toBe(code);
@@ -235,7 +237,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
 
     test('a referral code typed on the payment page keeps its discount behind a referral that has no code', async ({ page, context, flow, native }) => {
       const date = await native('nextDate');
-      await behindCodelessReferral(native, `typed${viewport.width}`, async code => {
+      await behindEarlierReferral(native, codeless, `typed${viewport.width}`, async code => {
         await routeNative(context, native, date);
         await flow.review('/booking?package=overhaul');
         await flow.payment();

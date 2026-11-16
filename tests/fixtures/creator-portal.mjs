@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import bcrypt from 'bcryptjs';
+import { matchesShadowFilter } from './shadow-filter.mjs';
 
 const userId = 'a0000000-0000-4000-8000-000000000001';
 const token = 'a'.repeat(64);
@@ -87,19 +88,7 @@ export async function portalHandle(ctx) {
   if (url.pathname === '/rest/v1/rpc/roo_fetch_shadow_documents_targeted' && body.p_filters?.some(filter => ['gt', 'gte', 'lt', 'lte'].includes(filter.op))) {
     if (!body.p_document_types?.length || !Number.isInteger(body.p_limit) || body.p_limit < 1 || body.p_limit > 1000) throw new Error('Invalid creator fixture read scope.');
     let rows = documents.filter(row => body.p_document_types.includes(row._type) && (!body.p_ids || body.p_ids.includes(row._id)));
-    for (const filter of body.p_filters) {
-      rows = rows.filter(row => {
-        const value = filter.path.split('.').reduce((item, key) => item?.[key], row);
-        if (filter.op === 'eq') return value === filter.value;
-        if (filter.op === 'ieq') return String(value).toLowerCase() === String(filter.value).toLowerCase();
-        if (filter.op === 'in') return filter.value.includes(value);
-        if (filter.op === 'gt') return value > filter.value;
-        if (filter.op === 'gte') return value >= filter.value;
-        if (filter.op === 'lt') return value < filter.value;
-        if (filter.op === 'lte') return value <= filter.value;
-        throw new Error('Unsupported creator fixture filter.');
-      });
-    }
+    for (const filter of body.p_filters) rows = rows.filter(row => matchesShadowFilter(row, filter));
     rows = rows.sort((a, b) => a._id.localeCompare(b._id)).slice(0, body.p_limit);
     call.rows = rows.length;
     return send(rows);
