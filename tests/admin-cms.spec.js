@@ -1336,7 +1336,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         const stored = await cms(request, `/api/admin/content/documents/${receipt.documentId}`);
         expect(stored.document).toMatchObject({ title, sortOrder: 0 });
         await page.clock.fastForward(31000);
-        await expect(page.getByRole("status").filter({ hasText: "Published. The live pages haven't updated yet. The site tries again in a few seconds and once more within a minute." })).toBeVisible();
+        await expect(page.getByRole("status").filter({ hasText: "Published. The live site picks this up within a few minutes (page and CDN caches)." })).toBeVisible();
         await expect(page.getByRole("alert").filter({ hasText: /not published.*retry/i })).toHaveCount(0);
         expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith("roo-content-draft:")))).toEqual([]);
         expect(submitted).toHaveLength(1);
@@ -1424,7 +1424,7 @@ for (const committed of [true, false]) {
       await expect(page.getByRole("button", { name: "Publishing…", exact: true })).toHaveCount(0);
       const stored = await cms(request, `/api/admin/content/documents/${HERO_ID}`);
       if (committed) {
-        await expect(page.getByRole("status").filter({ hasText: "Published. The live pages haven't updated yet. The site tries again in a few seconds and once more within a minute." })).toBeVisible();
+        await expect(page.getByRole("status").filter({ hasText: "Published. The live site picks this up within a few minutes (page and CDN caches)." })).toBeVisible();
         expect(stored.revision).not.toBe(original.revision);
         expect(stored.document.headingLine1).toBe(heading);
         expect(await page.evaluate(id => localStorage.getItem(`roo-content-draft:v1:doc:${id}`), HERO_ID)).toBeNull();
@@ -1459,7 +1459,7 @@ for (const committed of [true, false]) {
       expect(submitted.createIntentId).toBeTruthy();
       if (committed) {
         const receipt = (await response.json()).data;
-        await expect(page.getByRole("status").filter({ hasText: "Published. The live pages haven't updated yet. The site tries again in a few seconds and once more within a minute." })).toBeVisible();
+        await expect(page.getByRole("status").filter({ hasText: "Published. The live site picks this up within a few minutes (page and CDN caches)." })).toBeVisible();
         expect((await cms(request, `/api/admin/content/documents/${receipt.documentId}`)).document.title).toBe(title);
         expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith("roo-content-draft:")))).toEqual([]);
         await evidence(page, testInfo, { committed, title, documentId: receipt.documentId, createIntentId: submitted.createIntentId, calls });
@@ -1539,7 +1539,7 @@ test("create receipts reconcile a committed fixed-ID singleton after its respons
     await fs.writeFile(testInfo.outputPath("creation-content.json"), JSON.stringify({ submitted: submitted.document, stored: stored.document, receipt }, null, 2));
     const beforeLookup = await contentCounts(request, control);
     await page.clock.fastForward(31000);
-    await expect(page.getByRole("status").filter({ hasText: "Published. The live pages haven't updated yet. The site tries again in a few seconds and once more within a minute." })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "Published. The live site picks this up within a few minutes (page and CDN caches)." })).toBeVisible();
     expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith("roo-content-draft:")))).toEqual([]);
     expect((await cms(request, `/api/admin/content/documents/${receipt.documentId}`)).document.dateSlots[0].date).toBe("2099-01-13");
     expect(writes).toBe(1);
@@ -1714,10 +1714,44 @@ test("#10 uncertain publication keeps its draft and Retry only reads", async ({ 
     expect(await page.evaluate(id => JSON.parse(localStorage.getItem(`roo-content-draft:v1:doc:${id}`))?.document.headingLine1, HERO_ID)).toBe(text);
     await page.unroute(`**/api/admin/content/documents/${HERO_ID}`, failedRead);
     await page.getByRole("button", { name: "Retry", exact: true }).click();
-    await expect(page.getByRole("status").filter({ hasText: "Published. The live pages haven't updated yet. The site tries again in a few seconds and once more within a minute." })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "Published. The live site picks this up within a few minutes (page and CDN caches)." })).toBeVisible();
     expect(calls).toBe(1);
     await evidence(page, testInfo, { originalRevision: original.revision, calls, text });
   } finally { await pending.release(); }
+});
+
+test("a lost publish response followed by Retry shows the general notice", async ({ page, request }) => {
+  await login(page); await hero(page);
+  const original = await cms(request, `/api/admin/content/documents/${HERO_ID}`);
+  const heading = `Lost response ${original.revision}`;
+  await page.getByLabel("Main Heading (Line 1)", { exact: true }).fill(heading);
+  const failedRead = route => route.fulfill({ status: 503, json: { ok: false, error: "Synthetic reconciliation outage" } });
+  const lostResponse = async route => { await route.fetch(); await route.abort("failed"); };
+  await page.route(`**/api/admin/content/documents/${HERO_ID}`, failedRead);
+  await page.route("**/api/admin/content/publish", lostResponse);
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await expect(page.getByRole("alert").filter({ hasText: /could not confirm.*publication/i })).toBeVisible();
+  await page.unroute(`**/api/admin/content/documents/${HERO_ID}`, failedRead);
+  await page.getByRole("button", { name: "Retry", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Published. The live site picks this up within a few minutes (page and CDN caches)." })).toBeVisible();
+  expect((await cms(request, `/api/admin/content/documents/${HERO_ID}`)).document.headingLine1).toBe(heading);
+});
+
+test("a delete with unknown refresh status shows the general notice", async ({ page }) => {
+  await login(page); await choose(page, "Benchmark");
+  await page.getByRole("region", { name: "Benchmark list" }).getByRole("button", { name: "New", exact: true }).click();
+  await page.getByLabel("Benchmark Name", { exact: true }).fill("Delete with unknown refresh");
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Published. The live site picks this up within a few minutes (page and CDN caches)." })).toBeVisible();
+  await page.route("**/api/admin/content/publish", async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    delete body.data.refresh;
+    await route.fulfill({ response, json: body });
+  });
+  page.once("dialog", dialog => dialog.accept());
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Deleted. The live site picks this up within a few minutes." })).toBeVisible();
 });
 
 test("#10 a superseded publication keeps the draft and its revision guard", async ({ page, request }, testInfo) => {

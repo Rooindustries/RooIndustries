@@ -455,7 +455,7 @@ export default function ContentAdmin() {
     const publishedGeneration = selection.current;
     loadList(pending.session.type);
     await opening;
-    if (isCurrentSelection(publishedGeneration)) setNotice(refresh?.pages === "done" ? PUBLISH_NOTICE : PUBLISH_REFRESH_NOTICE);
+    if (isCurrentSelection(publishedGeneration)) setNotice(refresh && refresh.pages !== "done" ? PUBLISH_REFRESH_NOTICE : PUBLISH_NOTICE);
   };
 
   const notPublished = () => {
@@ -577,7 +577,7 @@ export default function ContentAdmin() {
       referenceCache.current.delete(session.type);
       setSession(null);
       setWorking(null);
-      setNotice(result?.refresh?.pages === "done" ? DELETE_NOTICE : DELETE_REFRESH_NOTICE);
+      setNotice(result?.refresh && result.refresh.pages !== "done" ? DELETE_REFRESH_NOTICE : DELETE_NOTICE);
       setPane("documents");
       loadList(session.type);
     } catch (error) {
