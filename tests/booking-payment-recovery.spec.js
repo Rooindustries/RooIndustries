@@ -55,7 +55,15 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         : await native.call("post", url.pathname, request.postDataJSON(), request.headers().authorization);
       await route.fulfill({ status: response.status, contentType: "application/json", body: JSON.stringify(response.body) });
     });
-    await flow.review();
+    await flow.booking();
+    await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+    const held = page.waitForResponse(response => new URL(response.url()).pathname === "/api/holdSlot");
+    await page.getByRole("button", { name: "Next", exact: true }).last().click();
+    const response = await held;
+    expect(new Date((await response.json()).expiresAt).getTime()).toBeGreaterThan(Date.now());
+    await flow.details();
+    await page.getByRole("button", { name: "Review before payment", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
     await flow.codeInput("FREE100");
     await expect(page.getByRole("button", { name: /Remove coupon code/i })).toBeVisible();
     await flow.payment();

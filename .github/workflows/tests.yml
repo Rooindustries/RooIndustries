@@ -408,11 +408,11 @@ jobs:
           assert.equal(stats.unexpected, 0);
           assert.equal(stats.flaky, 0);
           NODE
-      - name: Run all twelve native booking hold API cases
+      - name: Run all thirteen native booking hold API cases
         run: |
           node --test --test-reporter=tap tests/booking-hold.test.mjs | tee "$RUNNER_TEMP/booking-hold-tap.txt"
-          grep -Fx '# tests 12' "$RUNNER_TEMP/booking-hold-tap.txt"
-          grep -Fx '# pass 12' "$RUNNER_TEMP/booking-hold-tap.txt"
+          grep -Fx '# tests 13' "$RUNNER_TEMP/booking-hold-tap.txt"
+          grep -Fx '# pass 13' "$RUNNER_TEMP/booking-hold-tap.txt"
           grep -Fx '# fail 0' "$RUNNER_TEMP/booking-hold-tap.txt"
           grep -Fx '# skipped 0' "$RUNNER_TEMP/booking-hold-tap.txt"
       - name: Run booking-contact PostgreSQL 17 suite

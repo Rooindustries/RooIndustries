@@ -218,8 +218,9 @@ export async function createBookingHoldFixture() {
       const startTimeUTC = `${nextSlotDate()}T04:30:00.000Z`;
       const response = await post("/api/holdSlot", { startTimeUTC, packageTitle: "Performance Vertex Overhaul" });
       assert.equal(response.status, 200, JSON.stringify(response));
+      assert.ok(new Date(response.body.expiresAt).getTime() > Date.now());
       return { packageTitle: "Performance Vertex Overhaul", ...details, startTimeUTC,
-        slotHoldId: response.body.holdId, slotHoldToken: response.body.holdToken };
+        slotHoldId: response.body.holdId, slotHoldToken: response.body.holdToken, slotHoldExpiresAt: response.body.expiresAt };
     };
     const start = async bookingPayload => {
       const quote = await post("/api/payment/quote", { bookingPayload });
@@ -255,7 +256,7 @@ if (process.argv.includes("--worker")) {
         const payment = await fixture.commerce.getDocument(booking.paymentRecordId);
         const proof = await fixture.commerce.getDocument(payment.paymentProofClaimId);
         const redemption = await fixture.commerce.getDocument(booking.couponRedemptionId);
-        const bookings = await fixture.commerce.fetch('*[_type == "booking" && paymentRecordId == $id]', { id: payment._id });
+        const bookings = await fixture.commerce.fetch('*[_type == "booking" && startTimeUTC == $start]', { start: booking.startTimeUTC });
         const proofs = await fixture.commerce.fetch('*[_type == "paymentProofClaim" && paymentRecordId == $id]', { id: payment._id });
         value = { booking, payment, proof, redemption, bookings, proofs };
       }

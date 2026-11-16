@@ -154,15 +154,51 @@ test("historical reconstruction keeps delivered emails and accounting unchanged"
 const legacyPayload = payload => ({
   ...payload, packagePrice: "$54.95", status: "captured", paymentProvider: "razorpay",
   razorpayOrderId: "order_fixture", razorpayPaymentId: "payment_fixture",
-  displayDate: "Monday, January 5, 2099", displayTime: "10:00 AM",
+  localTimeZone: "America/Los_Angeles",
+  displayDate: new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles",
+    weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(new Date(payload.startTimeUTC)),
+  displayTime: new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles",
+    hour: "numeric", minute: "2-digit" }).format(new Date(payload.startTimeUTC)),
 });
 
 test("legacy Razorpay booking requires a client signature", async () => {
   const payload = await fixture.hold();
-  const result = await fixture.post("/api/ref/createBooking", legacyPayload(payload));
+  const key = process.env.RAZORPAY_KEY_ID;
+  const secret = process.env.RAZORPAY_KEY_SECRET;
+  const originalFetch = globalThis.fetch;
+  process.env.RAZORPAY_KEY_ID = "rzp_test_fixture";
+  process.env.RAZORPAY_KEY_SECRET = "fixture-secret";
+  globalThis.fetch = (input, init) => String(input) === "https://api.razorpay.com/v1/payments/payment_fixture"
+    ? Promise.resolve(Response.json({ id: "payment_fixture", order_id: "order_fixture", status: "captured",
+      captured: true, currency: "USD", amount: 5495 })) : originalFetch(input, init);
+  try {
+    const result = await fixture.post("/api/ref/createBooking", { ...legacyPayload(payload),
+      paymentRecordId: "paymentRecord.razorpay.order.public_fixture" });
+    assert.equal(result.status, 400, JSON.stringify(result));
+    assert.deepEqual(result.body, { error: "Missing payment verification fields." });
+    assert.equal((await fixture.commerce.getDocument(payload.slotHoldId)).phase, "active");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (key === undefined) delete process.env.RAZORPAY_KEY_ID; else process.env.RAZORPAY_KEY_ID = key;
+    if (secret === undefined) delete process.env.RAZORPAY_KEY_SECRET; else process.env.RAZORPAY_KEY_SECRET = secret;
+  }
+});
+
+test("a legacy Razorpay payment without transaction IDs creates no booking or emails and can be released", async () => {
+  const payload = await fixture.hold();
+  const before = fixture.evidence.providerRequests.length;
+  const holds = () => fixture.commerce.fetch('*[_type == "slotHold" && _id == $id]', { id: payload.slotHoldId });
+  assert.equal((await holds()).length, 1);
+  const result = await fixture.post("/api/ref/createBooking", { ...legacyPayload(payload),
+    razorpayOrderId: "", razorpayPaymentId: "", razorpaySignature: "fixture_signature", deferEmailsUntilConfirmation: false });
   assert.equal(result.status, 400, JSON.stringify(result));
-  assert.deepEqual(result.body, { error: "Missing payment verification fields." });
-  assert.equal((await fixture.commerce.getDocument(payload.slotHoldId)).phase, "active");
+  assert.deepEqual(await fixture.commerce.fetch('*[_type == "booking" && startTimeUTC == $start]', { start: payload.startTimeUTC }), []);
+  assert.deepEqual(fixture.evidence.providerRequests.slice(before), []);
+  const release = await fixture.post("/api/releaseHold", { holdId: payload.slotHoldId, holdToken: payload.slotHoldToken });
+  assert.equal(release.status, 200, JSON.stringify(release));
+  const released = await holds();
+  assert.equal(released.length, 1);
+  assert.equal(released[0].phase, "released");
 });
 
 test("a rejected legacy payment leaves no booking or email and permits release", async () => {
@@ -217,6 +253,7 @@ for (const missing of [false, true]) {
       const response = await fixture.post("/api/ref/createBooking", {
         ...legacyPayload(payload), paymentProvider: "paypal", paypalOrderId: `order_${payload.slotHoldId}`,
         razorpayOrderId: "", razorpayPaymentId: "",
+        payerEmail: payload.email,
         deferEmailsUntilConfirmation: false,
       });
       assert.equal(response.status, 200, JSON.stringify(response));
@@ -245,13 +282,15 @@ test("one legacy provider proof cannot book two different slots", async () => {
   try {
     const responses = await Promise.all(holds.map(payload => fixture.post("/api/ref/createBooking", {
       ...legacyPayload(payload), paymentProvider: "paypal", paypalOrderId: "order_shared_proof",
-      razorpayOrderId: "", razorpayPaymentId: "", deferEmailsUntilConfirmation: false,
+      razorpayOrderId: "", razorpayPaymentId: "", payerEmail: payload.email, deferEmailsUntilConfirmation: false,
     })));
     assert.deepEqual(responses.map(response => response.status).sort(), [200, 409]);
     assert.deepEqual(responses.find(response => response.status === 409).body, { error: "Booking time changed for this request key." });
-    const bookings = await fixture.commerce.fetch('*[_type == "booking" && paypalOrderId == $id]', { id: "order_shared_proof" });
+    const bookings = (await Promise.all(holds.map(({ startTimeUTC }) => fixture.commerce.fetch(
+      '*[_type == "booking" && startTimeUTC == $start]', { start: startTimeUTC })))).flat();
     assert.equal(bookings.length, 1);
-    const slots = await fixture.commerce.fetch('*[_type == "bookingSlot" && bookingId == $id]', { id: bookings[0]._id });
+    const slots = (await Promise.all(holds.map(({ startTimeUTC }) => fixture.commerce.fetch(
+      '*[_type == "bookingSlot" && startTimeUTC == $start]', { start: startTimeUTC })))).flat();
     assert.equal(slots.length, 1);
     assert.equal(emails.length, 2);
   } finally {
@@ -288,9 +327,11 @@ test("a Razorpay webhook recovers a captured payment after its hold was deleted"
     const signature = createHmac("sha256", "fixture-webhook-secret").update(JSON.stringify(event)).digest("hex");
     const webhook = await fixture.post("/api/payment/webhook/razorpay", event, "", { "x-razorpay-signature": signature });
     assert.equal(webhook.status, 200, JSON.stringify(webhook));
-    const bookings = await fixture.commerce.fetch('*[_type == "booking" && razorpayPaymentId == $id]', { id: payment.id });
+    const bookings = await fixture.commerce.fetch('*[_type == "booking" && startTimeUTC == $start]', { start: payload.startTimeUTC });
     assert.equal(bookings.length, 1);
+    assert.equal(bookings[0].paymentProvider, "razorpay");
     assert.equal(bookings[0].razorpayOrderId, payment.order_id);
+    assert.equal(bookings[0].razorpayPaymentId, payment.id);
     assert.equal(bookings[0].slotReservationState, "reconciled_after_missing_hold");
   } finally {
     fixture.restoreClock();
