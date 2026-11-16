@@ -126,6 +126,8 @@ export async function createBookingHoldFixture() {
     const handlers = new Map();
     for (const [route, module] of Object.entries({
       "/api/holdSlot": "../../src/server/booking/holdSlot.js",
+      "/api/ref/createBooking": "../../src/server/api/ref/createBooking.js",
+      "/api/ref/validateCoupon": "../../src/server/api/ref/validateCoupon.js",
       "/api/payment/quote": "../../src/server/api/payment/quote.js",
       "/api/payment/start": "../../src/server/api/payment/start.js",
       "/api/payment/finalize": "../../src/server/api/payment/finalize.js",
@@ -134,7 +136,7 @@ export async function createBookingHoldFixture() {
       "/api/bookingAvailability": "../../src/server/booking/availability.js",
       "/api/payment/reconcile": "../../src/server/api/payment/reconcile.js",
       "/api/payment/webhook/dodo": "../../src/server/api/payment/webhookDodo.js",
-      "/api/ref/createBooking": "../../src/server/api/ref/createBooking.js",
+      "/api/payment/webhook/razorpay": "../../src/server/api/payment/webhookRazorpay.js",
     })) handlers.set(route, (await import(module)).default);
     server.on("request", async (req, res) => {
       try {
@@ -245,6 +247,18 @@ if (process.argv.includes("--worker")) {
       }
       else if (method === "nextSlotDate") value = fixture.nextSlotDate();
       else if (method === "getHold") value = await fixture.commerce.getDocument(...args);
+      else if (method === "seedCoupon") value = await fixture.commerce.create({ _id: "coupon.fixture.free", _type: "coupon",
+        code: "FREE100", isActive: true, discountType: "percent", discountPercent: 100,
+        canCombineWithReferral: true, timesUsed: 0, activeReservations: 0, maxUses: 5 });
+      else if (method === "freeBooking") {
+        const booking = await fixture.commerce.getDocument(args[0]);
+        const payment = await fixture.commerce.getDocument(booking.paymentRecordId);
+        const proof = await fixture.commerce.getDocument(payment.paymentProofClaimId);
+        const redemption = await fixture.commerce.getDocument(booking.couponRedemptionId);
+        const bookings = await fixture.commerce.fetch('*[_type == "booking" && paymentRecordId == $id]', { id: payment._id });
+        const proofs = await fixture.commerce.fetch('*[_type == "paymentProofClaim" && paymentRecordId == $id]', { id: payment._id });
+        value = { booking, payment, proof, redemption, bookings, proofs };
+      }
       else if (method === "evidence") value = fixture.evidence;
       else if (method === "verifyHold") {
         const stored = await fixture.commerce.getDocument(args[0].holdId);

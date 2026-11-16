@@ -394,11 +394,25 @@ jobs:
           assert.equal(stats.unexpected, 0);
           assert.equal(stats.flaky, 0);
           NODE
-      - name: Run all six native booking hold API cases
+      - name: Run payment recovery browser cases
+        env:
+          NEXT_DIST_DIR: .next-e2e-native-booking
+          PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/native-payment-recovery.json
+        run: |
+          xvfb-run -a npx playwright test tests/booking-payment-recovery.spec.js --project=chromium --workers=1 --retries=0 --output=test-results/payment-recovery-e2e --reporter=line,json
+          node - <<'NODE'
+          const assert = require('node:assert/strict');
+          const { stats } = require('./test-results/native-payment-recovery.json');
+          assert.equal(stats.expected, 2);
+          assert.equal(stats.skipped, 0);
+          assert.equal(stats.unexpected, 0);
+          assert.equal(stats.flaky, 0);
+          NODE
+      - name: Run all twelve native booking hold API cases
         run: |
           node --test --test-reporter=tap tests/booking-hold.test.mjs | tee "$RUNNER_TEMP/booking-hold-tap.txt"
-          grep -Fx '# tests 6' "$RUNNER_TEMP/booking-hold-tap.txt"
-          grep -Fx '# pass 6' "$RUNNER_TEMP/booking-hold-tap.txt"
+          grep -Fx '# tests 12' "$RUNNER_TEMP/booking-hold-tap.txt"
+          grep -Fx '# pass 12' "$RUNNER_TEMP/booking-hold-tap.txt"
           grep -Fx '# fail 0' "$RUNNER_TEMP/booking-hold-tap.txt"
           grep -Fx '# skipped 0' "$RUNNER_TEMP/booking-hold-tap.txt"
       - name: Run booking-contact PostgreSQL 17 suite
