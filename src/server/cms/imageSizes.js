@@ -5,8 +5,10 @@ export const IMAGE_SIZE_QUALITY = 75;
 export const IMAGE_SIZE_MIME_TYPE = "image/webp";
 export const IMAGE_SIZE_CACHE_SECONDS = 365 * 24 * 60 * 60;
 const IMAGE_SIZE_TIMEOUT_SECONDS = 30;
+const TIMEOUT_MESSAGE = /timeout: \d+% complete/;
 const SIZED_EXTENSIONS = new Set(["png", "jpg", "gif", "webp", "avif"]);
 
+export const isImageSizeTimeout = (error) => TIMEOUT_MESSAGE.test(String(error?.message));
 export const imageSizePath = (sha1, width) => `images/${sha1}-w${width}.webp`;
 
 const decode = (bytes) =>

@@ -5,6 +5,7 @@ const { adminControl, login, choose, prepareAdminContext } = require("./fixtures
 
 const LADDER = [128, 320, 640, 960, 1280];
 const ONE_YEAR = "max-age=31536000";
+const UNREADABLE_MESSAGE = "Image bytes do not parse as the declared format.";
 const RETRY_MESSAGE = "Image size storage is temporarily unavailable. Retry before the upload expires.";
 const UPLOAD_BUTTON = /^(Upload|Replace)$/;
 
@@ -31,6 +32,10 @@ const rotatedPhoto = async (width, height) => ({
   mimeType: "image/jpeg",
   buffer: await sharp(noisyPixels(height, width), { raw: { width: height, height: width, channels: 3 } }).jpeg().withMetadata({ orientation: 6 }).toBuffer(),
 });
+const cutShort = async (width, height) => {
+  const whole = await png(width, height);
+  return { ...whole, buffer: whole.buffer.subarray(0, Math.floor(whole.buffer.length / 2)) };
+};
 const animatedGif = async (width, height) => ({
   name: "clip.gif",
   mimeType: "image/gif",
@@ -212,6 +217,19 @@ test("a photo turned on its side by its camera gets sizes as wide as browsers sh
   const found = await expectSizes(request, file, shown);
   expect(Object.keys(found).map(Number)).toEqual([128, 320, 600]);
   expect(found[600]).toMatchObject({ width: 600, height: 1000 });
+});
+
+test("an image whose pixels cannot be read is refused like any other bad file", async ({ page, request }) => {
+  const file = await cutShort(800, 500);
+  const sha1 = sha1Of(file.buffer);
+  const asset = await openReviewImage(page);
+  const refused = await upload(page, asset, file);
+  expect(refused).toMatchObject({ ok: false, code: "ASSET_VERIFICATION_FAILED", error: UNREADABLE_MESSAGE });
+  await expect(asset.getByRole("alert")).toHaveText(UNREADABLE_MESSAGE);
+  expect(await registered(request, `image-${sha1}-800x500-png`)).toEqual({ document: null, assets: 0 });
+  expect(await sizesInBucket(request, sha1, 800)).toEqual({});
+  const original = await request.get(`${await storageOrigin(request)}/storage/v1/object/public/site-content-public/images/${sha1}.png`);
+  expect(original.ok()).toBe(false);
 });
 
 test("a vector image and an animated image are stored as before and record no sizes", async ({ page, request }) => {

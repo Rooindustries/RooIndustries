@@ -7,13 +7,14 @@ import { cmsError, rpcData, validationError } from "./errors.js";
 import { assertGlobalCmsWritesAllowed } from "./writeControl.js";
 import { clearSupabaseAssetManifestCache } from "../supabase/assets.js";
 import { validManifest } from "./documents.js";
-import { IMAGE_SIZE_CACHE_SECONDS, IMAGE_SIZE_MIME_TYPE, imageSizePath, makeImageSizes } from "./imageSizes.js";
+import { IMAGE_SIZE_CACHE_SECONDS, IMAGE_SIZE_MIME_TYPE, imageSizePath, isImageSizeTimeout, makeImageSizes } from "./imageSizes.js";
 
 export const CMS_STORAGE_TRANSFER_TIMEOUT_MS = 240000;
 export const CMS_UPLOAD_LIMITS = Object.freeze({ image: 20 * 1024 * 1024, file: 64 * 1024 * 1024 });
 const imageTypes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif", "image/svg+xml"]);
 const fileTypes = new Set(["application/zip", "application/x-zip-compressed", "application/octet-stream", "application/vnd.microsoft.portable-executable", "application/x-msdownload"]);
 const uuidPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
+const UNREADABLE_IMAGE = "Image bytes do not parse as the declared format.";
 const verifyFailure = message => cmsError(message, 422, "ASSET_VERIFICATION_FAILED");
 const logicalStatus = error => Number(error?.statusCode || error?.status || 0);
 const missing = error => logicalStatus(error) === 404 || /not found/i.test(String(error?.message));
@@ -121,7 +122,7 @@ const detectBytes = async (bytes, signal) => {
   }
   if (!format) throw verifyFailure("Bytes do not identify an allowed image, ZIP or PE file.");
   let metadata;
-  try { metadata = await sharp(bytes, { failOn: "error", limitInputPixels: 100000000 }).timeout({ seconds: 10 }).metadata(); } catch { throw verifyFailure("Image bytes do not parse as the declared format."); }
+  try { metadata = await sharp(bytes, { failOn: "error", limitInputPixels: 100000000 }).timeout({ seconds: 10 }).metadata(); } catch { throw verifyFailure(UNREADABLE_IMAGE); }
   if (metadata.format !== format || !Number.isSafeInteger(metadata.width) || !Number.isSafeInteger(metadata.height) || metadata.width <= 0 || metadata.height <= 0 || metadata.width > 100000 || metadata.height > 100000 || (format === "heif" && metadata.compression !== "av1")) throw verifyFailure("Image format or dimensions are invalid.");
   const { width, height } = metadata.autoOrient;
   if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width <= 0 || height <= 0 || width > 100000 || height > 100000) throw verifyFailure("Oriented image dimensions are invalid.");
@@ -133,13 +134,18 @@ const removeStaging = async (client, row) => {
   if (result.error && !missing(result.error)) console.error("CMS staging cleanup unavailable", { code: "ASSET_STAGING_CLEANUP_FAILED" });
   return !result.error || missing(result.error);
 };
-const storeImageSizes = async ({ client, bucket, upload, detected }) => {
-  let sizes;
-  try { sizes = await makeImageSizes({ bytes: upload.bytes, extension: detected.extension, width: detected.width }); } catch { throw storageUnavailable("Image size making"); }
+const makeSizes = async (bytes, detected) => {
+  try { return await makeImageSizes({ bytes, extension: detected.extension, width: detected.width }); }
+  catch (error) {
+    if (!isImageSizeTimeout(error)) throw verifyFailure(UNREADABLE_IMAGE);
+    console.error("CMS image size making timed out", { code: "ASSET_SIZE_TIMEOUT" });
+    throw storageUnavailable("Image size making");
+  }
+};
+const storeImageSizes = async ({ client, bucket, upload, sizes }) => {
   const stored = await Promise.all(sizes.map(size => client.storage.from(bucket).upload(imageSizePath(upload.sha1, size.width), size.bytes, { contentType: IMAGE_SIZE_MIME_TYPE, cacheControl: String(IMAGE_SIZE_CACHE_SECONDS), upsert: false })));
   const failed = stored.find(({ error }) => error && logicalStatus(error) !== 409);
   if (failed) storageData(failed, "Image size storage");
-  return sizes.map(size => size.width);
 };
 const finalizeUpload = async ({ body, client, env = process.env, actor = "admin:key", signal, now = Date.now } = {}) => {
   assertGlobalCmsWritesAllowed(env);
@@ -151,11 +157,12 @@ const finalizeUpload = async ({ body, client, env = process.env, actor = "admin:
   if (row.status !== "issued" || !Number.isFinite(Date.parse(row.expires_at)) || Date.parse(row.expires_at) <= now()) throw verifyFailure("The upload has expired or was refused.");
   const maxBytes = CMS_UPLOAD_LIMITS[row.kind];
   const transferClient = createSupabaseAdminClient({ env, signal, storageTransferTimeoutMs: CMS_STORAGE_TRANSFER_TIMEOUT_MS });
-  let upload, detected;
+  let upload, detected, sizes;
   try {
     upload = await readBytes(transferClient, row.staging_bucket, row.staging_path, maxBytes, signal);
     detected = await detectBytes(upload.bytes, signal);
     if (upload.byteSize !== Number(row.declared_byte_size) || upload.sha1 !== row.declared_sha1 || upload.sha256 !== row.declared_sha256 || detected.kind !== row.kind || !mimeAgrees(row.declared_mime_type, detected) || upload.storedMimeType !== row.declared_mime_type || (row.declared_width !== null && row.declared_width !== undefined && Number(row.declared_width) !== detected.width) || (row.declared_height !== null && row.declared_height !== undefined && Number(row.declared_height) !== detected.height)) throw verifyFailure("Stored bytes disagree with the upload declaration.");
+    sizes = detected.kind === "image" ? await makeSizes(upload.bytes, detected) : [];
   } catch (error) {
     if (["ASSET_VERIFICATION_FAILED", "ASSET_TOO_LARGE"].includes(error.code)) {
       rpcData(await client.rpc("roo_refuse_cms_upload", { p_upload_id: row.upload_id, p_error_code: error.code }), "Upload refusal");
@@ -189,10 +196,10 @@ const finalizeUpload = async ({ body, client, env = process.env, actor = "admin:
     rpcData(await client.rpc("roo_refuse_cms_upload", { p_upload_id: row.upload_id, p_error_code: "ASSET_FINAL_COLLISION" }), "Upload collision refusal");
     throw verifyFailure("The immutable final asset disagrees with these bytes. Owner attention is required.");
   }
-  const sizes = row.kind === "image" ? await storeImageSizes({ client: transferClient, bucket, upload, detected }) : null;
+  await storeImageSizes({ client: transferClient, bucket, upload, sizes });
   const url = row.kind === "image" ? client.storage.from(bucket).getPublicUrl(path).data.publicUrl : null;
   const manifest = { legacy_sanity_asset_id: assetId, asset_kind: row.kind, storage_bucket: bucket, storage_path: path, source_url: url || `storage://${bucket}/${path}`, mime_type: mimeType, byte_size: upload.byteSize, sha256: upload.sha256, ...dimensions, migration_status: "verified", verified_at: new Date(now()).toISOString(), metadata: {} };
-  const assetDocument = { _id: assetId, _type: `sanity.${row.kind}Asset`, ...(url ? { url } : {}), sha1hash: upload.sha1, size: upload.byteSize, mimeType, extension, metadata: row.kind === "image" ? { dimensions: { ...dimensions, aspectRatio: dimensions.width / dimensions.height }, sizes } : {} };
+  const assetDocument = { _id: assetId, _type: `sanity.${row.kind}Asset`, ...(url ? { url } : {}), sha1hash: upload.sha1, size: upload.byteSize, mimeType, extension, metadata: row.kind === "image" ? { dimensions: { ...dimensions, aspectRatio: dimensions.width / dimensions.height }, sizes: sizes.map(size => size.width) } : {} };
   const registration = await client.rpc("roo_register_verified_cms_asset", { p_asset: manifest, p_asset_document: assetDocument });
   if (registration.error?.message?.includes("CMS_ASSET_SOURCE_COLLISION")) {
     console.error("CMS verified asset source mismatch", { code: "CMS_ASSET_SOURCE_COLLISION" });
