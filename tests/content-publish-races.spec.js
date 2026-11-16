@@ -111,6 +111,8 @@ test("R3 a hanging content purge does not stop the page mark", async ({ request,
   const after = await read(request, "/packages");
   const result = { status: publish.status(), refresh: answer?.data?.refresh ?? null, cache: after.cache, maxAge: after.maxAge, showsNew: after.body.includes(price) };
   report("R3", result);
+  expect(result.status).toBe(200);
+  expect(after.status).toBe(200);
   expect(result.showsNew, "the published price never reached the page").toBe(true);
   expect(result.refresh).toEqual({ content: "pending", pages: "done" });
   } finally {

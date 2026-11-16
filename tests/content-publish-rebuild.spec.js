@@ -21,7 +21,7 @@ const firstDocument = async (gate, ids) => {
 
 const forceFailedRebuild = async ({ request, baseURL, label, mode }) => {
   const gate = createContentGate(request, baseURL);
-  const tally = { label, served5xx: 0, staleAsFresh: 0, stillOldAfterRecovery: 0, examples: [] };
+  const tally = { label, served5xx: 0, staleAsFresh: 0, stillOldAfterRecovery: 0, examples: [], finalNot200: [] };
   if (mode === "warm") for (const path of ["/booking", "/payment", ...PAGES]) await read(request, path);
   const refusals = async () => (await (await request.get(`${gate.control}/page-refusals`)).json()).length;
   const beforeRefusals = await refusals();
@@ -64,6 +64,7 @@ const forceFailedRebuild = async ({ request, baseURL, label, mode }) => {
   await new Promise((resolve) => setTimeout(resolve, 2000));
   for (const page of await Promise.all(PAGES.map((path) => read(request, path)))) {
     judge(page, "after", pageLife);
+    if (page.status !== 200) tally.finalNot200.push(`${page.path} ${page.status}`);
     if (showsOld(page)) { tally.stillOldAfterRecovery += 1; tally.examples.push(`after ${page.path} ${page.cache} s-maxage=${page.maxAge}`); }
   }
   tally.refusals = (await refusals()) - beforeRefusals;
@@ -88,7 +89,8 @@ test("a failed read during a rebuild after a publish", async ({ request, baseURL
   expect((await inspected.json()).contentReads, "The forcing check requires a cold content server").toBe(0);
   const results = [];
   for (const mode of ["cold", "warm"]) results.push(await forceFailedRebuild({ request, baseURL, label: mode, mode }));
-  for (const { label, served5xx, staleAsFresh, stillOldAfterRecovery, refusals } of results) {
+  for (const { label, served5xx, staleAsFresh, stillOldAfterRecovery, refusals, finalNot200 } of results) {
+    expect(finalNot200, `${label}: final answers that were not 200`).toEqual([]);
     expect({ label, served5xx, staleAsFresh, stillOldAfterRecovery, refusals }).toEqual({
       label, served5xx: 0, staleAsFresh: 0, stillOldAfterRecovery: 0, refusals: 1,
     });
