@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import { evaluate, parse } from 'groq-js';
 import { createSweepPostgresFixture, root } from '../scripts/lib/sweep-postgres-fixture.mjs';
 import { createSupabaseDocumentClient, inferShadowScope } from '../src/server/supabase/documentClient.js';
+import { matchesShadowFilter } from './fixtures/shadow-filter.mjs';
 
 assert.ok(process.env.POSTGREST_14_BIN, 'POSTGREST_14_BIN must point to PostgREST 14.5');
 assert.equal(crypto.createHash('sha256').update(fs.readFileSync(process.env.POSTGREST_14_BIN)).digest('hex'), '39ce04b0597c6b3c3eb4c5f34fe6ab590a2d0172616eeaccf1e4c659b822295a');
@@ -158,7 +159,7 @@ test('targeted lookups return only real matches', async t => {
   const migration = fs.readdirSync(path.join(root, 'supabase/migrations')).find(name => name.endsWith(MIGRATION_SUFFIX));
   const fixture = await createSweepPostgresFixture({ fullMigrationChain: true, excludedMigrations: migration ? [migration] : [] });
   const { sql } = fixture;
-  const counts = { wrongLookups: 0, nonMatchingRows: 0, tableDisagreements: 0, tableNulls: 0, pathDisagreements: 0, referralPairWrong: 0, cutBeforeUnseenCondition: 0 };
+  const counts = { wrongLookups: 0, nonMatchingRows: 0, tableDisagreements: 0, tableNulls: 0, pathDisagreements: 0, referralPairWrong: 0, cutBeforeUnseenCondition: 0, standInDisagreements: 0 };
   const applyFile = async file => {
     const connection = await sql.reserve();
     try { await connection.unsafe(fs.readFileSync(path.join(root, file), 'utf8')); } finally { connection.release(); }
@@ -231,22 +232,23 @@ test('targeted lookups return only real matches', async t => {
       }
     });
 
-    await t.test('the matcher answers what GROQ answers for every operator, value and path shape', async () => {
+    await t.test('the matcher answers what GROQ answers, and the fixtures\' stand-in what the matcher answers, for every operator, value and path shape', async () => {
       const cases = [];
       for (const op of Object.keys(tableGroq)) for (const value of op === 'in' ? inValues : filterValues) for (const actual of fieldValues) for (const shape of pathShapes) {
         const document = { _id: 'x', _type: 't' };
         if (shape === 'nested') document.f = actual === undefined ? {} : { g: actual };
         if (shape === 'parentString') document.f = 'text';
-        cases.push({ op, value, document });
+        cases.push({ op, value, document, filter: { path: 'f.g', op, value } });
       }
       for (let start = 0; start < cases.length; start += TABLE_CHUNK) {
         const chunk = cases.slice(start, start + TABLE_CHUNK);
         const rows = await sql`select ord, migration.shadow_filter_matches(d, f) as matched
-          from jsonb_to_recordset(${chunk.map((item, ord) => ({ ord, d: item.document, f: { path: 'f.g', op: item.op, value: item.value } }))}::jsonb) as t(ord int, d jsonb, f jsonb)`;
+          from jsonb_to_recordset(${chunk.map((item, ord) => ({ ord, d: item.document, f: item.filter }))}::jsonb) as t(ord int, d jsonb, f jsonb)`;
         for (const row of rows) {
           const item = chunk[row.ord];
           if (row.matched === null) counts.tableNulls += 1;
           if ((row.matched === true) !== await groqMatches(tableGroq[item.op], item.document, item.value)) counts.tableDisagreements += 1;
+          if (matchesShadowFilter(item.document, item.filter) !== row.matched) counts.standInDisagreements += 1;
         }
       }
     });
@@ -283,7 +285,7 @@ test('targeted lookups return only real matches', async t => {
     });
 
     console.log(JSON.stringify(counts));
-    assert.deepEqual(counts, { wrongLookups: 0, nonMatchingRows: 0, tableDisagreements: 0, tableNulls: 0, pathDisagreements: 0, referralPairWrong: 0, cutBeforeUnseenCondition: 0 });
+    assert.deepEqual(counts, { wrongLookups: 0, nonMatchingRows: 0, tableDisagreements: 0, tableNulls: 0, pathDisagreements: 0, referralPairWrong: 0, cutBeforeUnseenCondition: 0, standInDisagreements: 0 });
   } finally {
     await fixture.stop();
     fs.rmSync(fixture.scratch, { recursive: true, force: true });
