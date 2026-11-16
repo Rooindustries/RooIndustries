@@ -1,0 +1,26 @@
+import sharp from "sharp";
+
+export const IMAGE_SIZE_WIDTHS = Object.freeze([128, 320, 640, 960, 1280]);
+export const IMAGE_SIZE_QUALITY = 75;
+export const IMAGE_SIZE_MIME_TYPE = "image/webp";
+export const IMAGE_SIZE_CACHE_SECONDS = 365 * 24 * 60 * 60;
+const IMAGE_SIZE_TIMEOUT_SECONDS = 30;
+const SIZED_EXTENSIONS = new Set(["png", "jpg", "gif", "webp", "avif"]);
+
+export const imageSizePath = (sha1, width) => `images/${sha1}-w${width}.webp`;
+
+const decode = (bytes) =>
+  sharp(bytes, { failOn: "error", limitInputPixels: 100000000 }).timeout({ seconds: IMAGE_SIZE_TIMEOUT_SECONDS });
+
+export const makeImageSizes = async ({ bytes, extension, width }) => {
+  if (!SIZED_EXTENSIONS.has(extension)) return [];
+  const { pages = 1 } = await decode(bytes).metadata();
+  if (pages > 1) return [];
+  const widest = Math.min(width, IMAGE_SIZE_WIDTHS.at(-1));
+  return Promise.all(
+    [...IMAGE_SIZE_WIDTHS.filter((step) => step < widest), widest].map(async (step) => ({
+      width: step,
+      bytes: await decode(bytes).autoOrient().resize({ width: step }).webp({ quality: IMAGE_SIZE_QUALITY }).toBuffer(),
+    })),
+  );
+};
