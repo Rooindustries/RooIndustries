@@ -7,7 +7,7 @@ import { cmsError, rpcData, validationError } from "./errors.js";
 import { assertGlobalCmsWritesAllowed } from "./writeControl.js";
 import { clearSupabaseAssetManifestCache } from "../supabase/assets.js";
 import { validManifest } from "./documents.js";
-import { IMAGE_SIZE_CACHE_SECONDS, IMAGE_SIZE_MIME_TYPE, imageSizePath, isImageSizeTimeout, makeImageSizes } from "./imageSizes.js";
+import { IMAGE_SIZE_CACHE_SECONDS, IMAGE_SIZE_MIME_TYPE, imagePixelLimit, imageSizePath, imageSizeWidths, isImageSizeTimeout, makeImageSizes } from "./imageSizes.js";
 
 export const CMS_STORAGE_TRANSFER_TIMEOUT_MS = 240000;
 export const CMS_UPLOAD_LIMITS = Object.freeze({ image: 20 * 1024 * 1024, file: 64 * 1024 * 1024 });
@@ -15,6 +15,7 @@ const imageTypes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"
 const fileTypes = new Set(["application/zip", "application/x-zip-compressed", "application/octet-stream", "application/vnd.microsoft.portable-executable", "application/x-msdownload"]);
 const uuidPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const UNREADABLE_IMAGE = "Image bytes do not parse as the declared format.";
+const INVALID_IMAGE = "Image format or dimensions are invalid.";
 const verifyFailure = message => cmsError(message, 422, "ASSET_VERIFICATION_FAILED");
 const logicalStatus = error => Number(error?.statusCode || error?.status || 0);
 const missing = error => logicalStatus(error) === 404 || /not found/i.test(String(error?.message));
@@ -121,12 +122,14 @@ const detectBytes = async (bytes, signal) => {
     if (offset >= 64 && offset <= bytes.length - 24 && bytes.subarray(offset, offset + 4).equals(Buffer.from([80,69,0,0]))) return { kind: "file", extension: "exe", mimeType: "application/vnd.microsoft.portable-executable", width: null, height: null };
   }
   if (!format) throw verifyFailure("Bytes do not identify an allowed image, ZIP or PE file.");
+  const extension = format === "jpeg" ? "jpg" : format === "heif" ? "avif" : format;
   let metadata;
-  try { metadata = await sharp(bytes, { failOn: "error", limitInputPixels: 100000000 }).timeout({ seconds: 10 }).metadata(); } catch { throw verifyFailure(UNREADABLE_IMAGE); }
-  if (metadata.format !== format || !Number.isSafeInteger(metadata.width) || !Number.isSafeInteger(metadata.height) || metadata.width <= 0 || metadata.height <= 0 || metadata.width > 100000 || metadata.height > 100000 || (format === "heif" && metadata.compression !== "av1")) throw verifyFailure("Image format or dimensions are invalid.");
+  try { metadata = await sharp(bytes, { failOn: "error", limitInputPixels: false }).timeout({ seconds: 10 }).metadata(); } catch { throw verifyFailure(UNREADABLE_IMAGE); }
+  if (metadata.format !== format || !Number.isSafeInteger(metadata.width) || !Number.isSafeInteger(metadata.height) || metadata.width <= 0 || metadata.height <= 0 || metadata.width > 100000 || metadata.height > 100000 || metadata.width * metadata.height > imagePixelLimit(extension) || (format === "heif" && metadata.compression !== "av1")) throw verifyFailure(INVALID_IMAGE);
   const { width, height } = metadata.autoOrient;
   if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width <= 0 || height <= 0 || width > 100000 || height > 100000) throw verifyFailure("Oriented image dimensions are invalid.");
-  return { kind: "image", extension: format === "jpeg" ? "jpg" : format === "heif" ? "avif" : format, mimeType: format === "svg" ? "image/svg+xml" : format === "heif" ? "image/avif" : `image/${format}`, width, height };
+  if (format !== "svg" && imageSizeWidths({ width, height }).at(-1) < 1) throw verifyFailure(INVALID_IMAGE);
+  return { kind: "image", extension, mimeType: format === "svg" ? "image/svg+xml" : format === "heif" ? "image/avif" : `image/${format}`, width, height };
 };
 const mimeAgrees = (declared, detected) => declared === detected.mimeType || (detected.extension === "zip" && declared === "application/x-zip-compressed") || (detected.extension === "exe" && fileTypes.has(declared) && !["application/zip", "application/x-zip-compressed"].includes(declared));
 const removeStaging = async (client, row) => {
@@ -135,7 +138,7 @@ const removeStaging = async (client, row) => {
   return !result.error || missing(result.error);
 };
 const makeSizes = async (bytes, detected) => {
-  try { return await makeImageSizes({ bytes, extension: detected.extension, width: detected.width }); }
+  try { return await makeImageSizes({ bytes, extension: detected.extension, width: detected.width, height: detected.height }); }
   catch (error) {
     if (!isImageSizeTimeout(error)) throw verifyFailure(UNREADABLE_IMAGE);
     console.error("CMS image size making timed out", { code: "ASSET_SIZE_TIMEOUT" });

@@ -44,7 +44,7 @@ const transformedSupabaseUrl = (directUrl, transforms, forceTransform) => {
   }
 };
 
-const storedSizeUrl = (directUrl, sizes, width = Infinity) =>
+const storedSizeUrl = (directUrl, sizes, width) =>
   imageSizeFile(
     directUrl.replace(IMAGE_EXTENSION, ""),
     sizes.find((size) => size >= width) ?? sizes.at(-1)
@@ -107,7 +107,7 @@ class DirectAssetUrlBuilder {
         this.forceTransform
       );
     }
-    return this.sizes.length
+    return this.sizes.length && this.transforms.width
       ? storedSizeUrl(this.directUrl, this.sizes, this.transforms.width)
       : this.directUrl;
   }

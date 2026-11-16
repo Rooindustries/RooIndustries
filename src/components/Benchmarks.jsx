@@ -6,6 +6,9 @@ import { getPublicContent } from "../lib/publicContentClient";
 import { Link } from "react-router-dom";
 import ImageZoomModal from "../components/ImageZoomModal";
 
+const reviewImageSizes = (width) =>
+  `min(${[width && `${width}px`, "calc(100vw - 64px)", "1216px"].filter(Boolean).join(", ")})`;
+
 export default function Benchmarks({ initialData = null, setIsModalOpen = () => {} }) {
   const [benchmarks, setBenchmarks] = useState(() => (Array.isArray(initialData) ? initialData : []));
   const [selectedImage, setSelectedImage] = useState(null);
@@ -161,7 +164,7 @@ export default function Benchmarks({ initialData = null, setIsModalOpen = () => 
                         height={reviewDims?.height}
                         loading="lazy"
                         decoding="async"
-                        sizes="(max-width: 768px) 94vw, 62vw"
+                        sizes={reviewImageSizes(reviewDims?.width)}
                         className="rounded-lg shadow-lg mx-auto cursor-pointer border border-line-strong group-hover:border-success group-hover:shadow-success-soft transition duration-300"
                       />
                     </button>
