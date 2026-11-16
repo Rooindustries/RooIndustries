@@ -360,7 +360,7 @@ jobs:
         with:
           playwright-ports: "3211"
       - name: Run native admin CMS suite
-        run: xvfb-run -a npx playwright test -c playwright.admin.config.js
+        run: xvfb-run -a npx playwright test -c playwright.admin-native.config.js
       - name: Run write conflict browser cases
         run: xvfb-run -a npm run test:conflict-ui:postgres17
       - name: Run the tooling safety suite
@@ -372,6 +372,55 @@ jobs:
         if: failure()
         with:
           name: test-results-native
+          path: test-results/
+          if-no-files-found: error
+          retention-days: 3
+
+  native-publish:
+    name: Native PostgreSQL 17 publish suite
+    needs: tested-tree
+    if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
+    runs-on: >-
+      ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-24.04' || vars.TESTS_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 60
+    env:
+      ROO_TEST_HOST: 127.0.0.1
+      PW_PORT: "3271"
+      PW_SERVER_ID: native-publish
+      NEXT_DIST_DIR: .next-e2e-native-publish
+      AT_SPI_BUS_ADDRESS: unix:path=/dev/null
+    steps:
+      - name: Use the runner temp directory
+        run: |
+          echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "STORAGE_SOURCE=$RUNNER_TEMP/roo-storage-api-v1.79.33" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          node-version: 24
+          browsers: chromium
+          build-dirs: .next-e2e-native-publish/cache/webpack
+      - uses: ./.github/actions/postgres
+      - name: Build the pinned native Storage fixture
+        run: |
+          git clone --depth 1 --branch v1.79.33 https://github.com/supabase/storage.git "$STORAGE_SOURCE"
+          test "$(git -C "$STORAGE_SOURCE" rev-parse HEAD)" = "2379ad5493f06bcf3bb5f044b844e292b98df4a0"
+          npx --yes npm@11.12.1 ci --prefix "$STORAGE_SOURCE"
+          npx --yes npm@11.12.1 run build --prefix "$STORAGE_SOURCE"
+      - uses: ./.github/actions/hold-ports
+        with:
+          playwright-ports: "3271"
+      - name: Run native publish suite
+        run: xvfb-run -a npx playwright test -c playwright.admin-publish.config.js
+      - uses: ./.github/actions/save-caches
+        with:
+          build-dirs: .next-e2e-native-publish/cache/webpack
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: test-results-native-publish
           path: test-results/
           if-no-files-found: error
           retention-days: 3
@@ -568,9 +617,10 @@ jobs:
       && needs.routes.result == 'success'
       && needs.native.result == 'success'
       && needs.native-booking.result == 'success'
+      && needs.native-publish.result == 'success'
       && needs.native-payouts.result == 'success'
       && needs.revalidation.result == 'success'
-    needs: [monitoring, jest, booking-model, playwright, routes, native, native-booking, native-payouts, revalidation]
+    needs: [monitoring, jest, booking-model, playwright, routes, native, native-booking, native-publish, native-payouts, revalidation]
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-24.04' || vars.TESTS_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 5
     steps:
@@ -612,6 +662,7 @@ jobs:
       - routes
       - native
       - native-booking
+      - native-publish
       - native-payouts
       - revalidation
       - record-tested-tree

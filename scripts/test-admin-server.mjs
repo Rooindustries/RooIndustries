@@ -10,6 +10,7 @@ import { listenOnPort, nextTestKeepAliveTimeout, portFromEnv, releaseTcpPorts, r
 import fixturePorts from "../tests/fixtures/fixture-ports.cjs";
 import { lockBuildDirectory } from "./lib/build-lock.mjs";
 import { withNodeOption } from "./lib/node-options.mjs";
+import { snapshotDatabase } from "./lib/admin-test-isolation.mjs";
 
 refuseEnvFiles();
 const root = process.cwd();
@@ -41,23 +42,48 @@ const fixture = await start({
   ...(process.env.POSTGREST_BIN ? { postgrestBin: process.env.POSTGREST_BIN } : {}),
   ...(process.env.LD_LIBRARY_PATH ? { libraryPath: process.env.LD_LIBRARY_PATH } : {}),
 });
-let active, restoreEmailFetch;
+let active, restoreEmailFetch, databaseSnapshot, resetIsolation;
 const emails = [];
 let notificationSequence = 0;
 const storeRules = new Map();
 const storeCalls = [];
 const storeHolds = [];
+const closedStores = new Set();
 const purges = [];
+const pageRefusals = [];
+const refreshEvents = [];
+const refreshErrors = [];
 const keptAlive = [];
+const pageWrites = [];
+const eventWaiters = new Set();
+const notifyEvents = () => { for (const waiter of eventWaiters) waiter(); };
+const waitForEvent = (response, ready) => {
+  const finish = () => {
+    const value = ready();
+    if (!value) return;
+    eventWaiters.delete(finish);
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(JSON.stringify(value));
+  };
+  finish.description = response.req.url;
+  finish.cancel = () => {
+    eventWaiters.delete(finish);
+    if (!response.destroyed && !response.writableEnded) {
+      response.writeHead(503, { "Content-Type": "application/json" });
+      response.end("{}");
+    }
+  };
+  eventWaiters.add(finish);
+  response.once("close", () => eventWaiters.delete(finish));
+  finish();
+};
 const readJson = async request => {
   let raw = "";
   for await (const chunk of request) raw += chunk;
   return JSON.parse(raw || "{}");
 };
 let stopped = false;
-const stop = async () => {
-  if (stopped) return;
-  stopped = true;
+const stopActive = async () => {
   if (active && active.exitCode === null && active.signalCode === null) {
     const child = active;
     await new Promise(resolve => {
@@ -66,8 +92,15 @@ const stop = async () => {
       child.kill("SIGTERM");
     });
   }
+  active = null;
+};
+const stop = async () => {
+  if (stopped) return;
+  stopped = true;
+  await stopActive();
   if (control.listening) { control.closeAllConnections(); await new Promise(resolve => control.close(resolve)); }
   restoreEmailFetch?.();
+  databaseSnapshot?.release();
   const cleanup = await fixture.stop();
   fs.mkdirSync("test-results/admin", { recursive: true });
   fs.writeFileSync("test-results/admin/cleanup.json", JSON.stringify(cleanup, null, 2));
@@ -75,7 +108,7 @@ const stop = async () => {
 for (const signal of ["SIGTERM", "SIGINT"]) process.on(signal, () => { void stop().then(() => process.exit(0)); });
 try {
   const { seedContentAdmin } = await import("./lib/content-admin-fixture.mjs");
-  await seedContentAdmin(fixture);
+  const adminFixture = await seedContentAdmin(fixture);
   Object.assign(process.env, {
     DATA_PRIMARY_BACKEND: "supabase", COMMERCE_PRIMARY_BACKEND: "supabase", COMMERCE_FAILOVER_GENERATION: "0",
     SUPABASE_CUTOVER_ENABLED: "1", COMMERCE_CUTOVER_ENABLED: "1",
@@ -147,9 +180,19 @@ try {
     if (result.error) throw new Error(`Creator seed: ${result.error.message}`);
     await fixture.sql`update accounts.creator_profiles set commission_basis_points=1000,discount_basis_points=500,total_basis_points=1500,successful_referrals=${index} where user_id=${user.id}`;
   }
+  databaseSnapshot = await snapshotDatabase(fixture.sql);
   const marker = { version: 1, isolated: true, baseURL, origins: [baseURL, fixture.origin], versions: fixture.versions };
   const instance = fixturePorts.fixtureInstance();
-  control.on("request", async (request, response) => {
+  const handleControl = async (request, response) => {
+    if (request.method === "POST" && request.url === "/reset-isolation") {
+      try {
+        const result = await resetIsolation();
+        response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(result));
+      } catch (error) {
+        response.writeHead(500, { "Content-Type": "application/json" }); response.end(JSON.stringify({ error: error.message }));
+      }
+      return;
+    }
     if (request.method === "GET" && request.url === fixturePorts.INSTANCE_PATH) {
       response.writeHead(200, { "Content-Type": "text/plain", "Cache-Control": "no-store" }); response.end(instance); return;
     }
@@ -189,9 +232,52 @@ try {
         response.end(JSON.stringify({ error: error.message })); return;
       }
     }
+    if (request.method === "POST" && ["/refresh-events", "/refresh-errors"].includes(request.url)) {
+      (request.url === "/refresh-events" ? refreshEvents : refreshErrors).push(await readJson(request));
+      notifyEvents();
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end("{}"); return;
+    }
+    if (request.method === "GET" && (request.url.startsWith("/refresh-events?") || request.url.startsWith("/refresh-errors?"))) {
+      const url = new URL(request.url, controlOrigin);
+      const records = url.pathname === "/refresh-events" ? refreshEvents : refreshErrors;
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(records.filter(record => record.trace === url.searchParams.get("trace")))); return;
+    }
+    if (request.method === "POST" && request.url === "/page-refusals") {
+      pageRefusals.push(await readJson(request));
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end("{}"); return;
+    }
+    if (request.method === "GET" && request.url === "/page-refusals") {
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(pageRefusals)); return;
+    }
     if (request.method === "POST" && ["/purges", "/kept-alive"].includes(request.url)) {
       (request.url === "/purges" ? purges : keptAlive).push(await readJson(request));
+      notifyEvents();
       response.writeHead(200, { "Content-Type": "application/json" }); response.end("{}"); return;
+    }
+    if (request.method === "POST" && request.url === "/test-page-write") {
+      pageWrites.push(await readJson(request));
+      notifyEvents();
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end("{}"); return;
+    }
+    if (request.method === "GET" && request.url === "/test-page-writes") {
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(pageWrites)); return;
+    }
+    if (request.method === "GET" && request.url.startsWith("/await-test-event?")) {
+      const query = new URL(request.url, controlOrigin).searchParams;
+      const kind = query.get("kind");
+      const trace = query.get("trace");
+      const key = query.get("key");
+      const count = Number(query.get("count"));
+      const rpc = query.get("rpc");
+      waitForEvent(response, () => {
+        const events = kind === "refresh" ? refreshEvents.filter(event => event.trace === trace)
+          : kind === "refresh-error" ? refreshErrors.filter(event => event.trace === trace)
+            : kind === "purge" ? purges.filter(event => event.trace === trace && event.operation === "invalidateByTag" && event.target === "_N_T_/layout")
+          : kind === "hold" ? storeHolds.filter(event => event.trace === trace && (!rpc || event.rpc === rpc))
+            : pageWrites.filter(event => event.key === key);
+        return events.length >= count ? { count: events.length } : null;
+      });
+      return;
     }
     if (request.method === "GET" && request.url === "/purges") {
       response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(purges)); return;
@@ -202,27 +288,29 @@ try {
     }
     if (request.method === "POST" && request.url === "/store-rules") {
       const { trace, rules } = await readJson(request);
-      storeRules.set(trace, rules.map(rule => ({ ...rule, pattern: new RegExp(rule.rpc) })));
+      if (rules.length) storeRules.set(trace, rules.map(rule => ({ ...rule, pattern: new RegExp(rule.rpc) })));
+      else storeRules.delete(trace);
       response.writeHead(200, { "Content-Type": "application/json" }); response.end("{}"); return;
     }
     if (request.method === "POST" && request.url === "/store-calls") {
       const call = await readJson(request);
       storeCalls.push(call);
-      const rule = (storeRules.get(call.trace) || []).find(entry => entry.pattern.test(call.rpc) && entry.times !== 0);
+      const rule = (storeRules.get(call.trace) || []).find(entry => entry.pattern.test(call.rpc) && (!entry.types || new RegExp(entry.types).test(call.types || "")) && entry.times !== 0);
       if (rule && rule.times > 0) rule.times -= 1;
       response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify({ action: rule?.action || "pass" })); return;
     }
     if (request.method === "POST" && request.url === "/store-holds") {
       const hold = await readJson(request);
-      await new Promise(resolve => storeHolds.push({ ...hold, release: resolve }));
+      if (!closedStores.has(hold.trace)) await new Promise(resolve => { storeHolds.push({ ...hold, release: resolve }); notifyEvents(); });
       response.writeHead(200, { "Content-Type": "application/json" }); response.end("{}"); return;
     }
     if (request.method === "GET" && request.url.startsWith("/store-holds?")) {
       const trace = new URL(request.url, controlOrigin).searchParams.get("trace");
       response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(storeHolds.filter(hold => hold.trace === trace).map(({ rpc }) => rpc))); return;
     }
-    if (request.method === "POST" && request.url === "/store-release") {
+    if (request.method === "POST" && ["/store-release", "/store-close"].includes(request.url)) {
       const { trace } = await readJson(request);
+      if (request.url === "/store-close") { closedStores.add(trace); storeRules.delete(trace); }
       const released = storeHolds.filter(hold => hold.trace === trace);
       storeHolds.splice(0, storeHolds.length, ...storeHolds.filter(hold => hold.trace !== trace));
       for (const hold of released) hold.release();
@@ -230,7 +318,9 @@ try {
     }
     if (request.method === "GET" && request.url.startsWith("/store-calls?")) {
       const trace = new URL(request.url, controlOrigin).searchParams.get("trace");
-      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(storeCalls.filter(call => call.trace === trace).map(({ rpc }) => rpc))); return;
+      const calls = storeCalls.filter(call => call.trace === trace);
+      const details = new URL(request.url, controlOrigin).searchParams.has("details");
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(details ? calls : calls.map(({ rpc }) => rpc))); return;
     }
     if (request.method === "POST" && request.url === "/publish-elsewhere") {
       try {
@@ -265,6 +355,14 @@ try {
         where operation='create' and status='committed' and result->'document_ids' ? ${documentId} returning command_id`;
       response.writeHead(updated.length === 1 ? 200 : 500); response.end(String(updated.length)); return;
     }
+    if (request.method === "POST" && request.url === "/remove-content-document") {
+      const { id } = await readJson(request);
+      await fixture.sql.begin(async sql => {
+        await sql`delete from cms.documents where legacy_sanity_id=${id}`;
+        await sql`delete from migration.source_documents where legacy_sanity_id=${id}`;
+      });
+      response.writeHead(200); response.end("ok"); return;
+    }
     if (request.method === "POST" && request.url === "/faq-create-fixture/legacy") {
       await fixture.sql.begin(async sql => {
         await sql`delete from migration.cms_publish_commands where result->'document_ids' ? 'faq'`;
@@ -292,15 +390,16 @@ try {
       const current = await fixture.sql`select legacy_sanity_id from migration.source_documents where document_type=any(${CONTENT_TYPES.map(type => type.name)}::text[]) and not tombstoned`;
       const currentIds = new Set(current.map(document => document.legacy_sanity_id));
       const baselineIds = new Set(documents.map(document => document._id));
-      for (const document of current) {
-        if (baselineIds.has(document.legacy_sanity_id)) continue;
-        const result = await fixture.client.rpc("roo_apply_document_mutations", { p_mutations: [{ operation: "delete", id: document.legacy_sanity_id }] });
+      const mutations = [
+        ...current.filter(document => !baselineIds.has(document.legacy_sanity_id)).map(document => ({ operation: "delete", id: document.legacy_sanity_id })),
+        ...documents.map(document => ({ operation: currentIds.has(document._id) ? "replace" : "create", id: document._id, document })),
+      ];
+      for (let index = 0; index < mutations.length; index += 100) {
+        const result = await fixture.client.rpc("roo_apply_document_mutations", { p_mutations: mutations.slice(index, index + 100) });
         if (result.error) { response.writeHead(500); response.end("Fixture reset failed."); return; }
       }
-      for (const document of documents) {
-        const result = await fixture.client.rpc("roo_apply_document_mutations", { p_mutations: [{ operation: currentIds.has(document._id) ? "replace" : "create", id: document._id, document }] });
-        if (result.error) { response.writeHead(500); response.end("Fixture reset failed."); return; }
-      }
+      const cleared = await fetch(`${baseURL}/api/admin/content/documents/tooling-hero`, { headers: { "x-admin-key": "synthetic-admin-key", "x-roo-test-clear-rounds": "1" } });
+      if (!cleared.ok) { response.writeHead(500); response.end("Fixture timer reset failed."); return; }
       response.writeHead(200); response.end("ok"); return;
     }
     if (request.method === "POST" && request.url === "/reset-rate-limits") {
@@ -308,6 +407,12 @@ try {
       response.writeHead(200); response.end("ok"); return;
     }
     response.writeHead(404); response.end();
+  };
+  control.on("request", (request, response) => {
+    void handleControl(request, response).catch(error => {
+      if (!response.headersSent) response.writeHead(500, { "Content-Type": "application/json" });
+      if (!response.writableEnded) response.end(JSON.stringify({ error: error.message }));
+    });
   });
   fixturePorts.writeFixturePorts(baseURL, instance, { TOOLING_ADMIN_CONTROL_PORT: controlPort });
   const env = withNodeOption({
@@ -318,8 +423,9 @@ try {
     REF_ADMIN_KEY: "synthetic-admin-key", REF_SESSION_SECRET: "synthetic-content-session-secret", RATE_LIMIT_HASH_SECRET: "synthetic-admin-rate-secret", CMS_WRITES_PAUSED: "0",
     ALLOW_LIVE_PAYMENTS: "0", SALES_PREVIEW_READ_ONLY: "0", NEXT_TELEMETRY_DISABLED: "1", BASE_URL: baseURL, ROO_TEST_HOST: target.hostname, NEXT_DIST_DIR: dist, TOOLING_NETWORK_GUARD: "1",
     ROO_CONTENT_TEST_CONTROL_URL: controlOrigin,
+    NEXT_CACHE_HANDLER_PATH: path.join(root, "tests/fixtures/stale-mark-cache-handler.cjs"),
     ROO_TEST_NETWORK_ORIGINS: JSON.stringify([baseURL, fixture.origin, fixture.storageUrl, fixture.postgrestUrl, controlOrigin]),
-  }, "--import", path.join(root, "scripts/lib/test-target-safety.mjs"), path.join(root, "scripts/lib/content-test-hooks.mjs"));
+  }, "--import", pathToFileURL(path.join(root, "scripts/lib/test-target-safety.mjs")).href, path.join(root, "scripts/lib/admin-test-imports.mjs"));
   const execute = args => new Promise((resolve, reject) => {
     const stdio = ["inherit", "inherit", "inherit", lock.fd];
     active = spawn(process.execPath, args, { env: lock.childEnv(env), stdio });
@@ -330,13 +436,81 @@ try {
   console.log(`Guarded native CMS fixture: ${baseURL}`);
   await execute(["scripts/generate-sitemap.js"]);
   await execute(["scripts/generate-robots.js"]);
-  if (process.env.ROO_TEST_DEV === "1") {
-    await releaseTcpPorts(target.hostname, [port]);
-    await execute([next, "dev", "--hostname", target.hostname, "--port", target.port]);
-  } else {
+  const development = process.env.ROO_TEST_DEV === "1";
+  if (!development) {
     await execute(["scripts/validate-runtime-env.js"]);
     await execute([next, "build"]);
-    await releaseTcpPorts(target.hostname, [port]);
-    await execute([next, "start", "--hostname", target.hostname, "--port", target.port, "--keepAliveTimeout", String(nextTestKeepAliveTimeout)]);
   }
+  await releaseTcpPorts(target.hostname, [port]);
+  let finish, fail;
+  const lifetime = new Promise((resolve, reject) => { finish = resolve; fail = reject; });
+  const startApp = () => new Promise((resolve, reject) => {
+    const args = [next, development ? "dev" : "start", "--hostname", target.hostname, "--port", target.port];
+    if (!development) args.push("--keepAliveTimeout", String(nextTestKeepAliveTimeout));
+    const child = spawn(process.execPath, args, {
+      env: lock.childEnv(env), stdio: ["inherit", "pipe", "pipe", lock.fd],
+    });
+    active = child;
+    let ready = false;
+    let output = "";
+    child.stdout.on("data", chunk => {
+      output += String(chunk);
+      process.stdout.write(chunk);
+      if (!ready && /Ready in/.test(output)) { ready = true; resolve(); }
+    });
+    child.stderr.on("data", chunk => process.stderr.write(chunk));
+    child.once("error", error => { if (!ready) reject(error); else fail(error); });
+    child.once("exit", (code, signal) => {
+      if (!ready) reject(new Error(`Admin fixture server exited ${signal || code}.`));
+      else (stopped || code === 0 ? finish : fail)(new Error(`Admin fixture server exited ${signal || code}.`));
+    });
+  });
+  resetIsolation = async () => {
+    const started = Date.now();
+    const step = async (name, action) => {
+      try { return await action(); } catch (error) { throw new Error(`reset: ${name}: ${error.message}`, { cause: error }); }
+    };
+    const hook = async (header, extra = {}) => {
+      const response = await fetch(baseURL, { headers: { [header]: "1", ...extra } });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response;
+    };
+    const controls = await step("inspect controls", async () => (await hook("x-roo-test-inspect-controls")).json());
+    const leftovers = [
+      ...storeHolds.map(({ trace, rpc }) => rpc === "page-store" ? `held page store ${trace}` : `held store ${trace}/${rpc}`),
+      ...[...eventWaiters].map(waiter => `pending waiter ${waiter.description}`),
+      ...controls.active.map(({ trace, content, pages, holds }) => `hang control ${trace}/${[content && "content purge", pages && "page mark", holds && `${holds} holds`].filter(Boolean).join(", ")}`),
+      ...controls.failures.map(({ trace, content, pages }) => `forced failure ${trace}/${[content && "content purge", pages && "page mark"].filter(Boolean).join(", ")}`),
+      ...controls.pageStoreHolds.map(trace => `unused page store hold ${trace}`),
+    ];
+    await step("clear controls", () => hook("x-roo-test-reset-all-controls", { "x-roo-test-clear-rounds": "1" }));
+    for (const hold of storeHolds.splice(0)) hold.release();
+    for (const waiter of eventWaiters) waiter.cancel();
+    const clearRecords = () => {
+      storeRules.clear(); closedStores.clear();
+      storeCalls.length = 0; purges.length = 0; pageRefusals.length = 0;
+      refreshEvents.length = 0; refreshErrors.length = 0; keptAlive.length = 0; pageWrites.length = 0;
+      adminFixture.sessions.clear(); adminFixture.requests.length = 0;
+      adminFixture.setLoginReply(null); adminFixture.setLogoutReply(null);
+      emails.length = 0; notificationSequence = 0;
+    };
+    fixture.pause();
+    let comparisonFailure;
+    try {
+      await step("cancel pending database requests", () => databaseSnapshot.cancelPending());
+      await step("drain requests", () => fixture.drain());
+      const revision = await step("read revision", () => databaseSnapshot.revision());
+      await step("restore database", () => databaseSnapshot.restore());
+      try {
+        const changed = await step("compare database", () => databaseSnapshot.differences());
+        if (changed.length) throw new Error(`reset: compare database: ${changed.join(", ")}`);
+      } catch (error) { comparisonFailure = error; }
+      await step("advance revision", () => databaseSnapshot.advanceRevision(revision));
+    } finally { fixture.resume(); clearRecords(); }
+    await step("mark pages", () => hook("x-roo-test-mark-pages"));
+    if (comparisonFailure) throw comparisonFailure;
+    return { leftovers, durationMs: Date.now() - started };
+  };
+  await startApp();
+  await lifetime;
 } finally { await stop(); }

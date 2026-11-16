@@ -9,6 +9,7 @@ import { listenOnPort } from '../../scripts/lib/free-tcp-port.mjs';
 import { referralEmail } from './api-routes.mjs';
 import fixturePorts from './fixture-ports.cjs';
 import { matchesShadowFilter } from './shadow-filter.mjs';
+import referralDefaults from '../../src/lib/referralBoxDefaults.js';
 
 const posthogReceived = [];
 const heldPosthog = new Set();
@@ -69,6 +70,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
     ...content('packages-list').map((pkg, index) => document('package', { ...pkg, price: index === 1 ? '$149.95' : pkg.price, order: index }, `tooling-package-${index}`)),
     document('proReviewsCarousel', reviews),
     document('supportedGames', content('supported-games')),
+    document('referralBox', referralDefaults.REFERRAL_BOX_DEFAULTS),
     document('faqSettings', content('faq-settings')),
     document('faqSection', {
       questions: [

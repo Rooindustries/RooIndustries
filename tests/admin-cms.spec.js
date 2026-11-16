@@ -9,6 +9,7 @@ const { PUBLIC_CONTENT_RESOURCES } = require("../src/lib/publicContentQueries.js
 const { ALL_PUBLIC_ROUTES, PREBUILT_ROUTES } = require("../src/lib/routes.js");
 const { MONEY_BACK_FAQ_QUESTION, MONEY_BACK_FAQ_ANSWER } = require("../src/lib/policyContent.js");
 const fieldContract = require("./fixtures/cms-field-contract.cjs");
+const { createContentGate } = require("./fixtures/content-store-gate.cjs");
 const { withoutCanonicalUrl } = require("../scripts/lib/rsc-canonical-url.cjs");
 const {
   ADMIN_KEY, EMAIL, PASSWORD, cms, login, choose, evidence, prepareAdminContext,
@@ -356,6 +357,7 @@ for (const schema of CONTENT_TYPES.filter(type => !["footer", "siteSettings"].in
     await testInfo.attach("published-content", { path: publishedArtifact, contentType: "application/json" });
     expect(publicData).toBeTruthy();
     if (binding.page) {
+      await createContentGate(request, baseURL).rebuild([binding.page]);
       await page.goto(binding.page === "/" ? "/#services" : binding.page);
       if (schema.name === "faqSection") await page.getByRole("button").filter({ hasText: pending.document.questions[0].question }).first().click();
       if (["proReviewsCarousel", "services", "howItWorks", "supportedGames"].includes(schema.name)) await page.locator(schema.name === "proReviewsCarousel" ? ".ri-reviews-heading" : schema.name === "services" ? "#services" : schema.name === "howItWorks" ? "#how-it-works" : "#supported-games").scrollIntoViewIfNeeded();
@@ -397,7 +399,10 @@ for (const schema of CONTENT_TYPES.filter(type => !["footer", "siteSettings"].in
         await publishDraft(page, schema, stored, { ...stored.document, sortOrder: item.value - 2 });
         const reordered = (await (await request.get(endpoint)).json()).data;
         expect(reordered.findIndex(row => row.title === pending.document.title)).toBeLessThan(reordered.findIndex(row => row.title === `${marker}-order-peer`));
-        if (binding.page) await page.goto(binding.page);
+        if (binding.page) {
+          await createContentGate(request, baseURL).rebuild([binding.page]);
+          await page.goto(binding.page);
+        }
         checked.push(item.path); continue;
       }
       if (schema.name === "coupon" && item.path.startsWith("eligiblePackages")) {
@@ -433,6 +438,7 @@ for (const schema of CONTENT_TYPES.filter(type => !["footer", "siteSettings"].in
         await publishDraft(page, schema, latest, { ...latest.document, downloadMode: "external" });
         const external = (await (await request.get(endpoint)).json()).data.find(row => row._id === entry._id);
         expect(external.downloadUrl).toBe(item.value);
+        await createContentGate(request, baseURL).rebuild([binding.page]);
         await page.goto(binding.page);
         await page.getByRole("article").filter({ hasText: pending.document.title }).getByRole("button", { name: "Download", exact: true }).click();
         const opened = page.waitForEvent("popup");
@@ -486,6 +492,7 @@ for (const fixture of [
     }, { timeout: 75000, intervals: [100, 500, 1000] }).toBe(fixture.type === "faqSection" ? 2 : fixture.match);
     const publicPage = await page.context().newPage();
     try {
+      await createContentGate(request, baseURL).rebuild([fixture.type === "faqSection" ? "/faq" : "/"]);
       await publicPage.goto(fixture.type === "faqSection" ? "/faq" : "/");
       if (fixture.type === "faqSection") {
         expect(publicData[1]).toMatchObject({ question: MONEY_BACK_FAQ_QUESTION, answer: MONEY_BACK_FAQ_ANSWER });
@@ -575,7 +582,7 @@ for (const matchingSelector of [false, true]) {
       await page.bringToFront();
       await page.clock.fastForward(31000);
       await expect(page.getByRole("alert").filter({ hasText: /not published.*retry/i })).toBeVisible();
-      await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toHaveCount(0);
+      await expect(page.getByRole("status").filter({ hasText: /Published\. The live (site|pages)/ })).toHaveCount(0);
       const draft = await page.evaluate(id => JSON.parse(localStorage.getItem(`roo-content-draft:v1:doc:${id}`)), id);
       expect(draft.baseRevision).toBe(original.revision);
       expect(draft.document.questions[0]).toMatchObject({ question: selector, answer: original.document.questions[0].answer });
@@ -704,6 +711,7 @@ for (const variant of ["standard", "ambassador"]) {
     expect(stored.document.sections[0].variant).toBe(nextVariant);
     const publicPage = await page.context().newPage();
     try {
+      await createContentGate(request, baseURL).rebuild(["/meet-the-team"]);
       await publicPage.goto("/meet-the-team");
       if (nextVariant === "ambassador") {
         await expect(publicPage.getByText(`${token}-platform`, { exact: true })).toBeVisible();
@@ -1142,7 +1150,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
           expect((await cms(request, `/api/admin/content/documents/${FAQ_ID}`)).revision).toBe(revision);
           const drafts = await page.evaluate(() => Object.fromEntries(Object.entries(localStorage).filter(([key]) => key.startsWith("roo-content-draft:"))));
           if (drafts[`roo-content-draft:v1:doc:${FAQ_ID}`]) expect(JSON.parse(drafts[`roo-content-draft:v1:doc:${FAQ_ID}`]).document._id).toBe(FAQ_ID);
-          await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toHaveCount(0);
+          await expect(page.getByRole("status").filter({ hasText: /Published\. The live (site|pages)/ })).toHaveCount(0);
           await evidence(page, testInfo, { source, expected, actual: await field.inputValue(), revision, drafts });
         } finally { await pending.release(); }
       });
@@ -1328,7 +1336,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         const stored = await cms(request, `/api/admin/content/documents/${receipt.documentId}`);
         expect(stored.document).toMatchObject({ title, sortOrder: 0 });
         await page.clock.fastForward(31000);
-        await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible();
+        await expect(page.getByRole("status").filter({ hasText: "Published. The live site picks this up within a few minutes (page and CDN caches)." })).toBeVisible();
         await expect(page.getByRole("alert").filter({ hasText: /not published.*retry/i })).toHaveCount(0);
         expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith("roo-content-draft:")))).toEqual([]);
         expect(submitted).toHaveLength(1);
@@ -1416,7 +1424,7 @@ for (const committed of [true, false]) {
       await expect(page.getByRole("button", { name: "Publishing…", exact: true })).toHaveCount(0);
       const stored = await cms(request, `/api/admin/content/documents/${HERO_ID}`);
       if (committed) {
-        await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible();
+        await expect(page.getByRole("status").filter({ hasText: "Published. The live site picks this up within a few minutes (page and CDN caches)." })).toBeVisible();
         expect(stored.revision).not.toBe(original.revision);
         expect(stored.document.headingLine1).toBe(heading);
         expect(await page.evaluate(id => localStorage.getItem(`roo-content-draft:v1:doc:${id}`), HERO_ID)).toBeNull();
@@ -1451,7 +1459,7 @@ for (const committed of [true, false]) {
       expect(submitted.createIntentId).toBeTruthy();
       if (committed) {
         const receipt = (await response.json()).data;
-        await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible();
+        await expect(page.getByRole("status").filter({ hasText: "Published. The live site picks this up within a few minutes (page and CDN caches)." })).toBeVisible();
         expect((await cms(request, `/api/admin/content/documents/${receipt.documentId}`)).document.title).toBe(title);
         expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith("roo-content-draft:")))).toEqual([]);
         await evidence(page, testInfo, { committed, title, documentId: receipt.documentId, createIntentId: submitted.createIntentId, calls });
@@ -1494,7 +1502,7 @@ test("create receipts keep a failed singleton draft after another create commits
     const beforeLookup = await contentCounts(request, control);
     await page.clock.fastForward(31000);
     await expect(page.getByRole("alert").filter({ hasText: /not published.*retry/i })).toBeVisible();
-    await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toHaveCount(0);
+    await expect(page.getByRole("status").filter({ hasText: /Published\. The live (site|pages)/ })).toHaveCount(0);
     const drafts = await page.evaluate(() => Object.entries(localStorage).filter(([key]) => key.startsWith("roo-content-draft:")));
     expect(drafts).toHaveLength(1);
     expect(JSON.parse(drafts[0][1])).toMatchObject({ createIntentId: submitted.createIntentId, document: { dateSlots: [{ date: "2099-01-11" }] } });
@@ -1531,7 +1539,7 @@ test("create receipts reconcile a committed fixed-ID singleton after its respons
     await fs.writeFile(testInfo.outputPath("creation-content.json"), JSON.stringify({ submitted: submitted.document, stored: stored.document, receipt }, null, 2));
     const beforeLookup = await contentCounts(request, control);
     await page.clock.fastForward(31000);
-    await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "Published. The live site picks this up within a few minutes (page and CDN caches)." })).toBeVisible();
     expect(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith("roo-content-draft:")))).toEqual([]);
     expect((await cms(request, `/api/admin/content/documents/${receipt.documentId}`)).document.dateSlots[0].date).toBe("2099-01-13");
     expect(writes).toBe(1);
@@ -1561,7 +1569,7 @@ test("create reconciliation refuses a status response without a committed receip
     await page.route("**/api/admin/content/publish/status", route => route.fulfill({ json: { ok: true, data: { ...content, documentId: receipt.documentId } } }));
     await page.clock.fastForward(31000);
     await expect(page.getByRole("alert").filter({ hasText: /not published.*retry/i })).toBeVisible();
-    await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toHaveCount(0);
+    await expect(page.getByRole("status").filter({ hasText: /Published\. The live (site|pages)/ })).toHaveCount(0);
     const drafts = await page.evaluate(() => Object.entries(localStorage).filter(([key]) => key.startsWith("roo-content-draft:")));
     expect(drafts).toHaveLength(1);
     expect(JSON.parse(drafts[0][1]).document.title).toBe(title);
@@ -1586,7 +1594,7 @@ test("create receipts keep a draft while its receipt is processing", async ({ pa
     const beforeLookup = await contentCounts(request, control);
     await page.clock.fastForward(31000);
     await expect(page.getByRole("alert").filter({ hasText: /not published.*retry/i })).toBeVisible();
-    await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toHaveCount(0);
+    await expect(page.getByRole("status").filter({ hasText: /Published\. The live (site|pages)/ })).toHaveCount(0);
     const drafts = await page.evaluate(() => Object.entries(localStorage).filter(([key]) => key.startsWith("roo-content-draft:")));
     expect(drafts).toHaveLength(1);
     expect(JSON.parse(drafts[0][1]).document.title).toBe(title);
@@ -1676,7 +1684,7 @@ test("#10 a concurrent subtitle prevents reconciling a missing deletion", async 
     });
     await page.clock.fastForward(31000);
     await expect(page.getByRole("alert").filter({ hasText: /not published.*retry/i })).toBeVisible();
-    await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toHaveCount(0);
+    await expect(page.getByRole("status").filter({ hasText: /Published\. The live (site|pages)/ })).toHaveCount(0);
     await expect(subtitle).toHaveValue("");
     const draft = await page.evaluate(id => JSON.parse(localStorage.getItem(`roo-content-draft:v1:doc:${id}`)), documentId);
     expect(draft.baseRevision).toBe(original.revision);
@@ -1706,7 +1714,7 @@ test("#10 uncertain publication keeps its draft and Retry only reads", async ({ 
     expect(await page.evaluate(id => JSON.parse(localStorage.getItem(`roo-content-draft:v1:doc:${id}`))?.document.headingLine1, HERO_ID)).toBe(text);
     await page.unroute(`**/api/admin/content/documents/${HERO_ID}`, failedRead);
     await page.getByRole("button", { name: "Retry", exact: true }).click();
-    await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "Published. The live site picks this up within a few minutes (page and CDN caches)." })).toBeVisible();
     expect(calls).toBe(1);
     await evidence(page, testInfo, { originalRevision: original.revision, calls, text });
   } finally { await pending.release(); }
@@ -1730,7 +1738,7 @@ test("#10 a superseded publication keeps the draft and its revision guard", asyn
     await cms(request, "/api/admin/content/publish", { operation: "replace", type: "hero", documentId: HERO_ID, expectedRevision: ours.revision, document: { ...ours.document, description: otherText } });
     await page.clock.fastForward(31000);
     await expect(page.getByRole("alert").filter({ hasText: /not published.*retry/i })).toBeVisible();
-    await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toHaveCount(0);
+    await expect(page.getByRole("status").filter({ hasText: /Published\. The live (site|pages)/ })).toHaveCount(0);
     expect(submitted).toHaveLength(1);
     const draft = await page.evaluate(id => JSON.parse(localStorage.getItem(`roo-content-draft:v1:doc:${id}`)), HERO_ID);
     expect(draft.baseRevision).toBe(original.revision);
@@ -1739,7 +1747,7 @@ test("#10 a superseded publication keeps the draft and its revision guard", asyn
     await page.getByRole("button", { name: "Retry", exact: true }).click();
     await expect(page.getByRole("button", { name: "Publishing…", exact: true })).toHaveCount(0);
     await expect(page.getByRole("alert").filter({ hasText: /not published.*retry/i })).toBeVisible();
-    await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toHaveCount(0);
+    await expect(page.getByRole("status").filter({ hasText: /Published\. The live (site|pages)/ })).toHaveCount(0);
     expect(submitted[1].expectedRevision).toBe(original.revision);
     expect((await cms(request, `/api/admin/content/documents/${HERO_ID}`)).document.description).toBe(otherText);
     await evidence(page, testInfo, { submitted, baseRevision: draft.baseRevision, text });

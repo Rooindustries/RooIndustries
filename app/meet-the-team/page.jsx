@@ -6,6 +6,7 @@ import contentServer from "@/src/lib/contentServer";
 export const metadata = seo.getMetadataForPath("/meet-the-team");
 export const dynamic = "force-static";
 export const revalidate = 60;
+export const maxDuration = 50;
 
 export default async function Page() {
   const meetTheTeam = await contentServer.fetchStaticPageContent("team", {

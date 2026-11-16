@@ -1,11 +1,13 @@
 const { randomUUID } = require("node:crypto");
-const { test, expect } = require("@playwright/test");
+const { get } = require("node:http");
+const { test, expect } = require("./fixtures/isolated-content-test.cjs");
 const { CONTENT_READ, createContentGate } = require("./fixtures/content-store-gate.cjs");
 
 const PACKAGE = "tooling-package-0";
 const PACKAGES = "/api/content/packages-list";
 const NO_STORE = "no-store, max-age=0";
 const CONTENT_PURGE = { operation: "dangerouslyDeleteByTag", target: "public-content", options: null };
+const PAGE_MARK = { operation: "invalidateByTag", target: "_N_T_/layout", options: null };
 
 const priceOf = async (response) =>
   (await response.json()).data.find((row) => row._id === PACKAGE)?.price;
@@ -28,7 +30,15 @@ const expectPurges = (gate, count) =>
   expect.poll(async () => (await gate.admin.purges()).map(({ trace, ...purge }) => purge), {
     timeout: 20000,
     intervals: [250, 500, 1000],
-  }).toEqual(Array(count).fill(CONTENT_PURGE));
+  }).toEqual(Array(count).fill([CONTENT_PURGE, PAGE_MARK]).flat());
+
+const waitForEvents = (gate, kind, trace, count) => new Promise((resolve, reject) => {
+  const query = new URLSearchParams({ kind, trace, count: String(count) });
+  get(`${gate.control}/await-test-event?${query}`, (response) => {
+    response.resume();
+    response.on("end", () => response.statusCode === 200 ? resolve() : reject(new Error("Refresh event was not recorded.")));
+  }).on("error", reject);
+});
 
 const couponTerms = async (request, coupon, packageTitle) => {
   const query = new URLSearchParams({ code: coupon.document.code, packageTitle });
@@ -57,12 +67,18 @@ test("publishing a package price and a coupon purges the content API right away 
   });
   const coupon = await gate.document(receipt.documentId);
   await expectPurges(gate, 2);
+  await waitForEvents(gate, "purge", gate.admin.trace, 3);
+  await expectPurges(gate, 3);
+  await waitForEvents(gate, "refresh", gate.admin.trace, 3);
+  const events = (await (await request.get(`${gate.control}/refresh-events?trace=${gate.admin.trace}`)).json()).map(({ event }) => event);
+  expect(events).toEqual(["now", "5s", "60s"].map((round) => ({ event: "public_pages_refresh", round, pages: "marked", content: "purged" })));
+  console.log(`REFRESH_EVENTS ${JSON.stringify(events)}`);
   let couponRevision = coupon.revision;
 
   try {
     expect(await couponTerms(request, coupon, pkg.document.title)).toMatchObject({ discountType: "percent", discountPercent: 10 });
     await gate.publish(pkg, { price: "$123.45" });
-    await expectPurges(gate, 3);
+    await expectPurges(gate, 4);
     const listed = await gate.traced().content(PACKAGES);
     expectCacheable(listed);
     expect(await priceOf(listed)).toBe("$123.45");
@@ -70,11 +86,11 @@ test("publishing a package price and a coupon purges the content API right away 
       timeout: 60000,
       intervals: [500, 1000, 2000],
     }).toBe(true);
-    await expectPurges(gate, 4);
+    await expectPurges(gate, 5);
 
     couponRevision = (await gate.publish(coupon, { discountType: "percent", discountPercent: 25 })).revision;
     expect(await couponTerms(request, coupon, pkg.document.title)).toMatchObject({ discountType: "percent", discountPercent: 25 });
-    await expectPurges(gate, 6);
+    await expectPurges(gate, 7);
   } finally {
     await gate.cms("/api/admin/content/publish", { operation: "delete", type: "coupon", documentId: coupon.document._id, expectedRevision: couponRevision });
     await gate.restore(PACKAGE, pkg.document);
@@ -125,9 +141,9 @@ test("a failed publish keeps the CDN copy and the last good server copy while th
   await down.rules([{ rpc: ".", action: "fail" }]);
   const attempt = await down.cms("/api/admin/content/publish", gate.replaceCommand(original, { price: "$404.04" }));
   expect(attempt.status).toBe(503);
-  await expect.poll(() => down.purges(), { timeout: 10000 }).toHaveLength(1);
+  await expect.poll(() => down.purges(), { timeout: 10000 }).toHaveLength(2);
   await new Promise((resolve) => setTimeout(resolve, 6000));
-  expect((await down.purges()).map(({ operation }) => operation)).toEqual(["invalidateByTag"]);
+  expect((await down.purges()).map(({ operation }) => operation)).toEqual(["invalidateByTag", "invalidateByTag"]);
   const served = await down.content(PACKAGES);
   expect(served.status()).toBe(200);
   expectNotCacheable(served);
@@ -303,7 +319,7 @@ for (const [action, answer, price] of [
       await expect.poll(async () => (await after.purges()).map(({ trace, ...purge }) => purge), {
         timeout: 20000,
         intervals: [250, 500, 1000],
-      }).toEqual([CONTENT_PURGE, CONTENT_PURGE]);
+      }).toEqual([CONTENT_PURGE, PAGE_MARK, CONTENT_PURGE, PAGE_MARK]);
       const current = await gate.traced().content(PACKAGES);
       expectCacheable(current);
       expect(await priceOf(current)).toBe(price);
@@ -322,11 +338,37 @@ test("a publish the database rejects before the commit only marks the CDN copy s
     const rejected = gate.traced();
     const attempt = await rejected.cms("/api/admin/content/publish", gate.replaceCommand(original, { price: "$848.48" }));
     expect(attempt.status).toBe(409);
-    await expect.poll(() => rejected.purges(), { timeout: 10000 }).toHaveLength(1);
+    await expect.poll(() => rejected.purges(), { timeout: 10000 }).toHaveLength(2);
     await new Promise((resolve) => setTimeout(resolve, 6000));
-    expect((await rejected.purges()).map(({ operation }) => operation)).toEqual(["invalidateByTag"]);
+    expect((await rejected.purges()).map(({ operation }) => operation)).toEqual(["invalidateByTag", "invalidateByTag"]);
     expect((await gate.document(PACKAGE)).document.price).toBe("$838.38");
   } finally {
     await gate.restore(PACKAGE, original.document);
   }
 });
+
+for (const [kind, header, expected] of [
+  ["content", "x-roo-test-fail-content-purge", { content: "failed", pages: "done" }],
+  ["pages", "x-roo-test-fail-page-mark", { content: "done", pages: "failed" }],
+]) {
+  test(`a failed ${kind} refresh is reported and logged once per round`, async ({ request, baseURL }) => {
+    const gate = createContentGate(request, baseURL);
+    const original = await gate.document(PACKAGE);
+    const attempt = gate.traced();
+    try {
+      const response = await request.post("/api/admin/content/publish", {
+        headers: { ...attempt.headers, "x-admin-key": "synthetic-admin-key", [header]: "1" },
+        data: gate.replaceCommand(original, { price: `$${400 + Math.floor(Math.random() * 400)}.79` }),
+      });
+      expect(response.status()).toBe(200);
+      expect((await response.json()).data.refresh).toEqual(expected);
+      await waitForEvents(gate, "refresh", attempt.trace, 3);
+      await waitForEvents(gate, "refresh-error", attempt.trace, 3);
+      const events = (await (await request.get(`${gate.control}/refresh-events?trace=${attempt.trace}`)).json()).map(({ event }) => event);
+      const errors = (await (await request.get(`${gate.control}/refresh-errors?trace=${attempt.trace}`)).json()).map(({ label }) => label);
+      expect(events).toEqual(["now", "5s", "60s"].map((round) => ({ event: "public_pages_refresh", round, pages: kind === "pages" ? "failed" : "marked", content: kind === "content" ? "failed" : "purged" })));
+      expect(errors).toEqual(Array(3).fill(kind === "pages" ? "Public pages mark failed" : "Public content CDN purge failed"));
+      console.log(`REFRESH_FAILURE ${JSON.stringify({ kind, events, errors })}`);
+    } finally { await attempt.reset(); }
+  });
+}

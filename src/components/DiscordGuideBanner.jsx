@@ -17,7 +17,6 @@ export default function DiscordGuideBanner({ hidden = false }) {
   );
 
   useEffect(() => {
-    if (serverLink) return undefined;
     let mounted = true;
     getPublicContent("discord-banner")
       .then((data) => {
