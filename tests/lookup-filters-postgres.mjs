@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
+import { isDeepStrictEqual } from 'node:util';
 import { evaluate, parse } from 'groq-js';
 import { createSweepPostgresFixture, root } from '../scripts/lib/sweep-postgres-fixture.mjs';
 import { createSupabaseDocumentClient, inferShadowScope } from '../src/server/supabase/documentClient.js';
@@ -13,6 +14,7 @@ assert.equal(crypto.createHash('sha256').update(fs.readFileSync(process.env.POST
 
 const MIGRATION_SUFFIX = '_match_lookup_filters_exactly.sql';
 const LIMIT_500_DECOYS = 500;
+const READ_CAP_DECOYS = 1000;
 const TABLE_CHUNK = 400;
 const NOW = '2026-11-16T00:00:00.000Z';
 const LATER = '2099-01-01T00:00:00.000Z';
@@ -134,6 +136,31 @@ const unseenConditionLookups = [
     decoy: { paymentProvider: 'paypal', ...dodoIds }, real: { paymentProvider: 'dodo', ...dodoIds } },
 ];
 
+const counted = result => result === 1;
+const shapeParams = { code: 'SEEN', discountType: 'percent', other: 'OTHER' };
+const seenThroughShapes = [
+  { shape: 'a count around one condition', pushed: ['code'], found: counted,
+    query: 'count(*[_type == "coupon" && code == $code])' },
+  { shape: 'a count around two conditions', pushed: ['code', 'discountType'], found: counted,
+    query: 'count(*[_type == "coupon" && code == $code && discountType == $discountType])' },
+  { shape: 'a condition in parentheses', pushed: ['code'], found: byId,
+    query: '*[_type == "coupon" && (code == $code)][0]{_id}' },
+  { shape: 'parentheses around every condition', pushed: ['code'], found: byId,
+    query: '*[(_type == "coupon" && code == $code)][0]{_id}' },
+  { shape: 'a count around a condition in parentheses', pushed: ['code'], found: counted,
+    query: 'count(*[_type == "coupon" && (code == $code)])' },
+];
+const neverPushedShapes = [
+  { shape: 'a condition under a negation', capped: true, answer: ({ other }) => [other],
+    query: '*[_type == "coupon" && !(code == $code)]._id' },
+  { shape: 'a condition in a projection', capped: false, answer: ({ other, real }) => [{ _id: other, seen: false }, { _id: real, seen: true }],
+    query: '*[_type == "coupon"]{ _id, "seen": code == $code }' },
+  { shape: 'a condition in a subquery', capped: true, answer: () => ({ others: 1 }),
+    query: '*[_type == "coupon" && code == "SEEN"][0]{ "others": count(*[_type == "coupon" && code == $other]) }' },
+  { shape: 'a condition under another function', capped: true, answer: ({ real }) => real,
+    query: 'coalesce(*[_type == "coupon" && code == $code][0]._id, "none")' },
+];
+
 const fieldValues = [undefined, null, 'abc', 'Abc', 'ABC', '', '5', 5, 5.0, 6, -1.5, true, false, { a: 1 }, ['abc'], [], {},
   '2026-01-01T00:00:00Z', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.5Z', '2026-01-02', 'ÉCOLE', 'école',
   'ΣΑΣ', 'σας', 'İstanbul', 'STRASSE', 'straße', 'ǅ', 'b'];
@@ -159,7 +186,7 @@ test('targeted lookups return only real matches', async t => {
   const migration = fs.readdirSync(path.join(root, 'supabase/migrations')).find(name => name.endsWith(MIGRATION_SUFFIX));
   const fixture = await createSweepPostgresFixture({ fullMigrationChain: true, excludedMigrations: migration ? [migration] : [] });
   const { sql } = fixture;
-  const counts = { wrongLookups: 0, nonMatchingRows: 0, tableDisagreements: 0, tableNulls: 0, pathDisagreements: 0, referralPairWrong: 0, cutBeforeUnseenCondition: 0, standInDisagreements: 0 };
+  const counts = { wrongLookups: 0, nonMatchingRows: 0, tableDisagreements: 0, tableNulls: 0, pathDisagreements: 0, referralPairWrong: 0, cutBeforeUnseenCondition: 0, standInDisagreements: 0, scopeLosses: 0, unseenPushed: 0 };
   const applyFile = async file => {
     const connection = await sql.reserve();
     try { await connection.unsafe(fs.readFileSync(path.join(root, file), 'utf8')); } finally { connection.release(); }
@@ -232,6 +259,28 @@ test('targeted lookups return only real matches', async t => {
       }
     });
 
+    await t.test('a count or parentheses around pushable conditions keeps the pushed filter, and nothing else is pushed', async () => {
+      const prefix = 'coupon.shape.';
+      const ids = { other: `${prefix}aaa-0000`, real: `${prefix}zzz-real` };
+      const others = Array.from({ length: READ_CAP_DECOYS }, (_, decoy) => [`${prefix}aaa-${String(decoy).padStart(4, '0')}`, { code: 'OTHER', discountType: 'percent' }]);
+      await seed('coupon', [...others, [ids.real, { code: 'SEEN', discountType: 'percent' }]]);
+      try {
+        for (const { shape, query, pushed, found } of seenThroughShapes) {
+          const scope = inferShadowScope({ query, params: shapeParams });
+          if (found(await client.fetch(query, shapeParams), ids.real) && isDeepStrictEqual(scope.filters.map(filter => filter.path), pushed)) continue;
+          counts.scopeLosses += 1;
+          t.diagnostic(`lost: ${shape}`);
+        }
+        await sql`delete from migration.source_documents where legacy_sanity_id like ${`${prefix}aaa-%`} and legacy_sanity_id <> ${ids.other}`;
+        for (const { shape, query, capped, answer } of neverPushedShapes) {
+          const scope = inferShadowScope({ query, params: shapeParams });
+          if (scope.filters.length === 0 && scope.capped === capped && isDeepStrictEqual(await client.fetch(query, shapeParams), answer(ids))) continue;
+          counts.unseenPushed += 1;
+          t.diagnostic(`pushed: ${shape}`);
+        }
+      } finally { await unseed(prefix); }
+    });
+
     await t.test('the matcher answers what GROQ answers, and the fixtures\' stand-in what the matcher answers, for every operator, value and path shape', async () => {
       const cases = [];
       for (const op of Object.keys(tableGroq)) for (const value of op === 'in' ? inValues : filterValues) for (const actual of fieldValues) for (const shape of pathShapes) {
@@ -285,7 +334,7 @@ test('targeted lookups return only real matches', async t => {
     });
 
     console.log(JSON.stringify(counts));
-    assert.deepEqual(counts, { wrongLookups: 0, nonMatchingRows: 0, tableDisagreements: 0, tableNulls: 0, pathDisagreements: 0, referralPairWrong: 0, cutBeforeUnseenCondition: 0, standInDisagreements: 0 });
+    assert.deepEqual(counts, { wrongLookups: 0, nonMatchingRows: 0, tableDisagreements: 0, tableNulls: 0, pathDisagreements: 0, referralPairWrong: 0, cutBeforeUnseenCondition: 0, standInDisagreements: 0, scopeLosses: 0, unseenPushed: 0 });
   } finally {
     await fixture.stop();
     fs.rmSync(fixture.scratch, { recursive: true, force: true });
