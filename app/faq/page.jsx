@@ -11,7 +11,6 @@ export const revalidate = 60;
 export default async function Page() {
   const initialHomeData = await fetchHomePageData({
     requireContent: process.env.NEXT_PHASE !== "phase-production-build",
-    requiredResources: ["faq-questions"],
   });
   const faqJsonLd = seo.buildFaqJsonLd(initialHomeData.faqQuestions);
   return (

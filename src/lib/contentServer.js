@@ -1,19 +1,35 @@
 const { applyHomePageCopyOverrides, resolveHeroCopy } = require("./homeCopy");
 const { buildPackageOffers, normalizeFaqQuestions } = require("./packageContent");
 
-const createPublicContentFetcher = async () => {
-  const [{ fetchPublicContent }, { resolveSupabaseRuntimePolicy }] =
+const createPublicContentFetcher = async ({ confirmed = false } = {}) => {
+  const [{ fetchPublicContent, fetchPublicContentEntry }, { resolveSupabaseRuntimePolicy }] =
     await Promise.all([
       import("../server/content/publicContent.js"),
       import("../server/supabase/runtime.js"),
     ]);
   const backend = resolveSupabaseRuntimePolicy().primaryBackend;
-  return (resource) =>
-    fetchPublicContent({
-      resource,
-      backend,
-      searchParams: new URLSearchParams(),
-    });
+  if (!confirmed) {
+    return (resource) =>
+      fetchPublicContent({
+        resource,
+        backend,
+        searchParams: new URLSearchParams(),
+      });
+  }
+  return async (resource) => {
+    const entry = await fetchPublicContentEntry({ resource, backend, searchParams: new URLSearchParams() });
+    if (!entry.confirmed) {
+      throw Object.assign(new Error("Public content was not confirmed at the current revision."), { code: "PUBLIC_CONTENT_UNCONFIRMED" });
+    }
+    return entry.data;
+  };
+};
+
+let refusalReported = false;
+let refusalGeneration = 0;
+const contentConfirmed = (value, generation) => {
+  if (generation === refusalGeneration) refusalReported = false;
+  return value;
 };
 
 async function fetchFaqQuestions() {
@@ -35,24 +51,25 @@ async function fetchFaqQuestions() {
   }
 }
 
-const refuseContentFallback = async (message, error) => {
-  const { logSafeError } = await import("../server/safeErrorLog.js");
-  logSafeError(message, error);
+const refuseContentFallback = async (error) => {
+  if (!refusalReported) {
+    refusalReported = true;
+    refusalGeneration += 1;
+    const { logSafeError } = await import("../server/safeErrorLog.js");
+    logSafeError("Page content unavailable; keeping the previous page", error);
+  }
   throw error;
 };
 
-const refuseHomeFallback = (error) =>
-  refuseContentFallback("Home content unavailable; keeping the previous page", error);
-
 async function fetchHomePageData({
   requireContent = false,
-  requiredResources = [],
 } = {}) {
+  const generation = refusalGeneration;
   let fetchContent;
   try {
-    fetchContent = await createPublicContentFetcher();
+    fetchContent = await createPublicContentFetcher({ confirmed: requireContent });
   } catch (error) {
-    if (requireContent) await refuseHomeFallback(error);
+    if (requireContent) await refuseContentFallback(error);
     console.warn("[content] home fetch failed");
     fetchContent = async () => null;
   }
@@ -93,16 +110,12 @@ async function fetchHomePageData({
     safeFetch("faq-questions", []),
     safeFetch("referral-box", null),
   ]);
-  if (requireContent && requiredResources.length === 0 && failed.has("hero") && failed.has("packages-list")) {
-    await refuseHomeFallback(Object.assign(new Error("Home content is unavailable."), { code: "HOME_CONTENT_UNAVAILABLE" }));
-  }
-  const missingResources = requiredResources.filter((resource) => failed.has(resource));
-  if (requireContent && missingResources.length > 0) {
+  if (requireContent && failed.size > 0) {
     await refuseContentFallback(
-      "Page content unavailable; keeping the previous page",
-      Object.assign(new Error("Page content is unavailable."), { code: "PAGE_CONTENT_UNAVAILABLE", resources: missingResources })
+      Object.assign(new Error("Page content is unavailable."), { code: "PAGE_CONTENT_UNAVAILABLE", resources: [...failed] })
     );
   }
+  if (requireContent) contentConfirmed(undefined, generation);
 
   return applyHomePageCopyOverrides({
     hero: resolveHeroCopy(hero),
@@ -144,7 +157,7 @@ async function withinRequestWait(load, label) {
 const fetchFlowPageHomeData = () => withinRequestWait(() => fetchHomePageData(), "flow page home");
 
 async function fetchDiscordBanner() {
-  const banner = await withinRequestWait(() => fetchStaticPageContent("discord-banner"), "discord banner");
+  const banner = await withinRequestWait(() => fetchStaticPageContent("discord-banner", { confirmed: true }), "discord banner");
   const link = typeof banner?.link === "string" ? banner.link.trim() : "";
   return link ? { link } : null;
 }
@@ -168,50 +181,52 @@ async function fetchPrivacyPolicy() {
   }
 }
 
-async function fetchStaticPageContent(resource, { requireContent = false } = {}) {
+async function fetchStaticPageContent(resource, { requireContent = false, confirmed = requireContent } = {}) {
+  const generation = refusalGeneration;
   try {
-    const fetchContent = await createPublicContentFetcher();
+    const fetchContent = await createPublicContentFetcher({ confirmed });
     const content = await fetchContent(resource);
     if (requireContent && content == null) {
       throw Object.assign(new Error(`No published ${resource} document.`), { code: "PAGE_CONTENT_MISSING" });
     }
-    return content;
+    return requireContent ? contentConfirmed(content, generation) : content;
   } catch (error) {
-    if (requireContent) await refuseContentFallback("Page content unavailable; keeping the previous page", error);
+    if (requireContent) await refuseContentFallback(error);
     return null;
   }
 }
 
-async function fetchContentList(resource, label, { requireContent = false } = {}) {
+async function fetchContentList(resource, { requireContent = false } = {}) {
+  const generation = refusalGeneration;
   try {
-    const fetchContent = await createPublicContentFetcher();
+    const fetchContent = await createPublicContentFetcher({ confirmed: requireContent });
     const rows = await fetchContent(resource);
-    return Array.isArray(rows) ? rows : [];
+    const content = Array.isArray(rows) ? rows : [];
+    return requireContent ? contentConfirmed(content, generation) : content;
   } catch (error) {
-    if (requireContent) await refuseContentFallback(`${label} content unavailable; keeping the previous page`, error);
+    if (requireContent) await refuseContentFallback(error);
     return null;
   }
 }
 
-const fetchBenchmarks = (options) => fetchContentList("benchmarks", "Benchmarks", options);
+const fetchBenchmarks = (options) => fetchContentList("benchmarks", options);
 
-const fetchReviewsGallery = (options) => fetchContentList("reviews-gallery", "Reviews", options);
+const fetchReviewsGallery = (options) => fetchContentList("reviews-gallery", options);
 
 async function fetchPackagesPageData({ requireContent = false } = {}) {
-  const refuse = (error) =>
-    refuseContentFallback("Packages content unavailable; keeping the previous page", error);
+  const generation = refusalGeneration;
   let fetchContent;
   try {
-    fetchContent = await createPublicContentFetcher();
+    fetchContent = await createPublicContentFetcher({ confirmed: requireContent });
   } catch (error) {
-    if (requireContent) await refuse(error);
+    if (requireContent) await refuseContentFallback(error);
     return { packagesList: null, packagesSettings: null };
   }
   const read = async (resource) => {
     try {
       return await fetchContent(resource);
     } catch (error) {
-      if (requireContent) await refuse(error);
+      if (requireContent) await refuseContentFallback(error);
       return null;
     }
   };
@@ -219,6 +234,7 @@ async function fetchPackagesPageData({ requireContent = false } = {}) {
     read("packages-list"),
     read("packages-settings"),
   ]);
+  if (requireContent) contentConfirmed(undefined, generation);
   return { packagesList, packagesSettings };
 }
 

@@ -192,7 +192,7 @@ const withinDeadline = (pending) =>
 const lastGoodCopy = (key) => {
   const entry = key ? supabaseContentCache.get(key) : null;
   if (!entry || Date.now() - entry.confirmedAt > SUPABASE_CONTENT_STALE_TTL_MS) return null;
-  return { data: entry.data, revision: entry.revision, cacheable: false, stale: true };
+  return { data: entry.data, revision: entry.revision, cacheable: false, stale: true, confirmed: false };
 };
 
 const startStoreRead = ({ resource, query, params, key, revision }) => {
@@ -208,7 +208,7 @@ const startStoreRead = ({ resource, query, params, key, revision }) => {
       if (settled && key) {
         supabaseContentCache.set(key, { data: entry.data, revision: entry.revision, readAt: Date.now(), confirmedAt: Date.now() });
       }
-      return { ...entry, cacheable: settled && timely(check) };
+      return { ...entry, cacheable: settled && timely(check), confirmed: settled };
     })
     .finally(() => {
       if (supabaseContentReads.get(readKey) === read) supabaseContentReads.delete(readKey);
@@ -246,7 +246,7 @@ const loadAt = async ({ resource, query, params, key, check }) => {
   const entry = key ? supabaseContentCache.get(key) : null;
   if (entry && entry.revision === check.revision && Date.now() - entry.readAt <= SUPABASE_CONTENT_CACHE_TTL_MS) {
     entry.confirmedAt = Date.now();
-    return { data: entry.data, revision: entry.revision, cacheable: timely(check) };
+    return { data: entry.data, revision: entry.revision, cacheable: timely(check), confirmed: true };
   }
   return awaitStoreRead(startStoreRead({ resource, query, params, key, revision: check.revision }), key);
 };
@@ -311,7 +311,7 @@ const loadSupabasePublicContent = async ({ resource, query, params }) => {
   }
   if (!known) return loadAt({ resource, query, params, key: null, check });
   const narrowed = narrowToKnown(resource, params, known);
-  if (!narrowed) return { data: null, revision: check.revision, cacheable: timely(check) };
+  if (!narrowed) return { data: null, revision: check.revision, cacheable: timely(check), confirmed: true };
   return loadAt({ resource, query, params: narrowed, key: memoryKey(resource, narrowed), check });
 };
 
@@ -336,11 +336,12 @@ export const fetchPublicContentEntry = async ({ resource, searchParams }) => {
       : resource === "upgrade-link"
         ? { slug: parseSlug(searchParams) }
         : {};
-  const { data, revision, cacheable } = await loadSupabasePublicContent({ resource, query, params });
+  const { data, revision, cacheable, confirmed } = await loadSupabasePublicContent({ resource, query, params });
   return {
     data: applyPublicPolicyOverrides(resource, visitorContent(resource, data)),
     revision,
     cacheable,
+    confirmed: confirmed === true,
   };
 };
 
