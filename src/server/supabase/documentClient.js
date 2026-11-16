@@ -97,6 +97,7 @@ export const inferShadowScope = ({ query, params = {}, configuredTypes = null })
     for (const match of source.matchAll(pattern)) {
       const [, lowerCall, path, operator, param] = match;
       if (["_id", "_type"].includes(path) || params[param] === undefined) continue;
+      if (lowerCall && operator !== "==") continue;
       const op =
         operator === "=="
           ? lowerCall

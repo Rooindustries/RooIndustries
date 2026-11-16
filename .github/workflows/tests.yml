@@ -453,7 +453,7 @@ jobs:
           const assert = require('node:assert/strict');
           const { stats } = require('./test-results/native-booking-hold.json');
           assert.equal(stats.skipped, 0, 'Native booking-hold cases must not skip');
-          assert.equal(stats.expected, 20, 'All native booking cases must pass');
+          assert.equal(stats.expected, 24, 'All native booking cases must pass');
           assert.equal(stats.unexpected, 0);
           assert.equal(stats.flaky, 0);
           NODE
@@ -467,6 +467,19 @@ jobs:
           const { stats } = require('./test-results/native-booking-emails.json');
           assert.equal(stats.skipped, 0);
           assert.equal(stats.expected, 4);
+          assert.equal(stats.unexpected, 0);
+          assert.equal(stats.flaky, 0);
+          NODE
+      - name: Run all six native lookup browser cases
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/native-lookup-filters.json
+        run: |
+          xvfb-run -a npx playwright test tests/lookup-filters-browser.spec.js --project=chromium --workers=1 --retries=0 --output=test-results/lookup-filters-e2e --reporter=line,json
+          node - <<'NODE'
+          const assert = require('node:assert/strict');
+          const { stats } = require('./test-results/native-lookup-filters.json');
+          assert.equal(stats.skipped, 0);
+          assert.equal(stats.expected, 6);
           assert.equal(stats.unexpected, 0);
           assert.equal(stats.flaky, 0);
           NODE
@@ -484,7 +497,7 @@ jobs:
             referral-social:postgres17 backend-integrity:postgres17 referral-authority:postgres17
             referral-email:postgres17 referral-integrity:postgres17 account-domain:postgres17
             account-check:postgres17 commerce-readiness:postgres17 commerce-readiness-scale:postgres17
-            referral-email:origins
+            referral-email:origins lookup-filters:postgres17
       - uses: ./.github/actions/save-caches
         with:
           build-dirs: .next-e2e-native-booking/cache/webpack

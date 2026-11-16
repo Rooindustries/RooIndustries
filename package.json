@@ -98,6 +98,7 @@
     "test:referral:postgres17": "node scripts/test-referral-creator-terms-postgres.mjs",
     "test:referral-reset-conflict:postgres17": "node scripts/test-referral-reset-conflict.mjs",
     "test:write-conflicts:postgres17": "node --test tests/write-conflicts-postgres.mjs",
+    "test:lookup-filters:postgres17": "node --test tests/lookup-filters-postgres.mjs",
     "test:conflict-ui:postgres17": "playwright test -c playwright.conflicts.config.js",
     "test:conflict-codes:postgrest": "node scripts/test-conflict-codes-postgrest.mjs",
     "test:creator-payouts:postgres17": "node scripts/test-creator-payouts-e2e.mjs",

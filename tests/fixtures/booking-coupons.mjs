@@ -40,6 +40,7 @@ const methods = {
     return { status: response.status, body: await response.json() };
   },
   create: doc => (doc._type === 'referral' ? fixture.content : fixture.commerce).create(doc),
+  remove: async ids => { await fixture.database.sql`delete from migration.source_documents where legacy_sanity_id = any(${ids})`; },
   get: id => fixture.commerce.getDocument(id),
   referral: id => fixture.content.getDocument(id),
   setPrice: price => fixture.content.patch('package.fixture.1').set({ price }).commit(),
