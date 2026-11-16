@@ -1,8 +1,15 @@
 const { randomUUID } = require("node:crypto");
 const { get } = require("node:http");
 const { test, expect } = require("./fixtures/isolated-content-test.cjs");
-const { login, choose, prepareAdminContext } = require("./fixtures/admin-content.cjs");
+const { cms, login, choose, prepareAdminContext } = require("./fixtures/admin-content.cjs");
 const { createContentGate } = require("./fixtures/content-store-gate.cjs");
+
+const HERO_ID = "tooling-hero";
+const hero = async page => {
+  await choose(page, "Hero Section");
+  await expect(page.getByLabel("Main Heading (Line 1)", { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Editor", exact: true })).toHaveAttribute("aria-busy", "false");
+};
 
 const PENDING_NOTICE = "Published. The live pages haven't updated yet. The site tries again in a few seconds and once more within a minute.";
 
@@ -60,4 +67,38 @@ test("a pending content purge is reported as pending", async ({ request, baseURL
   } finally {
     await gate.cleanup(() => hanging.reset(), () => gate.restore("tooling-package-0", original.document), () => gate.rebuild(["/packages"]), () => gate.clearRounds());
   }
+});
+
+test("a lost publish response followed by Retry shows the general notice", async ({ page, request }) => {
+  await login(page); await hero(page);
+  const original = await cms(request, `/api/admin/content/documents/${HERO_ID}`);
+  const heading = `Lost response ${original.revision}`;
+  await page.getByLabel("Main Heading (Line 1)", { exact: true }).fill(heading);
+  const failedRead = route => route.fulfill({ status: 503, json: { ok: false, error: "Synthetic reconciliation outage" } });
+  const lostResponse = async route => { await route.fetch(); await route.abort("failed"); };
+  await page.route(`**/api/admin/content/documents/${HERO_ID}`, failedRead);
+  await page.route("**/api/admin/content/publish", lostResponse);
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await expect(page.getByRole("alert").filter({ hasText: /could not confirm.*publication/i })).toBeVisible();
+  await page.unroute(`**/api/admin/content/documents/${HERO_ID}`, failedRead);
+  await page.getByRole("button", { name: "Retry", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Published. The live site picks this up within a few minutes (page and CDN caches)." })).toBeVisible();
+  expect((await cms(request, `/api/admin/content/documents/${HERO_ID}`)).document.headingLine1).toBe(heading);
+});
+
+test("a delete with unknown refresh status shows the general notice", async ({ page }) => {
+  await login(page); await choose(page, "Benchmark");
+  await page.getByRole("region", { name: "Benchmark list" }).getByRole("button", { name: "New", exact: true }).click();
+  await page.getByLabel("Benchmark Name", { exact: true }).fill("Delete with unknown refresh");
+  await page.getByRole("button", { name: "Publish", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Published. The live site picks this up within a few minutes (page and CDN caches)." })).toBeVisible();
+  await page.route("**/api/admin/content/publish", async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    delete body.data.refresh;
+    await route.fulfill({ response, json: body });
+  });
+  page.once("dialog", dialog => dialog.accept());
+  await page.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Deleted. The live site picks this up within a few minutes." })).toBeVisible();
 });
