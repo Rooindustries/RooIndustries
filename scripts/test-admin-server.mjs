@@ -494,7 +494,7 @@ try {
     fixture.resume();
     await startApp();
     const inspected = await fetch(baseURL, { headers: { "x-roo-test-inspect-controls": "1" } });
-    const controls = await inspected.json();
+    const { contentReads, ...controls } = await inspected.json();
     if (!inspected.ok || Object.values(controls).some(Boolean)) throw new Error("Fixture controls did not reset.");
     return { database: changed.length, rules: storeRules.size, holds: storeHolds.length, waiters: eventWaiters.size, closed: closedStores.size, ...controls };
   };

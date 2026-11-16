@@ -9,6 +9,7 @@ if (control) {
   const activeControls = new Map();
   const failures = new Map();
   const scheduledRounds = new Set();
+  let contentReads = 0;
   const schedule = globalThis.setTimeout;
   globalThis.setTimeout = (callback, ms, ...args) => {
     const timer = schedule(callback, ms, ...args);
@@ -18,11 +19,14 @@ if (control) {
   const emit = http.Server.prototype.emit;
   http.Server.prototype.emit = function (event, request, ...rest) {
     if (event !== "request") return emit.call(this, event, request, ...rest);
+    if (request?.url === "/__content-test-ready") {
+      rest[0].writeHead(200); rest[0].end("ready"); return true;
+    }
     if (request?.headers?.["x-roo-test-inspect-controls"] === "1") {
       const controls = globalThis[Symbol.for("roo.test.controls")];
       const response = rest[0];
       response.writeHead(200, { "Content-Type": "application/json" });
-      response.end(JSON.stringify({ failures: failures.size, active: activeControls.size, timers: scheduledRounds.size, storeDelayMs: controls?.storeDelayMs || 0 }));
+      response.end(JSON.stringify({ failures: failures.size, active: activeControls.size, timers: scheduledRounds.size, storeDelayMs: controls?.storeDelayMs || 0, contentReads }));
       return true;
     }
     const trace = request?.headers?.["x-roo-test-trace"];
@@ -74,6 +78,7 @@ if (control) {
   globalThis.fetch = async (input, init) => {
     const trace = traces.getStore();
     const url = typeof input === "string" || input instanceof URL ? String(input) : input.url;
+    if (url.startsWith(rpcPrefix) && /^roo_(read_public_content_revision|fetch_public_content_documents|asset_manifest_for_refs)$/.test(new URL(url).pathname.slice(new URL(rpcPrefix).pathname.length))) contentReads += 1;
     if (!trace || !url.startsWith(rpcPrefix)) return baseFetch(input, init);
     const rpc = new URL(url).pathname.slice(new URL(rpcPrefix).pathname.length);
     let types = "";

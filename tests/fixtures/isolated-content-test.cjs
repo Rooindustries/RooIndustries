@@ -9,7 +9,7 @@ const test = base.extend({
       const control = fixtureOrigin(baseURL, "TOOLING_ADMIN_CONTROL_PORT");
       const response = await request.post(`${control}/reset-isolation`);
       expect(response.ok(), await response.text()).toBe(true);
-      const state = await response.json();
+      const { contentReads, ...state } = await response.json();
       expect(state).toEqual({ database: 0, rules: 0, holds: 0, waiters: 0, closed: 0, failures: 0, active: 0, timers: 0, storeDelayMs: 0 });
       const contexts = browser.contexts().filter(context => !existing.has(context)).length;
       expect(contexts).toBe(0);

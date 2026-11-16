@@ -84,6 +84,8 @@ const forceFailedRebuild = async ({ request, baseURL, label, mode }) => {
 
 test("a failed read during a rebuild after a publish", async ({ request, baseURL }) => {
   test.setTimeout(300000);
+  const inspected = await request.get("/", { headers: { "x-roo-test-inspect-controls": "1" } });
+  expect((await inspected.json()).contentReads, "The forcing check requires a cold content server").toBe(0);
   const results = [];
   for (const mode of ["cold", "warm"]) results.push(await forceFailedRebuild({ request, baseURL, label: mode, mode }));
   for (const { label, served5xx, staleAsFresh, stillOldAfterRecovery, refusals } of results) {
