@@ -58,22 +58,27 @@ test("R2 a revision checked before publish cannot cache an old price after the s
   await read(request, "/booking");
   await render.rules([{ rpc: "^roo_read_public_content_revision$", action: "pass", times: 1 }, { rpc: "^roo_read_public_content_revision$", action: "hold", times: 1 }]);
   const count = await writesFor(request, gate, "/packages");
-  trigger = read(request, "/packages", { ...render.headers, "x-roo-test-delay-page-store": "8000" });
+  trigger = read(request, "/packages", { ...render.headers, "x-roo-test-hold-page-store": "1" });
   await waitFor(request, gate, { kind: "hold", trace: render.trace, count: "1" });
   const later = gate.traced();
   const current = await gate.document("tooling-package-0");
   const published = await later.cms("/api/admin/content/publish", gate.replaceCommand(current, { price: priceB }));
   expect(published.status).toBe(200);
   await render.release();
-  const first = await trigger;
+  await waitFor(request, gate, { kind: "hold", trace: render.trace, rpc: "page-store", count: "1" });
   await waitFor(request, gate, { kind: "purge", trace: later.trace, count: "2" });
-  await waitFor(request, gate, { kind: "write", key: "/packages", count: String(count + 1) });
+  await render.release();
+  const first = await trigger;
+  const saved = await waitFor(request, gate, { kind: "write", key: "/packages", count: String(count + 1) }).then((response) => response.ok(), () => false);
+  const refusals = (await (await request.get(`${gate.control}/page-refusals`)).json()).map(({ label }) => label);
+  const held = (await (await request.get(`${gate.control}/store-holds?trace=${render.trace}`)).json()).includes("page-store");
+  expect(saved, `/packages was not saved again; refusals seen: ${refusals.join(", ") || "none"}; ${held ? `held page store ${render.trace}` : "page store not held"}`).toBe(true);
   const after = await read(request, "/packages");
-  const result = { calls: await render.calls(), firstCache: first.cache, cache: after.cache, maxAge: after.maxAge, showsA: after.body.includes(priceA), showsB: after.body.includes(priceB) };
+  const result = { calls: await render.calls(), refusals, firstCache: first.cache, cache: after.cache, maxAge: after.maxAge, showsA: after.body.includes(priceA), showsB: after.body.includes(priceB) };
   report("R2", result);
   expect(first.status).toBe(200);
   expect(after.status).toBe(200);
-  expect(after.cache === "HIT" && after.maxAge >= 60 && result.showsA, "pre-publish price cached as fresh").toBe(false);
+  expect(after.cache === "HIT" && after.maxAge >= 60 && !result.showsB, "a page without the published price cached as fresh").toBe(false);
   } finally {
     await gate.cleanup(
       () => render.close(),

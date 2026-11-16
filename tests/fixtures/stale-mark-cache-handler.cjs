@@ -5,10 +5,9 @@ const marks = (globalThis[Symbol.for("roo.test.pageMarks")] ||= { at: 0 });
 module.exports = class StaleMarkCache extends FileSystemCache {
   async set(key, data, ctx) {
     const controls = globalThis[Symbol.for("roo.test.controls")];
-    if (controls?.storeDelayMs > 0 && data?.kind === "APP_PAGE") {
-      const ms = controls.storeDelayMs;
-      controls.storeDelayMs = 0;
-      await new Promise((resolve) => setTimeout(resolve, ms));
+    const trace = controls?.trace();
+    if (data?.kind === "APP_PAGE" && controls?.pageStoreHolds.delete(trace)) {
+      await fetch(`${process.env.ROO_CONTENT_TEST_CONTROL_URL}/store-holds`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ trace, rpc: "page-store" }) });
     }
     const result = await super.set(key, data, ctx);
     if (data?.kind === "APP_PAGE" && process.env.ROO_CONTENT_TEST_CONTROL_URL) {

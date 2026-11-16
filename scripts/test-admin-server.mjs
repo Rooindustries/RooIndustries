@@ -268,11 +268,12 @@ try {
       const trace = query.get("trace");
       const key = query.get("key");
       const count = Number(query.get("count"));
+      const rpc = query.get("rpc");
       waitForEvent(response, () => {
         const events = kind === "refresh" ? refreshEvents.filter(event => event.trace === trace)
           : kind === "refresh-error" ? refreshErrors.filter(event => event.trace === trace)
             : kind === "purge" ? purges.filter(event => event.trace === trace && event.operation === "invalidateByTag" && event.target === "_N_T_/layout")
-          : kind === "hold" ? storeHolds.filter(event => event.trace === trace)
+          : kind === "hold" ? storeHolds.filter(event => event.trace === trace && (!rpc || event.rpc === rpc))
             : pageWrites.filter(event => event.key === key);
         return events.length >= count ? { count: events.length } : null;
       });
@@ -476,11 +477,11 @@ try {
     };
     const controls = await step("inspect controls", async () => (await hook("x-roo-test-inspect-controls")).json());
     const leftovers = [
-      ...storeHolds.map(({ trace, rpc }) => `held store ${trace}/${rpc}`),
+      ...storeHolds.map(({ trace, rpc }) => rpc === "page-store" ? `held page store ${trace}` : `held store ${trace}/${rpc}`),
       ...[...eventWaiters].map(waiter => `pending waiter ${waiter.description}`),
       ...controls.active.map(({ trace, content, pages, holds }) => `hang control ${trace}/${[content && "content purge", pages && "page mark", holds && `${holds} holds`].filter(Boolean).join(", ")}`),
       ...controls.failures.map(({ trace, content, pages }) => `forced failure ${trace}/${[content && "content purge", pages && "page mark"].filter(Boolean).join(", ")}`),
-      ...(controls.storeDelayMs ? [`store delay ${controls.storeDelayMs}ms`] : []),
+      ...controls.pageStoreHolds.map(trace => `unused page store hold ${trace}`),
     ];
     await step("clear controls", () => hook("x-roo-test-reset-all-controls", { "x-roo-test-clear-rounds": "1" }));
     for (const hold of storeHolds.splice(0)) hold.release();
