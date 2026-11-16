@@ -30,7 +30,21 @@ export const reportSpecFiles = (report) => {
   return [...files].sort();
 };
 
-export const listSpecFiles = ({ filter, config } = {}) => {
+export const reportTests = (report) => {
+  const tests = [];
+  const walk = (suite, titles) => {
+    for (const spec of suite.specs || []) {
+      for (const test of spec.tests) {
+        tests.push({ id: [spec.file, spec.line, spec.column, test.projectName, [...titles, spec.title]], results: test.results });
+      }
+    }
+    for (const child of suite.suites || []) walk(child, [...titles, child.title]);
+  };
+  for (const suite of report.suites || []) walk(suite, []);
+  return tests;
+};
+
+export const listReport = ({ filter, config } = {}) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "playwright-list-"));
   const reportFile = path.join(dir, "list.json");
   const args = [playwrightCli, "test", "--list", "--reporter=json"];
@@ -42,8 +56,7 @@ export const listSpecFiles = ({ filter, config } = {}) => {
       stdio: ["ignore", "ignore", "inherit"],
       env: { ...process.env, PLAYWRIGHT_JSON_OUTPUT_FILE: reportFile },
     });
-    const files = reportSpecFiles(readReport());
-    return config ? files : files.filter(file => !nativeOnly.has(file));
+    return readReport();
   } catch (error) {
     const errors = fs.existsSync(reportFile) ? (readReport().errors || []).map(({ message }) => message) : [];
     throw new Error(["Playwright couldn't list the spec files", ...errors].join("\n"), { cause: error });
@@ -52,7 +65,12 @@ export const listSpecFiles = ({ filter, config } = {}) => {
   }
 };
 
-export const assignRestGroups = (specFiles, timings) => {
+export const listSpecFiles = (options = {}) => {
+  const files = reportSpecFiles(listReport(options));
+  return options.config ? files : files.filter(file => !nativeOnly.has(file));
+};
+
+export const assignRestGroups = (specFiles, timings, seed = 0) => {
   const fixed = new Set(Object.values(FIXED_GROUPS).flat());
   const rest = specFiles.filter((file) => !fixed.has(path.posix.basename(file))).sort();
   const fallback = median(Object.values(timings));
@@ -63,7 +81,8 @@ export const assignRestGroups = (specFiles, timings) => {
     files: [],
   }));
   const ordered = [...rest].sort((a, b) => weight(b) - weight(a) || a.localeCompare(b));
-  for (const file of ordered) {
+  const start = seed % ordered.length;
+  for (const file of [...ordered.slice(start), ...ordered.slice(0, start)]) {
     const lightest = groups.reduce((best, group) => (group.load < best.load ? group : best));
     lightest.files.push(file);
     lightest.load += weight(file);
@@ -76,7 +95,8 @@ export const groupPattern = (files) => {
   return `/tests/(${names.join("|")})\\.spec\\.js$`;
 };
 
-const readTimings = (candidates) => {
+export const readTimings = (timingsFile) => {
+  const candidates = [timingsFile, path.join(".github", "playwright-timings.json")];
   for (const candidate of candidates) {
     if (candidate && fs.existsSync(candidate)) return JSON.parse(fs.readFileSync(candidate, "utf8"));
   }
@@ -87,7 +107,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const [group, timingsFile] = process.argv.slice(2);
   if (!REST_GROUPS.includes(group)) throw new Error(`Unknown rest group "${group}"`);
   const specFiles = listSpecFiles();
-  const timings = readTimings([timingsFile, path.join(".github", "playwright-timings.json")]);
+  const timings = readTimings(timingsFile);
   const assigned = assignRestGroups(specFiles, timings)[group];
   if (!assigned.files.length) throw new Error(`Rest group ${group} has no spec files`);
   console.error(`${group}: ${assigned.files.length} files, about ${Math.round(assigned.load)}s`);

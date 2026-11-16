@@ -1,0 +1,1 @@
+{"config":{"workers":1,"projects":[{"name":"chromium","repeatEach":2,"retries":0},{"name":"mobile-webkit","repeatEach":1,"retries":0}]},"suites":[],"errors":[]}

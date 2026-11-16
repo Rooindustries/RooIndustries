@@ -1,0 +1,1 @@
+{"head_sha":"0123456789abcdef0123456789abcdef01234567","workers":1,"legs":[{"name":"booking-1","group":"booking","repeat":1,"files":["booking-flow.spec.js"]}],"tests":{"booking-flow.spec.js":[["booking-flow.spec.js",5,1,"chromium",["a > b","c"]],["booking-flow.spec.js",5,1,"chromium",["a","b > c"]]]}}
