@@ -1,11 +1,46 @@
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
+import { fork } from "node:child_process";
+import { once } from "node:events";
 import { after, before, test } from "node:test";
 import { createBookingHoldFixture } from "./fixtures/booking-hold.mjs";
 
-let fixture;
-before(async () => { fixture = await createBookingHoldFixture(); });
-after(async () => { await fixture?.stop(); });
+let fixture, couponChild, couponCall;
+before(async () => {
+  couponChild = fork(new URL('./fixtures/booking-coupons.mjs', import.meta.url), [], { execArgv: [], stdio: ['ignore', 'inherit', 'inherit', 'ipc'] });
+  const pending = new Map();
+  let nextId = 0;
+  const ready = new Promise((resolve, reject) => {
+    couponChild.on('message', message => {
+      if (message.ready) return resolve();
+      const request = pending.get(message.id);
+      if (!request) return;
+      pending.delete(message.id);
+      message.error ? request.reject(new Error(message.error)) : request.resolve(message.value);
+    });
+    couponChild.on('exit', code => {
+      const error = new Error(`Coupon fixture exited (${code})`);
+      reject(error);
+      for (const request of pending.values()) request.reject(error);
+      pending.clear();
+    });
+  });
+  couponCall = (method, ...args) => new Promise((resolve, reject) => {
+    const id = ++nextId;
+    pending.set(id, { resolve, reject });
+    couponChild.send({ id, method, args });
+  });
+  await ready;
+  fixture = await createBookingHoldFixture();
+});
+after(async () => {
+  await fixture?.stop();
+  if (couponChild?.exitCode === null) {
+    const exited = once(couponChild, 'exit');
+    await couponCall('stop');
+    await exited;
+  }
+});
 
 const refresh = (payload, credentials = {}) => fixture.post("/api/holdSlot", {
   startTimeUTC: payload.startTimeUTC,
@@ -345,4 +380,31 @@ test("a Razorpay webhook recovers a captured payment after its hold was deleted"
     globalThis.fetch = originalFetch;
     for (const key of keys) if (saved[key] === undefined) delete process.env[key]; else process.env[key] = saved[key];
   }
+});
+
+test('booking rejects a coupon targeted at another package', async () => {
+  await couponCall('create', { _id: 'coupon.targeted', _type: 'coupon', code: 'TARGETED', discountType: 'fixed',
+    discountAmount: 10, eligiblePackages: [{ _ref: 'package.fixture.2' }], canCombineWithReferral: true,
+    isActive: true, timesUsed: 0 });
+  const payload = await couponCall('hold');
+  const response = await couponCall('post', '/api/ref/createBooking', { ...payload, status: 'captured',
+    paymentProvider: 'paypal', paypalOrderId: 'targeted-order', couponCode: 'TARGETED' });
+  assert.equal(response.status, 400);
+  assert.deepEqual(response.body, { error: 'This coupon is not valid for the selected package.' });
+  const bookings = await couponCall('bookingsFor', 'TARGETED');
+  assert.deepEqual(bookings, []);
+});
+
+test('booking rejects a coupon that cannot be combined with a referral', async () => {
+  await couponCall('create', { _id: 'referral.noclub', _type: 'referral', slug: { _type: 'slug', current: 'noclub' },
+    registrationStatus: 'active', currentCommissionPercent: 20, currentDiscountPercent: 10 });
+  await couponCall('create', { _id: 'coupon.noclub', _type: 'coupon', code: 'NOCLUB', discountType: 'percent',
+    discountPercent: 5, canCombineWithReferral: false, isActive: true, timesUsed: 0 });
+  const payload = await couponCall('hold');
+  const response = await couponCall('post', '/api/ref/createBooking', { ...payload, status: 'captured',
+    paymentProvider: 'paypal', paypalOrderId: 'noclub-order', couponCode: 'NOCLUB', referralCode: 'noclub' });
+  assert.equal(response.status, 400);
+  assert.deepEqual(response.body, { error: "This coupon can't be combined with a referral discount." });
+  const bookings = await couponCall('bookingsFor', 'NOCLUB');
+  assert.deepEqual(bookings, []);
 });
