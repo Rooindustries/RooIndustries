@@ -6,6 +6,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { spawnSync } from 'node:child_process';
 import postgres from 'postgres';
+import yaml from 'js-yaml';
 import { createClient } from '@supabase/supabase-js';
 import { listenOnPort, releaseTcpPorts, reserveTcpPorts } from './free-tcp-port.mjs';
 import { startChildOnPorts, stopChild } from './start-on-port.mjs';
@@ -13,6 +14,8 @@ import { startChildOnPorts, stopChild } from './start-on-port.mjs';
 export const root = path.resolve(new URL('../..', import.meta.url).pathname);
 const host = process.env.ROO_TEST_HOST || '127.0.0.1';
 const migrationDir = path.join(root, 'supabase/migrations');
+const postgresAction = '.github/actions/postgres/action.yml';
+const pinnedPostgrest = yaml.load(fs.readFileSync(path.join(root, postgresAction), 'utf8')).runs.steps.find((step) => step.env?.POSTGREST_VERSION).env.POSTGREST_VERSION;
 const jwtSecret = 'local-persistence-proof-secret-never-production';
 
 const bootstrap = `
@@ -97,6 +100,7 @@ export const createSweepPostgresFixture = async ({ commerceRepairMigration = tru
     postgresVersion = run(path.join(pgBin,'postgres'),['--version']);
     assert.match(postgresVersion,/PostgreSQL\) 17\./);
     postgrestVersion = run(postgrestBin,['--version']);
+    assert.equal(postgrestVersion, `PostgREST ${pinnedPostgrest}`, `${postgrestBin} is not the PostgREST pinned in ${postgresAction}`);
     run(path.join(pgBin,'initdb'),['-D',dataDir,'--auth=trust','--no-locale',...(fullMigrationChain ? ['--encoding=UTF8'] : [])]);
     fs.appendFileSync(path.join(dataDir,'pg_hba.conf'),'\nhost all all samehost trust\n');
     const postgresLog = path.join(scratch, 'postgres.log');

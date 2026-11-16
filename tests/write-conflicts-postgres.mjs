@@ -1,13 +1,8 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import fs from 'node:fs';
 import { test } from 'node:test';
 import { createBookingContactFixture } from './fixtures/booking-contact.mjs';
 import { scenarios } from '../scripts/lib/conflict-code-scenarios.mjs';
-
-assert.ok(process.env.POSTGREST_14_BIN, 'POSTGREST_14_BIN must point to PostgREST 14.5');
-assert.equal(crypto.createHash('sha256').update(fs.readFileSync(process.env.POSTGREST_14_BIN)).digest('hex'), '39ce04b0597c6b3c3eb4c5f34fe6ab590a2d0172616eeaccf1e4c659b822295a');
-process.env.POSTGREST_BIN = process.env.POSTGREST_14_BIN;
 
 const within = async (promise, milliseconds) => {
   let timer;

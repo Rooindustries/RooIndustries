@@ -362,8 +362,6 @@ jobs:
       - name: Run native admin CMS suite
         run: xvfb-run -a npx playwright test -c playwright.admin.config.js
       - name: Run write conflict browser cases
-        env:
-          POSTGREST_BIN: ${{ env.POSTGREST_14_BIN }}
         run: xvfb-run -a npm run test:conflict-ui:postgres17
       - name: Run the tooling safety suite
         run: npm run test:tooling:safety

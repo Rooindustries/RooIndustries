@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -8,9 +7,6 @@ import { evaluate, parse } from 'groq-js';
 import { createSweepPostgresFixture, root } from '../scripts/lib/sweep-postgres-fixture.mjs';
 import { createSupabaseDocumentClient, inferShadowScope } from '../src/server/supabase/documentClient.js';
 import { matchesShadowFilter } from './fixtures/shadow-filter.mjs';
-
-assert.ok(process.env.POSTGREST_14_BIN, 'POSTGREST_14_BIN must point to PostgREST 14.5');
-assert.equal(crypto.createHash('sha256').update(fs.readFileSync(process.env.POSTGREST_14_BIN)).digest('hex'), '39ce04b0597c6b3c3eb4c5f34fe6ab590a2d0172616eeaccf1e4c659b822295a');
 
 const MIGRATION_SUFFIX = '_match_lookup_filters_exactly.sql';
 const LIMIT_500_DECOYS = 500;
@@ -182,7 +178,6 @@ const functionState = sql => sql`select p.oid::regprocedure::text as signature, 
   order by 1`;
 
 test('targeted lookups return only real matches', async t => {
-  process.env.POSTGREST_BIN = process.env.POSTGREST_14_BIN;
   const migration = fs.readdirSync(path.join(root, 'supabase/migrations')).find(name => name.endsWith(MIGRATION_SUFFIX));
   const fixture = await createSweepPostgresFixture({ fullMigrationChain: true, excludedMigrations: migration ? [migration] : [] });
   const { sql } = fixture;

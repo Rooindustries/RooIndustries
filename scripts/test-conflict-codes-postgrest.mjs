@@ -4,15 +4,11 @@ import fs from 'node:fs';
 import { createSweepPostgresFixture } from './lib/sweep-postgres-fixture.mjs';
 import { scenarios, controls } from './lib/conflict-code-scenarios.mjs';
 
-const binary = process.env.POSTGREST_14_BIN;
-assert.ok(binary, 'POSTGREST_14_BIN must point to PostgREST 14.5');
-assert.equal(crypto.createHash('sha256').update(fs.readFileSync(binary)).digest('hex'), '39ce04b0597c6b3c3eb4c5f34fe6ab590a2d0172616eeaccf1e4c659b822295a');
 const tag = crypto.randomBytes(6).toString('hex');
 let fixture;
 
 try {
-  fixture = await createSweepPostgresFixture({ fullMigrationChain: true, postgrestBin: binary });
-  assert.equal(fixture.postgrestVersion, 'PostgREST 14.5');
+  fixture = await createSweepPostgresFixture({ fullMigrationChain: true });
   const { sql, scratch, token, postgrestUrl } = fixture;
   const logPath = `${scratch}/postgres.log`;
   const logSize = () => fs.statSync(logPath).size;

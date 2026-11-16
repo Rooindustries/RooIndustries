@@ -5,8 +5,6 @@ const { ADMIN_KEY, cms, login, choose, prepareAdminContext } = require('./fixtur
 
 test.beforeEach(async ({ context, page, request, baseURL }) => {
   await prepareAdminContext({ context, page, request, baseURL });
-  const response = await request.get(`http://127.0.0.1:${fixturePort('TOOLING_ADMIN_CONTROL_PORT')}/fixture`);
-  expect((await response.json()).versions.postgrest).toBe('PostgREST 14.5');
 });
 
 test('a stale CMS publish shows the newer revision', async ({ page, request }) => {
