@@ -58,22 +58,57 @@ const inferQueryLimit = (query) => {
   return /\]\s*\[\s*0\s*\]/.test(String(query || "")) ? 1 : 500;
 };
 
-// When a query carries predicates that were not pushed down to the shadow
-// store (joins, ORs, literals), the local GROQ evaluator applies them — so
-// truncating the database read to the inferred limit could drop the matching
-// rows before evaluation. Only push the limit down alongside pushed filters.
-const hasUnpushedPredicates = ({ source, ids, filters }) => {
-  if (ids.length > 0 || filters.length > 0) return false;
-  const head = String(source || "").split("]")[0] || "";
-  const stripped = head
-    .replace(/_type\s*==\s*["'][^"']*["']/g, "")
-    .replace(/_type\s+in\s+\[[^\]]*\]/g, "")
-    .replace(/_id\s*==\s*(?:\$[A-Za-z_][A-Za-z0-9_]*|"[^"]*"|'[^']*')/g, "")
-    .replace(/_id\s+in\s+(?:\$[A-Za-z_][A-Za-z0-9_]*|\[[^\]]*\])/g, "");
-  return /==|!=|<=|>=|<|>|\bin\b/.test(stripped);
+const PUSHED_OPERATORS = { "==": "eq", in: "in", "<": "lt", "<=": "lte", ">": "gt", ">=": "gte" };
+const KEY_PATHS = ["_id", "_type"];
+
+const andList = (node) =>
+  node.type === "And" ? [...andList(node.left), ...andList(node.right)] : [node];
+
+const rootConjuncts = (tree) => {
+  let conjuncts = [];
+  let node = tree;
+  for (; node && node.type !== "Everything"; node = node.base) {
+    if (node.type === "Filter") conjuncts = [...andList(node.expr), ...conjuncts];
+    else if (conjuncts.length > 0) return null;
+  }
+  return node ? conjuncts : null;
 };
 
-export const inferShadowScope = ({ query, params = {}, configuredTypes = null }) => {
+const attributePath = (node) => {
+  if (node.type !== "AccessAttribute") return null;
+  if (!node.base) return node.name;
+  const parent = attributePath(node.base);
+  return parent && `${parent}.${node.name}`;
+};
+
+const readComparison = (conjunct) => {
+  if (conjunct.type !== "OpCall") return {};
+  const lowered = conjunct.left.type === "FuncCall" && conjunct.left.name === "lower";
+  const path = attributePath(lowered ? conjunct.left.args[0] : conjunct.left);
+  return { path, lowered, operator: conjunct.op, right: conjunct.right };
+};
+
+const pushedFilter = (conjunct, params) => {
+  const { path, lowered, operator, right } = readComparison(conjunct);
+  if (!path || KEY_PATHS.includes(path) || right.type !== "Parameter") return null;
+  const op = lowered ? operator === "==" && "ieq" : PUSHED_OPERATORS[operator];
+  const value = params[right.name];
+  return op && value !== undefined ? { path, op, value } : null;
+};
+
+const matchesKey = (conjunct, params, pushesIds) => {
+  const { path, lowered, operator, right } = readComparison(conjunct);
+  if (lowered || !KEY_PATHS.includes(path)) return false;
+  if (path === "_id") return pushesIds && ["==", "in"].includes(operator) && right.type === "Parameter";
+  return operator === "==" && (right.type === "Value" || (right.type === "Parameter" && Boolean(params[right.name])));
+};
+
+export const inferShadowScope = ({
+  query,
+  params = {},
+  configuredTypes = null,
+  tree = parse(String(query || "")),
+}) => {
   const source = String(query || "");
   const literalTypes = inferLiteralTypes(source);
   const paramType = source.match(/_type\s*==\s*\$([A-Za-z_][A-Za-z0-9_]*)/);
@@ -82,43 +117,36 @@ export const inferShadowScope = ({ query, params = {}, configuredTypes = null })
     ...(paramType && params[paramType[1]] ? [params[paramType[1]]] : []),
     ...(source.includes("->") ? ["package"] : []),
   ]);
-  const hasOr = source.includes("||");
+  const pushesConditions = !source.includes("||") && !source.includes("->");
   const ids = [];
-  if (!hasOr && !source.includes("->")) {
+  if (pushesConditions) {
     const idEq = source.match(/_id\s*==\s*\$([A-Za-z_][A-Za-z0-9_]*)/);
     if (idEq && params[idEq[1]]) ids.push(params[idEq[1]]);
     const idIn = source.match(/_id\s+in\s+\$([A-Za-z_][A-Za-z0-9_]*)/);
     if (idIn && Array.isArray(params[idIn[1]])) ids.push(...params[idIn[1]]);
   }
+  const pushedIds = uniqueStrings(ids);
 
+  const conjuncts = rootConjuncts(tree);
   const filters = [];
-  if (!hasOr && !source.includes("->")) {
-    const pattern = /(lower\()?([A-Za-z_][A-Za-z0-9_.]*)(?:\))?\s*(==|in|<=|>=|<|>)\s*\$([A-Za-z_][A-Za-z0-9_]*)/g;
-    for (const match of source.matchAll(pattern)) {
-      const [, lowerCall, path, operator, param] = match;
-      if (["_id", "_type"].includes(path) || params[param] === undefined) continue;
-      if (lowerCall && operator !== "==") continue;
-      const op =
-        operator === "=="
-          ? lowerCall
-            ? "ieq"
-            : "eq"
-          : operator === "in"
-            ? "in"
-            : ({ "<": "lt", "<=": "lte", ">": "gt", ">=": "gte" })[operator];
-      filters.push({ path, op, value: params[param] });
-    }
+  let fullyJudged = Boolean(conjuncts);
+  for (const conjunct of conjuncts || []) {
+    const filter = pushesConditions && pushedFilter(conjunct, params);
+    if (filter) filters.push(filter);
+    else if (!matchesKey(conjunct, params, pushesConditions)) fullyJudged = false;
   }
-  const capped = (source.match(/\*\s*\[/g) || []).length > 1 || source.includes("->") || hasUnpushedPredicates({ source, ids, filters });
+  const queryLimit = inferQueryLimit(source);
+  const idsBoundRead = pushedIds.length > 0 && pushedIds.length <= queryLimit;
+  const capped = (source.match(/\*\s*\[/g) || []).length > 1 || source.includes("->") || !(fullyJudged || idsBoundRead);
   const pinnedIds = [];
   for (const match of source.matchAll(/_id\s*==\s*(?:["']([^"']+)["']|\$([A-Za-z_][A-Za-z0-9_]*))/g)) {
     pinnedIds.push(match[1] || params[match[2]]);
   }
   return {
     documentTypes: documentTypes.length > 0 ? documentTypes : null,
-    ids: uniqueStrings(ids),
+    ids: pushedIds,
     filters,
-    limit: capped ? 1000 : inferQueryLimit(source),
+    limit: capped ? 1000 : queryLimit,
     capped,
     pinnedIds: uniqueStrings(pinnedIds),
   };
@@ -469,6 +497,7 @@ export class SupabaseDocumentClient {
       query,
       params,
       configuredTypes: this.documentTypes,
+      tree,
     });
     const recoveryQuery =
       this.commerceOnly &&
