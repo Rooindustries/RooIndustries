@@ -41,7 +41,7 @@ export const listSpecFiles = ({ filter, config } = {}) => {
       stdio: ["ignore", "ignore", "inherit"],
       env: { ...process.env, PLAYWRIGHT_JSON_OUTPUT_FILE: reportFile },
     });
-    return reportSpecFiles(readReport());
+    return reportSpecFiles(readReport()).filter(file => config || file !== "booking-email-browser.spec.js");
   } catch (error) {
     const errors = fs.existsSync(reportFile) ? (readReport().errors || []).map(({ message }) => message) : [];
     throw new Error(["Playwright couldn't list the spec files", ...errors].join("\n"), { cause: error });
