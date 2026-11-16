@@ -35,7 +35,7 @@ if (!shouldUseExternalServer && !internalDistDir.startsWith(".next-e2e-")) throw
 module.exports = defineConfig({
   testDir: "./tests",
   testMatch: "**/*.spec.js",
-  metadata: { toolingDistDir: internalDistDir, ownsToolingServer: !shouldUseExternalServer },
+  metadata: { toolingDistDir: internalDistDir, ownsToolingServer: !shouldUseExternalServer, proofLeg: process.env.PW_LEG },
   globalSetup: require.resolve("./tests/fixtures/fixture-ports-setup.cjs"),
   timeout: 120000,
   expect: {

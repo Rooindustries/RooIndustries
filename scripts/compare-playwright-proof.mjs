@@ -98,6 +98,9 @@ const judgeLeg = (plan, leg, file) => {
   if (!isObject(report)) return { reasons: ["its report is not a JSON object"] };
 
   const reasons = [];
+  if (report.config?.metadata?.proofLeg !== leg.name) {
+    reasons.push(`its report carries the leg name ${JSON.stringify(report.config?.metadata?.proofLeg)}, not its own`);
+  }
   if (report.config?.workers !== plan.workers) {
     reasons.push(`it ran ${JSON.stringify(report.config?.workers)} tests at a time, the plan says ${plan.workers}`);
   }

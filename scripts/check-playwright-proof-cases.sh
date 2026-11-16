@@ -35,8 +35,8 @@ mkdir -p "$work/real" "$work/cut"
 node scripts/plan-playwright-proof.mjs plan 1 "[{\"group\":\"$real_group\",\"repeat\":1,\"seed\":0}]" \
   .github/playwright-timings.json "$real_config" > "$work/real/plan.json"
 files="$(node scripts/plan-playwright-proof.mjs files "$work/real/plan.json" "$real_name")"
-PLAYWRIGHT_JSON_OUTPUT_FILE="$work/real/$real_name.json" npx playwright test --config "$real_config" \
-  --retries=0 --repeat-each=2 --reporter=json "$files"
+PW_LEG="$real_name" PLAYWRIGHT_JSON_OUTPUT_FILE="$work/real/$real_name.json" npx playwright test \
+  --config "$real_config" --retries=0 --repeat-each=2 --reporter=json "$files"
 check_case "a real report from the installed Playwright" "$work/real" 0 "Every planned leg is complete. Legs: 1. Tests: 2."
 cp "$work/real/plan.json" "$work/cut/"
 jq -c 'del(.suites[0].specs[0])' "$work/real/$real_name.json" > "$work/cut/$real_name.json"
