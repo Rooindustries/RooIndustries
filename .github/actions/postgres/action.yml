@@ -1,16 +1,12 @@
-name: Install PostgreSQL 17 and PostgREST 16.4
-description: Installs PostgreSQL and PostgREST 16.4 and 14.5, and exports PG_BIN, POSTGREST_BIN, and POSTGREST_14_BIN.
+name: Install PostgreSQL 17 and PostgREST
+description: Installs PostgreSQL 17 and the PostgREST version production runs, and exports PG_BIN and POSTGREST_BIN.
 runs:
   using: composite
   steps:
     - uses: actions/cache@v4
       with:
         path: ~/.cache/roo-postgrest
-        key: postgrest-v16.4-linux-static-x86-64-b47ecc82
-    - uses: actions/cache@v4
-      with:
-        path: ~/.cache/roo-postgrest-14
-        key: postgrest-v14.5-linux-static-x86-64-ab5cc7e9
+        key: postgrest-linux-static-x86-64-${{ hashFiles('.github/actions/postgres/action.yml') }}
     - if: ${{ !startsWith(runner.name, 'devbox-') }}
       shell: bash
       run: |
@@ -22,26 +18,20 @@ runs:
         sudo apt-get -o Acquire::Retries=5 update
         sudo apt-get -o Acquire::Retries=5 install --yes --no-install-recommends postgresql-17
     - shell: bash
+      env:
+        POSTGREST_VERSION: "14.5"
+        POSTGREST_SHA256: ab5cc7e974d4940447991804588cfb8b3f7b2c57b691f0905df04d51ede69470
       run: |
-        archive="$HOME/.cache/roo-postgrest/postgrest.tar.xz"
+        release="postgrest-v$POSTGREST_VERSION-linux-static-x86-64.tar.xz"
+        archive="$HOME/.cache/roo-postgrest/$release"
         mkdir -p "$(dirname "$archive")" "$RUNNER_TEMP/postgrest"
         if [ ! -f "$archive" ]; then
           curl --fail --silent --show-error --location --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 20 \
-            https://github.com/PostgREST/postgrest/releases/download/v16.4/postgrest-v16.4-linux-static-x86-64.tar.xz -o "$archive"
+            "https://github.com/PostgREST/postgrest/releases/download/v$POSTGREST_VERSION/$release" -o "$archive"
         fi
-        echo "b47ecc82fce1dcebbbc4183d839e52f07f7630c9d7ad0f54db753d1939299354  $archive" | sha256sum --check
+        echo "$POSTGREST_SHA256  $archive" | sha256sum --check
         tar -xJf "$archive" -C "$RUNNER_TEMP/postgrest"
         /usr/lib/postgresql/17/bin/postgres --version
-        test "$("$RUNNER_TEMP/postgrest/postgrest" --version)" = "PostgREST 16.4"
+        test "$("$RUNNER_TEMP/postgrest/postgrest" --version)" = "PostgREST $POSTGREST_VERSION"
         echo "PG_BIN=/usr/lib/postgresql/17/bin" >> "$GITHUB_ENV"
         echo "POSTGREST_BIN=$RUNNER_TEMP/postgrest/postgrest" >> "$GITHUB_ENV"
-        archive14="$HOME/.cache/roo-postgrest-14/postgrest.tar.xz"
-        mkdir -p "$(dirname "$archive14")" "$RUNNER_TEMP/postgrest-14"
-        if [ ! -f "$archive14" ]; then
-          curl --fail --silent --show-error --location --retry 5 --retry-all-errors --retry-delay 3 --connect-timeout 20 \
-            https://github.com/PostgREST/postgrest/releases/download/v14.5/postgrest-v14.5-linux-static-x86-64.tar.xz -o "$archive14"
-        fi
-        echo "ab5cc7e974d4940447991804588cfb8b3f7b2c57b691f0905df04d51ede69470  $archive14" | sha256sum --check
-        tar -xJf "$archive14" -C "$RUNNER_TEMP/postgrest-14"
-        test "$("$RUNNER_TEMP/postgrest-14/postgrest" --version)" = "PostgREST 14.5"
-        echo "POSTGREST_14_BIN=$RUNNER_TEMP/postgrest-14/postgrest" >> "$GITHUB_ENV"

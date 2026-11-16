@@ -9,9 +9,6 @@ import { installNetworkGuard, refuseEnvFiles } from './lib/test-target-safety.mj
 import { sealReferralEmailToken, unsealReferralEmailToken } from '../src/server/api/ref/referralEmailTokenSeal.js';
 
 refuseEnvFiles();
-const binary = process.env.POSTGREST_14_BIN;
-assert.ok(binary, 'POSTGREST_14_BIN must point to PostgREST 14.5');
-assert.equal(crypto.createHash('sha256').update(fs.readFileSync(binary)).digest('hex'), '39ce04b0597c6b3c3eb4c5f34fe6ab590a2d0172616eeaccf1e4c659b822295a');
 const host = '127.0.0.1';
 const port = await freeTcpPort(host);
 const origin = `http://${host}:${port}`;
@@ -48,8 +45,7 @@ const within = async (promise, label = 'Reset conflict') => {
 };
 
 try {
-  fixture = await createSweepPostgresFixture({ fullMigrationChain: true, postgrestBin: binary });
-  assert.equal(fixture.postgrestVersion, 'PostgREST 14.5');
+  fixture = await createSweepPostgresFixture({ fullMigrationChain: true });
   fixture.setProviderHandler(async (request) => {
     assert.equal(request.path, '/emails');
     emails.push(request.body);
