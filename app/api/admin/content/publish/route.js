@@ -54,8 +54,8 @@ const refreshRound = (round, purge) => {
   ]).then(([contentState, pagesState]) => {
     logSafeEvent("public_pages_refresh", {
       round,
-      pages: pagesState === "done" ? "marked" : "failed",
-      content: contentState === "done" ? "purged" : "failed",
+      pages: pagesState === "done" ? "marked" : pagesState,
+      content: contentState === "done" ? "purged" : contentState,
     });
     return { content: contentState, pages: pagesState };
   });

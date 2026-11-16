@@ -33,11 +33,31 @@ test("a publish with an unconfirmed page refresh shows the pending notice", asyn
     }).on("error", reject);
   });
   const events = (await (await request.get(`${gate.control}/refresh-events?trace=${trace}`)).json()).map(({ event }) => event);
-  expect(events).toEqual(["now", "5s", "60s"].map((round) => ({ event: "public_pages_refresh", round, pages: "failed", content: "purged" })));
+  expect(events).toEqual(["now", "5s", "60s"].map((round) => ({ event: "public_pages_refresh", round, pages: "pending", content: "purged" })));
   const errors = (await (await request.get(`${gate.control}/refresh-errors?trace=${trace}`)).json()).map(({ label }) => label);
   expect(errors).toEqual(["Public pages mark did not answer in time"]);
   console.log(`REFRESH_PENDING ${JSON.stringify({ events, errors })}`);
   } finally {
     await gate.cleanup(() => page.unroute("**/api/admin/content/publish"), () => hanging.reset(), () => gate.restore("tooling-hero", hero.document), () => gate.rebuild(["/"]), () => gate.clearRounds());
+  }
+});
+
+test("a pending content purge is reported as pending", async ({ request, baseURL }) => {
+  const gate = createContentGate(request, baseURL);
+  const original = await gate.document("tooling-package-0");
+  const hanging = gate.traced();
+  try {
+    const response = await request.post("/api/admin/content/publish", {
+      headers: { ...hanging.headers, "x-admin-key": "synthetic-admin-key", "x-roo-test-hang-content-purge": "1" },
+      data: gate.replaceCommand(original, { price: "$487.19" }),
+    });
+    expect(response.status()).toBe(200);
+    expect((await response.json()).data.refresh).toEqual({ content: "pending", pages: "done" });
+    const query = new URLSearchParams({ kind: "refresh", trace: hanging.trace, count: "1" });
+    expect((await request.get(`${gate.control}/await-test-event?${query}`)).status()).toBe(200);
+    const events = (await (await request.get(`${gate.control}/refresh-events?trace=${hanging.trace}`)).json()).map(({ event }) => event);
+    expect(events).toEqual([{ event: "public_pages_refresh", round: "now", pages: "marked", content: "pending" }]);
+  } finally {
+    await gate.cleanup(() => hanging.reset(), () => gate.restore("tooling-package-0", original.document), () => gate.rebuild(["/packages"]), () => gate.clearRounds());
   }
 });
