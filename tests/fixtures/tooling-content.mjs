@@ -69,6 +69,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
     ...content('packages-list').map((pkg, index) => document('package', { ...pkg, price: index === 1 ? '$149.95' : pkg.price, order: index }, `tooling-package-${index}`)),
     document('proReviewsCarousel', reviews),
     document('supportedGames', content('supported-games')),
+    document('referralBox', { heading: 'Fixture referral heading', description: 'Fixture referral description.', emailPlaceholder: 'you@example.invalid', startButtonText: 'Start', loginButtonText: 'Log in', loginPath: '/referrals/login' }),
     document('faqSettings', content('faq-settings')),
     document('faqSection', {
       questions: [

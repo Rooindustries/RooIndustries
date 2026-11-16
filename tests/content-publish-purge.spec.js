@@ -1,4 +1,5 @@
 const { randomUUID } = require("node:crypto");
+const { get } = require("node:http");
 const { test, expect } = require("@playwright/test");
 const { CONTENT_READ, createContentGate } = require("./fixtures/content-store-gate.cjs");
 
@@ -31,6 +32,14 @@ const expectPurges = (gate, count) =>
     intervals: [250, 500, 1000],
   }).toEqual(Array(count).fill([CONTENT_PURGE, PAGE_MARK]).flat());
 
+const waitForThirdPageMark = (gate) => new Promise((resolve, reject) => {
+  const query = new URLSearchParams({ kind: "purge", trace: gate.admin.trace, count: "3" });
+  get(`${gate.control}/await-test-event?${query}`, (response) => {
+    response.resume();
+    response.on("end", () => response.statusCode === 200 ? resolve() : reject(new Error("Page mark was not recorded.")));
+  }).on("error", reject);
+});
+
 const couponTerms = async (request, coupon, packageTitle) => {
   const query = new URLSearchParams({ code: coupon.document.code, packageTitle });
   const response = await request.get(`/api/ref/validateCoupon?${query}`);
@@ -58,12 +67,14 @@ test("publishing a package price and a coupon purges the content API right away 
   });
   const coupon = await gate.document(receipt.documentId);
   await expectPurges(gate, 2);
+  await waitForThirdPageMark(gate);
+  await expectPurges(gate, 3);
   let couponRevision = coupon.revision;
 
   try {
     expect(await couponTerms(request, coupon, pkg.document.title)).toMatchObject({ discountType: "percent", discountPercent: 10 });
     await gate.publish(pkg, { price: "$123.45" });
-    await expectPurges(gate, 3);
+    await expectPurges(gate, 4);
     const listed = await gate.traced().content(PACKAGES);
     expectCacheable(listed);
     expect(await priceOf(listed)).toBe("$123.45");
@@ -71,11 +82,11 @@ test("publishing a package price and a coupon purges the content API right away 
       timeout: 60000,
       intervals: [500, 1000, 2000],
     }).toBe(true);
-    await expectPurges(gate, 4);
+    await expectPurges(gate, 5);
 
     couponRevision = (await gate.publish(coupon, { discountType: "percent", discountPercent: 25 })).revision;
     expect(await couponTerms(request, coupon, pkg.document.title)).toMatchObject({ discountType: "percent", discountPercent: 25 });
-    await expectPurges(gate, 6);
+    await expectPurges(gate, 7);
   } finally {
     await gate.cms("/api/admin/content/publish", { operation: "delete", type: "coupon", documentId: coupon.document._id, expectedRevision: couponRevision });
     await gate.restore(PACKAGE, pkg.document);
