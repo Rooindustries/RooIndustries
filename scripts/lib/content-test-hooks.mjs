@@ -30,7 +30,9 @@ if (control) {
     const url = typeof input === "string" || input instanceof URL ? String(input) : input.url;
     if (!trace || !url.startsWith(rpcPrefix)) return baseFetch(input, init);
     const rpc = new URL(url).pathname.slice(new URL(rpcPrefix).pathname.length);
-    const { action } = await report("/store-calls", { trace, rpc });
+    let types = "";
+    try { types = (JSON.parse(typeof init?.body === "string" ? init.body : "{}").p_document_types || []).join(","); } catch {}
+    const { action } = await report("/store-calls", { trace, rpc, types });
     if (action === "fail") {
       return new Response(JSON.stringify({ code: "PGRST000", message: "Store unavailable." }), {
         status: 503,

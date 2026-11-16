@@ -216,7 +216,7 @@ try {
     if (request.method === "POST" && request.url === "/store-calls") {
       const call = await readJson(request);
       storeCalls.push(call);
-      const rule = (storeRules.get(call.trace) || []).find(entry => entry.pattern.test(call.rpc) && entry.times !== 0);
+      const rule = (storeRules.get(call.trace) || []).find(entry => entry.pattern.test(call.rpc) && (!entry.types || new RegExp(entry.types).test(call.types || "")) && entry.times !== 0);
       if (rule && rule.times > 0) rule.times -= 1;
       response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify({ action: rule?.action || "pass" })); return;
     }
@@ -238,7 +238,9 @@ try {
     }
     if (request.method === "GET" && request.url.startsWith("/store-calls?")) {
       const trace = new URL(request.url, controlOrigin).searchParams.get("trace");
-      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(storeCalls.filter(call => call.trace === trace).map(({ rpc }) => rpc))); return;
+      const calls = storeCalls.filter(call => call.trace === trace);
+      const details = new URL(request.url, controlOrigin).searchParams.has("details");
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(details ? calls : calls.map(({ rpc }) => rpc))); return;
     }
     if (request.method === "POST" && request.url === "/publish-elsewhere") {
       try {
