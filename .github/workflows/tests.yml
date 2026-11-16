@@ -191,6 +191,12 @@ jobs:
         run: |
           files="$(node scripts/playwright-groups.mjs "$PW_SUITE" .playwright-timings/timings.json)"
           echo "PW_FILES=$files" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@v4
+        if: contains(env.PW_FILES, 'booking-email-browser')
+        with:
+          node-version: 24
+      - uses: ./.github/actions/postgres
+        if: contains(env.PW_FILES, 'booking-email-browser')
       - uses: ./.github/actions/hold-ports
         with:
           playwright-ports: "3211"

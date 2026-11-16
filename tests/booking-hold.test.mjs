@@ -67,6 +67,8 @@ test("an ordinary foreign active hold keeps its existing 409 response", async ()
 
 test("a legacy paid booking creates its missing payment record", async () => {
   const payload = await fixture.hold();
+  assert.ok(new Date(payload.slotHoldExpiresAt).getTime() > Date.now());
+  const emailsBefore = fixture.evidence.providerRequests.filter(request => request.path === "/emails").length;
   const response = await fixture.post("/api/ref/createBooking", {
     ...payload,
     status: "captured",
@@ -78,6 +80,15 @@ test("a legacy paid booking creates its missing payment record", async () => {
     deferEmailsUntilConfirmation: true,
   });
   assert.equal(response.status, 200, JSON.stringify(response));
+  assert.ok(response.body.bookingId);
+  assert.ok(response.body.emailDispatchToken);
+  assert.deepEqual({ deferred: response.body.emailDispatch.deferred, allSent: response.body.emailDispatch.allSent },
+    { deferred: true, allSent: false });
+  assert.equal(fixture.evidence.providerRequests.filter(request => request.path === "/emails").length, emailsBefore);
+  const booking = await fixture.commerce.getDocument(response.body.bookingId);
+  assert.equal(booking.emailDispatchDeferred, true);
+  assert.equal(booking.emailDispatchStatus, "pending");
+  assert.ok(booking.emailDispatchQueuedAt);
   const records = await fixture.commerce.fetch(
     '*[_type == "paymentRecord" && provider == "paypal" && providerOrderId == $id]',
     { id: "fixture_legacy_order" }
@@ -96,6 +107,7 @@ test("a legacy paid booking creates its missing payment record", async () => {
 
 test("historical reconstruction keeps delivered emails and accounting unchanged", async () => {
   const payload = await fixture.hold();
+  assert.ok(new Date(payload.slotHoldExpiresAt).getTime() > Date.now());
   fixture.setPaymentStatus("succeeded");
   try {
     const started = await fixture.start(payload);

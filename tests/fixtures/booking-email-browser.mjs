@@ -6,6 +6,12 @@ process.env.PAYPAL_CLIENT_ID = "fixture-paypal-client";
 process.env.PAYPAL_CLIENT_SECRET = "fixture-paypal-secret";
 process.env.PAYPAL_ENV = "sandbox";
 const fixture = await createBookingContactFixture({ artifactName: "booking-email-browser" });
+const { CommerceStore } = await import("../../src/server/commerce/store.js");
+let mirrorCalls = 0;
+Object.defineProperty(CommerceStore.prototype, "flushCommerceMirror", {
+  configurable: true,
+  value() { mirrorCalls += 1; throw new Error("Unexpected commerce mirror flush"); },
+});
 const originalFetch = globalThis.fetch;
 const orders = new Map();
 const emailKeys = [];
@@ -41,6 +47,14 @@ process.on("message", async ({ id, method, args = [] }) => {
     else if (method === "nextDate") value = new Date(Date.UTC(2099, 0, ++date)).toISOString().slice(0, 10);
     else if (method === "document") value = await fixture.commerce.getDocument(...args);
     else if (method === "evidence") value = fixture.evidence;
+    else if (method === "slotCounts") {
+      const [start] = args;
+      const rows = await fixture.database.sql`select document_type, count(*)::int as count from migration.source_documents
+        where document_type in ('booking', 'slotHold') and payload->>'startTimeUTC' = ${start} and not tombstoned
+        group by document_type`;
+      value = Object.fromEntries(rows.map(row => [row.document_type, row.count]));
+    }
+    else if (method === "mirrorCalls") value = mirrorCalls;
     else if (method === "emailKeys") value = emailKeys;
     else if (method === "holdEmails") { emailGate = new Promise(resolve => { releaseEmail = resolve; }); value = true; }
     else if (method === "releaseEmails") { emailGate = null; releaseEmail(); value = true; }
