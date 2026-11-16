@@ -332,8 +332,6 @@ jobs:
       PW_PORT: "3211"
       PW_SERVER_ID: native
       NEXT_DIST_DIR: .next-e2e-native-admin
-      BOOKING_CONTACT_PORT: "3220"
-      BOOKING_ROUTE_PORT: "3225"
       AT_SPI_BUS_ADDRESS: unix:path=/dev/null
     steps:
       - name: Use the runner temp directory
@@ -347,9 +345,7 @@ jobs:
         with:
           node-version: 24
           browsers: chromium
-          build-dirs: |
-            .next-e2e-native-admin/cache/webpack
-            .next-e2e-native-booking/cache/webpack
+          build-dirs: .next-e2e-native-admin/cache/webpack
       - uses: ./.github/actions/postgres
       - name: Build the pinned native Storage fixture
         run: |
@@ -366,54 +362,11 @@ jobs:
         env:
           POSTGREST_BIN: ${{ env.POSTGREST_14_BIN }}
         run: xvfb-run -a npm run test:conflict-ui:postgres17
-      - name: Run native booking-hold and payment recovery browser cases
-        env:
-          NEXT_DIST_DIR: .next-e2e-native-booking
-          PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/native-booking-hold.json
-        run: |
-          xvfb-run -a npx playwright test tests/booking-hold.spec.js tests/booking-payment-recovery.spec.js tests/booking-coupons.spec.js --project=chromium --workers=1 --retries=0 --output=test-results/booking-hold-e2e --reporter=line,json
-          node - <<'NODE'
-          const assert = require('node:assert/strict');
-          const { stats } = require('./test-results/native-booking-hold.json');
-          assert.equal(stats.skipped, 0, 'Native booking-hold cases must not skip');
-          assert.equal(stats.expected, 20, 'All native booking cases must pass');
-          assert.equal(stats.unexpected, 0);
-          assert.equal(stats.flaky, 0);
-          NODE
-      - name: Run all four native booking and email browser cases
-        env:
-          NEXT_DIST_DIR: .next-e2e-native-booking
-          PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/native-booking-emails.json
-        run: |
-          xvfb-run -a npx playwright test tests/booking-email-browser.spec.js --project=chromium --workers=1 --retries=0 --output=test-results/booking-emails-e2e --reporter=line,json
-          node - <<'NODE'
-          const assert = require('node:assert/strict');
-          const { stats } = require('./test-results/native-booking-emails.json');
-          assert.equal(stats.skipped, 0);
-          assert.equal(stats.expected, 4);
-          assert.equal(stats.unexpected, 0);
-          assert.equal(stats.flaky, 0);
-          NODE
-      - name: Run booking-contact PostgreSQL 17 suite
-        run: npm run test:booking-contact
-      - name: Run booking hold API suite
-        run: npm run test:booking:holds
-      - name: Run payment persistence sweep on the full migration chain
-        run: node scripts/test-payment-persistence-sweep.mjs --full-chain
-      - name: Run the remaining PostgreSQL 17 suites
-        uses: ./.github/actions/npm-suites
-        with:
-          suites: >-
-            booking-hold upgrade-credit upgrade-credit:ownership emails:postgres17 referral:postgres17
-            referral-social:postgres17 backend-integrity:postgres17 referral-authority:postgres17
-            referral-email:postgres17 referral-integrity:postgres17 account-domain:postgres17
-            account-check:postgres17 commerce-readiness:postgres17 commerce-readiness-scale:postgres17
-            referral-email:origins tooling:safety
+      - name: Run the tooling safety suite
+        run: npm run test:tooling:safety
       - uses: ./.github/actions/save-caches
         with:
-          build-dirs: |
-            .next-e2e-native-admin/cache/webpack
-            .next-e2e-native-booking/cache/webpack
+          build-dirs: .next-e2e-native-admin/cache/webpack
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
@@ -457,6 +410,90 @@ jobs:
           name: test-results-native-payouts
           path: test-results/
           if-no-files-found: ignore
+          retention-days: 3
+
+  native-booking:
+    name: Native PostgreSQL 17 booking suites
+    needs: tested-tree
+    if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
+    runs-on: >-
+      ${{ github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.full_name != github.repository
+      && 'ubuntu-24.04' || vars.TESTS_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 60
+    env:
+      ROO_TEST_HOST: 127.0.0.1
+      PW_PORT: "3281"
+      PW_SERVER_ID: native-booking
+      NEXT_DIST_DIR: .next-e2e-native-booking
+      BOOKING_CONTACT_PORT: "3290"
+      BOOKING_ROUTE_PORT: "3295"
+      AT_SPI_BUS_ADDRESS: unix:path=/dev/null
+    steps:
+      - name: Use the runner temp directory
+        run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          node-version: 24
+          browsers: chromium
+          build-dirs: .next-e2e-native-booking/cache/webpack
+      - uses: ./.github/actions/postgres
+      - uses: ./.github/actions/hold-ports
+        with:
+          playwright-ports: "3281"
+      - name: Run native booking-hold, payment recovery and coupon browser cases
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/native-booking-hold.json
+        run: |
+          xvfb-run -a npx playwright test tests/booking-hold.spec.js tests/booking-payment-recovery.spec.js tests/booking-coupons.spec.js --project=chromium --workers=1 --retries=0 --output=test-results/booking-hold-e2e --reporter=line,json
+          node - <<'NODE'
+          const assert = require('node:assert/strict');
+          const { stats } = require('./test-results/native-booking-hold.json');
+          assert.equal(stats.skipped, 0, 'Native booking-hold cases must not skip');
+          assert.equal(stats.expected, 20, 'All native booking cases must pass');
+          assert.equal(stats.unexpected, 0);
+          assert.equal(stats.flaky, 0);
+          NODE
+      - name: Run all four native booking and email browser cases
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/native-booking-emails.json
+        run: |
+          xvfb-run -a npx playwright test tests/booking-email-browser.spec.js --project=chromium --workers=1 --retries=0 --output=test-results/booking-emails-e2e --reporter=line,json
+          node - <<'NODE'
+          const assert = require('node:assert/strict');
+          const { stats } = require('./test-results/native-booking-emails.json');
+          assert.equal(stats.skipped, 0);
+          assert.equal(stats.expected, 4);
+          assert.equal(stats.unexpected, 0);
+          assert.equal(stats.flaky, 0);
+          NODE
+      - name: Run booking-contact PostgreSQL 17 suite
+        run: npm run test:booking-contact
+      - name: Run booking hold API suite
+        run: npm run test:booking:holds
+      - name: Run payment persistence sweep on the full migration chain
+        run: node scripts/test-payment-persistence-sweep.mjs --full-chain
+      - name: Run the remaining PostgreSQL 17 suites
+        uses: ./.github/actions/npm-suites
+        with:
+          suites: >-
+            booking-hold upgrade-credit upgrade-credit:ownership emails:postgres17 referral:postgres17
+            referral-social:postgres17 backend-integrity:postgres17 referral-authority:postgres17
+            referral-email:postgres17 referral-integrity:postgres17 account-domain:postgres17
+            account-check:postgres17 commerce-readiness:postgres17 commerce-readiness-scale:postgres17
+            referral-email:origins
+      - uses: ./.github/actions/save-caches
+        with:
+          build-dirs: .next-e2e-native-booking/cache/webpack
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: test-results-native-booking
+          path: test-results/
+          if-no-files-found: error
           retention-days: 3
 
   revalidation:
@@ -516,9 +553,10 @@ jobs:
       && needs.playwright.result == 'success'
       && needs.routes.result == 'success'
       && needs.native.result == 'success'
+      && needs.native-booking.result == 'success'
       && needs.native-payouts.result == 'success'
       && needs.revalidation.result == 'success'
-    needs: [monitoring, jest, booking-model, playwright, routes, native, native-payouts, revalidation]
+    needs: [monitoring, jest, booking-model, playwright, routes, native, native-booking, native-payouts, revalidation]
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-24.04' || vars.TESTS_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 5
     steps:
@@ -551,7 +589,18 @@ jobs:
       contents: read
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-24.04' || vars.TESTS_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 5
-    needs: [tested-tree, monitoring, jest, booking-model, playwright, routes, native, native-payouts, revalidation, record-tested-tree]
+    needs:
+      - tested-tree
+      - monitoring
+      - jest
+      - booking-model
+      - playwright
+      - routes
+      - native
+      - native-booking
+      - native-payouts
+      - revalidation
+      - record-tested-tree
     if: always()
     steps:
       - env:
