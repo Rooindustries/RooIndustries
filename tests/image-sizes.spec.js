@@ -11,13 +11,14 @@ const SCREENS = [
 const PAGES = ["/", "/reviews", "/benchmarks"];
 const STORAGE_PATH = "/storage/v1/";
 const RESIZE_PATH = "/storage/v1/render/image/";
+const LAYOUT_STEP = 1 / 64;
 
 const shownImages = (page, loadedOnly) => page.evaluate(({ storagePath, loadedOnly }) => [...document.images]
   .filter(image => (image.getAttribute("src") || "").includes(storagePath))
   .map(image => ({ image, box: image.getBoundingClientRect() }))
   .filter(({ box }) => box.width > 0 && box.height > 0 && box.bottom > 0 && box.top < innerHeight && box.right > 0 && box.left < innerWidth)
   .filter(({ image }) => !loadedOnly || image.currentSrc)
-  .map(({ image, box }) => ({ address: image.currentSrc, loaded: image.complete && image.naturalWidth > 0, boxWidth: box.width })),
+  .map(({ image, box }) => ({ address: image.currentSrc, loaded: image.complete && image.naturalWidth > 0, boxWidth: box.width, boxHeight: box.height, declaredWidth: Number(image.getAttribute("width")), declaredHeight: Number(image.getAttribute("height")), alt: image.alt })),
 { storagePath: STORAGE_PATH, loadedOnly });
 const waitForShownImages = page => expect.poll(async () => (await shownImages(page, false)).every(image => image.loaded)).toBe(true);
 
@@ -69,6 +70,10 @@ for (const screen of SCREENS) {
         for (const line of blurry) console.log(`  blurry ${line}`);
 
         if (path === "/reviews") {
+          const reshaped = images.filter(image => Math.abs(image.boxHeight - (image.boxWidth * image.declaredHeight) / image.declaredWidth) > LAYOUT_STEP)
+            .map(image => `${image.alt}: ${image.boxWidth} by ${image.boxHeight} box for a ${image.declaredWidth} by ${image.declaredHeight} image`);
+          for (const line of reshaped) console.log(`  reshaped ${line}`);
+          expect(reshaped).toEqual([]);
           const shown = address => images.find(image => assetOf(image.address) === assetOf(address) && image.address.includes(address));
           expect(images.find(image => assetOf(image.address) === unfilled && image.address.includes(RESIZE_PATH))).toMatchObject({ loaded: true });
           expect(shown(`/object/public/site-content-public/${vector.storagePath}`)).toMatchObject({ loaded: true });
