@@ -146,7 +146,7 @@ test("a merge queue rejects a run from a fork", () => {
 
 test("a merge queue rejects a run from an event outside the allowlist", () => {
   const { dir, tree } = workspace();
-  const otherEvent = runResponse({ event: "workflow_dispatch" });
+  const otherEvent = runResponse({ event: "schedule" });
   assert.equal(checkQueue(dir, responsesFor(tree, otherEvent)).tested, "tested=false");
 });
 
@@ -161,7 +161,7 @@ test("a merge queue reuses a green push run", () => {
   assert.equal(checkQueue(dir, responsesFor(tree, runResponse({ event: "push" }))).tested, "tested=true");
 });
 
-for (const event of ["merge_group", "push", "pull_request"]) {
+for (const event of ["merge_group", "push", "pull_request", "workflow_dispatch"]) {
   test(`a ${event} run cannot vouch for a different tree`, () => {
     const { dir, tree } = workspace();
     const run = runResponse({ event });

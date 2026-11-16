@@ -66,6 +66,7 @@ const checkForkRouting = (job) => {
   }
   if (route.variable !== undefined || !vmLabel(route.label)) {
     const allowed = job.file === "production-smoke.yml" ? ["deployment_status"] : ["push", "pull_request", "merge_group"];
+    if (job.file === "tests.yml") allowed.push("workflow_dispatch");
     const untrusted = triggers.filter((trigger) => !allowed.includes(trigger));
     assert.deepEqual(untrusted, [], `${where}: a dedicated runner is reachable from ${untrusted.join(", ")}`);
   }

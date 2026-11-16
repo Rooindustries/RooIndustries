@@ -25,7 +25,7 @@ elif ! runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=tested-tr
 else
   for run in $runs; do
     if ! head_sha="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run" --jq \
-      'select(.conclusion == "success" and (.event | IN("pull_request", "merge_group", "push"))
+      'select(.conclusion == "success" and (.event | IN("pull_request", "merge_group", "push", "workflow_dispatch"))
         and .path == ".github/workflows/tests.yml"
         and .head_repository.full_name == env.GITHUB_REPOSITORY) | (.head_sha // "missing")')"; then
       say "Couldn't look up run $run; not counting it."
