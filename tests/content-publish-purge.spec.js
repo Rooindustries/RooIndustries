@@ -32,11 +32,11 @@ const expectPurges = (gate, count) =>
     intervals: [250, 500, 1000],
   }).toEqual(Array(count).fill([CONTENT_PURGE, PAGE_MARK]).flat());
 
-const waitForThirdPageMark = (gate) => new Promise((resolve, reject) => {
-  const query = new URLSearchParams({ kind: "purge", trace: gate.admin.trace, count: "3" });
+const waitForEvents = (gate, kind, trace, count) => new Promise((resolve, reject) => {
+  const query = new URLSearchParams({ kind, trace, count: String(count) });
   get(`${gate.control}/await-test-event?${query}`, (response) => {
     response.resume();
-    response.on("end", () => response.statusCode === 200 ? resolve() : reject(new Error("Page mark was not recorded.")));
+    response.on("end", () => response.statusCode === 200 ? resolve() : reject(new Error("Refresh event was not recorded.")));
   }).on("error", reject);
 });
 
@@ -67,8 +67,12 @@ test("publishing a package price and a coupon purges the content API right away 
   });
   const coupon = await gate.document(receipt.documentId);
   await expectPurges(gate, 2);
-  await waitForThirdPageMark(gate);
+  await waitForEvents(gate, "purge", gate.admin.trace, 3);
   await expectPurges(gate, 3);
+  await waitForEvents(gate, "refresh", gate.admin.trace, 3);
+  const events = (await (await request.get(`${gate.control}/refresh-events?trace=${gate.admin.trace}`)).json()).map(({ event }) => event);
+  expect(events).toEqual(["now", "5s", "60s"].map((round) => ({ event: "public_pages_refresh", round, pages: "marked", content: "purged" })));
+  console.log(`REFRESH_EVENTS ${JSON.stringify(events)}`);
   let couponRevision = coupon.revision;
 
   try {
@@ -342,3 +346,27 @@ test("a publish the database rejects before the commit only marks the CDN copy s
     await gate.restore(PACKAGE, original.document);
   }
 });
+
+for (const [kind, header, expected] of [
+  ["content", "x-roo-test-fail-content-purge", { content: "failed", pages: "done" }],
+  ["pages", "x-roo-test-fail-page-mark", { content: "done", pages: "failed" }],
+]) {
+  test(`a failed ${kind} refresh is reported and logged once per round`, async ({ request, baseURL }) => {
+    const gate = createContentGate(request, baseURL);
+    const original = await gate.document(PACKAGE);
+    const attempt = gate.traced();
+    const response = await request.post("/api/admin/content/publish", {
+      headers: { ...attempt.headers, "x-admin-key": "synthetic-admin-key", [header]: "1" },
+      data: gate.replaceCommand(original, { price: `$${400 + Math.floor(Math.random() * 400)}.79` }),
+    });
+    expect(response.status()).toBe(200);
+    expect((await response.json()).data.refresh).toEqual(expected);
+    await waitForEvents(gate, "refresh", attempt.trace, 3);
+    await waitForEvents(gate, "refresh-error", attempt.trace, 3);
+    const events = (await (await request.get(`${gate.control}/refresh-events?trace=${attempt.trace}`)).json()).map(({ event }) => event);
+    const errors = (await (await request.get(`${gate.control}/refresh-errors?trace=${attempt.trace}`)).json()).map(({ label }) => label);
+    expect(events).toEqual(["now", "5s", "60s"].map((round) => ({ event: "public_pages_refresh", round, pages: kind === "pages" ? "failed" : "marked", content: kind === "content" ? "failed" : "purged" })));
+    expect(errors).toEqual(Array(3).fill(kind === "pages" ? "Public pages mark failed" : "Public content CDN purge failed"));
+    console.log(`REFRESH_FAILURE ${JSON.stringify({ kind, events, errors })}`);
+  });
+}

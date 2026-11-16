@@ -50,7 +50,7 @@ const documentTitle = (type, document, fallback = "Untitled") => {
 };
 
 const PUBLISH_NOTICE = "Published. The live site picks this up within a few minutes (page and CDN caches).";
-const PUBLISH_REFRESH_NOTICE = "Published. The live pages did not confirm the update yet; they are asked again within a minute, and update within the hour at most.";
+const PUBLISH_REFRESH_NOTICE = "Published. The live pages haven't updated yet. The site tries again in a few seconds and once more within a minute.";
 
 export default function ContentAdmin() {
   const [email, setEmail] = useState("");
@@ -575,7 +575,7 @@ export default function ContentAdmin() {
       referenceCache.current.delete(session.type);
       setSession(null);
       setWorking(null);
-      setNotice(result?.refresh?.pages === "done" ? "Deleted. The live site picks this up within a few minutes." : "Deleted. The live pages did not confirm the update yet; they are asked again within a minute, and update within the hour at most.");
+      setNotice(result?.refresh?.pages === "done" ? "Deleted. The live site picks this up within a few minutes." : "Deleted. The live pages haven't updated yet. The site tries again in a few seconds and once more within a minute.");
       setPane("documents");
       loadList(session.type);
     } catch (error) {

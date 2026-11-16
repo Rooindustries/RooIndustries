@@ -49,6 +49,8 @@ const storeCalls = [];
 const storeHolds = [];
 const purges = [];
 const pageRefusals = [];
+const refreshEvents = [];
+const refreshErrors = [];
 const keptAlive = [];
 const pageWrites = [];
 const eventWaiters = new Set();
@@ -205,6 +207,16 @@ try {
         response.end(JSON.stringify({ error: error.message })); return;
       }
     }
+    if (request.method === "POST" && ["/refresh-events", "/refresh-errors"].includes(request.url)) {
+      (request.url === "/refresh-events" ? refreshEvents : refreshErrors).push(await readJson(request));
+      notifyEvents();
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end("{}"); return;
+    }
+    if (request.method === "GET" && (request.url.startsWith("/refresh-events?") || request.url.startsWith("/refresh-errors?"))) {
+      const url = new URL(request.url, controlOrigin);
+      const records = url.pathname === "/refresh-events" ? refreshEvents : refreshErrors;
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(records.filter(record => record.trace === url.searchParams.get("trace")))); return;
+    }
     if (request.method === "POST" && request.url === "/page-refusals") {
       pageRefusals.push(await readJson(request));
       response.writeHead(200, { "Content-Type": "application/json" }); response.end("{}"); return;
@@ -232,7 +244,9 @@ try {
       const key = query.get("key");
       const count = Number(query.get("count"));
       waitForEvent(response, () => {
-        const events = kind === "purge" ? purges.filter(event => event.trace === trace && event.operation === "invalidateByTag" && event.target === "_N_T_/layout")
+        const events = kind === "refresh" ? refreshEvents.filter(event => event.trace === trace)
+          : kind === "refresh-error" ? refreshErrors.filter(event => event.trace === trace)
+            : kind === "purge" ? purges.filter(event => event.trace === trace && event.operation === "invalidateByTag" && event.target === "_N_T_/layout")
           : kind === "hold" ? storeHolds.filter(event => event.trace === trace)
             : pageWrites.filter(event => event.key === key);
         return events.length >= count ? { count: events.length } : null;
