@@ -58,7 +58,17 @@ if (control) {
     return response;
   };
 
+  const originalError = console.error;
+  console.error = (...args) => {
+    originalError(...args);
+    if (typeof args[0] === "string" && args[0].includes("keeping the previous page")) {
+      void report("/page-refusals", { label: args[0] }).catch(() => {});
+    }
+  };
+
+  const marks = (globalThis[Symbol.for("roo.test.pageMarks")] ||= { at: 0 });
   const record = (operation) => async (target, options) => {
+    if (operation === "invalidateByTag" && [target].flat().includes("_N_T_/layout")) marks.at = Date.now();
     await report("/purges", { operation, target, options: options ?? null, trace: traces.getStore() ?? null });
   };
   const purge = {

@@ -48,6 +48,7 @@ const storeRules = new Map();
 const storeCalls = [];
 const storeHolds = [];
 const purges = [];
+const pageRefusals = [];
 const keptAlive = [];
 const readJson = async request => {
   let raw = "";
@@ -189,6 +190,13 @@ try {
         response.end(JSON.stringify({ error: error.message })); return;
       }
     }
+    if (request.method === "POST" && request.url === "/page-refusals") {
+      pageRefusals.push(await readJson(request));
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end("{}"); return;
+    }
+    if (request.method === "GET" && request.url === "/page-refusals") {
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(pageRefusals)); return;
+    }
     if (request.method === "POST" && ["/purges", "/kept-alive"].includes(request.url)) {
       (request.url === "/purges" ? purges : keptAlive).push(await readJson(request));
       response.writeHead(200, { "Content-Type": "application/json" }); response.end("{}"); return;
@@ -318,6 +326,7 @@ try {
     REF_ADMIN_KEY: "synthetic-admin-key", REF_SESSION_SECRET: "synthetic-content-session-secret", RATE_LIMIT_HASH_SECRET: "synthetic-admin-rate-secret", CMS_WRITES_PAUSED: "0",
     ALLOW_LIVE_PAYMENTS: "0", SALES_PREVIEW_READ_ONLY: "0", NEXT_TELEMETRY_DISABLED: "1", BASE_URL: baseURL, ROO_TEST_HOST: target.hostname, NEXT_DIST_DIR: dist, TOOLING_NETWORK_GUARD: "1",
     ROO_CONTENT_TEST_CONTROL_URL: controlOrigin,
+    NEXT_CACHE_HANDLER_PATH: path.join(root, "tests/fixtures/stale-mark-cache-handler.cjs"),
     ROO_TEST_NETWORK_ORIGINS: JSON.stringify([baseURL, fixture.origin, fixture.storageUrl, fixture.postgrestUrl, controlOrigin]),
   }, "--import", path.join(root, "scripts/lib/test-target-safety.mjs"), path.join(root, "scripts/lib/content-test-hooks.mjs"));
   const execute = args => new Promise((resolve, reject) => {
