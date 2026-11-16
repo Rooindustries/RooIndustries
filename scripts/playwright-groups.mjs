@@ -10,6 +10,7 @@ export const REST_GROUPS = ["rest-1", "rest-2", "rest-3", "rest-4"];
 export const REST_1_EXTRA_SECONDS = 250;
 
 const playwrightCli = createRequire(import.meta.url).resolve("@playwright/test/cli");
+const nativeOnly = new Set(["booking-hold.spec.js", "booking-email-browser.spec.js", "booking-payment-recovery.spec.js"]);
 
 const escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -41,7 +42,8 @@ export const listSpecFiles = ({ filter, config } = {}) => {
       stdio: ["ignore", "ignore", "inherit"],
       env: { ...process.env, PLAYWRIGHT_JSON_OUTPUT_FILE: reportFile },
     });
-    return reportSpecFiles(readReport()).filter(file => config || file !== "booking-email-browser.spec.js");
+    const files = reportSpecFiles(readReport());
+    return config ? files : files.filter(file => !nativeOnly.has(file));
   } catch (error) {
     const errors = fs.existsSync(reportFile) ? (readReport().errors || []).map(({ message }) => message) : [];
     throw new Error(["Playwright couldn't list the spec files", ...errors].join("\n"), { cause: error });
