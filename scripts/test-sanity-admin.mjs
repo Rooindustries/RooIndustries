@@ -9,9 +9,19 @@ import { pathToFileURL } from 'node:url';
 import { start } from './lib/storage-fixture.mjs';
 const root = path.resolve('.');
 globalThis.rooRevalidations = new AsyncLocalStorage();
-const nextCacheStub = `data:text/javascript,${encodeURIComponent('export const revalidatePath = (...args) => { globalThis.rooRevalidations.getStore()?.push(args); };')}`;
+const forbiddenCacheCalls = [];
+globalThis.rooRecordCache = (operation, args) => {
+  const calls = globalThis.rooRevalidations.getStore();
+  if (!calls) return;
+  calls.push({ operation, args });
+  if (operation === 'revalidatePath' || (operation === 'dangerouslyDeleteByTag' && [args[0]].flat().includes('_N_T_/layout'))) forbiddenCacheCalls.push({ operation, args });
+};
+process.once('beforeExit', () => assert.deepEqual(forbiddenCacheCalls, [], 'Publish must never delete pages'));
+const nextCacheStub = `data:text/javascript,${encodeURIComponent('export const revalidatePath = (...args) => globalThis.rooRecordCache("revalidatePath", args);')}`;
+const vercelFunctionsStub = `data:text/javascript,${encodeURIComponent('export const invalidateByTag = async (...args) => globalThis.rooRecordCache("invalidateByTag", args); export const dangerouslyDeleteByTag = async (...args) => globalThis.rooRecordCache("dangerouslyDeleteByTag", args); export const waitUntil = () => {};')}`;
 registerHooks({ resolve(specifier, context, next) {
   if (specifier === 'next/cache') return { url: nextCacheStub, shortCircuit: true };
+  if (specifier === '@vercel/functions') return { url: vercelFunctionsStub, shortCircuit: true };
   if (specifier.startsWith('@/')) specifier = pathToFileURL(path.join(root, specifier.slice(2))).href;
   try { return next(specifier, context); } catch (error) {
     if (error.code === 'ERR_MODULE_NOT_FOUND' && (specifier.startsWith('.') || specifier.startsWith('file:')) && !path.extname(specifier)) return next(specifier + '.js', context);
@@ -64,9 +74,10 @@ try {
     return { status: response.status, ...result };
   };
   const publish = async body => {
-    const revalidated = [];
-    const result = await globalThis.rooRevalidations.run(revalidated, () => call('publish', body));
-    assert.deepEqual(revalidated, [['/', 'layout']], 'Every publish revalidates the root layout');
+    const calls = [];
+    const result = await globalThis.rooRevalidations.run(calls, () => call('publish', body));
+    assert.ok(calls.some(({ operation, args }) => operation === 'invalidateByTag' && [args[0]].flat().includes('_N_T_/layout')), 'Every publish marks pages stale before responding');
+    assert.deepEqual(forbiddenCacheCalls, [], 'Publish must never delete pages');
     return result;
   };
   const create = (type, document, createIntentId = crypto.randomUUID()) => publish({ operation: 'create', type, document, createIntentId });
