@@ -77,7 +77,7 @@ const beginUpload = async (page, asset, file) => {
       if (body.ok && last.response.url().endsWith("/upload") && !body.data.alreadyExists) return false;
       outcome = { ...body, milliseconds: last.at - started };
       return true;
-    }, { timeout: 60000 }).toBe(true);
+    }).toBe(true);
     await expect(asset.getByRole("button", { name: UPLOAD_BUTTON })).toBeEnabled();
     page.off("response", record);
     return outcome;
@@ -262,7 +262,6 @@ test("a strip too tall for any width is refused", async ({ page, request }) => {
 });
 
 test("the largest picture each format may hold: 100 megapixels gets its sizes, an AVIF just over 36 is refused", async ({ page, request }) => {
-  test.setTimeout(300000);
   const asset = await openReviewImage(page);
   const largest = { width: 10000, height: 10000 };
   const png = await flat(largest.width, largest.height, "png");
