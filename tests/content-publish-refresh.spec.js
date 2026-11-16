@@ -11,6 +11,9 @@ test.beforeEach(prepareAdminContext);
 test("a publish with an unconfirmed page refresh shows the pending notice", async ({ page, request, baseURL }) => {
   const gate = createContentGate(request, baseURL);
   const trace = randomUUID();
+  const hanging = gate.traced(trace);
+  const hero = await gate.document("tooling-hero");
+  try {
   await login(page);
   await choose(page, "Hero Section");
   await expect(page.getByLabel("Main Heading (Line 1)", { exact: true })).toBeVisible();
@@ -34,4 +37,7 @@ test("a publish with an unconfirmed page refresh shows the pending notice", asyn
   const errors = (await (await request.get(`${gate.control}/refresh-errors?trace=${trace}`)).json()).map(({ label }) => label);
   expect(errors).toEqual(["Public pages mark did not answer in time"]);
   console.log(`REFRESH_PENDING ${JSON.stringify({ events, errors })}`);
+  } finally {
+    await gate.cleanup(() => page.unroute("**/api/admin/content/publish"), () => hanging.reset(), () => gate.restore("tooling-hero", hero.document), () => gate.rebuild(["/"]), () => gate.clearRounds());
+  }
 });

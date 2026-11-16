@@ -29,6 +29,8 @@ const forceFailedRebuild = async ({ request, baseURL, label, mode }) => {
   const pkg = await gate.document("tooling-package-0");
   const contact = await gate.document("tooling-contact");
   const banner = await firstDocument(gate, ["discordBanner", "fixture-discordBanner"]);
+  const failing = gate.traced();
+  try {
   const old = { price: pkg.document.price, subtitle: contact.document.subtitle, link: banner.document.link };
   const fresh = { price: `$${(300 + Math.floor(Math.random() * 600)).toFixed(0)}.17`, subtitle: `Probe subtitle ${tag}`, link: `https://discord.gg/probe${tag}` };
   await gate.publish(pkg, { price: fresh.price });
@@ -46,7 +48,6 @@ const forceFailedRebuild = async ({ request, baseURL, label, mode }) => {
     }
   };
   const pageLife = (await read(request, "/terms")).maxAge;
-  const failing = gate.traced();
   await failing.rules([{ rpc: READS, action: "fail" }]);
   for (const page of await Promise.all(PAGES.map((path) => read(request, path, failing.headers)))) judge(page, "during", pageLife);
   if (mode === "warm") {
@@ -68,6 +69,16 @@ const forceFailedRebuild = async ({ request, baseURL, label, mode }) => {
   tally.examples = [...new Set(tally.examples)].slice(0, 12);
   console.log(`CHECK ${JSON.stringify(tally)}`);
   return tally;
+  } finally {
+    await gate.cleanup(
+      () => failing.rules([]),
+      () => gate.restore("tooling-package-0", pkg.document),
+      () => gate.restore("tooling-contact", contact.document),
+      () => gate.restore(banner.document._id, banner.document),
+      () => gate.rebuild(PAGES),
+      () => gate.clearRounds(),
+    );
+  }
 };
 
 test("a failed read during a rebuild after a publish", async ({ request, baseURL }) => {

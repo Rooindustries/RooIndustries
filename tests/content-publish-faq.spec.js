@@ -18,6 +18,7 @@ test("FAQ publishes its own change without embedding an unconfirmed hero", async
   const gate = createContentGate(request, baseURL);
   await read(request, "/booking");
   await read(request, "/");
+  await gate.rebuild(["/", "/faq"]);
   const hero = await gate.document("tooling-hero");
   const faq = await gate.document("faq");
   const tag = randomUUID().slice(0, 8);
@@ -42,8 +43,13 @@ test("FAQ publishes its own change without embedding an unconfirmed hero", async
     expect(latest.cache).toBe("HIT");
   } finally {
     console.log(`FAQCASE ${JSON.stringify(seen)}`);
-    await gate.restore("tooling-hero", hero.document);
-    await gate.restore("faq", faq.document);
+    await gate.cleanup(
+      () => failing.rules([]),
+      () => gate.restore("tooling-hero", hero.document),
+      () => gate.restore("faq", faq.document),
+      () => gate.rebuild(["/", "/faq"]),
+      () => gate.clearRounds(),
+    );
   }
 });
 
@@ -75,7 +81,7 @@ for (const [id, type, failingPages] of [["tooling-contact", "contact", ["/contac
       expect(failedReads.length).toBeGreaterThanOrEqual(2);
       expect(events).toEqual([{ label: "Page content unavailable; keeping the previous page" }]);
     } finally {
-      await gate.restore(id, original.document);
+      await gate.cleanup(() => failing.rules([]), () => gate.restore(id, original.document), () => gate.rebuild(failingPages), () => gate.clearRounds());
     }
   });
 }

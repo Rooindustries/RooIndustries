@@ -22,6 +22,7 @@ test("R1 a missing required singleton is never cached as fresh", async ({ reques
   const gate = createContentGate(request, baseURL);
   const hero = await gate.document("tooling-hero");
   const contact = await gate.document("tooling-contact");
+  try {
   const before = await read(request, "/");
   expect(before.body).toContain(hero.document.headingLine1);
   expect((await request.post(`${gate.control}/remove-content-document`, { data: { id: "tooling-hero" } })).ok()).toBe(true);
@@ -35,19 +36,29 @@ test("R1 a missing required singleton is never cached as fresh", async ({ reques
   report("R1", result);
   expect(after.status).toBe(200);
   expect(after.cache === "HIT" && after.maxAge >= 60 && !result.hasHero, "fallback hero cached as fresh").toBe(false);
+  } finally {
+    await gate.cleanup(
+      async () => { expect((await request.post(`${gate.control}/cms-field-fixture`, { data: hero.document })).ok()).toBe(true); },
+      () => gate.restore("tooling-contact", contact.document),
+      () => gate.rebuild(["/"]),
+      () => gate.clearRounds(),
+    );
+  }
 });
 
 test("R2 a revision checked before publish cannot cache an old price after the second mark", async ({ request, baseURL }) => {
   const gate = createContentGate(request, baseURL);
   const pkg = await gate.document("tooling-package-0");
+  const render = gate.traced();
+  let trigger;
+  try {
   const priceA = `$${400 + Math.floor(Math.random() * 400)}.11`;
   const priceB = `$${400 + Math.floor(Math.random() * 400)}.22`;
   await gate.publish(pkg, { price: priceA });
   await read(request, "/booking");
-  const render = gate.traced();
   await render.rules([{ rpc: "^roo_read_public_content_revision$", action: "pass", times: 1 }, { rpc: "^roo_read_public_content_revision$", action: "hold", times: 1 }]);
   const count = await writesFor(request, gate, "/packages");
-  const trigger = read(request, "/packages", { ...render.headers, "x-roo-test-delay-page-store": "8000" });
+  trigger = read(request, "/packages", { ...render.headers, "x-roo-test-delay-page-store": "8000" });
   await waitFor(request, gate, { kind: "hold", trace: render.trace, count: "1" });
   const later = gate.traced();
   const current = await gate.document("tooling-package-0");
@@ -61,17 +72,30 @@ test("R2 a revision checked before publish cannot cache an old price after the s
   const result = { calls: await render.calls(), firstCache: first.cache, cache: after.cache, maxAge: after.maxAge, showsA: after.body.includes(priceA), showsB: after.body.includes(priceB) };
   report("R2", result);
   expect(after.cache === "HIT" && after.maxAge >= 60 && result.showsA, "pre-publish price cached as fresh").toBe(false);
+  } finally {
+    await gate.cleanup(
+      () => render.close(),
+      () => render.reset(),
+      async () => { if (trigger) await trigger; },
+      () => render.reset(),
+      () => gate.restore("tooling-package-0", pkg.document),
+      () => gate.rebuild(["/packages"]),
+      () => gate.clearRounds(),
+    );
+  }
 });
 
 test("R3 a hanging content purge does not stop the page mark", async ({ request, baseURL }) => {
   const gate = createContentGate(request, baseURL);
   const pkg = await gate.document("tooling-package-0");
+  const hanging = gate.traced();
+  try {
   await read(request, "/packages");
   const count = await writesFor(request, gate, "/packages");
   const price = `$${400 + Math.floor(Math.random() * 400)}.33`;
   const publish = await request.fetch("/api/admin/content/publish", {
     method: "POST",
-    headers: { "x-admin-key": "synthetic-admin-key", "x-roo-test-hang-content-purge": "1" },
+    headers: { ...hanging.headers, "x-admin-key": "synthetic-admin-key", "x-roo-test-hang-content-purge": "1" },
     data: gate.replaceCommand(pkg, { price }),
   });
   const answer = await publish.json();
@@ -82,4 +106,7 @@ test("R3 a hanging content purge does not stop the page mark", async ({ request,
   report("R3", result);
   expect(result.showsNew, "the published price never reached the page").toBe(true);
   expect(result.refresh).toEqual({ content: "pending", pages: "done" });
+  } finally {
+    await gate.cleanup(() => hanging.reset(), () => gate.restore("tooling-package-0", pkg.document), () => gate.rebuild(["/packages"]), () => gate.clearRounds());
+  }
 });

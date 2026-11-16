@@ -47,6 +47,7 @@ let notificationSequence = 0;
 const storeRules = new Map();
 const storeCalls = [];
 const storeHolds = [];
+const closedStores = new Set();
 const purges = [];
 const pageRefusals = [];
 const refreshEvents = [];
@@ -262,7 +263,8 @@ try {
     }
     if (request.method === "POST" && request.url === "/store-rules") {
       const { trace, rules } = await readJson(request);
-      storeRules.set(trace, rules.map(rule => ({ ...rule, pattern: new RegExp(rule.rpc) })));
+      if (rules.length) storeRules.set(trace, rules.map(rule => ({ ...rule, pattern: new RegExp(rule.rpc) })));
+      else storeRules.delete(trace);
       response.writeHead(200, { "Content-Type": "application/json" }); response.end("{}"); return;
     }
     if (request.method === "POST" && request.url === "/store-calls") {
@@ -274,15 +276,16 @@ try {
     }
     if (request.method === "POST" && request.url === "/store-holds") {
       const hold = await readJson(request);
-      await new Promise(resolve => { storeHolds.push({ ...hold, release: resolve }); notifyEvents(); });
+      if (!closedStores.has(hold.trace)) await new Promise(resolve => { storeHolds.push({ ...hold, release: resolve }); notifyEvents(); });
       response.writeHead(200, { "Content-Type": "application/json" }); response.end("{}"); return;
     }
     if (request.method === "GET" && request.url.startsWith("/store-holds?")) {
       const trace = new URL(request.url, controlOrigin).searchParams.get("trace");
       response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(storeHolds.filter(hold => hold.trace === trace).map(({ rpc }) => rpc))); return;
     }
-    if (request.method === "POST" && request.url === "/store-release") {
+    if (request.method === "POST" && ["/store-release", "/store-close"].includes(request.url)) {
       const { trace } = await readJson(request);
+      if (request.url === "/store-close") { closedStores.add(trace); storeRules.delete(trace); }
       const released = storeHolds.filter(hold => hold.trace === trace);
       storeHolds.splice(0, storeHolds.length, ...storeHolds.filter(hold => hold.trace !== trace));
       for (const hold of released) hold.release();
@@ -362,15 +365,16 @@ try {
       const current = await fixture.sql`select legacy_sanity_id from migration.source_documents where document_type=any(${CONTENT_TYPES.map(type => type.name)}::text[]) and not tombstoned`;
       const currentIds = new Set(current.map(document => document.legacy_sanity_id));
       const baselineIds = new Set(documents.map(document => document._id));
-      for (const document of current) {
-        if (baselineIds.has(document.legacy_sanity_id)) continue;
-        const result = await fixture.client.rpc("roo_apply_document_mutations", { p_mutations: [{ operation: "delete", id: document.legacy_sanity_id }] });
+      const mutations = [
+        ...current.filter(document => !baselineIds.has(document.legacy_sanity_id)).map(document => ({ operation: "delete", id: document.legacy_sanity_id })),
+        ...documents.map(document => ({ operation: currentIds.has(document._id) ? "replace" : "create", id: document._id, document })),
+      ];
+      for (let index = 0; index < mutations.length; index += 100) {
+        const result = await fixture.client.rpc("roo_apply_document_mutations", { p_mutations: mutations.slice(index, index + 100) });
         if (result.error) { response.writeHead(500); response.end("Fixture reset failed."); return; }
       }
-      for (const document of documents) {
-        const result = await fixture.client.rpc("roo_apply_document_mutations", { p_mutations: [{ operation: currentIds.has(document._id) ? "replace" : "create", id: document._id, document }] });
-        if (result.error) { response.writeHead(500); response.end("Fixture reset failed."); return; }
-      }
+      const cleared = await fetch(`${baseURL}/api/admin/content/documents/tooling-hero`, { headers: { "x-admin-key": "synthetic-admin-key", "x-roo-test-clear-rounds": "1" } });
+      if (!cleared.ok) { response.writeHead(500); response.end("Fixture timer reset failed."); return; }
       response.writeHead(200); response.end("ok"); return;
     }
     if (request.method === "POST" && request.url === "/reset-rate-limits") {

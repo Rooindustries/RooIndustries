@@ -6,7 +6,15 @@ const control = process.env.ROO_CONTENT_TEST_CONTROL_URL;
 if (control) {
   const traces = new AsyncLocalStorage();
   const refreshControls = new AsyncLocalStorage();
+  const activeControls = new Map();
   const failures = new Map();
+  const scheduledRounds = new Set();
+  const schedule = globalThis.setTimeout;
+  globalThis.setTimeout = (callback, ms, ...args) => {
+    const timer = schedule(callback, ms, ...args);
+    if (refreshControls.getStore()?.publish && [5000, 60000].includes(ms)) scheduledRounds.add(timer);
+    return timer;
+  };
   const emit = http.Server.prototype.emit;
   http.Server.prototype.emit = function (event, request, ...rest) {
     if (event !== "request") return emit.call(this, event, request, ...rest);
@@ -15,10 +23,30 @@ if (control) {
       failures.set(trace, { content: request.headers["x-roo-test-fail-content-purge"] === "1", pages: request.headers["x-roo-test-fail-page-mark"] === "1" });
     }
     const testControls = (globalThis[Symbol.for("roo.test.controls")] ||= { storeDelayMs: 0 });
+    if (request?.headers?.["x-roo-test-clear-rounds"] === "1") {
+      for (const timer of scheduledRounds) clearTimeout(timer);
+      scheduledRounds.clear();
+    }
+    const reset = request?.headers?.["x-roo-test-reset-controls"];
+    if (typeof reset === "string") {
+      testControls.storeDelayMs = 0;
+      failures.delete(reset);
+      const active = activeControls.get(reset);
+      if (active) {
+        active.hangContentPurge = false;
+        active.hangPageMark = false;
+        for (const release of active.holds) release();
+        active.holds.clear();
+        activeControls.delete(reset);
+      }
+    }
     const requestControls = {
       hangContentPurge: request?.headers?.["x-roo-test-hang-content-purge"] === "1",
       hangPageMark: request?.headers?.["x-roo-test-hang-page-mark"] === "1",
+      holds: new Set(),
+      publish: request?.method === "POST" && request?.url?.split("?")[0] === "/api/admin/content/publish",
     };
+    if (typeof trace === "string" && (requestControls.hangContentPurge || requestControls.hangPageMark)) activeControls.set(trace, requestControls);
     if (/^\d+$/.test(request?.headers?.["x-roo-test-delay-page-store"] || "")) testControls.storeDelayMs = Number(request.headers["x-roo-test-delay-page-store"]);
     return traces.run(typeof trace === "string" ? trace : null, () => refreshControls.run(requestControls, () => emit.call(this, event, request, ...rest)));
   };
@@ -96,10 +124,10 @@ if (control) {
     const testControls = refreshControls.getStore();
     const failure = failures.get(traces.getStore());
     if ((failure?.content && [target].flat().includes("public-content")) || (failure?.pages && [target].flat().includes("_N_T_/layout"))) throw Object.assign(new Error("Refresh unavailable."), { code: "FIXTURE_REFRESH_FAILURE" });
-    if (testControls?.hangPageMark && [target].flat().includes("_N_T_/layout")) await new Promise(() => {});
+    if (testControls?.hangPageMark && [target].flat().includes("_N_T_/layout")) await new Promise(resolve => testControls.holds.add(resolve));
     if (operation === "invalidateByTag" && [target].flat().includes("_N_T_/layout")) marks.at = Date.now();
     await report("/purges", { operation, target, options: options ?? null, trace: traces.getStore() ?? null });
-    if (testControls?.hangContentPurge && [target].flat().includes("public-content")) await new Promise(() => {});
+    if (testControls?.hangContentPurge && [target].flat().includes("public-content")) await new Promise(resolve => testControls.holds.add(resolve));
   };
   const purge = {
     invalidateByTag: record("invalidateByTag"),
