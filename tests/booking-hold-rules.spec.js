@@ -35,7 +35,6 @@ const test = base.extend({
       await use({ post: (...args) => call("post", ...args), get: route => call("get", route), nextSlotDate: () => call("nextSlotDate"),
         getHold: id => call("getHold", id), verifyHold: hold => call("verifyHold", hold),
         expireHold: id => call("expireHold", id),
-        setPaymentStatus: status => call("setPaymentStatus", status), paymentSucceeded: id => call("paymentSucceeded", id),
         setPackageSlots: date => call("setPackageSlots", date), restoreSettings: () => call("restoreSettings"),
         createBooking: start => call("createBooking", start), setHoldPhase: (id, phase) => call("setHoldPhase", id, phase),
         snapshot: start => call("snapshot", start), evidence: () => call("evidence"),
