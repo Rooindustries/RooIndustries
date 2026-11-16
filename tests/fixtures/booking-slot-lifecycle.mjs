@@ -7,16 +7,12 @@ const { commerce, content } = fixture;
 const { sql } = fixture.database;
 const { buildBookingSlotId, buildSlotHoldId } = await import("../../src/server/booking/slotIdentity.js");
 const { verifyHoldToken } = await import("../../src/server/booking/holdToken.js");
-const { applyBookingRefund } = await import("../../src/server/api/ref/bookingRefunds.js");
 
-const slotAt = startTimeUTC => ({
-  startTimeUTC,
-  date: startTimeUTC.slice(0, 10),
-  lockId: buildBookingSlotId(startTimeUTC),
-  holdId: buildSlotHoldId(startTimeUTC),
-});
+const packageTitle = "Vertex Essentials";
 const adminStatus = (bookingId, status) =>
   fixture.post("/api/ref/updateBookingStatus", { bookingId, status }, "", { "x-admin-key": "fixture-only-admin" });
+const paymentSucceeded = (orderId, delivery) =>
+  fixture.dodoWebhook(`payment_${orderId}`, "payment.succeeded", `lifecycle_paid_${orderId}_${delivery}`);
 
 let seeded = 0;
 let commerceLock;
@@ -26,25 +22,33 @@ const operations = {
   post: fixture.post,
   availability: fixture.availability,
   adminStatus,
+  paymentSucceeded,
   document: id => commerce.getDocument(id),
   referral: id => content.getDocument(id),
-  async book(codes) {
-    const payload = await fixture.hold(codes);
-    const started = await fixture.start(payload);
+  freeSlot() {
+    const day = new Date(Date.UTC(2099, 0, 240 - seeded++)).toISOString().slice(0, 10);
+    const startTimeUTC = `${day}T04:30:00.000Z`;
+    return { startTimeUTC, date: day, lockId: buildBookingSlotId(startTimeUTC), holdId: buildSlotHoldId(startTimeUTC) };
+  },
+  async book(slot, codes) {
+    const held = await fixture.post("/api/holdSlot", { startTimeUTC: slot.startTimeUTC, packageTitle });
+    assert.equal(held.status, 200, JSON.stringify(held));
+    const started = await fixture.start({
+      packageTitle, ...fixture.details, startTimeUTC: slot.startTimeUTC, slotHoldId: held.body.holdId,
+      slotHoldToken: held.body.holdToken, deferEmailsUntilConfirmation: true, ...codes,
+    });
     assert.equal(started.status, 200, JSON.stringify(started));
-    const record = await fixture.recordFor(payload);
-    const paid = await fixture.dodoWebhook(`payment_${record.providerOrderId}`, "payment.succeeded", `lifecycle_${record._id}`);
+    const { orderId } = started.body.providerPayload;
+    const paid = await paymentSucceeded(orderId, "first");
     assert.equal(paid.status, 200, JSON.stringify(paid));
-    return { ...slotAt(payload.startTimeUTC), bookingId: paid.body.bookingId };
+    return { ...slot, bookingId: paid.body.bookingId, paymentId: `payment_${orderId}` };
   },
   async cancelledBooking() {
-    const number = ++seeded;
-    const day = new Date(Date.UTC(2099, 0, 241 - number)).toISOString().slice(0, 10);
-    const slot = slotAt(`${day}T04:30:00.000Z`);
-    const bookingId = `booking.lifecycle.cancelled.${number}`;
+    const slot = operations.freeSlot();
+    const bookingId = `booking.lifecycle.cancelled.${seeded}`;
     await commerce.create({
       _id: bookingId, _type: "booking", backendOwner: "supabase", cutoverGeneration: 0, status: "cancelled",
-      startTimeUTC: slot.startTimeUTC, packageTitle: "Vertex Essentials", email: "earlier@example.invalid",
+      startTimeUTC: slot.startTimeUTC, packageTitle, email: "earlier@example.invalid",
     });
     return { ...slot, bookingId };
   },
@@ -66,14 +70,30 @@ const operations = {
     });
     return codes;
   },
-  async latePartialRefund(bookingId) {
-    const booking = await commerce.getDocument(bookingId);
-    return applyBookingRefund({
-      client: commerce,
-      paymentRecord: await commerce.getDocument(booking.paymentRecordId),
-      refund: { full: false, id: `late-partial-${bookingId}`, totalRefundedAmount: 1, currency: "USD" },
+  async activeUpgrade({ bookingId, startTimeUTC }) {
+    await commerce.create({
+      _id: `${bookingId}.upgrade`, _type: "booking", backendOwner: "supabase", cutoverGeneration: 0, status: "captured",
+      originalOrderId: bookingId, startTimeUTC, packageTitle: "Performance Vertex Overhaul", email: fixture.details.email,
     });
   },
+  async markRefunded(bookingId) {
+    await commerce.patch(bookingId).set({ status: "refunded" }).commit();
+  },
+  latePartialRefund: ({ paymentId }) => fixture.refundPayment(paymentId, [{
+    refund_id: `late_partial_${paymentId}`, payment_id: paymentId, amount: 100, currency: "USD", status: "succeeded", is_partial: true,
+  }], `lifecycle_late_partial_${paymentId}`),
+  async bookingsAt(startTimeUTC) {
+    const bookings = await commerce.fetch('*[_type == "booking" && startTimeUTC == $startTimeUTC]', { startTimeUTC });
+    return bookings.map(booking => booking._id);
+  },
+  async slotClaims(startTimeUTC) {
+    const claims = await sql`select claim_type from commerce.slot_claims where start_time_utc = ${startTimeUTC}`;
+    return claims.map(claim => claim.claim_type);
+  },
+  emails: bookingId => fixture.evidence.providerRequests
+    .filter(request => request.path === "/emails" && request.body.html.includes(`>${bookingId}<`))
+    .map(request => request.body.to)
+    .sort(),
   async verifyHold({ token, holdId }) {
     const stored = await commerce.getDocument(holdId);
     return Boolean(verifyHoldToken({

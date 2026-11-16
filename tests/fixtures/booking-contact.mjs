@@ -158,6 +158,7 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
     const handlers = new Map();
     for (const [route, module] of Object.entries({
       '/api/holdSlot': '../../src/server/booking/holdSlot.js',
+      '/api/releaseHold': '../../src/server/booking/releaseHold.js',
       '/api/bookingAvailability': '../../src/server/booking/availability.js',
       '/api/payment/start': '../../src/server/api/payment/start.js',
       '/api/payment/quote': '../../src/server/api/payment/quote.js',

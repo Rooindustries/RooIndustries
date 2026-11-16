@@ -48,36 +48,86 @@ test.skip(!nativeBinaries.every(file => file && fs.existsSync(file)), "Needs PG_
 
 const fulfillJson = (route, response, body = response.body) =>
   route.fulfill({ status: response.status, contentType: "application/json", body: JSON.stringify(body) });
+const nativeRoutes = /\/api\/(holdSlot|releaseHold|payment\/quote|payment\/start|payment\/finalize|payment\/status)(?:\?|$)/;
 const routeToNative = async (context, native, date) => {
-  const reservations = [];
-  await context.route(/\/api\/holdSlot(?:\?|$)/, async route => {
-    const response = await native.post("/api/holdSlot", route.request().postDataJSON());
-    reservations.push(response);
-    return fulfillJson(route, response);
-  });
+  const answers = [];
+  const forward = async request => {
+    const path = new URL(request.url()).pathname;
+    const token = (request.headers().authorization || "").replace(/^Bearer /, "");
+    const response = await native.post(path, request.postDataJSON(), token);
+    answers.push({ path, ...response });
+    return response;
+  };
+  await context.route(nativeRoutes, async route => fulfillJson(route, await forward(route.request())));
   await context.route(/\/api\/bookingAvailability(?:\?|$)/, async route => {
     const response = await native.availability();
     const dateSlots = [{ date, times: ["10:00"] }];
     const settings = { dateSlots, xocDateSlots: dateSlots, vertexEssentialsDateSlots: dateSlots, packageDateSlots: [] };
     return fulfillJson(route, response, { ...response.body, settings });
   });
-  return reservations;
+  await context.route("https://test.checkout.dodopayments.com/session/**", route => route.fulfill({
+    contentType: "text/html", body: "<h1>Fixture provider checkout</h1>",
+  }));
+  return { forward, answered: path => answers.filter(answer => answer.path === path) };
 };
 const readHold = page => page.evaluate(() => JSON.parse(sessionStorage.getItem("my_slot_hold")));
+const selectSlot = async (page, flow) => {
+  await flow.booking();
+  await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+};
+const pressNext = page => page.getByRole("button", { name: "Next", exact: true }).last().click();
+const expectDetailsStep = page => expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toBeVisible();
 const expectReserved = async (page, native, slot) => {
   const held = await readHold(page);
   expect(held).toMatchObject({ holdId: slot.holdId, startTimeUTC: slot.startTimeUTC });
   expect(await native.verifyHold({ token: held.holdToken, holdId: held.holdId })).toBe(true);
   expect(await native.document(slot.holdId)).toMatchObject({ phase: "active" });
+  expect(await native.slotClaims(slot.startTimeUTC)).toEqual(["hold"]);
+};
+const queueBehindCommerceLock = async (native, actors) => {
+  await native.holdCommerceLock();
+  try {
+    for (const [index, act] of actors.entries()) {
+      await act();
+      await expect.poll(() => native.commerceLockWaiters()).toBe(index + 1);
+    }
+  } finally {
+    await native.releaseCommerceLock();
+  }
 };
 
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
   test.describe(`${viewport.width}px`, () => {
     test.use({ viewport });
 
+    test("two confirmations of one payment book the slot once and email each side once", async ({ page, context, flow, native }) => {
+      const slot = await native.freeSlot();
+      const { forward, answered } = await routeToNative(context, native, slot.date);
+      await flow.reserve();
+      await flow.details();
+      await page.getByRole("button", { name: "Review before payment", exact: true }).click();
+      await flow.payment();
+      await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Fixture provider checkout", exact: true })).toBeVisible();
+      const { orderId } = answered("/api/payment/start").at(-1).body.providerPayload;
+      await context.route(/\/api\/payment\/finalize(?:\?|$)/, async route => {
+        const [returned] = await Promise.all([forward(route.request()), native.paymentSucceeded(orderId, "race")]);
+        return fulfillJson(route, returned);
+      });
+      await page.goto("/payment?dodo_return=1");
+      await expect(page.getByRole("heading", { level: 1, name: "Payment Successful", exact: true })).toBeVisible();
+      const bookings = await native.bookingsAt(slot.startTimeUTC);
+      expect(bookings).toHaveLength(1);
+      expect(await native.paymentSucceeded(orderId, "retry")).toMatchObject({ status: 200, body: { status: "booked", bookingId: bookings[0] } });
+      expect(await native.bookingsAt(slot.startTimeUTC)).toEqual(bookings);
+      expect(await native.slotClaims(slot.startTimeUTC)).toEqual(["booking"]);
+      expect(await native.document(slot.holdId)).toMatchObject({ phase: "consumed", bookingId: bookings[0] });
+      expect(await native.emails(bookings[0])).toEqual(["owner@example.invalid", "visitor@example.invalid"]);
+    });
+
     test("cancelling a booking frees only its own slot, and the next customer reserves it", async ({ page, context, flow, native }) => {
-      const cancelled = await native.book();
-      const kept = await native.book();
+      const cancelled = await native.book(await native.freeSlot());
+      const kept = await native.book(await native.freeSlot());
       expect(await native.adminStatus(cancelled.bookingId, "canceled"))
         .toMatchObject({ status: 200, body: { status: "cancelled", reopenedSlot: true } });
       await routeToNative(context, native, cancelled.date);
@@ -90,7 +140,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
 
     test("a full refund reopens the slot for the next customer and reverses the coupon and referral once", async ({ page, context, flow, native }) => {
       const codes = await native.discountCodes();
-      const refunded = await native.book({ couponCode: codes.couponCode, referralCode: codes.referralCode });
+      const refunded = await native.book(await native.freeSlot(), { couponCode: codes.couponCode, referralCode: codes.referralCode });
       expect(await native.document(codes.couponId)).toMatchObject({ timesUsed: 1 });
       expect(await native.referral(codes.referralId)).toMatchObject({ successfulReferrals: 1 });
       expect(await native.adminStatus(refunded.bookingId, "refunded")).toMatchObject({
@@ -98,14 +148,35 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         body: { reopenedSlot: true, couponRestored: true, referralReversed: true, idempotent: false },
       });
       expect(await native.adminStatus(refunded.bookingId, "refunded")).toMatchObject({ status: 200, body: { idempotent: true } });
-      expect(await native.latePartialRefund(refunded.bookingId)).toMatchObject({ idempotent: true });
-      await routeToNative(context, native, refunded.date);
-      await flow.reserve();
-      await expectReserved(page, native, refunded);
-      expect(await native.document(refunded.bookingId)).toMatchObject({ status: "refunded", refundStatus: "full" });
+      const settled = await native.document(refunded.bookingId);
+      expect(settled).toMatchObject({ status: "refunded", refundStatus: "full" });
+      expect(await native.latePartialRefund(refunded)).toMatchObject({ status: 200 });
+      expect(await native.document(refunded.bookingId)).toEqual(settled);
+      expect(await native.document(settled.paymentRecordId)).toMatchObject({ status: "refunded", refundState: "full" });
       expect(await native.document(refunded.lockId)).toMatchObject({ status: "released" });
       expect(await native.document(codes.couponId)).toMatchObject({ timesUsed: 0, isActive: true });
       expect(await native.referral(codes.referralId)).toMatchObject({ successfulReferrals: 0 });
+      await routeToNative(context, native, refunded.date);
+      await flow.reserve();
+      await expectReserved(page, native, refunded);
+    });
+
+    test("a slot still locked by a refunded booking is reserved by a customer who chose it earlier, while its upgrade stays active", async ({ page, context, flow, native }) => {
+      const slot = await native.freeSlot();
+      await routeToNative(context, native, slot.date);
+      await selectSlot(page, flow);
+      const original = await native.book(slot);
+      await native.activeUpgrade(original);
+      await native.markRefunded(original.bookingId);
+      expect(await native.document(slot.lockId)).toMatchObject({ status: "active", bookingId: original.bookingId });
+      await pressNext(page);
+      await expectDetailsStep(page);
+      await expectReserved(page, native, slot);
+      expect(await native.document(slot.lockId)).toMatchObject({ status: "released", releaseReason: "booking_status_repair" });
+      await page.getByRole("button", { name: "Back", exact: true }).last().click();
+      await page.getByRole("button", { name: "Release Slot", exact: true }).click();
+      await expect.poll(() => readHold(page)).toBeNull();
+      expect(await native.document(slot.holdId)).toMatchObject({ phase: "released" });
     });
 
     test("a cancelled booking cannot be restored over the slot a customer has just reserved", async ({ page, context, flow, native }) => {
@@ -117,28 +188,32 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await expectReserved(page, native, cancelled);
     });
 
-    test("a reservation sent while the slot's booking is being restored is refused and the booking keeps the slot", async ({ page, context, flow, native }) => {
+    test("a restore queued ahead of a reservation keeps the slot for its booking and the reservation is refused", async ({ page, context, flow, native }) => {
       const cancelled = await native.cancelledBooking();
-      const reservations = await routeToNative(context, native, cancelled.date);
-      await flow.booking();
-      await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
-      await native.holdCommerceLock();
-      try {
-        await native.beginRestore(cancelled.bookingId);
-        await expect.poll(() => native.commerceLockWaiters()).toBe(1);
-        await page.getByRole("button", { name: "Next", exact: true }).last().click();
-        await expect.poll(() => native.commerceLockWaiters()).toBe(2);
-      } finally {
-        await native.releaseCommerceLock();
-      }
+      const { answered } = await routeToNative(context, native, cancelled.date);
+      await selectSlot(page, flow);
+      await queueBehindCommerceLock(native, [() => native.beginRestore(cancelled.bookingId), () => pressNext(page)]);
       expect(await native.restoreAnswer()).toMatchObject({ status: 200, body: { status: "captured" } });
-      await expect.poll(() => reservations.length).toBe(1);
-      expect(reservations[0].status).toBe(409);
-      await expect(page.getByRole("alert").filter({ hasText: reservations[0].body.message })).toBeVisible();
+      await expect.poll(() => answered("/api/holdSlot").length).toBe(1);
+      const [reservation] = answered("/api/holdSlot");
+      expect(reservation.status).toBe(409);
+      await expect(page.getByRole("alert").filter({ hasText: reservation.body.message })).toBeVisible();
       expect(await readHold(page)).toBeNull();
       expect(await native.document(cancelled.bookingId)).toMatchObject({ status: "captured" });
       expect(await native.document(cancelled.lockId)).toMatchObject({ status: "active", bookingId: cancelled.bookingId });
       expect(await native.document(cancelled.holdId)).toMatchObject({ phase: "consumed", bookingId: cancelled.bookingId });
+      expect(await native.slotClaims(cancelled.startTimeUTC)).toEqual(["booking"]);
+    });
+
+    test("a reservation queued ahead of a restore keeps the slot for the customer and the restore is refused", async ({ page, context, flow, native }) => {
+      const cancelled = await native.cancelledBooking();
+      await routeToNative(context, native, cancelled.date);
+      await selectSlot(page, flow);
+      await queueBehindCommerceLock(native, [() => pressNext(page), () => native.beginRestore(cancelled.bookingId)]);
+      expect(await native.restoreAnswer()).toMatchObject({ status: 409, body: { ok: false } });
+      await expectDetailsStep(page);
+      await expectReserved(page, native, cancelled);
+      expect(await native.document(cancelled.bookingId)).toMatchObject({ status: "cancelled" });
     });
   });
 }

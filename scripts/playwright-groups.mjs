@@ -10,7 +10,7 @@ export const REST_GROUPS = ["rest-1", "rest-2", "rest-3", "rest-4"];
 export const REST_1_EXTRA_SECONDS = 250;
 
 const playwrightCli = createRequire(import.meta.url).resolve("@playwright/test/cli");
-const nativeOnly = new Set(["booking-hold.spec.js", "booking-email-browser.spec.js", "booking-payment-recovery.spec.js", "booking-coupons.spec.js", "lookup-filters-browser.spec.js"]);
+const nativeOnly = new Set(["booking-hold.spec.js", "booking-email-browser.spec.js", "booking-payment-recovery.spec.js", "booking-coupons.spec.js", "lookup-filters-browser.spec.js", "booking-slot-lifecycle.spec.js"]);
 
 const escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
