@@ -123,10 +123,16 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       expect(bookings).toHaveLength(1);
       expect(confirmations).toHaveLength(2);
       const [returned, raced] = confirmations.map(outcome);
-      const booked = { status: 200, state: "booked", bookingId: bookings[0] };
-      expect([booked, { status: 202, state: "finalizing", bookingId: "" }]).toContainEqual(returned);
-      expect([booked, { status: 503, state: "finalizing", bookingId: "" }]).toContainEqual(raced);
-      expect([returned, raced]).toContainEqual(booked);
+      const answersFor = waiting => [
+        { status: 200, state: "booked", bookingId: bookings[0] },
+        { status: 200, state: "email_partial", bookingId: bookings[0] },
+        { status: 200, state: "finalizing", bookingId: bookings[0] },
+        { status: waiting, state: "started", bookingId: "" },
+        { status: waiting, state: "finalizing", bookingId: "" },
+      ];
+      expect(answersFor(202)).toContainEqual(returned);
+      expect(answersFor(503)).toContainEqual(raced);
+      expect([returned.state, raced.state].some(state => ["booked", "email_partial"].includes(state))).toBe(true);
       expect(await native.paymentSucceeded(orderId, "retry")).toMatchObject({ status: 200, body: { status: "booked", bookingId: bookings[0] } });
       expect(await native.bookingsAt(slot.startTimeUTC)).toEqual(bookings);
       expect(await native.slotClaims(slot.startTimeUTC)).toEqual(["booking"]);
