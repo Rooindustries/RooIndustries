@@ -61,12 +61,14 @@ const inferQueryLimit = (query) => {
 const PUSHED_OPERATORS = { "==": "eq", in: "in", "<": "lt", "<=": "lte", ">": "gt", ">=": "gte" };
 const KEY_PATHS = ["_id", "_type"];
 
-const andList = (node) =>
-  node.type === "And" ? [...andList(node.left), ...andList(node.right)] : [node];
+const andList = (node) => {
+  if (node.type === "Group") return andList(node.base);
+  return node.type === "And" ? [...andList(node.left), ...andList(node.right)] : [node];
+};
 
 const rootConjuncts = (tree) => {
   let conjuncts = [];
-  let node = tree;
+  let node = tree.type === "FuncCall" && tree.name === "count" ? tree.args[0] : tree;
   for (; node && node.type !== "Everything"; node = node.base) {
     if (node.type === "Filter") conjuncts = [...andList(node.expr), ...conjuncts];
     else if (conjuncts.length > 0) return null;
