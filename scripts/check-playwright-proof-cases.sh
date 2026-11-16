@@ -1,19 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+cd "$(dirname "$(realpath "$0")")/.."
 planted=.github/playwright-proof
 real_config="$planted/planted/playwright.config.js"
 real_group=rest-2
 real_name="$real_group-1"
+expected_cases=56
 work="$(mktemp -d)"
 trap 'rm -rf -- "${work:?}"' EXIT
 checked=0
 wrong=0
 
 check_case() {
-  local name="$1" run="$2" expected_exit="$3" phrase="$4" exit_code=0 output
-  output="$(node scripts/compare-playwright-proof.mjs "$run" 2>&1)" || exit_code=$?
+  local name="$1" run="$2" expected_exit="$3" phrase="$4" judge="${5:-scripts/compare-playwright-proof.mjs}"
+  local exit_code=0 output
+  output="$(node "$judge" "$run" 2>&1)" || exit_code=$?
   checked=$((checked + 1))
   if [ "$exit_code" != "$expected_exit" ] || ! grep -qF -- "$phrase" <<< "$output"; then
     wrong=$((wrong + 1))
@@ -31,6 +33,10 @@ for case_dir in "$planted"/cases/*/; do
   check_case "$(basename "$case_dir")" "${case_dir}run" "$expected_exit" "$phrase"
 done
 
+ln -s "$PWD" "$work/linked"
+check_case "the judge started through a symlinked path" "$planted/cases/leg-without-report/run" 2 \
+  "Leg navigation-1: it has no report" "$work/linked/scripts/compare-playwright-proof.mjs"
+
 mkdir -p "$work/real" "$work/cut"
 node scripts/plan-playwright-proof.mjs plan 1 "[{\"group\":\"$real_group\",\"repeat\":1,\"seed\":0}]" \
   .github/playwright-timings.json "$real_config" > "$work/real/plan.json"
@@ -44,6 +50,10 @@ check_case "the real report with one entry removed" "$work/cut" 2 "planned tests
 
 if [ "$wrong" != 0 ]; then
   echo "Planted cases judged wrongly: $wrong of $checked. The proof does not start." >&2
+  exit 1
+fi
+if [ "$checked" != "$expected_cases" ]; then
+  echo "Planted cases checked: $checked, not the $expected_cases this script counts on. The proof does not start." >&2
   exit 1
 fi
 echo "Planted cases judged as expected: all $checked."

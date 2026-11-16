@@ -1,15 +1,16 @@
 import fs from "node:fs";
-import { planProblems } from "./compare-playwright-proof.mjs";
+import { planProblems } from "./lib/playwright-proof.mjs";
 import {
-  FIXED_GROUPS, assignRestGroups, groupPattern, listReport, listSpecFiles, readTimings, reportTests,
+  FIXED_GROUPS, assignRestGroups, groupPattern, groupSpecFiles, listReport, readTimings, reportTests,
 } from "./playwright-groups.mjs";
 
 const USAGE = "usage: plan-playwright-proof.mjs plan <tests at a time> <legs json> <timings file> [<config>]\n" +
   "       plan-playwright-proof.mjs files <plan file> <leg>";
 
 const planLegs = (workers, legs, timingsFile, config) => {
-  const specFiles = listSpecFiles({ config });
-  const listed = Object.groupBy(reportTests(listReport({ config })), ({ id }) => id[0]);
+  const report = listReport({ config });
+  const specFiles = groupSpecFiles(report, config);
+  const listed = Object.groupBy(reportTests(report), ({ id }) => id[0]);
   const timings = readTimings(timingsFile);
   const restGroups = new Map();
   const filesOf = ({ group, seed }) => {

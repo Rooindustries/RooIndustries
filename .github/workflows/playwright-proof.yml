@@ -94,16 +94,16 @@ jobs:
             | ($groups | split(" ") | map(select(. != "")) | unique | if length == 0 then $all else . end) as $chosen
             | ($chosen - $all) as $unknown
             | ($chosen - $known.fixed | length) as $rest
-            | [$chosen[] as $group | range($repeats) | {group: $group, repeat: (. + 1), seed: ($seed + .)}]
+            | (($chosen | length) * $repeats) as $count
             | if ($unknown | length) > 0 then
                 "Unknown browser group \($unknown | join(", ")). The groups are \($all | join(" ")).\n" | halt_error(1)
               elif $repeats > 1 and $rest > 0 and $rest < ($known.rest | length) then
                 "The seed moves rest files between rest groups from one repeat to the next, so only all rest groups"
                 + " together, or none, can be compared across repeats. Select every rest group"
                 + " (\($known.rest | join(" "))), or use one repeat.\n" | halt_error(1)
-              elif length > 256 then
-                "\(length) legs were asked for; a run takes at most 256.\n" | halt_error(1)
-              else . end
+              elif $count > 256 then
+                "\($count) legs were asked for; a run takes at most 256.\n" | halt_error(1)
+              else [$chosen[] as $group | range($repeats) | {group: $group, repeat: (. + 1), seed: ($seed + .)}] end
           ')"
           echo "legs=$legs" >> "$GITHUB_OUTPUT"
       - name: Restore the latest per-file test timings

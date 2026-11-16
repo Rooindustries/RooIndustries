@@ -65,10 +65,12 @@ export const listReport = ({ filter, config } = {}) => {
   }
 };
 
-export const listSpecFiles = (options = {}) => {
-  const files = reportSpecFiles(listReport(options));
-  return options.config ? files : files.filter(file => !nativeOnly.has(file));
+export const groupSpecFiles = (report, config) => {
+  const files = reportSpecFiles(report);
+  return config ? files : files.filter(file => !nativeOnly.has(file));
 };
+
+export const listSpecFiles = (options = {}) => groupSpecFiles(listReport(options), options.config);
 
 export const assignRestGroups = (specFiles, timings, seed = 0) => {
   const fixed = new Set(Object.values(FIXED_GROUPS).flat());
