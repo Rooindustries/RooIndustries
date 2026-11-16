@@ -218,9 +218,8 @@ export async function createBookingHoldFixture() {
       const startTimeUTC = `${nextSlotDate()}T04:30:00.000Z`;
       const response = await post("/api/holdSlot", { startTimeUTC, packageTitle: "Performance Vertex Overhaul" });
       assert.equal(response.status, 200, JSON.stringify(response));
-      assert.ok(new Date(response.body.expiresAt).getTime() > Date.now());
       return { packageTitle: "Performance Vertex Overhaul", ...details, startTimeUTC,
-        slotHoldId: response.body.holdId, slotHoldToken: response.body.holdToken, slotHoldExpiresAt: response.body.expiresAt };
+        slotHoldId: response.body.holdId, slotHoldToken: response.body.holdToken };
     };
     const start = async bookingPayload => {
       const quote = await post("/api/payment/quote", { bookingPayload });

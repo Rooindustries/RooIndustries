@@ -151,6 +151,13 @@ test("historical reconstruction keeps delivered emails and accounting unchanged"
   }
 });
 
+const reserve = async () => {
+  const payload = await fixture.hold();
+  const response = fixture.evidence.http.findLast(entry => entry.path === "/api/holdSlot").response;
+  assert.ok(new Date(response.expiresAt).getTime() > Date.now());
+  return { ...payload, slotHoldExpiresAt: response.expiresAt };
+};
+
 const legacyPayload = payload => ({
   ...payload, packagePrice: "$54.95", status: "captured", paymentProvider: "razorpay",
   razorpayOrderId: "order_fixture", razorpayPaymentId: "payment_fixture",
@@ -162,7 +169,7 @@ const legacyPayload = payload => ({
 });
 
 test("legacy Razorpay booking requires a client signature", async () => {
-  const payload = await fixture.hold();
+  const payload = await reserve();
   const key = process.env.RAZORPAY_KEY_ID;
   const secret = process.env.RAZORPAY_KEY_SECRET;
   const originalFetch = globalThis.fetch;
@@ -185,7 +192,7 @@ test("legacy Razorpay booking requires a client signature", async () => {
 });
 
 test("a legacy Razorpay payment without transaction IDs creates no booking or emails and can be released", async () => {
-  const payload = await fixture.hold();
+  const payload = await reserve();
   const before = fixture.evidence.providerRequests.length;
   const holds = () => fixture.commerce.fetch('*[_type == "slotHold" && _id == $id]', { id: payload.slotHoldId });
   assert.equal((await holds()).length, 1);
@@ -202,7 +209,7 @@ test("a legacy Razorpay payment without transaction IDs creates no booking or em
 });
 
 test("a rejected legacy payment leaves no booking or email and permits release", async () => {
-  const payload = await fixture.hold();
+  const payload = await reserve();
   const before = fixture.evidence.providerRequests.length;
   const key = process.env.RAZORPAY_KEY_ID;
   const secret = process.env.RAZORPAY_KEY_SECRET;
@@ -237,7 +244,7 @@ test("a rejected legacy payment leaves no booking or email and permits release",
 
 for (const missing of [false, true]) {
   test(`a captured legacy payment books after its hold ${missing ? "is deleted" : "expires"}`, async () => {
-    const payload = await fixture.hold();
+    const payload = await reserve();
     const originalFetch = globalThis.fetch;
     const emails = [];
     globalThis.fetch = (input, init) => {
@@ -269,7 +276,7 @@ for (const missing of [false, true]) {
 }
 
 test("one legacy provider proof cannot book two different slots", async () => {
-  const holds = [await fixture.hold(), await fixture.hold()];
+  const holds = [await reserve(), await reserve()];
   const originalFetch = globalThis.fetch;
   const emails = [];
   globalThis.fetch = (input, init) => {
@@ -299,7 +306,7 @@ test("one legacy provider proof cannot book two different slots", async () => {
 });
 
 test("a Razorpay webhook recovers a captured payment after its hold was deleted", async () => {
-  const payload = await fixture.hold();
+  const payload = await reserve();
   const keys = ["RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET", "RAZORPAY_WEBHOOK_SECRET"];
   const saved = Object.fromEntries(keys.map(key => [key, process.env[key]]));
   Object.assign(process.env, { RAZORPAY_KEY_ID: "rzp_test_fixture", RAZORPAY_KEY_SECRET: "fixture-secret",
