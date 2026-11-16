@@ -6,8 +6,6 @@ const path = require('node:path');
 
 const test = base.extend({
   native: [async ({}, use) => {
-    const binaries = [process.env.PG_BIN && path.join(process.env.PG_BIN, 'postgres'), process.env.POSTGREST_BIN];
-    if (!binaries.every(file => file && fs.existsSync(file))) throw new Error('PG_BIN and POSTGREST_BIN must point to the native binaries.');
     const child = fork(require.resolve('./fixtures/booking-coupons.mjs'), [], { execArgv: [], stdio: ['ignore', 'inherit', 'inherit', 'ipc'] });
     const pending = new Map();
     let nextId = 0;
@@ -46,6 +44,8 @@ const test = base.extend({
 
 test.use({ javaScriptEnabled: true, timezoneId: 'Asia/Kolkata', reducedMotion: 'reduce', trace: 'off' });
 test.describe.configure({ retries: 0 });
+const binaries = [process.env.PG_BIN && path.join(process.env.PG_BIN, 'postgres'), process.env.POSTGREST_BIN];
+test.skip(!binaries.every(file => file && fs.existsSync(file)), 'Needs PG_BIN and POSTGREST_BIN for the native PostgreSQL 17 fixture.');
 
 const routeNative = async (context, native, date) => {
   await context.route(/\/api\/(holdSlot|releaseHold|payment\/(quote|start|cancel|status)|ref\/validateCoupon|ref\/validateReferral|bookingAvailability)(?:\?|$)/, async route => {
@@ -126,10 +126,10 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       expect((await native('referral', `referral.${code}`)).successfulReferrals).toBe(1);
     });
 
-    test('two customers racing for the final coupon use create one booking', async ({ page, context, flow, native }) => {
+    for (const first of [0, 1]) test(`two customers racing for the final coupon use: customer ${first + 1} first`, async ({ page, context, flow, native }) => {
       const date = await native('nextDate');
       const otherDate = await native('nextDate');
-      const id = `last${viewport.width}`;
+      const id = `last${viewport.width}${first}`;
       await native('create', coupon(id, id.toUpperCase(), { discountPercent: 100, maxUses: 1 }));
       await routeNative(context, native, date);
       const other = await context.newPage();
@@ -160,14 +160,25 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await other.getByRole('button', { name: 'Continue to payment', exact: true }).click();
         const buttons = [page, other].map(tab => tab.getByRole('button', { name: 'Confirm Free Booking', exact: true }));
         for (const button of buttons) await expect(button).toBeEnabled();
-        await native('armCouponRace');
-        const responses = [page, other].map(tab => tab.waitForResponse(response => new URL(response.url()).pathname === '/api/payment/start'));
-        await Promise.all(buttons.map(button => button.click()));
-        expect((await Promise.all(responses)).map(response => response.status()).sort()).toEqual([200, 409]);
+        await native('lockCommerce');
+        try {
+          const responses = [page, other].map(tab => tab.waitForResponse(response => new URL(response.url()).pathname === '/api/payment/start'));
+          const clicks = [];
+          clicks[first] = buttons[first].click();
+          await expect.poll(() => native('waiting')).toBe(1);
+          clicks[1 - first] = buttons[1 - first].click();
+          await expect.poll(() => native('waiting')).toBe(2);
+          await native('unlockCommerce');
+          await Promise.all(clicks);
+          const statuses = (await Promise.all(responses)).map(response => response.status());
+          expect(statuses[first]).toBe(200);
+          expect(statuses[1 - first]).toBe(409);
+        } finally { await native('unlockCommerce'); }
         const stored = await native('get', `coupon.${id}`);
         expect(stored).toMatchObject({ timesUsed: 1, activeReservations: 0 });
         const bookings = (await native('rows', 'booking')).filter(row => row.couponCode?.toLowerCase() === id);
         expect(bookings).toHaveLength(1);
+        expect(bookings[0].email).toBe(first === 0 ? 'visitor@example.invalid' : 'other@example.invalid');
         const redemptions = (await native('rows', 'couponRedemption')).filter(row => row.coupon?._ref === `coupon.${id}`);
         expect(redemptions).toHaveLength(1);
         expect(redemptions[0].status).toBe('consumed');

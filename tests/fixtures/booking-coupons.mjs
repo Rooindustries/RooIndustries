@@ -8,29 +8,27 @@ for (const name of ['validateCoupon', 'validateReferral']) {
   validations.set(name, (await import(`../../src/server/api/ref/${name}.js`)).default);
 }
 let nextDate = 0;
+let unlock, lockTransaction;
 const methods = {
   nextDate: () => new Date(Date.UTC(2099, 0, ++nextDate)).toISOString().slice(0, 10),
-  armCouponRace: () => {
-    let count = 0;
-    let releaseReads, releaseFinalized;
-    const bothRead = new Promise(resolve => { releaseReads = resolve; });
-    const firstFinalized = new Promise(resolve => { releaseFinalized = resolve; });
-    fixture.setRequestHook(async (stage, request) => {
-      if (stage !== 'after') return;
-      if (request.path === '/rest/v1/rpc/roo_apply_commerce_document_mutations' &&
-          request.body?.p_command_id?.startsWith('booking-finalize:') && request.status === 200) {
-        fixture.setRequestHook(null);
-        releaseFinalized();
-        return;
-      }
-      if (count >= 2 || request.path !== '/rest/v1/rpc/roo_fetch_shadow_documents_targeted' ||
-          request.body?.p_document_types?.length !== 1 || request.body.p_document_types[0] !== 'coupon' ||
-          !request.body.p_filters?.some(filter => filter.path === 'code')) return;
-      const position = ++count;
-      if (count === 2) releaseReads();
-      await bothRead;
-      if (position === 2) await firstFinalized;
+  lockCommerce: async () => {
+    let acquired;
+    const ready = new Promise(resolve => { acquired = resolve; });
+    const release = new Promise(resolve => { unlock = resolve; });
+    lockTransaction = fixture.database.sql.begin(async sql => {
+      await sql`select pg_advisory_xact_lock(hashtextextended('cms-reference-integrity', 0))`;
+      acquired();
+      await release;
     });
+    await Promise.race([ready, lockTransaction]);
+  },
+  waiting: async () => Number((await fixture.database.sql`select count(*) as count from pg_locks
+    where locktype = 'advisory' and not granted`)[0].count),
+  unlockCommerce: async () => {
+    if (unlock) unlock();
+    unlock = null;
+    if (lockTransaction) await lockTransaction;
+    lockTransaction = null;
   },
   availability: () => fixture.availability(),
   hold: () => fixture.hold(),
@@ -65,6 +63,7 @@ const methods = {
 process.on('message', async ({ id, method, args = [] }) => {
   try {
     if (method === 'stop') {
+      await methods.unlockCommerce();
       await fixture.stop();
       process.send({ id, value: true });
       endOwnChannel();
