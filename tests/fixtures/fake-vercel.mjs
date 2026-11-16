@@ -42,6 +42,9 @@ export const startVercel = ({
   dropAcceptedRollback = false,
   promoteAssignPolls = 0,
   forbidTeams = false,
+  invalidateError = null,
+  invalidateDropWithoutApply = false,
+  onInvalidate = () => {},
 } = {}) => {
   const state = structuredClone(fixture);
   tweak?.(state);
@@ -62,14 +65,19 @@ export const startVercel = ({
       try { parsedBody = JSON.parse(rawBody); } catch { parsedBody = rawBody; }
     }
     const url = new URL(req.url, "http://fixture");
-    requests.push({
+    const request = {
+      index: requests.length,
+      at: Date.now(),
       method: req.method,
       path: url.pathname,
       query: Object.fromEntries(url.searchParams),
       auth: req.headers.authorization,
       body: parsedBody,
-    });
+    };
+    requests.push(request);
     const send = (status, body) => {
+      request.status = status;
+      request.response = body === undefined ? undefined : structuredClone(body);
       res.writeHead(status, { "content-type": "application/json" });
       res.end(body === undefined ? "" : JSON.stringify(body));
     };
@@ -102,6 +110,12 @@ export const startVercel = ({
       if (!freezeAlias) state.aliases[DOMAIN].deploymentId = deploymentId;
     };
     let match;
+    if (req.method === "POST" && url.pathname === "/v1/edge-cache/invalidate-by-tags") {
+      if (!owned || url.searchParams.get("projectIdOrName") !== state.project.id || parsedBody.tags !== "_N_T_/layout") return notFound();
+      if (invalidateError) return send(invalidateError.status, { error: { message: invalidateError.message } });
+      if (invalidateDropWithoutApply) return void Promise.resolve(onInvalidate({ applied: false })).then(() => req.socket.destroy());
+      return void Promise.resolve(onInvalidate({ applied: true })).then(() => send(200, {}));
+    }
     if (req.method === "GET" && url.pathname === "/v2/teams") {
       if (forbidTeams) return send(403, { error: { code: "forbidden", message: "You don't have permission to list the team" } });
       return send(200, { teams: state.teams, pagination: { count: state.teams.length, next: null, prev: null } });
