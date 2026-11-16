@@ -9,6 +9,10 @@ if (control) {
   http.Server.prototype.emit = function (event, request, ...rest) {
     if (event !== "request") return emit.call(this, event, request, ...rest);
     const trace = request?.headers?.["x-roo-test-trace"];
+    const testControls = (globalThis[Symbol.for("roo.test.controls")] ||= { hangContentPurge: false, hangPageMark: false, storeDelayMs: 0 });
+    if (request?.headers?.["x-roo-test-hang-content-purge"] === "1") testControls.hangContentPurge = true;
+    if (request?.headers?.["x-roo-test-hang-page-mark"] === "1") testControls.hangPageMark = true;
+    if (/^\d+$/.test(request?.headers?.["x-roo-test-delay-page-store"] || "")) testControls.storeDelayMs = Number(request.headers["x-roo-test-delay-page-store"]);
     return traces.run(typeof trace === "string" ? trace : null, () => emit.call(this, event, request, ...rest));
   };
 
@@ -70,8 +74,11 @@ if (control) {
 
   const marks = (globalThis[Symbol.for("roo.test.pageMarks")] ||= { at: 0 });
   const record = (operation) => async (target, options) => {
+    const testControls = globalThis[Symbol.for("roo.test.controls")];
+    if (testControls?.hangPageMark && [target].flat().includes("_N_T_/layout")) await new Promise(() => {});
     if (operation === "invalidateByTag" && [target].flat().includes("_N_T_/layout")) marks.at = Date.now();
     await report("/purges", { operation, target, options: options ?? null, trace: traces.getStore() ?? null });
+    if (testControls?.hangContentPurge && [target].flat().includes("public-content")) await new Promise(() => {});
   };
   const purge = {
     invalidateByTag: record("invalidateByTag"),

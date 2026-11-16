@@ -50,6 +50,21 @@ const storeHolds = [];
 const purges = [];
 const pageRefusals = [];
 const keptAlive = [];
+const pageWrites = [];
+const eventWaiters = new Set();
+const notifyEvents = () => { for (const waiter of eventWaiters) waiter(); };
+const waitForEvent = (response, ready) => {
+  const finish = () => {
+    const value = ready();
+    if (!value) return;
+    eventWaiters.delete(finish);
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(JSON.stringify(value));
+  };
+  eventWaiters.add(finish);
+  response.once("close", () => eventWaiters.delete(finish));
+  finish();
+};
 const readJson = async request => {
   let raw = "";
   for await (const chunk of request) raw += chunk;
@@ -199,7 +214,30 @@ try {
     }
     if (request.method === "POST" && ["/purges", "/kept-alive"].includes(request.url)) {
       (request.url === "/purges" ? purges : keptAlive).push(await readJson(request));
+      notifyEvents();
       response.writeHead(200, { "Content-Type": "application/json" }); response.end("{}"); return;
+    }
+    if (request.method === "POST" && request.url === "/test-page-write") {
+      pageWrites.push(await readJson(request));
+      notifyEvents();
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end("{}"); return;
+    }
+    if (request.method === "GET" && request.url === "/test-page-writes") {
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(pageWrites)); return;
+    }
+    if (request.method === "GET" && request.url.startsWith("/await-test-event?")) {
+      const query = new URL(request.url, controlOrigin).searchParams;
+      const kind = query.get("kind");
+      const trace = query.get("trace");
+      const key = query.get("key");
+      const count = Number(query.get("count"));
+      waitForEvent(response, () => {
+        const events = kind === "purge" ? purges.filter(event => event.trace === trace && event.operation === "invalidateByTag" && event.target === "_N_T_/layout")
+          : kind === "hold" ? storeHolds.filter(event => event.trace === trace)
+            : pageWrites.filter(event => event.key === key);
+        return events.length >= count ? { count: events.length } : null;
+      });
+      return;
     }
     if (request.method === "GET" && request.url === "/purges") {
       response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(purges)); return;
@@ -222,7 +260,7 @@ try {
     }
     if (request.method === "POST" && request.url === "/store-holds") {
       const hold = await readJson(request);
-      await new Promise(resolve => storeHolds.push({ ...hold, release: resolve }));
+      await new Promise(resolve => { storeHolds.push({ ...hold, release: resolve }); notifyEvents(); });
       response.writeHead(200, { "Content-Type": "application/json" }); response.end("{}"); return;
     }
     if (request.method === "GET" && request.url.startsWith("/store-holds?")) {
@@ -274,6 +312,14 @@ try {
       const updated = await fixture.sql`update migration.cms_publish_commands set status='processing',result=null,committed_at=null
         where operation='create' and status='committed' and result->'document_ids' ? ${documentId} returning command_id`;
       response.writeHead(updated.length === 1 ? 200 : 500); response.end(String(updated.length)); return;
+    }
+    if (request.method === "POST" && request.url === "/remove-content-document") {
+      const { id } = await readJson(request);
+      await fixture.sql.begin(async sql => {
+        await sql`delete from cms.documents where legacy_sanity_id=${id}`;
+        await sql`delete from migration.source_documents where legacy_sanity_id=${id}`;
+      });
+      response.writeHead(200); response.end("ok"); return;
     }
     if (request.method === "POST" && request.url === "/faq-create-fixture/legacy") {
       await fixture.sql.begin(async sql => {
