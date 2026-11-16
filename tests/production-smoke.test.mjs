@@ -248,6 +248,27 @@ const withGate = async ({ site: siteOverrides, vercel: vercelOptions } = {}, bod
 const vercelChanges = vercel => vercel.requests.filter(request => request.method !== "GET" && request.path !== "/v1/edge-cache/invalidate-by-tags");
 const invalidations = vercel => vercel.requests.filter(request => request.path === "/v1/edge-cache/invalidate-by-tags");
 const rebuildMessage = reason => `The page rebuild did not run: ${reason}. Production has moved: see the lines above, or run \`npm run deploy:rollback -- --status\`, for what it serves. Its pages can be stale until their timer expires (at most an hour). Finish with: npm run deploy:rollback -- --rebuild-pages`;
+const expectRebuildMessage = (output, reason, annotated = false) => {
+  const lines = output.split("\n").filter(line => line.startsWith("The page rebuild did not run:") || line.startsWith("::error::The page rebuild did not run:"));
+  const expected = rebuildMessage(reason);
+  assert.deepEqual(lines.sort(), (annotated ? [expected, `::error::${expected}`] : [expected]).sort());
+  for (const line of lines) {
+    assert.doesNotMatch(line, /\bdpl_[a-zA-Z0-9]+\b|https?:\/\/\S+|\b[a-zA-Z0-9.-]+\.vercel\.app\b/);
+    assert.ok(line.endsWith("npm run deploy:rollback -- --rebuild-pages"));
+  }
+};
+const expectSuccess = output => {
+  const lines = output.split("\n").filter(line => line.startsWith("Production pages marked stale"));
+  assert.deepEqual(lines, ["Production pages marked stale; each rebuilds on its next visit."]);
+  assert.doesNotMatch(lines[0], /\bdpl_[a-zA-Z0-9]+\b|https?:\/\/\S+|\b[a-zA-Z0-9.-]+\.vercel\.app\b/);
+};
+const expectMovedWithoutRebuild = (output, annotated = false) => {
+  const lines = output.split("\n").filter(line => line.startsWith("error: The money-path smoke failed, production was rolled back") || line.startsWith("::error::The money-path smoke failed, production was rolled back"));
+  const prefix = annotated ? "::error::" : "error: ";
+  assert.deepEqual(lines, [`${prefix}The money-path smoke failed, production was rolled back, but the page rebuild did not run.`]);
+  assert.doesNotMatch(lines[0], /\bdpl_[a-zA-Z0-9]+\b|https?:\/\/\S+|\b[a-zA-Z0-9.-]+\.vercel\.app\b/);
+  assert.doesNotMatch(output, /automatic rollback did not run/);
+};
 const expectInvalidate = request => {
   assert.equal(request.method, "POST");
   assert.deepEqual(request.query, { projectIdOrName: "prj_rooFixture", teamId: "team_rooFixture" });
@@ -262,7 +283,7 @@ test("deploy gate: a passing smoke marks pages stale once after its last request
   assert.equal(vercelChanges(vercel).length, 0);
   assert.ok(smokeRequestsAtInvalidation() > 0);
   assert.equal(smokeRequestsAtInvalidation(), site.requests.length);
-  assert.match(result.output, /Production pages marked stale; each rebuilds on its next visit\./);
+  expectSuccess(result.output);
 }));
 
 test("deploy gate: a passing smoke fails on an invalidation error without rolling back", () => withGate({ vercel: { invalidateError: { status: 503, message: "cache unavailable" } } }, async ({ vercel, exec }) => {
@@ -271,7 +292,7 @@ test("deploy gate: a passing smoke fails on an invalidation error without rollin
   assert.equal(invalidations(vercel).length, 1);
   expectInvalidate(invalidations(vercel)[0]);
   assert.equal(vercelChanges(vercel).length, 0);
-  assert.ok(result.output.includes(rebuildMessage("Vercel answered 503: cache unavailable")));
+  expectRebuildMessage(result.output, "Vercel answered 503: cache unavailable");
 }));
 
 for (const failed of [false, true]) {
@@ -279,17 +300,45 @@ for (const failed of [false, true]) {
     site: { status: { "/payment": 500 } },
     vercel: failed ? { invalidateError: { status: 503, message: "cache unavailable" } } : {},
   }, async ({ vercel, exec }) => {
-    const result = await exec();
+    const result = await exec(failed ? { GITHUB_ACTIONS: "true" } : {});
     assert.equal(result.code, 1, result.output);
     assert.equal(vercelChanges(vercel).length, 1);
     assert.match(vercelChanges(vercel)[0].path, /\/rollback\/dpl_previous$/);
     assert.equal(invalidations(vercel).length, 1);
     expectInvalidate(invalidations(vercel)[0]);
     assert.ok(invalidations(vercel)[0].index > vercelChanges(vercel)[0].index);
-    if (failed) assert.equal(result.output.split(rebuildMessage("Vercel answered 503: cache unavailable")).length - 1, 1);
-    else assert.match(result.output, /so production was rolled back\. Fix forward/);
+    if (failed) {
+      expectRebuildMessage(result.output, "Vercel answered 503: cache unavailable", true);
+      expectMovedWithoutRebuild(result.output, true);
+    } else assert.ok(result.output.split("\n").includes(`error: The money-path smoke failed on ${LIVE_URL}, so production was rolled back. Fix forward, then run npm run deploy:rollback -- --undo so new deployments go live again.`));
   }));
 }
+
+test("deploy gate: a rollback followed by a lost rebuild answer reports the move", () => withGate({
+  site: { status: { "/payment": 500 } },
+  vercel: { invalidateDropWithoutApply: true },
+}, async ({ vercel, exec }) => {
+  const result = await exec();
+  assert.equal(result.code, 1, result.output);
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_previous");
+  assert.equal(vercelChanges(vercel).length, 1);
+  assert.equal(invalidations(vercel).length, 1);
+  expectRebuildMessage(result.output, "the call got no answer (fetch failed), so whether Vercel applied it is unknown");
+  expectMovedWithoutRebuild(result.output);
+}));
+
+test("deploy gate: a rejected rollback keeps the existing failure message", () => withGate({
+  site: { status: { "/payment": 500 } },
+  vercel: { rollbackError: { status: 400, message: "rollback rejected" } },
+}, async ({ vercel, exec }) => {
+  const result = await exec();
+  assert.equal(result.code, 1, result.output);
+  assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_live");
+  assert.equal(vercelChanges(vercel).length, 1);
+  assert.equal(invalidations(vercel).length, 1);
+  assert.ok(result.output.split("\n").includes(`error: The money-path smoke failed on ${LIVE_URL} and the automatic rollback did not run (see above).`));
+  assert.doesNotMatch(result.output, /production was rolled back, but the page rebuild did not run/);
+}));
 
 test("deploy gate: a failed smoke on another deployment still marks pages stale", () => withGate({ site: { status: { "/payment": 500 } } }, async ({ vercel, exec }) => {
   const result = await exec({ DEPLOYMENT_URL: PREVIOUS_URL });
@@ -465,7 +514,7 @@ test("deploy gate: without VERCEL_TOKEN a healthy smoke reports that the rebuild
   const result = await exec({ VERCEL_TOKEN: undefined });
   assert.equal(result.code, 1, result.output);
   assert.match(result.output, /warning: VERCEL_TOKEN is not set/);
-  assert.ok(result.output.includes(rebuildMessage("VERCEL_TOKEN is not set")));
+  expectRebuildMessage(result.output, "VERCEL_TOKEN is not set");
   assert.deepEqual(vercel.requests, []);
 }));
 
@@ -473,7 +522,7 @@ test("deploy gate: without VERCEL_TOKEN a failure is reported but nothing is rol
   const result = await exec({ VERCEL_TOKEN: undefined });
   assert.equal(result.code, 1, result.output);
   assert.match(result.output, /not rolled back/);
-  assert.ok(result.output.includes(rebuildMessage("VERCEL_TOKEN is not set")));
+  expectRebuildMessage(result.output, "VERCEL_TOKEN is not set");
   assert.deepEqual(vercel.requests, []);
 }));
 

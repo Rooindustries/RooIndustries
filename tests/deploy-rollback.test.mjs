@@ -38,6 +38,20 @@ const withVercel = async (options, body) => {
 const mutations = requests => requests.filter(request => request.method !== "GET");
 const invalidations = requests => requests.filter(request => request.path === "/v1/edge-cache/invalidate-by-tags");
 const rebuildMessage = reason => `The page rebuild did not run: ${reason}. Production has moved: see the lines above, or run \`npm run deploy:rollback -- --status\`, for what it serves. Its pages can be stale until their timer expires (at most an hour). Finish with: npm run deploy:rollback -- --rebuild-pages`;
+const expectRebuildMessage = (output, reason, annotated = false) => {
+  const lines = output.split("\n").filter(line => line.startsWith("The page rebuild did not run:") || line.startsWith("::error::The page rebuild did not run:"));
+  const expected = rebuildMessage(reason);
+  assert.deepEqual(lines.sort(), (annotated ? [expected, `::error::${expected}`] : [expected]).sort());
+  for (const line of lines) {
+    assert.doesNotMatch(line, /\bdpl_[a-zA-Z0-9]+\b|https?:\/\/\S+|\b[a-zA-Z0-9.-]+\.vercel\.app\b/);
+    assert.ok(line.endsWith("npm run deploy:rollback -- --rebuild-pages"));
+  }
+};
+const expectSuccess = output => {
+  const lines = output.split("\n").filter(line => line.startsWith("Production pages marked stale"));
+  assert.deepEqual(lines, ["Production pages marked stale; each rebuilds on its next visit."]);
+  assert.doesNotMatch(lines[0], /\bdpl_[a-zA-Z0-9]+\b|https?:\/\/\S+|\b[a-zA-Z0-9.-]+\.vercel\.app\b/);
+};
 const expectInvalidate = request => {
   assert.equal(request.method, "POST");
   assert.deepEqual(request.query, { projectIdOrName: PROJECT_ID, teamId: TEAM_ID });
@@ -56,7 +70,7 @@ for (const undo of [false, true]) {
     expectInvalidate(changes[1]);
     const alias = vercel.requests.find(request => request.index > changes[0].index && request.index < changes[1].index && request.path === `/v4/aliases/${DOMAIN}` && request.response?.deploymentId === (undo ? "dpl_live" : "dpl_previous"));
     assert.ok(alias, "the target alias must be confirmed before invalidation");
-    assert.match(result.output, /Production pages marked stale; each rebuilds on its next visit\./);
+    expectSuccess(result.output);
     assert.ok(result.output.indexOf("now serves") < result.output.indexOf("Production pages marked stale"));
   }));
 }
@@ -71,8 +85,7 @@ for (const undo of [false, true]) {
     assert.equal(vercel.state.aliases[DOMAIN].deploymentId, undo ? "dpl_live" : "dpl_previous");
     assert.equal(invalidations(vercel.requests).length, 1);
     expectInvalidate(invalidations(vercel.requests)[0]);
-    assert.ok(result.output.includes(rebuildMessage("Vercel answered 503: cache unavailable")));
-    assert.ok(result.output.includes(`::error::${rebuildMessage("Vercel answered 503: cache unavailable")}`));
+    expectRebuildMessage(result.output, "Vercel answered 503: cache unavailable", true);
   }));
 }
 
@@ -81,7 +94,7 @@ test("rollback reports a lost invalidation answer after the confirmed move", () 
   assert.equal(result.code, 3, result.output);
   assert.equal(vercel.state.aliases[DOMAIN].deploymentId, "dpl_previous");
   assert.equal(invalidations(vercel.requests).length, 1);
-  assert.ok(result.output.includes(rebuildMessage("the call got no answer (fetch failed), so whether Vercel applied it is unknown")));
+  expectRebuildMessage(result.output, "the call got no answer (fetch failed), so whether Vercel applied it is unknown");
 }));
 
 for (const [label, options, code, reason] of [
@@ -94,8 +107,8 @@ for (const [label, options, code, reason] of [
     assert.equal(result.code, code, result.output);
     assert.equal(vercel.requests.length, 1);
     expectInvalidate(vercel.requests[0]);
-    if (reason) assert.ok(result.output.includes(rebuildMessage(reason)));
-    else assert.match(result.output, /Production pages marked stale; each rebuilds on its next visit\./);
+    if (reason) expectRebuildMessage(result.output, reason);
+    else expectSuccess(result.output);
   }));
 }
 
@@ -103,7 +116,7 @@ for (const [missing, reason] of [["VERCEL_TOKEN", "VERCEL_TOKEN is not set"], ["
   test(`rebuild-pages refuses missing ${missing} without a request`, () => withVercel({}, async (vercel, exec) => {
     const result = await exec(["--rebuild-pages"], { CI: "true", VERCEL_TEAM_ID: TEAM_ID, VERCEL_PROJECT_ID: PROJECT_ID, [missing]: undefined });
     assert.equal(result.code, 1, result.output);
-    assert.ok(result.output.includes(rebuildMessage(reason)));
+    expectRebuildMessage(result.output, reason);
     assert.deepEqual(vercel.requests, []);
   }));
 }
@@ -112,7 +125,7 @@ for (const action of [["--undo"], ["--status"], ["--dry-run"], ["--if-live", LIV
   test(`rebuild-pages refuses ${action[0]} without a request`, () => withVercel({}, async (vercel, exec) => {
     const result = await exec(["--rebuild-pages", ...action]);
     assert.equal(result.code, 1, result.output);
-    assert.match(result.output, /--rebuild-pages can't be combined with other actions\./);
+    assert.equal(result.output.trim(), "Refusing: --rebuild-pages can't be combined with other actions.");
     assert.deepEqual(vercel.requests, []);
   }));
 }

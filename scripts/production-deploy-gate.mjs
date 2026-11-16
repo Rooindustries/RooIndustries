@@ -87,9 +87,13 @@ const main = async () => {
     annotate("error", `The money-path smoke failed on ${deploymentUrl}. The rollback was sent, but production was not confirmed on the previous deployment (see above).`);
     return { code: 1 };
   }
+  if (rollback.code === 3) {
+    annotate("error", "The money-path smoke failed, production was rolled back, but the page rebuild did not run.");
+    return { code: 1, rebuildHandled: true };
+  }
   if (rollback.code !== 0) {
     annotate("error", `The money-path smoke failed on ${deploymentUrl} and the automatic rollback did not run (see above).`);
-    return { code: 1, rebuildHandled: rollback.code === 3 };
+    return { code: 1 };
   }
   annotate("error", `The money-path smoke failed on ${deploymentUrl}, so production was rolled back. Fix forward, then run npm run deploy:rollback -- --undo so new deployments go live again.`);
   return { code: 1, rebuildHandled: true };
