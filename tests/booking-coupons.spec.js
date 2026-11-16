@@ -71,6 +71,17 @@ const coupon = (id, code, fields = {}) => ({ _id: `coupon.${id}`, _type: 'coupon
 const referral = (id, code, fields = {}) => ({ _id: `referral.${id}`, _type: 'referral',
   slug: { _type: 'slug', current: code }, registrationStatus: 'active',
   currentCommissionPercent: 20, currentDiscountPercent: 10, successfulReferrals: 0, ...fields });
+const REFERRAL_DISCOUNT = '5.50';
+const behindCodelessReferral = async (native, id, run) => {
+  const code = `realcode${id}`;
+  const docs = [referral(`aaa-${id}`, null, { slug: null }), referral(`zzz-${id}`, code, { registrationStatus: undefined })];
+  for (const doc of docs) await native('create', doc);
+  try { await run(code, docs[1]._id); } finally { await native('remove', docs.map(doc => doc._id)); }
+};
+const paymentCode = (page, name) => {
+  const input = page.getByRole('textbox', { name, exact: true });
+  return { input, apply: input.locator('..').getByRole('button', { name: 'Apply', exact: true }) };
+};
 
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
   test.describe(`${viewport.width}px`, () => {
@@ -183,6 +194,56 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         expect(redemptions).toHaveLength(1);
         expect(redemptions[0].status).toBe('consumed');
       } finally { await other.close(); }
+    });
+
+    test('a creator link keeps its discount and credit behind a referral that has no code', async ({ page, context, flow, native }) => {
+      const date = await native('nextDate');
+      const id = `link${viewport.width}`;
+      await native('create', coupon(id, id.toUpperCase(), { canCombineWithReferral: false }));
+      await behindCodelessReferral(native, id, async (code, referralId) => {
+        await routeNative(context, native, date);
+        await page.goto(`/?ref=${code}`);
+        await expect.poll(() => page.evaluate(() => sessionStorage.getItem('referral_session'))).toBe(code);
+        await page.locator('.ri-package-card').filter({ has: page.getByRole('heading', { name: 'Performance Vertex Overhaul', exact: true }) })
+          .locator('.ri-package-book-button').click();
+        await page.getByRole('button', { name: /^Earliest available:/ }).click();
+        await page.getByRole('button', { name: '10:00 AM', exact: true }).click();
+        await page.getByRole('button', { name: 'Next', exact: true }).last().click();
+        await flow.details();
+        await page.getByRole('button', { name: 'Review before payment', exact: true }).click();
+        await expect(page.getByRole('button', { name: `Remove referral code ${code}`, exact: true })).toBeVisible();
+        await flow.payment();
+        await expect(page.getByText(`${code} · −$${REFERRAL_DISCOUNT}`, { exact: true })).toBeVisible();
+        const couponCode = paymentCode(page, 'Coupon Code (optional)');
+        await couponCode.input.fill(id);
+        await couponCode.apply.click();
+        await expect(page.locator('#payment-coupon-code-error')).toHaveText(
+          "This coupon can't be used together with a referral discount. Remove the referral or use a different coupon.");
+        await page.getByRole('button', { name: 'Pay your way', exact: true }).click();
+        await expect(page.getByRole('heading', { name: 'Checkout', exact: true })).toBeVisible();
+        const record = (await native('rows', 'paymentRecord')).find(row => row.bookingPayload?.referralCode === code);
+        expect(record).toBeTruthy();
+        expect((await native('webhook', `payment_${record.providerOrderId}`, 'payment.succeeded', `paid_${id}`)).status).toBe(200);
+        const bookings = (await native('rows', 'booking')).filter(row => row.referralCode === code);
+        expect(bookings).toHaveLength(1);
+        expect(bookings[0]).toMatchObject({ grossAmount: 54.95, discountPercent: 10.01, discountAmount: 5.5, netAmount: 49.45,
+          commissionPercent: 20, commissionAmount: 10.99 });
+        expect(bookings[0]).not.toHaveProperty('couponCode');
+        expect((await native('referral', referralId)).successfulReferrals).toBe(1);
+      });
+    });
+
+    test('a referral code typed on the payment page keeps its discount behind a referral that has no code', async ({ page, context, flow, native }) => {
+      const date = await native('nextDate');
+      await behindCodelessReferral(native, `typed${viewport.width}`, async code => {
+        await routeNative(context, native, date);
+        await flow.review('/booking?package=overhaul');
+        await flow.payment();
+        const referralCode = paymentCode(page, 'Referral Code (optional)');
+        await referralCode.input.fill(code);
+        await referralCode.apply.click();
+        await expect(page.getByText(`${code} · −$${REFERRAL_DISCOUNT}`, { exact: true })).toBeVisible();
+      });
     });
 
     test('a refund restores capacity but preserves a later manual disable', async ({ page, context, flow, native }) => {
