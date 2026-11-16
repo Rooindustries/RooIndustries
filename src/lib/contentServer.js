@@ -25,10 +25,11 @@ const createPublicContentFetcher = async ({ confirmed = false } = {}) => {
   };
 };
 
-let refusalReported = false;
-let refusalGeneration = 0;
-const contentConfirmed = (value, generation) => {
-  if (generation === refusalGeneration) refusalReported = false;
+const refusals = new Map();
+const REFUSAL_MEMORY_MS = 10 * 60 * 1000;
+const refusalMark = (key) => refusals.get(key);
+const contentConfirmed = (key, mark, value) => {
+  if (refusals.get(key) === mark) refusals.delete(key);
   return value;
 };
 
@@ -51,25 +52,32 @@ async function fetchFaqQuestions() {
   }
 }
 
-const refuseContentFallback = async (error) => {
-  if (!refusalReported) {
-    refusalReported = true;
-    refusalGeneration += 1;
+const refuseContentFallback = async (key, message, error) => {
+  const now = Date.now();
+  for (const [refused, entry] of refusals) if (now - entry.at > REFUSAL_MEMORY_MS) refusals.delete(refused);
+  const ongoing = refusals.size > 0;
+  refusals.set(key, { at: now });
+  if (!ongoing) {
     const { logSafeError } = await import("../server/safeErrorLog.js");
-    logSafeError("Page content unavailable; keeping the previous page", error);
+    logSafeError(message, error);
   }
   throw error;
 };
 
+const HOME_RESOURCES = ["hero", "reviews", "about", "services", "packages-list", "packages-settings", "how-it-works", "supported-games", "faq-settings", "faq-questions", "referral-box"];
+
 async function fetchHomePageData({
   requireContent = false,
+  requiredResources = HOME_RESOURCES,
+  page = "/",
 } = {}) {
-  const generation = refusalGeneration;
+  const mark = refusalMark(page);
+  const refuse = (error) => refuseContentFallback(page, page === "/" ? "Home content unavailable; keeping the previous page" : "Page content unavailable; keeping the previous page", error);
   let fetchContent;
   try {
     fetchContent = await createPublicContentFetcher({ confirmed: requireContent });
   } catch (error) {
-    if (requireContent) await refuseContentFallback(error);
+    if (requireContent) await refuse(error);
     console.warn("[content] home fetch failed");
     fetchContent = async () => null;
   }
@@ -110,12 +118,11 @@ async function fetchHomePageData({
     safeFetch("faq-questions", []),
     safeFetch("referral-box", null),
   ]);
-  if (requireContent && failed.size > 0) {
-    await refuseContentFallback(
-      Object.assign(new Error("Page content is unavailable."), { code: "PAGE_CONTENT_UNAVAILABLE", resources: [...failed] })
-    );
+  const missingResources = requiredResources.filter((resource) => failed.has(resource));
+  if (requireContent && missingResources.length > 0) {
+    await refuse(Object.assign(new Error("Page content is unavailable."), { code: "PAGE_CONTENT_UNAVAILABLE", resources: missingResources }));
   }
-  if (requireContent) contentConfirmed(undefined, generation);
+  if (requireContent) contentConfirmed(page, mark);
 
   return applyHomePageCopyOverrides({
     hero: resolveHeroCopy(hero),
@@ -182,51 +189,52 @@ async function fetchPrivacyPolicy() {
 }
 
 async function fetchStaticPageContent(resource, { requireContent = false, confirmed = requireContent } = {}) {
-  const generation = refusalGeneration;
+  const mark = refusalMark(resource);
   try {
     const fetchContent = await createPublicContentFetcher({ confirmed });
     const content = await fetchContent(resource);
     if (requireContent && content == null) {
       throw Object.assign(new Error(`No published ${resource} document.`), { code: "PAGE_CONTENT_MISSING" });
     }
-    return requireContent ? contentConfirmed(content, generation) : content;
+    return requireContent ? contentConfirmed(resource, mark, content) : content;
   } catch (error) {
-    if (requireContent) await refuseContentFallback(error);
+    if (requireContent) await refuseContentFallback(resource, "Page content unavailable; keeping the previous page", error);
     return null;
   }
 }
 
-async function fetchContentList(resource, { requireContent = false } = {}) {
-  const generation = refusalGeneration;
+async function fetchContentList(resource, label, { requireContent = false } = {}) {
+  const mark = refusalMark(resource);
   try {
     const fetchContent = await createPublicContentFetcher({ confirmed: requireContent });
     const rows = await fetchContent(resource);
     const content = Array.isArray(rows) ? rows : [];
-    return requireContent ? contentConfirmed(content, generation) : content;
+    return requireContent ? contentConfirmed(resource, mark, content) : content;
   } catch (error) {
-    if (requireContent) await refuseContentFallback(error);
+    if (requireContent) await refuseContentFallback(resource, `${label} content unavailable; keeping the previous page`, error);
     return null;
   }
 }
 
-const fetchBenchmarks = (options) => fetchContentList("benchmarks", options);
+const fetchBenchmarks = (options) => fetchContentList("benchmarks", "Benchmarks", options);
 
-const fetchReviewsGallery = (options) => fetchContentList("reviews-gallery", options);
+const fetchReviewsGallery = (options) => fetchContentList("reviews-gallery", "Reviews", options);
 
 async function fetchPackagesPageData({ requireContent = false } = {}) {
-  const generation = refusalGeneration;
+  const mark = refusalMark("/packages");
+  const refuse = (error) => refuseContentFallback("/packages", "Packages content unavailable; keeping the previous page", error);
   let fetchContent;
   try {
     fetchContent = await createPublicContentFetcher({ confirmed: requireContent });
   } catch (error) {
-    if (requireContent) await refuseContentFallback(error);
+    if (requireContent) await refuse(error);
     return { packagesList: null, packagesSettings: null };
   }
   const read = async (resource) => {
     try {
       return await fetchContent(resource);
     } catch (error) {
-      if (requireContent) await refuseContentFallback(error);
+      if (requireContent) await refuse(error);
       return null;
     }
   };
@@ -234,7 +242,7 @@ async function fetchPackagesPageData({ requireContent = false } = {}) {
     read("packages-list"),
     read("packages-settings"),
   ]);
-  if (requireContent) contentConfirmed(undefined, generation);
+  if (requireContent) contentConfirmed("/packages", mark);
   return { packagesList, packagesSettings };
 }
 
