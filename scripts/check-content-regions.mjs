@@ -7,6 +7,7 @@ const { functions } = config;
 assert.deepEqual(config.regions, ["dub1"], "Default function region must be dub1");
 assert.deepEqual(functions["app/api/downloads/file/route.js"]?.regions, ["iad1"], "File download region must be iad1");
 assert.equal(functions["app/api/admin/content/publish/route.js"]?.maxDuration, 90, "Content publish must allow its final refresh");
+assert.ok(Object.keys(functions).indexOf("app/api/admin/content/publish/route.js") < Object.keys(functions).indexOf("app/api/admin/content/**/*"), "The publish route must come before the content glob because the first matching entry decides the function's settings");
 for (const pattern of [
   "app/api/admin/content/**/*",
   "app/api/admin/referral-creators/route.js",
