@@ -26,6 +26,11 @@ const png = async (width, height) => ({
   mimeType: "image/png",
   buffer: await sharp(noisyPixels(width, height), { raw: { width, height, channels: 3 } }).png().toBuffer(),
 });
+const rotatedPhoto = async (width, height) => ({
+  name: "photo.jpg",
+  mimeType: "image/jpeg",
+  buffer: await sharp(noisyPixels(height, width), { raw: { width: height, height: width, channels: 3 } }).jpeg().withMetadata({ orientation: 6 }).toBuffer(),
+});
 const animatedGif = async (width, height) => ({
   name: "clip.gif",
   mimeType: "image/gif",
@@ -107,7 +112,7 @@ const expectSizes = async (request, file, original) => {
     expect(found[width]).toMatchObject({ contentType: "image/webp", cacheControl: ONE_YEAR, format: "webp", width });
     expect(Math.abs(found[width].height - (original.height * width) / original.width)).toBeLessThan(1);
   }
-  const record = await registered(request, `image-${sha1}-${original.width}x${original.height}-png`);
+  const record = await registered(request, `image-${sha1}-${original.width}x${original.height}-${file.name.split(".").pop()}`);
   expect(record.assets).toBe(1);
   expect(record.document.metadata.sizes).toEqual(widths);
   expect(record.document.metadata.dimensions).toMatchObject(original);
@@ -192,6 +197,21 @@ test("an upload that fails late leaves the sizes another upload of the same byte
     await request.post(`${adminControl()}/storage-release`);
     expect((await failures(request, [])).ok()).toBe(true);
   }
+});
+
+test("a photo turned on its side by its camera gets sizes as wide as browsers show it", async ({ page, request }) => {
+  const shown = { width: 600, height: 1000 };
+  const file = await rotatedPhoto(shown.width, shown.height);
+  expect(await sharp(file.buffer).metadata()).toMatchObject({ width: 1000, height: 600, orientation: 6 });
+  const asset = await openReviewImage(page);
+  expect((await upload(page, asset, file)).ok).toBe(true);
+  await expect(asset).toContainText("600×1000");
+  const preview = asset.locator("img");
+  await expect(preview).toHaveJSProperty("complete", true);
+  expect(await preview.evaluate(image => ({ width: image.naturalWidth, height: image.naturalHeight }))).toEqual(shown);
+  const found = await expectSizes(request, file, shown);
+  expect(Object.keys(found).map(Number)).toEqual([128, 320, 600]);
+  expect(found[600]).toMatchObject({ width: 600, height: 1000 });
 });
 
 test("a vector image and an animated image are stored as before and record no sizes", async ({ page, request }) => {
