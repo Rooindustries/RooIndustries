@@ -6,6 +6,7 @@ const PACKAGE = "tooling-package-0";
 const PACKAGES = "/api/content/packages-list";
 const NO_STORE = "no-store, max-age=0";
 const CONTENT_PURGE = { operation: "dangerouslyDeleteByTag", target: "public-content", options: null };
+const PAGE_MARK = { operation: "invalidateByTag", target: "_N_T_/layout", options: null };
 
 const priceOf = async (response) =>
   (await response.json()).data.find((row) => row._id === PACKAGE)?.price;
@@ -28,7 +29,7 @@ const expectPurges = (gate, count) =>
   expect.poll(async () => (await gate.admin.purges()).map(({ trace, ...purge }) => purge), {
     timeout: 20000,
     intervals: [250, 500, 1000],
-  }).toEqual(Array(count).fill(CONTENT_PURGE));
+  }).toEqual(Array(count).fill([CONTENT_PURGE, PAGE_MARK]).flat());
 
 const couponTerms = async (request, coupon, packageTitle) => {
   const query = new URLSearchParams({ code: coupon.document.code, packageTitle });
@@ -125,9 +126,9 @@ test("a failed publish keeps the CDN copy and the last good server copy while th
   await down.rules([{ rpc: ".", action: "fail" }]);
   const attempt = await down.cms("/api/admin/content/publish", gate.replaceCommand(original, { price: "$404.04" }));
   expect(attempt.status).toBe(503);
-  await expect.poll(() => down.purges(), { timeout: 10000 }).toHaveLength(1);
+  await expect.poll(() => down.purges(), { timeout: 10000 }).toHaveLength(2);
   await new Promise((resolve) => setTimeout(resolve, 6000));
-  expect((await down.purges()).map(({ operation }) => operation)).toEqual(["invalidateByTag"]);
+  expect((await down.purges()).map(({ operation }) => operation)).toEqual(["invalidateByTag", "invalidateByTag"]);
   const served = await down.content(PACKAGES);
   expect(served.status()).toBe(200);
   expectNotCacheable(served);
@@ -303,7 +304,7 @@ for (const [action, answer, price] of [
       await expect.poll(async () => (await after.purges()).map(({ trace, ...purge }) => purge), {
         timeout: 20000,
         intervals: [250, 500, 1000],
-      }).toEqual([CONTENT_PURGE, CONTENT_PURGE]);
+      }).toEqual([CONTENT_PURGE, PAGE_MARK, CONTENT_PURGE, PAGE_MARK]);
       const current = await gate.traced().content(PACKAGES);
       expectCacheable(current);
       expect(await priceOf(current)).toBe(price);
@@ -322,9 +323,9 @@ test("a publish the database rejects before the commit only marks the CDN copy s
     const rejected = gate.traced();
     const attempt = await rejected.cms("/api/admin/content/publish", gate.replaceCommand(original, { price: "$848.48" }));
     expect(attempt.status).toBe(409);
-    await expect.poll(() => rejected.purges(), { timeout: 10000 }).toHaveLength(1);
+    await expect.poll(() => rejected.purges(), { timeout: 10000 }).toHaveLength(2);
     await new Promise((resolve) => setTimeout(resolve, 6000));
-    expect((await rejected.purges()).map(({ operation }) => operation)).toEqual(["invalidateByTag"]);
+    expect((await rejected.purges()).map(({ operation }) => operation)).toEqual(["invalidateByTag", "invalidateByTag"]);
     expect((await gate.document(PACKAGE)).document.price).toBe("$838.38");
   } finally {
     await gate.restore(PACKAGE, original.document);
