@@ -84,6 +84,7 @@ const expectReserved = async (page, native, slot) => {
   expect(await native.document(slot.holdId)).toMatchObject({ phase: "active" });
   expect(await native.slotClaims(slot.startTimeUTC)).toEqual(["hold"]);
 };
+const outcome = ({ status, body }) => ({ status, state: body.status, bookingId: body.bookingId });
 const queueBehindCommerceLock = async (native, actors) => {
   await native.holdCommerceLock();
   try {
@@ -110,14 +111,22 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await page.getByRole("button", { name: "Pay your way", exact: true }).click();
       await expect(page.getByRole("heading", { name: "Fixture provider checkout", exact: true })).toBeVisible();
       const { orderId } = answered("/api/payment/start").at(-1).body.providerPayload;
+      const confirmations = [];
       await context.route(/\/api\/payment\/finalize(?:\?|$)/, async route => {
-        const [returned] = await Promise.all([forward(route.request()), native.paymentSucceeded(orderId, "race")]);
-        return fulfillJson(route, returned);
+        const both = await Promise.all([forward(route.request()), native.paymentSucceeded(orderId, "race")]);
+        confirmations.push(...both);
+        return fulfillJson(route, both[0]);
       });
       await page.goto("/payment?dodo_return=1");
       await expect(page.getByRole("heading", { level: 1, name: "Payment Successful", exact: true })).toBeVisible();
       const bookings = await native.bookingsAt(slot.startTimeUTC);
       expect(bookings).toHaveLength(1);
+      expect(confirmations).toHaveLength(2);
+      const [returned, raced] = confirmations.map(outcome);
+      const booked = { status: 200, state: "booked", bookingId: bookings[0] };
+      expect([booked, { status: 202, state: "finalizing", bookingId: "" }]).toContainEqual(returned);
+      expect([booked, { status: 503, state: "finalizing", bookingId: "" }]).toContainEqual(raced);
+      expect([returned, raced]).toContainEqual(booked);
       expect(await native.paymentSucceeded(orderId, "retry")).toMatchObject({ status: 200, body: { status: "booked", bookingId: bookings[0] } });
       expect(await native.bookingsAt(slot.startTimeUTC)).toEqual(bookings);
       expect(await native.slotClaims(slot.startTimeUTC)).toEqual(["booking"]);
@@ -180,7 +189,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         expect(await native.document(slot.holdId)).toMatchObject({ phase: "released" });
       } finally {
         const held = await readHold(page);
-        if (held) await native.post("/api/releaseHold", { holdId: held.holdId, holdToken: held.holdToken });
+        if (held) expect.soft(await native.post("/api/releaseHold", { holdId: held.holdId, holdToken: held.holdToken })).toMatchObject({ status: 200 });
       }
     });
 
