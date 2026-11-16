@@ -84,7 +84,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await route.fulfill({ status: response.status, json: response.body });
       });
       await context.route("https://test.checkout.dodopayments.com/session/**", route => route.fulfill({
-        contentType: "text/html", body: '<a href="http://127.0.0.1:' + new URL(page.url()).port + '/payment?dodo_return=1">Return to booking</a>',
+        contentType: "text/html", body: `<a href="${new URL(page.url()).origin}/payment?dodo_return=1">Return to booking</a>`,
       }));
       await context.route(/https:\/\/www\.(sandbox\.)?paypal\.com\/sdk\/js/, route => route.fulfill({ contentType: "application/javascript", body: paypalSdk }));
       await flow.booking();
@@ -106,6 +106,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       expect((await native.call("document", hold.response.holdId)).phase).toBe("consumed");
       expect(await native.call("slotCounts", `${date}T04:30:00.000Z`)).toEqual({ booking: 1, slotHold: 1 });
       expect(finalized.status).toBe(200);
+      await expect.poll(async () => (await native.call("document", finalized.response.bookingId))?.emailDispatchStatus).toBe("sent");
       const booking = await native.call("document", finalized.response.bookingId);
       expect(booking).toMatchObject({ email: "visitor@example.invalid", packageTitle: "Performance Vertex Overhaul",
         startTimeUTC: `${date}T04:30:00.000Z`, localTimeZone: "America/Los_Angeles", hostTimeZone: "Asia/Kolkata", emailDispatchStatus: "sent" });
@@ -191,6 +192,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await expect.poll(() => responses.map(response => response.status)).toContain(200);
         expect(responses.map(response => response.status).sort()).toEqual([200, 202]);
         expect(responses.find(response => response.status === 200).body).toMatchObject({ ok: true, emailDispatch: { allSent: true } });
+        await expect.poll(async () => (await native.call("document", receipt.bookingId))?.emailDispatchStatus).toBe("sent");
         const booking = await native.call("document", receipt.bookingId);
         expect(booking.emailDispatchStatus).toBe("sent");
         expect(booking.emailDispatchClientSentAt).toBeTruthy();
