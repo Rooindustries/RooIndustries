@@ -1,0 +1,209 @@
+name: Playwright proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      workers:
+        description: Tests running at a time in each job.
+        type: choice
+        options: ["1", "2"]
+        default: "1"
+      repeats:
+        description: Times each group runs.
+        type: number
+        default: 5
+      groups:
+        description: Space-separated browser groups to run. Empty runs every group.
+        default: ""
+      seed:
+        description: Moves the rest groups' files beside different neighbours. Each repeat adds one.
+        type: number
+        default: 0
+
+permissions:
+  contents: read
+
+env:
+  PW_SERVERS: ${{ inputs.workers }}
+  ROO_TEST_HOST: 127.0.0.1
+  BASE_URL: http://127.0.0.1:3211
+  PW_PORT: "3211"
+  TOOLING_CONTENT_PORT: "3219"
+  PW_SERVER_ID: ci
+  NEXT_DIST_DIR: .next-e2e-ci
+  TOOLING_API_ROUTES: "0"
+
+jobs:
+  self-check:
+    name: Check the comparison on planted reports
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          node-version: 22
+      - name: Judge every planted case and one real Playwright report
+        run: bash scripts/check-playwright-proof-cases.sh
+
+  plan:
+    name: Plan the proof legs
+    needs: self-check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      legs: ${{ steps.legs.outputs.legs }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          node-version: 22
+      - name: Check the Playwright config runs that many tests at a time
+        run: |
+          workers="$(node -p 'require("./playwright.config.js").workers')"
+          if [ "$workers" != "$PW_SERVERS" ]; then
+            echo "playwright.config.js runs $workers tests at a time, not $PW_SERVERS. Nothing was run." >&2
+            exit 1
+          fi
+      - id: legs
+        name: List the legs
+        env:
+          PROOF_GROUPS: ${{ inputs.groups }}
+          REPEATS: ${{ inputs.repeats }}
+          SEED: ${{ inputs.seed }}
+        run: |
+          if ! [[ "$REPEATS" =~ ^[1-9][0-9]*$ ]]; then
+            echo "repeats must be a whole number of at least 1, not \"$REPEATS\"." >&2
+            exit 1
+          fi
+          if ! [[ "$SEED" =~ ^(0|[1-9][0-9]*)$ ]]; then
+            echo "seed must be a whole number, not \"$SEED\"." >&2
+            exit 1
+          fi
+          known="$(node --input-type=module -e '
+            import { FIXED_GROUPS, REST_GROUPS } from "./scripts/playwright-groups.mjs";
+            console.log(JSON.stringify({ fixed: Object.keys(FIXED_GROUPS), rest: REST_GROUPS }));
+          ')"
+          legs="$(jq -cn --argjson known "$known" --arg groups "$PROOF_GROUPS" \
+            --argjson repeats "$REPEATS" --argjson seed "$SEED" '
+            ($known.fixed + $known.rest) as $all
+            | ($groups | split(" ") | map(select(. != "")) | unique | if length == 0 then $all else . end) as $chosen
+            | ($chosen - $all) as $unknown
+            | ($chosen - $known.fixed | length) as $rest
+            | (($chosen | length) * $repeats) as $count
+            | if ($unknown | length) > 0 then
+                "Unknown browser group \($unknown | join(", ")). The groups are \($all | join(" ")).\n" | halt_error(1)
+              elif $repeats > 1 and $rest > 0 and $rest < ($known.rest | length) then
+                "The seed moves rest files between rest groups from one repeat to the next, so only all rest groups"
+                + " together, or none, can be compared across repeats. Select every rest group"
+                + " (\($known.rest | join(" "))), or use one repeat.\n" | halt_error(1)
+              elif $count > 256 then
+                "\($count) legs were asked for; a run takes at most 256.\n" | halt_error(1)
+              else [$chosen[] as $group | range($repeats) | {group: $group, repeat: (. + 1), seed: ($seed + .)}] end
+          ')"
+          echo "legs=$legs" >> "$GITHUB_OUTPUT"
+      - name: Restore the latest per-file test timings
+        uses: actions/cache/restore@v4
+        with:
+          path: .playwright-timings
+          key: playwright-timings-latest
+          restore-keys: playwright-timings-
+      - name: Give each leg its spec files and list their tests
+        env:
+          LEGS: ${{ steps.legs.outputs.legs }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/playwright-proof"
+          node scripts/plan-playwright-proof.mjs plan "$PW_SERVERS" "$LEGS" .playwright-timings/timings.json \
+            > "$RUNNER_TEMP/playwright-proof/plan.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: playwright-proof-plan
+          path: ${{ runner.temp }}/playwright-proof/plan.json
+          if-no-files-found: error
+          retention-days: 14
+
+  playwright:
+    name: Playwright proof ${{ matrix.leg.group }} repeat ${{ matrix.leg.repeat }}
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        leg: ${{ fromJSON(needs.plan.outputs.legs) }}
+    env:
+      PW_LEG: ${{ matrix.leg.group }}-${{ matrix.leg.repeat }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          node-version: 22
+          browsers: chromium webkit
+          build-dirs: .next-e2e-ci/cache/webpack
+      - uses: actions/download-artifact@v4
+        with:
+          name: playwright-proof-plan
+          path: playwright-proof-plan
+      - uses: ./.github/actions/hold-ports
+        with:
+          playwright-ports: "3211"
+      - name: Run this group's spec files twice over
+        run: |
+          files="$(node scripts/plan-playwright-proof.mjs files playwright-proof-plan/plan.json "$PW_LEG")"
+          node scripts/test-tooling-sweep-server.mjs &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" || true' EXIT
+          for _ in {1..180}; do
+            if curl --fail --silent "$BASE_URL" > /dev/null; then
+              break
+            fi
+            kill -0 "$server_pid"
+            sleep 1
+          done
+          curl --fail --silent "$BASE_URL" > /dev/null
+          bash scripts/check-test-servers.sh "$PW_SERVERS"
+          xvfb-run -a npx playwright test --retries=0 --repeat-each=2 --reporter=dot,json "$files"
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: playwright-proof/${{ env.PW_LEG }}.json
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-proof-leg-${{ env.PW_LEG }}
+          path: playwright-proof/
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: test-results-${{ env.PW_LEG }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 3
+
+  compare:
+    name: Judge the proof legs
+    needs: [plan, playwright]
+    if: ${{ !cancelled() && needs.plan.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: playwright-proof-*
+          path: playwright-proof
+          merge-multiple: true
+      - name: Judge every planned leg and print each test's outcomes
+        run: node scripts/compare-playwright-proof.mjs playwright-proof

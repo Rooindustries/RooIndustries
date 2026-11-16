@@ -35,7 +35,7 @@ const writeFixturePorts = (baseURL, instance, ports) => {
   const file = reportPath(baseURL);
   const temporary = `${file}.${randomUUID()}.tmp`;
   fs.mkdirSync(reportDir, { recursive: true });
-  fs.writeFileSync(temporary, JSON.stringify({ baseURL: new URL(baseURL).origin, instance, ports }));
+  fs.writeFileSync(temporary, JSON.stringify({ baseURL: new URL(baseURL).origin, instance, pid: process.pid, ports }));
   fs.renameSync(temporary, file);
 };
 
