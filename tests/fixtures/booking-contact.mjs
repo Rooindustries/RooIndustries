@@ -158,6 +158,7 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
     const handlers = new Map();
     for (const [route, module] of Object.entries({
       '/api/holdSlot': '../../src/server/booking/holdSlot.js',
+      '/api/releaseHold': '../../src/server/booking/releaseHold.js',
       '/api/bookingAvailability': '../../src/server/booking/availability.js',
       '/api/payment/start': '../../src/server/api/payment/start.js',
       '/api/payment/quote': '../../src/server/api/payment/quote.js',
@@ -299,7 +300,7 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
       paymentRefunds.set(paymentId, refunds);
       return dodoWebhook(paymentId, 'refund.succeeded', eventId);
     };
-    return { post, start, hold, snapshot, recordFor, seedUpgrade, commerce, content, database, details, evidence, save, stop,
+    return { post, start, hold, snapshot, recordFor, seedUpgrade, commerce, content, database, dateSlots, details, evidence, save, stop,
       setPaymentTax, setPaymentTaxInclusive, setPaymentAmountOverrides, refundPayment, dodoWebhook,
       setEmailFailure(value) { emailFailure = value; },
       setCheckoutPaymentStarted(value) { checkoutPaymentStarted = value; },
