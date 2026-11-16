@@ -21,6 +21,7 @@ export async function createBookingHoldFixture() {
     DODO_PAYMENTS_ENVIRONMENT: "test_mode", DODO_PAYMENTS_API_KEY: "fixture-only",
     DODO_PAYMENTS_WEBHOOK_KEY: "whsec_Zml4dHVyZS1vbmx5", DODO_PAYMENTS_PRODUCT_ID: "pdt_fixture",
     PAYMENT_SESSION_SECRET: "fixture-only-payment-session", HOLD_TOKEN_SECRET: "fixture-only-hold",
+    BOOKING_EMAIL_TOKEN_SECRET: "fixture-only-booking-email",
     CRON_SECRET: "fixture-only-cron",
     REF_SESSION_SECRET: "fixture-only-ref-session", RESEND_API_KEY: "re_fixture",
     FROM_EMAIL: "noreply@example.invalid", OWNER_EMAIL: "owner@example.invalid",
@@ -73,6 +74,7 @@ export async function createBookingHoldFixture() {
     const sessions = new Map();
     database.setProviderHandler(async request => {
       evidence.providerRequests.push(request);
+      if (request.path === "/emails") return { body: { id: `email_fixture_${evidence.providerRequests.length}` } };
       if (request.path === "/products/pdt_fixture") return { body: { product_id: "pdt_fixture", is_recurring: false,
         price: { type: "one_time_price", currency: "USD", pay_what_you_want: true, tax_inclusive: false,
           purchasing_power_parity: false, discount: 0, price: 0 } } };
@@ -126,11 +128,13 @@ export async function createBookingHoldFixture() {
       "/api/holdSlot": "../../src/server/booking/holdSlot.js",
       "/api/payment/quote": "../../src/server/api/payment/quote.js",
       "/api/payment/start": "../../src/server/api/payment/start.js",
+      "/api/payment/finalize": "../../src/server/api/payment/finalize.js",
       "/api/payment/cancel": "../../src/server/api/payment/cancel.js",
       "/api/releaseHold": "../../src/server/booking/releaseHold.js",
       "/api/bookingAvailability": "../../src/server/booking/availability.js",
       "/api/payment/reconcile": "../../src/server/api/payment/reconcile.js",
       "/api/payment/webhook/dodo": "../../src/server/api/payment/webhookDodo.js",
+      "/api/ref/createBooking": "../../src/server/api/ref/createBooking.js",
     })) handlers.set(route, (await import(module)).default);
     server.on("request", async (req, res) => {
       try {
@@ -220,7 +224,7 @@ export async function createBookingHoldFixture() {
       assert.equal(quote.status, 200, JSON.stringify(quote));
       return post("/api/payment/start", { provider: "dodo", bookingPayload, quoteFingerprint: quote.body.quoteFingerprint });
     };
-    return { baseURL, post, get, hold, start, nextSlotDate, commerce, details, evidence, save, stop,
+    return { baseURL, post, get, hold, start, nextSlotDate, commerce, content, details, evidence, save, stop,
       setPaymentStatus, holdRunsOut, restoreClock, reconcile, paymentSucceeded };
   } catch (error) { await stop(); throw error; }
 }

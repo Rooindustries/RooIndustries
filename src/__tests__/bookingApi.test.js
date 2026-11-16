@@ -2,8 +2,6 @@ let holdSlot;
 let isSameSupabaseOwnedHold;
 let createBooking;
 let releaseHold;
-let sendBookingEmails;
-let sendBookingEmailsForBooking;
 let dispatchRescheduleNotifications;
 let formatRequestedTimeFields;
 let applyBookingRefund;
@@ -748,9 +746,6 @@ beforeAll(() => {
   ));
   createBooking = load("../../src/server/api/ref/createBooking");
   releaseHold = load("../../src/server/booking/releaseHold");
-  sendBookingEmails = load("../../src/server/api/ref/sendBookingEmails");
-  sendBookingEmailsForBooking =
-    require("../../src/server/api/ref/bookingEmails").sendBookingEmailsForBooking;
   dispatchRescheduleNotifications =
     require("../../src/server/api/ref/bookingEmails").dispatchRescheduleNotifications;
   formatRequestedTimeFields =
@@ -909,115 +904,6 @@ describe("booking reservation API", () => {
 
     expect(bookingRes.statusCode).toBe(409);
     expect(mockSendEmail).not.toHaveBeenCalled();
-  });
-
-  test("reservation -> payment -> confirmation persists booking and emails", async () => {
-    expect(CLIENT_EMAIL).toBe("vihaann2.0@gmail.com");
-    expect(OWNER_EMAIL).toBe("serviroo@rooindustries.com");
-
-    const startTimeUTC = "2099-01-15T08:00:00.000Z";
-    const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
-
-    const { res, displayDate, displayTime } = await createPaidBooking({
-      startTimeUTC,
-      timeZone: "America/Los_Angeles",
-      paymentProvider: "paypal",
-      holdId: hold.body.holdId,
-      holdToken: hold.body.holdToken,
-      holdExpiresAt: hold.body.expiresAt,
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(store.bookings).toHaveLength(1);
-    expect(store.slotHolds).toHaveLength(1);
-    expect(store.slotHolds[0].phase).toBe("consumed");
-
-    const booking = store.bookings[0];
-    const utcDate = new Date(startTimeUTC);
-    const ownerDate = formatOwnerDate(utcDate);
-    const ownerTime = formatOwnerTime(utcDate);
-
-    expect(booking.startTimeUTC).toBe(new Date(startTimeUTC).toISOString());
-    expect(booking.displayDate).toBe(displayDate);
-    expect(booking.displayTime).toBe(displayTime);
-    expect(booking.hostDate).toBe(ownerDate);
-    expect(booking.hostTime).toBe(ownerTime);
-    expect(booking.localTimeZone).toBe("America/Los_Angeles");
-    expect(booking.hostTimeZone).toBe(OWNER_TZ);
-    expect(booking.email).toBe(CLIENT_EMAIL);
-
-    expect(mockSendEmail).toHaveBeenCalledTimes(2);
-    const clientCall = mockSendEmail.mock.calls.find(
-      ([args]) => args.to === CLIENT_EMAIL
-    );
-    const ownerCall = mockSendEmail.mock.calls.find(
-      ([args]) => args.to === OWNER_EMAIL
-    );
-
-    expect(clientCall).toBeTruthy();
-    expect(ownerCall).toBeTruthy();
-    expect(clientCall[0].attachments).toBeUndefined();
-  });
-
-  test("createBooking can defer emails until the success page confirms the flow", async () => {
-    const startTimeUTC = "2099-01-15T08:15:00.000Z";
-    const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
-
-    const { res } = await createPaidBooking({
-      startTimeUTC,
-      timeZone: "America/Los_Angeles",
-      paymentProvider: "paypal",
-      holdId: hold.body.holdId,
-      holdToken: hold.body.holdToken,
-      holdExpiresAt: hold.body.expiresAt,
-      deferEmailsUntilConfirmation: true,
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(mockSendEmail).not.toHaveBeenCalled();
-    expect(res.body.bookingId).toBeTruthy();
-    expect(res.body.emailDispatchToken).toBeTruthy();
-    expect(res.body.emailDispatch).toMatchObject({
-      deferred: true,
-      allSent: false,
-    });
-
-    const booking = store.bookings.find((entry) => entry._id === res.body.bookingId);
-    expect(booking.emailDispatchDeferred).toBe(true);
-    expect(booking.emailDispatchStatus).toBe("pending");
-    expect(booking.emailDispatchQueuedAt).toBeTruthy();
-  });
-
-  test("direct paid bookings backfill a terminal payment record when no record exists yet", async () => {
-    const startTimeUTC = "2099-01-15T08:18:00.000Z";
-    const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
-
-    const { res } = await createPaidBooking({
-      startTimeUTC,
-      timeZone: "America/Los_Angeles",
-      paymentProvider: "paypal",
-      holdId: hold.body.holdId,
-      holdToken: hold.body.holdToken,
-      holdExpiresAt: hold.body.expiresAt,
-      deferEmailsUntilConfirmation: true,
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(store.paymentRecords).toHaveLength(1);
-    expect(store.paymentRecords[0]).toMatchObject({
-      provider: "paypal",
-      status: "email_partial",
-      bookingId: res.body.bookingId,
-      providerOrderId: "paypal_order_1",
-      payerEmail: CLIENT_EMAIL,
-      emailDispatchToken: res.body.emailDispatchToken,
-    });
-    expect(store.paymentRecords[0].bookingPayload).toMatchObject({
-      packageTitle: "Performance Vertex Overhaul",
-      email: CLIENT_EMAIL,
-      paymentProvider: "paypal",
-    });
-    expect(store.paymentRecords[0].pricingSnapshot.netAmount).toBeCloseTo(84.99, 2);
   });
 
   test("clubbed coupons reduce the referral base before referral discount and commission", async () => {
@@ -1295,128 +1181,6 @@ describe("booking reservation API", () => {
       error: "This coupon can't be combined with a referral discount.",
     });
     expect(store.bookings).toHaveLength(0);
-  });
-
-  test("sendBookingEmails dispatches deferred emails once and stays idempotent", async () => {
-    const startTimeUTC = "2099-01-15T08:20:00.000Z";
-    const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
-
-    const { res: bookingRes } = await createPaidBooking({
-      startTimeUTC,
-      timeZone: "America/Los_Angeles",
-      paymentProvider: "paypal",
-      holdId: hold.body.holdId,
-      holdToken: hold.body.holdToken,
-      holdExpiresAt: hold.body.expiresAt,
-      deferEmailsUntilConfirmation: true,
-    });
-
-    expect(bookingRes.statusCode).toBe(200);
-    expect(mockSendEmail).not.toHaveBeenCalled();
-
-    const firstDispatchRes = createRes();
-    await sendBookingEmails(
-      createReq({
-        bookingId: bookingRes.body.bookingId,
-        emailDispatchToken: bookingRes.body.emailDispatchToken,
-      }),
-      firstDispatchRes
-    );
-
-    expect(firstDispatchRes.statusCode).toBe(200);
-    expect(firstDispatchRes.body.ok).toBe(true);
-    expect(mockSendEmail).toHaveBeenCalledTimes(2);
-
-    const bookingAfterFirstDispatch = store.bookings.find(
-      (entry) => entry._id === bookingRes.body.bookingId
-    );
-    expect(bookingAfterFirstDispatch.emailDispatchClientSentAt).toBeTruthy();
-    expect(bookingAfterFirstDispatch.emailDispatchOwnerSentAt).toBeTruthy();
-    expect(bookingAfterFirstDispatch.emailDispatchStatus).toBe("sent");
-
-    const secondDispatchRes = createRes();
-    await sendBookingEmails(
-      createReq({
-        bookingId: bookingRes.body.bookingId,
-        emailDispatchToken: bookingRes.body.emailDispatchToken,
-      }),
-      secondDispatchRes
-    );
-
-    expect(secondDispatchRes.statusCode).toBe(200);
-    expect(secondDispatchRes.body.ok).toBe(true);
-    expect(mockSendEmail).toHaveBeenCalledTimes(2);
-    expect(mockFlushCommerceMirror).not.toHaveBeenCalled();
-  });
-
-  test("sendBookingEmailsForBooking refetches full booking data before rendering", async () => {
-    const startTimeUTC = "2099-01-15T08:25:00.000Z";
-    const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
-
-    const { res: bookingRes } = await createPaidBooking({
-      startTimeUTC,
-      timeZone: "America/Los_Angeles",
-      paymentProvider: "razorpay",
-      holdId: hold.body.holdId,
-      holdToken: hold.body.holdToken,
-      holdExpiresAt: hold.body.expiresAt,
-      deferEmailsUntilConfirmation: true,
-    });
-
-    expect(bookingRes.statusCode).toBe(200);
-    expect(mockSendEmail).not.toHaveBeenCalled();
-
-    const booking = store.bookings.find(
-      (entry) => entry._id === bookingRes.body.bookingId
-    );
-    booking.message = '<script>alert("preview")</script>';
-    const partialBooking = {
-      _id: booking._id,
-      email: booking.email,
-      packageTitle: booking.packageTitle,
-    };
-
-    const result = await sendBookingEmailsForBooking({
-      bookingId: booking._id,
-      booking: partialBooking,
-      client: mockSanityClient,
-    });
-
-    expect(result.httpStatus).toBe(200);
-    expect(result.body.emailDispatch.allSent).toBe(true);
-    expect(mockSendEmail).toHaveBeenCalledTimes(2);
-
-    const ownerCall = mockSendEmail.mock.calls.find(
-      ([args]) => args.to === OWNER_EMAIL
-    );
-    expect(ownerCall).toBeTruthy();
-    expect(ownerCall[0].subject).toMatch(
-      /^New booking [A-Z0-9]{6} - Performance Vertex Overhaul \(Thu Jan 15 2099 1:55 PM\)$/
-    );
-
-    const renderedOwnerEmail = JSON.stringify(ownerCall[0]);
-    expect(renderedOwnerEmail).not.toContain("undefined");
-    expect(renderedOwnerEmail).toContain("servi");
-    expect(renderedOwnerEmail).toContain("GPU/CPU");
-    expect(renderedOwnerEmail).toContain("Shooter");
-    expect(renderedOwnerEmail).toContain("$84.99");
-    expect(renderedOwnerEmail).toContain(
-      "margin:0;padding:0;background:#e9edf3"
-    );
-    expect(renderedOwnerEmail).toContain(
-      "max-width:640px;background:#0f172a;border:1px solid #2a3f5c"
-    );
-    expect(renderedOwnerEmail).toContain(
-      "text-align:center;background:#0b1120"
-    );
-    expect(renderedOwnerEmail).not.toContain(
-      "margin:0;padding:0;background:#0f172a"
-    );
-    expect(renderedOwnerEmail).not.toContain("#020617");
-    expect(renderedOwnerEmail).toContain(
-      "&lt;script&gt;alert(&quot;preview&quot;)&lt;/script&gt;"
-    );
-    expect(renderedOwnerEmail).not.toContain('<script>alert("preview")</script>');
   });
 
   test("captured paid bookings auto-reconcile after the original hold expires", async () => {
@@ -2123,35 +1887,6 @@ describe("booking reservation API", () => {
 
     expect(coupon.timesUsed).toBe(0);
     expect(coupon.isActive).toBe(false);
-  });
-
-  test("concurrent email dispatch uses one lease and stable Resend keys", async () => {
-    const startTimeUTC = "2099-01-15T08:20:00.000Z";
-    const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
-    const created = await createPaidBooking({
-      startTimeUTC,
-      timeZone: "America/Los_Angeles",
-      paymentProvider: "paypal",
-      holdId: hold.body.holdId,
-      holdToken: hold.body.holdToken,
-      deferEmailsUntilConfirmation: true,
-    });
-
-    const [first, second] = await Promise.all([
-      sendBookingEmailsForBooking({
-        bookingId: created.res.body.bookingId,
-        client: mockSanityClient,
-      }),
-      sendBookingEmailsForBooking({
-        bookingId: created.res.body.bookingId,
-        client: mockSanityClient,
-      }),
-    ]);
-
-    expect([first.httpStatus, second.httpStatus].sort()).toEqual([200, 202]);
-    expect(mockSendEmail).toHaveBeenCalledTimes(2);
-    expect(mockSendEmail.mock.calls[0][1].idempotencyKey).toMatch(/-client$/);
-    expect(mockSendEmail.mock.calls[1][1].idempotencyKey).toMatch(/-owner$/);
   });
 
   test.each([undefined, 101.99])("reschedule recovery notifies both sides once with paid total %s", async dodoTotalAmount => {
@@ -2979,94 +2714,6 @@ describe("booking reservation API", () => {
       packagePrice: "$84.99",
       grossAmount: 84.99,
       netAmount: pricingSnapshot.netAmount,
-    });
-  });
-
-  test("internal reconstruction preserves completed email delivery without resending", async () => {
-    const startTimeUTC = "2099-01-15T10:00:00.000Z";
-    const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
-    const paymentRecordId = "paymentRecord.paypal.order.email_reconstruction";
-    const claimId = "paymentProofClaim.paypal.email_reconstruction";
-    const leaseId = "lease_email_reconstruction";
-    const completedAt = "2099-01-15T10:05:00.000Z";
-    store.referrals.push({
-      _id: "ref_historical_reconstruction",
-      _type: "referral",
-      successfulReferrals: 4,
-    });
-    store.paymentRecords.push({
-      _id: paymentRecordId,
-      _rev: "payment_record_email_reconstruction_rev",
-      _type: "paymentRecord",
-      provider: "paypal",
-      providerOrderId: "email_reconstruction",
-      status: "finalizing",
-      paymentProofClaimId: claimId,
-      finalizationLeaseId: leaseId,
-      finalizationLeaseExpiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
-      pricingSnapshot: {
-        grossAmount: 84.99,
-        netAmount: 84.99,
-        couponDiscountAmount: 0,
-        couponDiscountPercent: 0,
-        effectiveReferralId: "ref_historical_reconstruction",
-      },
-    });
-    store.paymentProofClaims.push({
-      _id: claimId,
-      _rev: "proof_claim_email_reconstruction_rev",
-      _type: "paymentProofClaim",
-      paymentRecordId,
-      provider: "paypal",
-      providerOrderId: "email_reconstruction",
-      providerPaymentId: "",
-    });
-    const utcDate = new Date(startTimeUTC);
-    const res = createRes();
-
-    await createBooking(
-      {
-        ...createReq({
-          email: CLIENT_EMAIL,
-          packageTitle: "Performance Vertex Overhaul",
-          status: "captured",
-          paymentProvider: "paypal",
-          paypalOrderId: "email_reconstruction",
-          paymentRecordId,
-          couponCode: "HISTORICAL",
-          startTimeUTC,
-          localTimeZone: "America/Los_Angeles",
-          displayDate: formatClientDate(utcDate, "America/Los_Angeles"),
-          displayTime: formatClientTime(utcDate, "America/Los_Angeles"),
-          slotHoldId: hold.body.holdId,
-          slotHoldToken: hold.body.holdToken,
-          deferEmailsUntilConfirmation: false,
-        }),
-        internalContext: {
-          paymentFinalizeSource: "reconcile",
-          paymentProofClaimId: claimId,
-          paymentFinalizationLeaseId: leaseId,
-          emailDispatchAlreadyComplete: true,
-          emailDispatchCompletedAt: completedAt,
-          preserveHistoricalAccounting: true,
-        },
-      },
-      res
-    );
-
-    expect(res.statusCode).toBe(200);
-    expect(store.bookings).toHaveLength(1);
-    expect(store.bookings[0]).toMatchObject({
-      emailDispatchStatus: "sent",
-      emailDispatchClientSentAt: completedAt,
-      emailDispatchOwnerSentAt: completedAt,
-    });
-    expect(mockSendEmail).not.toHaveBeenCalled();
-    expect(store.couponRedemptions).toHaveLength(0);
-    expect(store.referrals[0].successfulReferrals).toBe(4);
-    expect(store.paymentRecords[0]).toMatchObject({
-      status: "booked",
-      bookingId: res.body.bookingId,
     });
   });
 
