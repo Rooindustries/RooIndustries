@@ -6,6 +6,7 @@ import seo from "@/src/lib/seo";
 export const metadata = seo.getMetadataForPath("/about");
 export const dynamic = "force-static";
 export const revalidate = 60;
+export const maxDuration = 50;
 
 export default function Page() {
   return (

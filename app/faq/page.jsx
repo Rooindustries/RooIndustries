@@ -7,6 +7,7 @@ import { fetchHomePageData } from "@/src/lib/contentServer";
 export const metadata = seo.getMetadataForPath("/faq");
 export const dynamic = "force-static";
 export const revalidate = 60;
+export const maxDuration = 50;
 
 export default async function Page() {
   const initialHomeData = await fetchHomePageData({

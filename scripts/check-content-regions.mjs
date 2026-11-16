@@ -6,6 +6,7 @@ const config = JSON.parse(readFileSync("vercel.json", "utf8"));
 const { functions } = config;
 assert.deepEqual(config.regions, ["dub1"], "Default function region must be dub1");
 assert.deepEqual(functions["app/api/downloads/file/route.js"]?.regions, ["iad1"], "File download region must be iad1");
+assert.equal(functions["app/api/admin/content/publish/route.js"]?.maxDuration, 90, "Content publish must allow its final refresh");
 for (const pattern of [
   "app/api/admin/content/**/*",
   "app/api/admin/referral-creators/route.js",
@@ -40,7 +41,11 @@ for (const route of routes) {
   assert.ok(matches.length, `No function region configured for ${route}`);
   for (const [pattern, settings] of matches) {
     assert.deepEqual(settings.regions, ["dub1"], `${route} has conflicting regions in ${pattern}`);
-    assert.deepEqual(settings, matches[0][1], `${route} has conflicting function settings in ${pattern}`);
+    for (const [otherPattern, otherSettings] of matches) {
+      for (const key of Object.keys(settings)) {
+        if (key in otherSettings) assert.deepEqual(settings[key], otherSettings[key], `${route} has conflicting ${key} in ${pattern} and ${otherPattern}`);
+      }
+    }
   }
 }
 console.log(`Dublin function regions configured for ${routes.length} content and admin routes.`);

@@ -5,6 +5,10 @@
     "app/api/downloads/file/route.js": {
       "regions": ["iad1"]
     },
+    "app/api/admin/content/publish/route.js": {
+      "regions": ["dub1"],
+      "maxDuration": 90
+    },
     "app/api/admin/content/**/*": {
       "regions": [
         "dub1"

@@ -315,6 +315,15 @@ const loadSupabasePublicContent = async ({ resource, query, params }) => {
   return loadAt({ resource, query, params: narrowed, key: memoryKey(resource, narrowed), check });
 };
 
+export const confirmPageRevision = async () => {
+  const calledAt = Date.now();
+  const check = await withinDeadline(checkRevision());
+  if (check.startedAt < calledAt || !timely(check)) {
+    throw Object.assign(new Error("The content revision could not be confirmed in time."), { status: 503, code: "PUBLIC_CONTENT_UNCONFIRMED" });
+  }
+  return check.revision;
+};
+
 export const clearSupabasePublicContentCache = () => {
   supabaseContentReads.clear();
   supabaseContentCache.clear();

@@ -64,7 +64,45 @@ const refuseContentFallback = async (key, message, error) => {
   throw error;
 };
 
+const LIST_RESOURCES = new Set(["packages-list", "faq-questions", "tools", "benchmarks", "reviews-gallery"]);
+
+const loadAtOneRevision = async (resources, required) => {
+  const { fetchPublicContentEntry, confirmPageRevision } = await import("../server/content/publicContent.js");
+  const reads = await Promise.all(resources.map(async (resource) => {
+    try {
+      const entry = await fetchPublicContentEntry({ resource, searchParams: new URLSearchParams() });
+      return { resource, entry };
+    } catch (error) {
+      return { resource, error };
+    }
+  }));
+  const revision = await confirmPageRevision();
+  const parts = {};
+  const problems = [];
+  for (const { resource, entry, error } of reads) {
+    const present = LIST_RESOURCES.has(resource) ? Array.isArray(entry?.data) : entry?.data != null;
+    if (!error && entry.revision === revision && present) parts[resource] = entry.data;
+    else if (required.includes(resource)) problems.push(`${resource}: ${error ? error.code || "read failed" : entry.revision !== revision ? "read at an older revision" : "no published document"}`);
+  }
+  if (problems.length) throw Object.assign(new Error(`Page content is unavailable (${problems.join("; ")}).`), { code: "PAGE_CONTENT_UNAVAILABLE" });
+  return parts;
+};
+
 const HOME_RESOURCES = ["hero", "reviews", "about", "services", "packages-list", "packages-settings", "how-it-works", "supported-games", "faq-settings", "faq-questions", "referral-box"];
+
+const buildHomePageData = (parts, part) => applyHomePageCopyOverrides({
+  hero: resolveHeroCopy(part("hero", null)),
+  reviews: part("reviews", null),
+  about: part("about", null),
+  services: part("services", null),
+  packagesList: buildPackageOffers(part("packages-list", [])),
+  packagesSettings: part("packages-settings", null),
+  howItWorks: part("how-it-works", null),
+  supportedGames: part("supported-games", null),
+  faqSettings: part("faq-settings", null),
+  faqQuestions: normalizeFaqQuestions(Array.isArray(part("faq-questions", [])) ? part("faq-questions", []) : []),
+  referralBox: part("referral-box", null),
+});
 
 async function fetchHomePageData({
   requireContent = false,
@@ -73,6 +111,16 @@ async function fetchHomePageData({
 } = {}) {
   const mark = refusalMark(page);
   const refuse = (error) => refuseContentFallback(page, page === "/" ? "Home content unavailable; keeping the previous page" : "Page content unavailable; keeping the previous page", error);
+  if (requireContent) {
+    let parts;
+    try {
+      parts = await loadAtOneRevision(HOME_RESOURCES, requiredResources);
+    } catch (error) {
+      await refuse(error);
+    }
+    contentConfirmed(page, mark);
+    return buildHomePageData(parts, (resource, fallback) => (resource in parts ? parts[resource] : fallback));
+  }
   let fetchContent;
   try {
     fetchContent = await createPublicContentFetcher({ confirmed: requireContent });
@@ -81,13 +129,11 @@ async function fetchHomePageData({
     console.warn("[content] home fetch failed");
     fetchContent = async () => null;
   }
-  const failed = new Set();
   const safeFetch = async (resource, fallback) => {
     try {
       const data = await fetchContent(resource);
       return data ?? fallback;
     } catch {
-      failed.add(resource);
       console.warn("[content] home fetch failed");
       return fallback;
     }
@@ -118,12 +164,6 @@ async function fetchHomePageData({
     safeFetch("faq-questions", []),
     safeFetch("referral-box", null),
   ]);
-  const missingResources = requiredResources.filter((resource) => failed.has(resource));
-  if (requireContent && missingResources.length > 0) {
-    await refuse(Object.assign(new Error("Page content is unavailable."), { code: "PAGE_CONTENT_UNAVAILABLE", resources: missingResources }));
-  }
-  if (requireContent) contentConfirmed(page, mark);
-
   return applyHomePageCopyOverrides({
     hero: resolveHeroCopy(hero),
     reviews,
@@ -190,6 +230,14 @@ async function fetchPrivacyPolicy() {
 
 async function fetchStaticPageContent(resource, { requireContent = false, confirmed = requireContent } = {}) {
   const mark = refusalMark(resource);
+  if (requireContent) {
+    try {
+      const parts = await loadAtOneRevision([resource], [resource]);
+      return contentConfirmed(resource, mark, parts[resource]);
+    } catch (error) {
+      await refuseContentFallback(resource, "Page content unavailable; keeping the previous page", error);
+    }
+  }
   try {
     const fetchContent = await createPublicContentFetcher({ confirmed });
     const content = await fetchContent(resource);
@@ -205,6 +253,14 @@ async function fetchStaticPageContent(resource, { requireContent = false, confir
 
 async function fetchContentList(resource, label, { requireContent = false } = {}) {
   const mark = refusalMark(resource);
+  if (requireContent) {
+    try {
+      const parts = await loadAtOneRevision([resource], [resource]);
+      return contentConfirmed(resource, mark, parts[resource]);
+    } catch (error) {
+      await refuseContentFallback(resource, `${label} content unavailable; keeping the previous page`, error);
+    }
+  }
   try {
     const fetchContent = await createPublicContentFetcher({ confirmed: requireContent });
     const rows = await fetchContent(resource);
@@ -223,6 +279,16 @@ const fetchReviewsGallery = (options) => fetchContentList("reviews-gallery", "Re
 async function fetchPackagesPageData({ requireContent = false } = {}) {
   const mark = refusalMark("/packages");
   const refuse = (error) => refuseContentFallback("/packages", "Packages content unavailable; keeping the previous page", error);
+  if (requireContent) {
+    let parts;
+    try {
+      parts = await loadAtOneRevision(["packages-list", "packages-settings"], ["packages-list", "packages-settings"]);
+    } catch (error) {
+      await refuse(error);
+    }
+    contentConfirmed("/packages", mark);
+    return { packagesList: parts["packages-list"], packagesSettings: parts["packages-settings"] };
+  }
   let fetchContent;
   try {
     fetchContent = await createPublicContentFetcher({ confirmed: requireContent });

@@ -50,6 +50,7 @@ const documentTitle = (type, document, fallback = "Untitled") => {
 };
 
 const PUBLISH_NOTICE = "Published. The live site picks this up within a few minutes (page and CDN caches).";
+const PUBLISH_REFRESH_NOTICE = "Published. The live pages did not confirm the update yet; they are asked again within a minute, and update within the hour at most.";
 
 export default function ContentAdmin() {
   const [email, setEmail] = useState("");
@@ -443,7 +444,7 @@ export default function ContentAdmin() {
     [api, assets, registerAsset, loadReferenceOptions, errorsByPath, captureEditTarget, applyAtTarget, beginUpload, endUpload, session?.documentId, baseline, working]
   );
 
-  const finishPublication = async (pending, documentId) => {
+  const finishPublication = async (pending, documentId, refresh) => {
     if (!isCurrentSelection(pending.generation)) return;
     clearDraft(draftKey(pending.session));
     setPendingPublication(null);
@@ -452,7 +453,7 @@ export default function ContentAdmin() {
     const publishedGeneration = selection.current;
     loadList(pending.session.type);
     await opening;
-    if (isCurrentSelection(publishedGeneration)) setNotice(PUBLISH_NOTICE);
+    if (isCurrentSelection(publishedGeneration)) setNotice(refresh?.pages === "done" ? PUBLISH_NOTICE : PUBLISH_REFRESH_NOTICE);
   };
 
   const notPublished = () => {
@@ -460,7 +461,7 @@ export default function ContentAdmin() {
     setBanner({ tone: "error", text: "Not published. Retry when you are ready; your changes are kept as a local draft.", retry: { kind: "publish" } });
   };
 
-  const reconcilePublication = async (pending) => {
+  const reconcilePublication = async (pending, refresh) => {
     if (!pending || !isCurrentSelection(pending.generation)) return;
     setSaving(true);
     setBanner(null);
@@ -479,7 +480,7 @@ export default function ContentAdmin() {
         throw new Error("The publication status could not be read.");
       }
       if (publishedContentMatches(data, pending.session, pending.document, TYPES_BY_NAME.get(pending.session.type), pending.removedPaths)) {
-        await finishPublication(pending, documentId);
+        await finishPublication(pending, documentId, refresh);
       } else notPublished();
     } catch (error) {
       if (!isCurrentSelection(pending.generation) || handleAuthFailure(error)) return;
@@ -532,8 +533,8 @@ export default function ContentAdmin() {
       if (result?.committed !== true || typeof result.revision !== "string" || !result.revision || typeof result.documentId !== "string" || !result.documentId || (session.documentId && result.documentId !== session.documentId)) {
         throw new AdminApiError("The publication receipt could not be confirmed.", { code: "CMS_RECEIPT_INVALID" });
       }
-      if (result.replayed === true) await reconcilePublication(pending);
-      else await finishPublication(pending, result.documentId);
+      if (result.replayed === true) await reconcilePublication(pending, result.refresh);
+      else await finishPublication(pending, result.documentId, result.refresh);
     } catch (error) {
       if (!isCurrentSelection(selectedGeneration) || handleAuthFailure(error)) return;
       if (error.code === "CMS_VALIDATION_FAILED" && Array.isArray(error.details)) {
@@ -563,7 +564,7 @@ export default function ContentAdmin() {
     setSaving(true);
     setBanner(null);
     try {
-      await api.publish({
+      const result = await api.publish({
         operation: "delete",
         type: session.type,
         documentId: session.documentId,
@@ -574,7 +575,7 @@ export default function ContentAdmin() {
       referenceCache.current.delete(session.type);
       setSession(null);
       setWorking(null);
-      setNotice("Deleted. The live site picks this up within a few minutes.");
+      setNotice(result?.refresh?.pages === "done" ? "Deleted. The live site picks this up within a few minutes." : "Deleted. The live pages did not confirm the update yet; they are asked again within a minute, and update within the hour at most.");
       setPane("documents");
       loadList(session.type);
     } catch (error) {
