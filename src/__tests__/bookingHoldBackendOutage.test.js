@@ -177,28 +177,6 @@ describe("booking hold backend isolation", () => {
 
   ;
 
-  test("creates a generation-one Supabase hold with zero Sanity environment", async () => {
-    const client = createSupabaseClient({ existingHold: null });
-    configureGenerationOne(client);
-    const response = createResponse();
-
-    await holdSlot({
-      method: "POST",
-      body: {
-        startTimeUTC: "2099-01-05T04:30:00.000Z",
-        packageTitle: "Test Package",
-      },
-      headers: {},
-    }, response);
-
-    expect(response.statusCode).toBe(200);
-    expect(response.body).toMatchObject({ backend: "supabase" });
-    expect(client.create).toHaveBeenCalledTimes(1);
-    expect(mockCreateCommerceWriteClient).not.toHaveBeenCalledWith({
-      backendOverride: "sanity",
-    });
-  });
-
   test.each([
     ["valid", "2099-01-05T05:00:00.000Z", 200],
     ["expired", "2020-01-05T05:00:00.000Z", 409],
@@ -331,61 +309,6 @@ describe("booking hold backend isolation", () => {
       ).toBe("supabase");
     }
   );
-
-  test("defaults an unowned hold to the Supabase policy", () => {
-    expect(selectHoldAuthority()).toBe("supabase");
-  });
-
-  test("B1/O2 refreshes a Supabase hold in Supabase with legacy selectors", async () => {
-    const startTimeUTC = "2099-01-05T04:30:00.000Z";
-    const holdId = buildSlotHoldId(startTimeUTC);
-    const existingHold = {
-      _id: holdId,
-      _rev: "supabase-rev-1",
-      _type: "slotHold",
-      startTimeUTC,
-      expiresAt: "2099-01-05T05:00:00.000Z",
-      holdNonce: "supabase-nonce",
-      phase: "active",
-      backendOwner: "supabase",
-      cutoverGeneration: 1,
-    };
-    const client = createSupabaseClient({ existingHold });
-    configureGenerationTwoSanity(client);
-    const holdToken = issueHoldToken({
-      holdId,
-      startTimeUTC,
-      expiresAt: existingHold.expiresAt,
-      holdNonce: existingHold.holdNonce,
-      backend: "supabase",
-      cutoverGeneration: 1,
-    });
-    const response = createResponse();
-
-    await holdSlot(
-      {
-        method: "POST",
-        body: {
-          startTimeUTC,
-          packageTitle: "Test Package",
-          previousHoldId: holdId,
-          previousHoldToken: holdToken,
-        },
-        headers: {},
-      },
-      response
-    );
-
-    expect(response.statusCode).toBe(200);
-    expect(response.body).toMatchObject({
-      backend: "supabase",
-      cutoverGeneration: 2,
-    });
-    expect(mockCreateCommerceWriteClient).toHaveBeenCalledWith({
-      backendOverride: "supabase",
-    });
-
-  });
 
   test("B1/O2 releases a Supabase hold in Supabase with legacy selectors", async () => {
     const startTimeUTC = "2099-01-05T04:30:00.000Z";

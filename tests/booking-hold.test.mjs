@@ -50,13 +50,32 @@ const refresh = (payload, credentials = {}) => fixture.post("/api/holdSlot", {
   ...credentials,
 });
 const paymentMessage = "This slot already has a payment session in progress.";
+const holdDocuments = async () => (await fixture.commerce.dataset({ documentTypes: ["slotHold"] }))
+  .sort((left, right) => left._id.localeCompare(right._id));
+const withConfiguredSlot = async (startTimeUTC, run) => {
+  const { createSupabaseAdminClient } = await import("../src/server/supabase/adminClient.js");
+  const { createSupabaseDocumentClient } = await import("../src/server/supabase/documentClient.js");
+  const { BOOKING_SETTINGS_ID, getOwnerSlotDetails } = await import("../src/server/booking/slotPolicy.js");
+  const content = createSupabaseDocumentClient({ shadowClient: createSupabaseAdminClient() });
+  const settings = await content.getDocument(BOOKING_SETTINGS_ID);
+  const slot = getOwnerSlotDetails(startTimeUTC);
+  const time = `${String(slot.hour).padStart(2, "0")}:${String(slot.minute).padStart(2, "0")}`;
+  try {
+    await content.patch(BOOKING_SETTINGS_ID).set({ dateSlots: [...settings.dateSlots, { date: slot.dateKey, times: [time] }] }).commit();
+    await run();
+  } finally {
+    await content.patch(BOOKING_SETTINGS_ID).set({ dateSlots: settings.dateSlots }).commit();
+  }
+};
 
 test("an owner can recognize a live payment hold without losing valid credentials", async () => {
   const payload = await fixture.hold();
   const before = await fixture.commerce.getDocument(payload.slotHoldId);
   const payment = await fixture.start(payload);
   assert.equal(payment.status, 200, JSON.stringify(payment));
+  const beforeRefresh = await fixture.snapshot(payload.startTimeUTC);
   const response = await refresh(payload);
+  assert.deepEqual(await fixture.snapshot(payload.startTimeUTC), beforeRefresh);
   const stored = await fixture.commerce.getDocument(payload.slotHoldId);
   const { verifyHoldToken } = await import("../src/server/booking/holdToken.js");
   assert.equal(stored.phase, "payment_pending");
@@ -72,6 +91,7 @@ test("an owner can recognize a live payment hold without losing valid credential
 test("payment ownership is not exposed to missing, invalid, or foreign credentials", async () => {
   const payload = await fixture.hold();
   assert.equal((await fixture.start(payload)).status, 200);
+  const before = await fixture.snapshot(payload.startTimeUTC);
   for (const credentials of [
     { previousHoldId: null, previousHoldToken: null },
     { previousHoldToken: "invalid-token" },
@@ -80,6 +100,7 @@ test("payment ownership is not exposed to missing, invalid, or foreign credentia
     const response = await refresh(payload, credentials);
     assert.equal(response.status, 409);
     assert.deepEqual(response.body, { ok: false, message: paymentMessage });
+    assert.deepEqual(await fixture.snapshot(payload.startTimeUTC), before);
   }
 });
 
@@ -89,16 +110,287 @@ test("a token superseded before payment cannot identify the payment owner", asyn
   assert.equal(updated.status, 200);
   assert.notEqual(updated.body.holdToken, payload.slotHoldToken);
   assert.equal((await fixture.start({ ...payload, slotHoldToken: updated.body.holdToken })).status, 200);
+  const before = await fixture.snapshot(payload.startTimeUTC);
   const stale = await refresh(payload);
   assert.equal(stale.status, 409);
   assert.deepEqual(stale.body, { ok: false, message: paymentMessage });
+  assert.deepEqual(await fixture.snapshot(payload.startTimeUTC), before);
 });
 
 test("an ordinary foreign active hold keeps its existing 409 response", async () => {
   const payload = await fixture.hold();
+  const before = await fixture.snapshot(payload.startTimeUTC);
   const response = await refresh(payload, { previousHoldToken: "invalid-token" });
   assert.equal(response.status, 409);
   assert.deepEqual(response.body, { ok: false, message: "This slot is currently reserved by someone else." });
+  assert.deepEqual(await fixture.snapshot(payload.startTimeUTC), before);
+});
+
+test("unconfigured, sub-minute, and invalid starts do not create holds", async () => {
+  const date = fixture.nextSlotDate();
+  const { buildSlotHoldId } = await import("../src/server/booking/slotIdentity.js");
+  const before = await holdDocuments();
+  for (const [startTimeUTC, message] of [
+    [`${date}T04:31:00.000Z`, "This time is not available for the selected package."],
+    ["2099-02-01T04:30:00.000Z", "This time is not available for the selected package."],
+    [`${date}T04:30:00.001Z`, "startTimeUTC must be an exact configured minute."],
+    [`${date}T04:30:30.000Z`, "startTimeUTC must be an exact configured minute."],
+    ["invalid", "startTimeUTC must be an exact configured minute."],
+  ]) {
+    const beforeCommands = await fixture.commandCount();
+    const beforeClaims = await fixture.sql`select * from commerce.slot_claims order by start_time_utc`;
+    const beforeSlot = Number.isFinite(Date.parse(startTimeUTC)) ? await fixture.snapshot(startTimeUTC) : null;
+    const response = await fixture.post("/api/holdSlot", {
+      startTimeUTC, packageTitle: "Performance Vertex Overhaul",
+    }, "", { "x-forwarded-for": "192.0.2.51" });
+    assert.equal(response.status, 400);
+    assert.equal(response.body.message, message);
+    const holdId = buildSlotHoldId(startTimeUTC);
+    if (holdId) assert.equal(await fixture.commerce.getDocument(holdId), null);
+    if (beforeSlot) assert.deepEqual(await fixture.snapshot(startTimeUTC), beforeSlot);
+    assert.equal(await fixture.commandCount(), beforeCommands);
+    assert.deepEqual(Array.from(await fixture.sql`select * from commerce.slot_claims order by start_time_utc`), Array.from(beforeClaims));
+  }
+  assert.deepEqual(await holdDocuments(), before);
+});
+
+test("the twenty-first hold request from one address is rate limited", async t => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  const previousSecret = process.env.RATE_LIMIT_HASH_SECRET;
+  const now = Date.now();
+  const clock = t.mock.method(Date, "now", () => now);
+  process.env.NODE_ENV = "development";
+  process.env.RATE_LIMIT_HASH_SECRET = "fixture-only-rate-limit";
+  try {
+    const before = await holdDocuments();
+    const startTimeUTC = `${fixture.nextSlotDate()}T04:30:00.000Z`;
+    const body = { startTimeUTC, packageTitle: "Performance Vertex Overhaul" };
+    for (let index = 0; index < 20; index += 1) {
+      const response = await fixture.post("/api/holdSlot", body, "", { "x-forwarded-for": "192.0.2.52" });
+      assert.equal(response.status, index === 0 ? 200 : 409);
+    }
+    const beforeLimit = await fixture.snapshot(startTimeUTC);
+    const response = await fixture.post("/api/holdSlot", body, "", { "x-forwarded-for": "192.0.2.52" });
+    assert.equal(response.status, 429);
+    assert.deepEqual(response.body, { ok: false, error: "Too many slot hold requests. Please try again later." });
+    assert.deepEqual(await fixture.snapshot(startTimeUTC), beforeLimit);
+    const { buildSlotHoldId } = await import("../src/server/booking/slotIdentity.js");
+    assert.equal((await fixture.commerce.getDocument(buildSlotHoldId(startTimeUTC))).phase, "active");
+    const after = await holdDocuments();
+    assert.equal(after.length, before.length + 1);
+    assert.deepEqual(after.filter(hold => hold._id !== buildSlotHoldId(startTimeUTC)), before);
+  } finally {
+    clock.mock.restore();
+    process.env.NODE_ENV = previousNodeEnv;
+    if (previousSecret === undefined) delete process.env.RATE_LIMIT_HASH_SECRET;
+    else process.env.RATE_LIMIT_HASH_SECRET = previousSecret;
+  }
+});
+
+test("environment and database pauses prevent new holds", async () => {
+  const { createSupabaseAdminClient } = await import("../src/server/supabase/adminClient.js");
+  const { buildSlotHoldId } = await import("../src/server/booking/slotIdentity.js");
+  const admin = createSupabaseAdminClient();
+  const control = await admin.rpc("roo_commerce_control");
+  assert.equal(control.error, null);
+  const setPaused = paused => admin.rpc("roo_set_commerce_starts_paused", {
+    p_expected_generation: control.data.generation, p_paused: paused, p_reason: "fixture pause",
+  });
+  const previousPause = process.env.COMMERCE_STARTS_PAUSED;
+  const date = fixture.nextSlotDate();
+  const before = await holdDocuments();
+  try {
+    process.env.COMMERCE_STARTS_PAUSED = "1";
+    let startTimeUTC = `${date}T04:30:00.000Z`;
+    let beforeSlot = await fixture.snapshot(startTimeUTC);
+    let response = await fixture.post("/api/holdSlot", { startTimeUTC, packageTitle: "Performance Vertex Overhaul" },
+      "", { "x-forwarded-for": "192.0.2.53" });
+    assert.equal(response.status, 503);
+    assert.equal(response.body.code, "commerce_starts_paused");
+    assert.equal(await fixture.commerce.getDocument(buildSlotHoldId(startTimeUTC)), null);
+    assert.deepEqual(await holdDocuments(), before);
+    assert.deepEqual(await fixture.snapshot(startTimeUTC), beforeSlot);
+    process.env.COMMERCE_STARTS_PAUSED = "0";
+    assert.equal((await setPaused(true)).error, null);
+    startTimeUTC = `${date}T05:30:00.000Z`;
+    beforeSlot = await fixture.snapshot(startTimeUTC);
+    response = await fixture.post("/api/holdSlot", { startTimeUTC, packageTitle: "Performance Vertex Overhaul" },
+      "", { "x-forwarded-for": "192.0.2.54" });
+    assert.equal(response.status, 503);
+    assert.equal(response.body.code, "commerce_starts_paused");
+    assert.equal(await fixture.commerce.getDocument(buildSlotHoldId(startTimeUTC)), null);
+    assert.deepEqual(await holdDocuments(), before);
+    assert.deepEqual(await fixture.snapshot(startTimeUTC), beforeSlot);
+  } finally {
+    const restored = await setPaused(false);
+    if (previousPause === undefined) delete process.env.COMMERCE_STARTS_PAUSED;
+    else process.env.COMMERCE_STARTS_PAUSED = previousPause;
+    assert.equal(restored.error, null);
+  }
+});
+
+test("a configured slot two minutes ahead can be reserved", async () => {
+  const startTimeUTC = new Date(Math.ceil((Date.now() + 120_000) / 60_000) * 60_000).toISOString();
+  await withConfiguredSlot(startTimeUTC, async () => {
+    const response = await fixture.post("/api/holdSlot", { startTimeUTC, packageTitle: "Performance Vertex Overhaul" },
+      "", { "x-forwarded-for": "192.0.2.57" });
+    assert.equal(response.status, 200);
+    assert.equal(response.body.ok, true);
+    const hold = await fixture.commerce.getDocument(response.body.holdId);
+    assert.equal(hold.startTimeUTC, startTimeUTC);
+    assert.equal(hold.phase, "active");
+  });
+});
+
+test("a configured slot in the past cannot be reserved", async () => {
+  const { buildSlotHoldId } = await import("../src/server/booking/slotIdentity.js");
+  const start = Math.floor((Date.now() - 86_400_000) / 60_000) * 60_000;
+  const startTimeUTC = new Date(start).toISOString();
+  await withConfiguredSlot(startTimeUTC, async () => {
+    const before = await fixture.snapshot(startTimeUTC);
+    const response = await fixture.post("/api/holdSlot", { startTimeUTC, packageTitle: "Performance Vertex Overhaul" },
+      "", { "x-forwarded-for": "192.0.2.58" });
+    assert.equal(response.status, 400);
+    assert.equal(response.body.message, "This time has already started.");
+    assert.equal(await fixture.commerce.getDocument(buildSlotHoldId(startTimeUTC)), null);
+    assert.deepEqual(await fixture.snapshot(startTimeUTC), before);
+  });
+});
+
+test("an owned hold cannot be refreshed or reclaimed once its slot has started", async () => {
+  const { buildSlotHoldId } = await import("../src/server/booking/slotIdentity.js");
+  const { issueHoldToken } = await import("../src/server/booking/holdToken.js");
+  for (const [daysAgo, expired] of [[2, false], [3, true]]) {
+    const start = Math.floor((Date.now() - daysAgo * 86_400_000) / 60_000) * 60_000;
+    const startTimeUTC = new Date(start).toISOString();
+    const expiresAt = new Date(expired ? start - 120_000 : Date.now() + 1_200_000).toISOString();
+    const holdId = buildSlotHoldId(startTimeUTC);
+    const holdNonce = `fixture-${daysAgo}`;
+    await withConfiguredSlot(startTimeUTC, async () => {
+      await fixture.commerce.create({ _id: holdId, _type: "slotHold", startTimeUTC,
+        packageTitle: "Performance Vertex Overhaul", expiresAt, holdNonce, phase: "active",
+        backendOwner: "supabase", cutoverGeneration: 0 });
+      const before = await fixture.commerce.getDocument(holdId);
+      const beforeSnapshot = await fixture.snapshot(startTimeUTC);
+      const token = issueHoldToken({ holdId, startTimeUTC, expiresAt, holdNonce,
+        backend: "supabase", cutoverGeneration: 0 });
+      const response = await fixture.post("/api/holdSlot", { startTimeUTC,
+        packageTitle: "Performance Vertex Overhaul", previousHoldId: holdId, previousHoldToken: token },
+      "", { "x-forwarded-for": "192.0.2.59" });
+      assert.equal(response.status, 400);
+      assert.equal(response.body.message, "This time has already started.");
+      assert.deepEqual(await fixture.commerce.getDocument(holdId), before);
+      assert.deepEqual(await fixture.snapshot(startTimeUTC), beforeSnapshot);
+    });
+  }
+});
+
+test("an unreachable database refuses a reservation without writing", async () => {
+  const startTimeUTC = `${fixture.nextSlotDate()}T04:30:00.000Z`;
+  const before = await fixture.snapshot(startTimeUTC);
+  let response;
+  try {
+    fixture.setRequestHook(phase => { if (phase === "before") throw new Error("fixture database unreachable"); });
+    response = await fetch(`${fixture.baseURL}/api/holdSlot`, {
+      method: "POST", headers: { "content-type": "application/json", origin: fixture.baseURL,
+        "x-forwarded-for": "192.0.2.61" },
+      body: JSON.stringify({ startTimeUTC, packageTitle: "Performance Vertex Overhaul" }),
+    });
+  } finally {
+    fixture.setRequestHook(null);
+  }
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("retry-after"), "60");
+  assert.deepEqual(await response.json(), { ok: false, code: "commerce_control_unavailable",
+    message: "New booking starts are temporarily unavailable. Please try again shortly." });
+  assert.deepEqual(await fixture.snapshot(startTimeUTC), before);
+});
+
+test("a refused hold write leaves no reservation behind", async () => {
+  const startTimeUTC = `${fixture.nextSlotDate()}T04:30:00.000Z`;
+  const before = await fixture.snapshot(startTimeUTC);
+  await fixture.sql.unsafe(`create function migration.fixture_refuse_hold_write() returns trigger
+    language plpgsql as $$ begin raise exception 'fixture hold write refused'; end; $$;
+    create trigger fixture_refuse_hold_write before insert or update on migration.source_documents
+    for each row when (new.document_type = 'slotHold') execute function migration.fixture_refuse_hold_write();`);
+  let response;
+  try {
+    response = await fixture.post("/api/holdSlot", { startTimeUTC, packageTitle: "Performance Vertex Overhaul" },
+      "", { "x-forwarded-for": "192.0.2.62" });
+  } finally {
+    await fixture.sql.unsafe("drop trigger fixture_refuse_hold_write on migration.source_documents; drop function migration.fixture_refuse_hold_write();");
+  }
+  assert.equal(response.status, 500);
+  assert.deepEqual(response.body, { ok: false, message: "Failed to reserve this slot. Please try again." });
+  assert.deepEqual(await fixture.snapshot(startTimeUTC), before);
+});
+
+test("missing booking settings refuse a reservation without writing", async () => {
+  const startTimeUTC = `${fixture.nextSlotDate()}T04:30:00.000Z`;
+  const id = "6d8a3646-0ed2-44b5-ad45-c5c9d578126a";
+  const settings = await fixture.content.getDocument(id);
+  await fixture.content.delete(id);
+  try {
+    const before = await fixture.snapshot(startTimeUTC);
+    const response = await fixture.post("/api/holdSlot", { startTimeUTC, packageTitle: "Performance Vertex Overhaul" },
+      "", { "x-forwarded-for": "192.0.2.63" });
+    assert.equal(response.status, 500);
+    assert.deepEqual(response.body, { ok: false, message: "Failed to reserve this slot. Please try again." });
+    assert.deepEqual(await fixture.snapshot(startTimeUTC), before);
+  } finally {
+    await fixture.content.createOrReplace(settings);
+  }
+});
+
+test("holds are created and refreshed on Supabase across generations without Sanity settings", async () => {
+  const { createSupabaseAdminClient } = await import("../src/server/supabase/adminClient.js");
+  const admin = createSupabaseAdminClient();
+  const savedSanity = Object.fromEntries(Object.entries(process.env).filter(([key]) => /^(SANITY_|NEXT_PUBLIC_SANITY_)/.test(key)));
+  const previousGeneration = process.env.COMMERCE_FAILOVER_GENERATION;
+  const previousDataBackend = process.env.DATA_PRIMARY_BACKEND;
+  const previousCommerceBackend = process.env.COMMERCE_PRIMARY_BACKEND;
+  for (const key of Object.keys(savedSanity)) delete process.env[key];
+  const [savedControl] = await fixture.sql`select generation, primary_backend, starts_paused, change_reason
+    from migration.commerce_control where singleton`;
+  const advance = generation => admin.rpc("roo_advance_commerce_generation", {
+    p_expected_generation: generation, p_primary_backend: "supabase", p_starts_paused: false, p_reason: "fixture generation",
+  });
+  try {
+    const control = await admin.rpc("roo_commerce_control");
+    assert.equal(control.error, null);
+    const firstGeneration = control.data.generation + 1;
+    assert.equal((await advance(control.data.generation)).error, null);
+    process.env.COMMERCE_FAILOVER_GENERATION = String(firstGeneration);
+    const startTimeUTC = `${fixture.nextSlotDate()}T04:30:00.000Z`;
+    const body = { startTimeUTC, packageTitle: "Performance Vertex Overhaul" };
+    const first = await fixture.post("/api/holdSlot", body, "", { "x-forwarded-for": "192.0.2.55" });
+    assert.equal(first.status, 200);
+    assert.equal(first.body.backend, "supabase");
+    assert.equal(first.body.cutoverGeneration, firstGeneration);
+    const created = await fixture.commerce.getDocument(first.body.holdId);
+    assert.equal(created.backendOwner, "supabase");
+    assert.equal(created.cutoverGeneration, firstGeneration);
+    assert.equal((await advance(firstGeneration)).error, null);
+    process.env.COMMERCE_FAILOVER_GENERATION = String(firstGeneration + 1);
+    process.env.DATA_PRIMARY_BACKEND = "sanity";
+    process.env.COMMERCE_PRIMARY_BACKEND = "sanity";
+    const second = await fixture.post("/api/holdSlot", { ...body, previousHoldId: first.body.holdId,
+      previousHoldToken: first.body.holdToken }, "", { "x-forwarded-for": "192.0.2.56" });
+    assert.equal(second.status, 200);
+    assert.equal(second.body.backend, "supabase");
+    assert.equal(second.body.cutoverGeneration, firstGeneration + 1);
+    const refreshed = await fixture.commerce.getDocument(first.body.holdId);
+    assert.equal(refreshed.backendOwner, "supabase");
+    assert.equal(refreshed.cutoverGeneration, firstGeneration + 1);
+    assert.notEqual(second.body.holdToken, first.body.holdToken);
+  } finally {
+    if (previousGeneration === undefined) delete process.env.COMMERCE_FAILOVER_GENERATION;
+    else process.env.COMMERCE_FAILOVER_GENERATION = previousGeneration;
+    process.env.DATA_PRIMARY_BACKEND = previousDataBackend;
+    process.env.COMMERCE_PRIMARY_BACKEND = previousCommerceBackend;
+    Object.assign(process.env, savedSanity);
+    await fixture.sql`update migration.commerce_control set ${fixture.sql(savedControl)} where singleton`;
+  }
 });
 
 test("a legacy paid booking creates its missing payment record", async () => {

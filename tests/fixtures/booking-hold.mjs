@@ -122,6 +122,77 @@ export async function createBookingHoldFixture() {
     await content.create({ _id: "package.fixture.vertex", _type: "package", title: "Performance Vertex Overhaul", price: "$54.95" });
     await content.create({ _id: "6d8a3646-0ed2-44b5-ad45-c5c9d578126a", _type: "bookingSettings",
       dateSlots: dates.map(date => ({ date, times: ["10:00", "11:00"] })), ownerEmail: "owner@example.invalid" });
+    const originalSettings = await content.getDocument("6d8a3646-0ed2-44b5-ad45-c5c9d578126a");
+    const setPackageSlots = date => content.createOrReplace({ ...originalSettings,
+      packageDateSlots: [{ package: { _type: "reference", _ref: "package.fixture.vertex" },
+        dateSlots: [{ date, times: ["12:00"] }] }] });
+    const restoreSettings = () => content.createOrReplace(originalSettings);
+    const setSlots = (date, times) => content.createOrReplace({ ...originalSettings,
+      dateSlots: [{ date, times }], packageDateSlots: [] });
+    let nearMinute = 0;
+    const nearSlot = async () => {
+      nearMinute = Math.max(nearMinute + 60_000, Math.ceil((Date.now() + 300_000) / 60_000) * 60_000);
+      const startTimeUTC = new Date(nearMinute).toISOString();
+      const { getOwnerSlotDetails } = await import("../../src/server/booking/slotPolicy.js");
+      const slot = getOwnerSlotDetails(startTimeUTC);
+      const time = `${String(slot.hour).padStart(2, "0")}:${String(slot.minute).padStart(2, "0")}`;
+      await setSlots(slot.dateKey, [time]);
+      return { startTimeUTC, date: slot.dateKey, time };
+    };
+    let extraDate = 0;
+    const extraSlot = async () => {
+      const date = new Date(Date.UTC(2099, 1, ++extraDate)).toISOString().slice(0, 10);
+      await setSlots(date, ["10:00", "11:00"]);
+      return date;
+    };
+    const resetRateLimits = async () => {
+      globalThis.__rooRateLimitBuckets?.clear();
+      await database.sql`delete from commerce.rate_limit_buckets`;
+    };
+    const rateWindow = () => Math.floor(Date.now() / 900_000);
+    const commandCount = async () => (await database.sql`select count(*)::int as count from migration.commerce_commands`)[0].count;
+    let missingSettings;
+    const setFault = async mode => {
+      if (mode === "env") process.env.COMMERCE_STARTS_PAUSED = "1";
+      else if (mode === "control") await database.sql`update migration.commerce_control set starts_paused = true where singleton`;
+      else if (mode === "unreachable") database.setRequestHook(phase => { if (phase === "before") throw new Error("fixture database unreachable"); });
+      else if (mode === "write") await database.sql.unsafe(`create function migration.fixture_refuse_hold_write() returns trigger
+        language plpgsql as $$ begin raise exception 'fixture hold write refused'; end; $$;
+        create trigger fixture_refuse_hold_write before insert or update on migration.source_documents
+        for each row when (new.document_type = 'slotHold') execute function migration.fixture_refuse_hold_write();`);
+      else if (mode === "settings") {
+        missingSettings = await content.getDocument(originalSettings._id);
+        await content.delete(originalSettings._id);
+      }
+    };
+    const clearFault = async mode => {
+      if (mode === "env") process.env.COMMERCE_STARTS_PAUSED = "0";
+      else if (mode === "control") await database.sql`update migration.commerce_control set starts_paused = false where singleton`;
+      else if (mode === "unreachable") database.setRequestHook(null);
+      else if (mode === "write") await database.sql.unsafe("drop trigger fixture_refuse_hold_write on migration.source_documents; drop function migration.fixture_refuse_hold_write();");
+      else if (mode === "settings") await content.createOrReplace(missingSettings);
+    };
+    const createBooking = async startTimeUTC => {
+      const id = `booking.fixture.${startTimeUTC.replace(/\D/g, "")}`;
+      await commerce.create({ _id: id, _type: "booking", backendOwner: "supabase", cutoverGeneration: 0,
+        status: "cancelled", startTimeUTC, packageTitle: "Performance Vertex Overhaul", email: "visitor@example.invalid" });
+      await database.sql.begin(async sql => {
+        await sql`set local session_replication_role = replica`;
+        await sql`update migration.source_documents set payload = jsonb_set(payload, '{status}', '"captured"')
+          where legacy_sanity_id = ${id}`;
+        await sql`update commerce.bookings set status = 'captured' where legacy_sanity_id = ${id}`;
+      });
+    };
+    const setHoldPhase = (holdId, phase) => commerce.patch(holdId).set({ phase }).commit();
+    const snapshot = async startTimeUTC => {
+      const holds = await database.sql`select legacy_sanity_id, payload, source_revision, tombstoned
+        from migration.source_documents where document_type = 'slotHold'
+        and payload->>'startTimeUTC' = ${startTimeUTC} order by legacy_sanity_id`;
+      const claims = await database.sql`select * from commerce.slot_claims
+        where start_time_utc = ${startTimeUTC}::timestamptz`;
+      const [commands] = await database.sql`select count(*)::int as count from migration.commerce_commands`;
+      return { holds: Array.from(holds), claims: Array.from(claims), commands: commands.count };
+    };
     const { runLegacyApiHandler } = await import("../../src/lib/nextApiAdapter.js");
     const handlers = new Map();
     for (const [route, module] of Object.entries({
@@ -168,6 +239,11 @@ export async function createBookingHoldFixture() {
         },
         body: JSON.stringify(body),
       });
+      return { status: response.status, body: await response.json() };
+    };
+    const countedPost = async (route, body, headers = {}) => {
+      const response = await fetch(`${baseURL}${route}`, { method: "POST",
+        headers: { "content-type": "application/json", origin: baseURL, ...headers }, body: JSON.stringify(body) });
       return { status: response.status, body: await response.json() };
     };
     const get = async route => {
@@ -226,8 +302,11 @@ export async function createBookingHoldFixture() {
       assert.equal(quote.status, 200, JSON.stringify(quote));
       return post("/api/payment/start", { provider: "dodo", bookingPayload, quoteFingerprint: quote.body.quoteFingerprint });
     };
-    return { baseURL, post, get, hold, start, nextSlotDate, commerce, content, details, evidence, save, stop,
-      setPaymentStatus, holdRunsOut, restoreClock, reconcile, paymentSucceeded };
+    return { baseURL, post, get, hold, start, nextSlotDate, commerce, content, sql: database.sql,
+      setRequestHook: database.setRequestHook, details, evidence, save, stop,
+      setPaymentStatus, holdRunsOut, restoreClock, reconcile, paymentSucceeded, setPackageSlots, restoreSettings,
+      createBooking, setHoldPhase, snapshot, setSlots, nearSlot, extraSlot, resetRateLimits, rateWindow, countedPost,
+      commandCount, setFault, clearFault };
   } catch (error) { await stop(); throw error; }
 }
 
@@ -237,7 +316,9 @@ if (process.argv.includes("--worker")) {
   process.once("SIGTERM", shutdown);
   process.once("SIGINT", shutdown);
   process.once("disconnect", () => { fixture.stop(); });
-  const forwardedMethods = ["get", "setPaymentStatus", "holdRunsOut", "restoreClock", "reconcile", "paymentSucceeded"];
+  const forwardedMethods = ["get", "setPaymentStatus", "holdRunsOut", "restoreClock", "reconcile", "paymentSucceeded",
+    "setPackageSlots", "restoreSettings", "createBooking", "setHoldPhase", "snapshot", "setSlots", "nearSlot", "extraSlot",
+    "resetRateLimits", "rateWindow", "countedPost", "commandCount", "setFault", "clearFault"];
   process.on("message", async ({ id, method, args = [] }) => {
     try {
       let value;

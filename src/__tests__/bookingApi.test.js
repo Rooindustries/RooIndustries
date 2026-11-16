@@ -802,135 +802,6 @@ afterEach(() => {
 describe("booking reservation API", () => {
   ;
 
-  test("reservation creation locks slot for other users", async () => {
-    expect(CLIENT_EMAIL).toBe("vihaann2.0@gmail.com");
-    expect(OWNER_EMAIL).toBe("serviroo@rooindustries.com");
-
-    const startTimeUTC = "2099-01-15T07:59:00.000Z";
-    const first = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
-
-    expect(first.res.statusCode).toBe(200);
-    expect(first.body.ok).toBe(true);
-    expect(store.slotHolds).toHaveLength(1);
-
-    const utcDate = new Date(startTimeUTC);
-    expect(store.slotHolds[0].hostDate).toBe(formatOwnerDate(utcDate));
-    expect(store.slotHolds[0].hostTime).toBe(formatOwnerTime(utcDate));
-
-    const second = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
-    expect(second.res.statusCode).toBe(409);
-    expect(second.body.message).toMatch(/reserved/i);
-  });
-
-
-
-
-
-
-
-  test("payment-pending holds cannot be refreshed, moved, or publicly released", async () => {
-    const startTimeUTC = "2099-01-15T08:00:00.000Z";
-    const hold = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
-    Object.assign(store.slotHolds[0], {
-      phase: "payment_pending",
-      paymentRecordId: "paymentRecord.session.pending",
-    });
-
-    const refreshRes = createRes();
-    await holdSlot(
-      createReq({
-        startTimeUTC,
-        packageTitle: "Performance Vertex Overhaul",
-        previousHoldId: hold.body.holdId,
-        previousHoldToken: hold.body.holdToken,
-      }),
-      refreshRes
-    );
-    const moveRes = createRes();
-    await holdSlot(
-      createReq({
-        startTimeUTC: "2099-01-15T08:15:00.000Z",
-        packageTitle: "Performance Vertex Overhaul",
-        previousHoldId: hold.body.holdId,
-        previousHoldToken: hold.body.holdToken,
-      }),
-      moveRes
-    );
-    const releaseRes = createRes();
-    await releaseHold(
-      createReq({
-        holdId: hold.body.holdId,
-        holdToken: hold.body.holdToken,
-      }),
-      releaseRes
-    );
-
-    expect(refreshRes.statusCode).toBe(409);
-    expect(moveRes.statusCode).toBe(409);
-    expect(releaseRes.statusCode).toBe(409);
-    expect(store.slotHolds).toHaveLength(1);
-    expect(store.slotHolds[0]).toMatchObject({
-      phase: "payment_pending",
-      paymentRecordId: "paymentRecord.session.pending",
-    });
-  });
-
-  test("reservation expiry releases slot and avoids emails", async () => {
-    expect(CLIENT_EMAIL).toBe("vihaann2.0@gmail.com");
-    expect(OWNER_EMAIL).toBe("serviroo@rooindustries.com");
-
-    const baseTime = new Date("2099-01-01T00:00:00.000Z").getTime();
-    jest.useFakeTimers({ now: baseTime, doNotFake: ["setTimeout", "clearTimeout"] });
-
-    const startTimeUTC = "2099-01-15T07:59:00.000Z";
-    const first = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
-    expect(first.res.statusCode).toBe(200);
-
-    jest.setSystemTime(baseTime + 21 * 60 * 1000);
-
-    const second = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
-    expect(second.res.statusCode).toBe(200);
-    expect(second.body.holdId).toBe(first.body.holdId);
-    expect(second.body.holdToken).not.toBe(first.body.holdToken);
-
-    const { res: bookingRes } = await createPaidBooking({
-      startTimeUTC,
-      timeZone: "America/Los_Angeles",
-      paymentProvider: "razorpay",
-      holdId: first.body.holdId,
-      holdToken: first.body.holdToken,
-      holdExpiresAt: first.body.expiresAt,
-    });
-
-    expect(bookingRes.statusCode).toBe(409);
-    expect(mockSendEmail).not.toHaveBeenCalled();
-  });
-
-  test("stale hold token cannot release a newly re-acquired slot", async () => {
-    const baseTime = new Date("2099-01-01T00:00:00.000Z").getTime();
-    jest.useFakeTimers({ now: baseTime, doNotFake: ["setTimeout", "clearTimeout"] });
-
-    const startTimeUTC = "2099-01-15T07:59:00.000Z";
-    const first = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
-    expect(first.res.statusCode).toBe(200);
-
-    jest.setSystemTime(baseTime + 21 * 60 * 1000);
-    const second = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
-    expect(second.res.statusCode).toBe(200);
-    expect(second.body.holdId).toBe(first.body.holdId);
-    expect(second.body.holdToken).not.toBe(first.body.holdToken);
-
-    const staleReleaseRes = createRes();
-    await releaseHold(
-      createReq({ holdId: first.body.holdId, holdToken: first.body.holdToken }),
-      staleReleaseRes
-    );
-
-    expect(staleReleaseRes.statusCode).toBe(403);
-    expect(store.slotHolds).toHaveLength(1);
-
-  });
-
   test.each([true, false])("Dodo reuses its existing booking when emails succeed: %s", async (emailsSucceed) => {
     const booking = {
       _id: "booking_dodo_existing",
@@ -979,23 +850,6 @@ describe("booking reservation API", () => {
     expect(store.bookings).toHaveLength(1);
     expect(store.slotHolds).toHaveLength(0);
     expect(mockSendEmail).toHaveBeenCalledTimes(2);
-  });
-
-  test("rejects sub-minute and off-calendar hold requests", async () => {
-    const subMinute = await reserveSlot(
-      "2099-01-15T08:00:30.000Z",
-      "Performance Vertex Overhaul"
-    );
-    const offCalendar = await reserveSlot(
-      "2099-01-17T08:00:00.000Z",
-      "Performance Vertex Overhaul"
-    );
-
-    expect(subMinute.res.statusCode).toBe(400);
-    expect(subMinute.body.message).toMatch(/exact configured minute/i);
-    expect(offCalendar.res.statusCode).toBe(400);
-    expect(offCalendar.body.message).toMatch(/not available/i);
-    expect(store.slotHolds).toHaveLength(0);
   });
 
   test.each([true, false])("Dodo full refunds retain tax in recovery amount %s", async recovery => {
@@ -1913,21 +1767,6 @@ describe("booking reservation API", () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.body).toEqual({ error: "Payment verification failed." });
-  });
-
-  test("rate limits repeated hold requests", async () => {
-    const startTimeUTC = "2099-01-15T08:00:00.000Z";
-    let lastResponse = null;
-
-    for (let index = 0; index < 21; index += 1) {
-      lastResponse = await reserveSlot(startTimeUTC, "Performance Vertex Overhaul");
-    }
-
-    expect(lastResponse.res.statusCode).toBe(429);
-    expect(lastResponse.body).toEqual({
-      ok: false,
-      error: "Too many slot hold requests. Please try again later.",
-    });
   });
 });
 
