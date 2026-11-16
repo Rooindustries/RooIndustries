@@ -116,6 +116,11 @@ export default function Reviews({ initialData = null }) {
                     alt={reviewAlt}
                     width={reviewDims?.width}
                     height={reviewDims?.height}
+                    style={
+                      reviewDims?.width && reviewDims?.height
+                        ? { aspectRatio: `${reviewDims.width} / ${reviewDims.height}` }
+                        : undefined
+                    }
                     loading="lazy"
                     decoding="async"
                     fetchPriority="auto"

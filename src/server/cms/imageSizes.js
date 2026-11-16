@@ -29,13 +29,14 @@ export const makeImageSizes = async ({ bytes, extension, width, height }) => {
   const { pages = 1 } = await decode(bytes, extension).metadata();
   if (pages > 1) return [];
   const widths = imageSizeWidths({ width, height });
-  const { data, info } = await decode(bytes, extension).autoOrient().resize({ width: widths.at(-1) }).raw().toBuffer({ resolveWithObject: true });
+  const exact = (step) => ({ width: step, height: Math.max(1, Math.round((step * height) / width)), fit: "fill" });
+  const { data, info } = await decode(bytes, extension).autoOrient().resize(exact(widths.at(-1))).raw().toBuffer({ resolveWithObject: true });
   const raw = { width: info.width, height: info.height, channels: info.channels };
   const sizes = [];
   for (const step of widths) {
     sizes.push({
       width: step,
-      bytes: await sharp(data, { raw }).resize({ width: step }).webp({ quality: IMAGE_SIZE_QUALITY }).toBuffer(),
+      bytes: await sharp(data, { raw }).resize(exact(step)).webp({ quality: IMAGE_SIZE_QUALITY }).toBuffer(),
     });
   }
   return sizes;
