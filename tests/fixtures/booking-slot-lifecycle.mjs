@@ -78,6 +78,10 @@ const operations = {
       originalOrderId: bookingId, startTimeUTC, packageTitle: "Performance Vertex Overhaul", email: fixture.details.email,
     });
   },
+  async sellAtPagePrice({ packageTitle, packagePrice }) {
+    const sold = await content.fetch(`*[_type == "package" && title == $title][0]`, { title: packageTitle });
+    await content.patch(sold._id).set({ price: packagePrice }).commit();
+  },
   async markRefunded(bookingId) {
     await commerce.patch(bookingId).set({ status: "refunded" }).commit();
   },

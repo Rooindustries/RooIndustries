@@ -105,6 +105,8 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       const slot = await native.freeSlot();
       const { forward, answered } = await routeToNative(context, native, slot.date);
       await flow.reserve();
+      const held = await readHold(page);
+      await native.sellAtPagePrice(held);
       await flow.details();
       await page.getByRole("button", { name: "Review before payment", exact: true }).click();
       await flow.payment();
@@ -121,6 +123,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await expect(page.getByRole("heading", { level: 1, name: "Payment Successful", exact: true })).toBeVisible();
       const bookings = await native.bookingsAt(slot.startTimeUTC);
       expect(bookings).toHaveLength(1);
+      expect(await native.document(bookings[0])).toMatchObject({ packageTitle: held.packageTitle, packagePrice: held.packagePrice });
       expect(confirmations).toHaveLength(2);
       const [returned, raced] = confirmations.map(outcome);
       const answersFor = waiting => [
