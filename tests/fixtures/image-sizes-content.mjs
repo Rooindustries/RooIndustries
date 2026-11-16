@@ -36,7 +36,7 @@ export async function createImageSizesContent() {
   const add = async (name, width, height, extension, svg, { filled = true } = {}) => {
     const body = extension === 'svg' ? Buffer.from(svg) : await raster(svg, extension);
     const sha1 = createHash('sha1').update(body).digest('hex');
-    const made = filled ? await makeImageSizes({ bytes: body, extension, width }) : null;
+    const made = filled ? await makeImageSizes({ bytes: body, extension, width, height }) : null;
     const image = {
       name, width, height, body, sha1,
       id: `image-${sha1}-${width}x${height}-${extension}`,

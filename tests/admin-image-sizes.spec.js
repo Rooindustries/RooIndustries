@@ -6,6 +6,8 @@ const { createContentGate } = require("./fixtures/content-store-gate.cjs");
 
 const LADDER = [128, 320, 640, 960, 1280];
 const ONE_YEAR = "max-age=31536000";
+const INVALID_MESSAGE = "Image format or dimensions are invalid.";
+const TALLEST_FILE = 16383;
 const UNREADABLE_MESSAGE = "Image bytes do not parse as the declared format.";
 const RETRY_MESSAGE = "Image size storage is temporarily unavailable. Retry before the upload expires.";
 const UPLOAD_BUTTON = /^(Upload|Replace)$/;
@@ -82,13 +84,22 @@ const beginUpload = async (page, asset, file) => {
   };
 };
 const upload = async (page, asset, file) => (await beginUpload(page, asset, file))();
-const storedWidths = width => [...LADDER.filter(step => step < Math.min(width, 1280)), Math.min(width, 1280)];
+const storedWidths = ({ width, height }) => {
+  const top = Math.min(width, 1280, Math.floor((TALLEST_FILE * width) / height));
+  return [...LADDER.filter(step => step < top), top];
+};
+const flat = async (width, height, format) => {
+  const canvas = sharp({ create: { width, height, channels: 3, background: { r: randomBytes(1)[0], g: randomBytes(1)[0], b: randomBytes(1)[0] } }, limitInputPixels: false });
+  return format === "avif"
+    ? { name: "flat.avif", mimeType: "image/avif", buffer: await canvas.avif({ effort: 0 }).toBuffer() }
+    : { name: "flat.png", mimeType: "image/png", buffer: await canvas.png().toBuffer() };
+};
 const failures = (request, rules) => request.post(`${adminControl()}/storage-failures`, { data: { rules } });
 const storageOrigin = async request => (await (await request.get(`${adminControl()}/fixture`)).json()).origins[1];
-const sizesInBucket = async (request, sha1, originalWidth) => {
+const sizesInBucket = async (request, sha1, ...otherWidths) => {
   const origin = await storageOrigin(request);
   const found = {};
-  for (const width of [...new Set([...LADDER, originalWidth])].sort((left, right) => left - right)) {
+  for (const width of [...new Set([...LADDER, ...otherWidths])].sort((left, right) => left - right)) {
     const response = await request.get(`${origin}${sizePath(sha1, width).replace("/object/", "/object/public/")}`);
     if (!response.ok()) continue;
     const image = await sharp(await response.body()).metadata();
@@ -111,8 +122,8 @@ const registered = async (request, assetId) => {
 };
 const expectSizes = async (request, file, original) => {
   const sha1 = sha1Of(file.buffer);
-  const widths = storedWidths(original.width);
-  const found = await sizesInBucket(request, sha1, original.width);
+  const widths = storedWidths(original);
+  const found = await sizesInBucket(request, sha1, original.width, widths.at(-1));
   expect(Object.keys(found).map(Number)).toEqual(widths);
   for (const width of widths) {
     expect(found[width]).toMatchObject({ contentType: "image/webp", cacheControl: ONE_YEAR, format: "webp", width });
@@ -132,7 +143,7 @@ for (const [original, widths] of [
   [{ width: 90, height: 60 }, [90]],
 ]) {
   test(`a ${original.width} pixel wide image has its sizes stored and recorded`, async ({ page, request }) => {
-    expect(storedWidths(original.width)).toEqual(widths);
+    expect(storedWidths(original)).toEqual(widths);
     const file = await png(original.width, original.height);
     const asset = await openReviewImage(page);
     const outcome = await upload(page, asset, file);
@@ -145,7 +156,7 @@ for (const [original, widths] of [
 
 test("a narrow image stores the steps below its width and its own width, and the same bytes again add nothing", async ({ page, request }) => {
   const original = { width: 800, height: 500 };
-  expect(storedWidths(original.width)).toEqual([128, 320, 640, 800]);
+  expect(storedWidths(original)).toEqual([128, 320, 640, 800]);
   const file = await png(original.width, original.height);
   const asset = await openReviewImage(page);
   const first = await upload(page, asset, file);
@@ -231,6 +242,39 @@ test("an image whose pixels cannot be read is refused like any other bad file", 
   expect(await sizesInBucket(request, sha1, 800)).toEqual({});
   const original = await request.get(`${await storageOrigin(request)}/storage/v1/object/public/site-content-public/images/${sha1}.png`);
   expect(original.ok()).toBe(false);
+});
+
+test("a very tall image is stored with a top size its format can hold", async ({ page, request }) => {
+  const original = { width: 1280, height: 20000 };
+  expect(storedWidths(original)).toEqual([128, 320, 640, 960, 1048]);
+  const file = await flat(original.width, original.height, "png");
+  const asset = await openReviewImage(page);
+  expect((await upload(page, asset, file)).ok).toBe(true);
+  const found = await expectSizes(request, file, original);
+  expect(found[1048].height).toBeLessThanOrEqual(TALLEST_FILE);
+});
+
+test("a strip too tall for any width is refused", async ({ page, request }) => {
+  const file = await flat(1, 16384, "png");
+  const asset = await openReviewImage(page);
+  expect(await upload(page, asset, file)).toMatchObject({ ok: false, code: "ASSET_VERIFICATION_FAILED", error: INVALID_MESSAGE });
+  expect(await registered(request, `image-${sha1Of(file.buffer)}-1x16384-png`)).toEqual({ document: null, assets: 0 });
+});
+
+test("the largest picture each format may hold: 100 megapixels gets its sizes, an AVIF just over 36 is refused", async ({ page, request }) => {
+  test.setTimeout(300000);
+  const asset = await openReviewImage(page);
+  const largest = { width: 10000, height: 10000 };
+  const png = await flat(largest.width, largest.height, "png");
+  expect((await upload(page, asset, png)).ok).toBe(true);
+  await expectSizes(request, png, largest);
+  const avif = await flat(6000, 6001, "avif");
+  const sha1 = sha1Of(avif.buffer);
+  expect(await upload(page, asset, avif)).toMatchObject({ ok: false, code: "ASSET_VERIFICATION_FAILED", error: INVALID_MESSAGE });
+  await expect(asset.getByRole("alert")).toHaveText(INVALID_MESSAGE);
+  expect(await registered(request, `image-${sha1}-6000x6001-avif`)).toEqual({ document: null, assets: 0 });
+  expect(await sizesInBucket(request, sha1, 6000)).toEqual({});
+  expect((await request.get(`${await storageOrigin(request)}/storage/v1/object/public/site-content-public/images/${sha1}.avif`)).ok()).toBe(false);
 });
 
 test("a published review image reaches visitors from its stored sizes", async ({ page, request, baseURL }) => {

@@ -9,7 +9,6 @@ const SCREENS = [
   { width: 1440, height: 900, deviceScaleFactor: 1 },
 ];
 const PAGES = ["/", "/reviews", "/benchmarks"];
-const OVERSIZE_FACTOR = 1.5;
 const STORAGE_PATH = "/storage/v1/";
 const RESIZE_PATH = "/storage/v1/render/image/";
 
@@ -57,15 +56,17 @@ for (const screen of SCREENS) {
 
         const resizeRequests = [...responses.keys()].filter(address => address.includes(RESIZE_PATH) && assetOf(address) !== unfilled);
         const originalRequests = [...responses.keys()].filter(address => !address.includes(RESIZE_PATH) && assetOf(address)?.sizes?.length && address.endsWith(assetOf(address).storagePath));
-        const oversized = images.filter(image => {
-          const sizes = assetOf(image.address)?.sizes;
-          if (!sizes?.length) return false;
-          const needed = image.boxWidth * screen.deviceScaleFactor;
-          return image.fileWidth > Math.max(OVERSIZE_FACTOR * needed, sizes.find(size => size >= needed) ?? sizes.at(-1));
-        }).map(image => `${assetOf(image.address).name}: ${image.fileWidth} wide file in a ${Math.round(image.boxWidth)} wide box`);
+        const sized = images.filter(image => assetOf(image.address)?.sizes?.length).map(image => {
+          const { name, sizes } = assetOf(image.address);
+          const need = Math.ceil(image.boxWidth * screen.deviceScaleFactor);
+          return { ...image, need, fitting: sizes.find(size => size >= need) ?? sizes.at(-1), widest: sizes.at(-1), label: `${name}: ${image.fileWidth} wide file for ${need} needed` };
+        });
+        const oversized = sized.filter(image => image.fileWidth > image.fitting).map(image => image.label);
+        const blurry = sized.filter(image => image.fileWidth < image.need && image.fileWidth !== image.widest).map(image => image.label);
 
-        console.log(`${path} at ${screen.width}: ${resizeRequests.length} resize requests, ${oversized.length} oversized images, ${originalRequests.length} original files, first screen ${firstScreenBytes} image bytes in ${firstScreen.length} files`);
+        console.log(`${path} at ${screen.width}: ${resizeRequests.length} resize requests, ${oversized.length} oversized images, ${blurry.length} blurry images, ${originalRequests.length} original files, first screen ${firstScreenBytes} image bytes in ${firstScreen.length} files`);
         for (const line of oversized) console.log(`  oversized ${line}`);
+        for (const line of blurry) console.log(`  blurry ${line}`);
 
         if (path === "/reviews") {
           const shown = address => images.find(image => assetOf(image.address) === assetOf(address) && image.address.includes(address));
@@ -75,7 +76,23 @@ for (const screen of SCREENS) {
         expect(resizeRequests).toEqual([]);
         expect(originalRequests).toEqual([]);
         expect(oversized).toEqual([]);
+        expect(blurry).toEqual([]);
       });
     }
   });
 }
+
+test.describe("zoom view", () => {
+  test.use({ viewport: { width: 1440, height: 900 }, javaScriptEnabled: true });
+  test("opening a benchmark image shows the original file", async ({ page, request, baseURL }) => {
+    const contentOrigin = new URL(baseURL);
+    contentOrigin.port = String(fixturePort("TOOLING_CONTENT_PORT"));
+    const assets = await (await request.get(new URL("/__image-sizes", contentOrigin).href)).json();
+    const original = assets.find(asset => asset.name === "benchmark-before");
+    await page.goto("/benchmarks");
+    await page.getByRole("button", { name: "Open Fixture Benchmark Gamma benchmark before optimization", exact: true }).click();
+    const zoomed = page.getByRole("dialog").getByRole("img");
+    await expect(zoomed).toHaveAttribute("src", new URL(`/storage/v1/object/public/site-content-public/${original.storagePath}`, contentOrigin).href);
+    await expect.poll(() => zoomed.evaluate(image => image.naturalWidth)).toBe(original.width);
+  });
+});
