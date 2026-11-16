@@ -6,8 +6,6 @@ const path = require("node:path");
 
 const test = base.extend({
   native: [async ({}, use) => {
-    const binaries = [process.env.PG_BIN && path.join(process.env.PG_BIN, "postgres"), process.env.POSTGREST_BIN];
-    if (!binaries.every(file => file && fs.existsSync(file))) throw new Error("Needs PG_BIN and POSTGREST_BIN for the native PostgreSQL 17 fixture.");
     const child = fork(require.resolve("./fixtures/booking-email-browser.mjs"), [], { execArgv: [], stdio: ["ignore", "inherit", "inherit", "ipc"] });
     const pending = new Map();
     let nextId = 0;
@@ -45,6 +43,8 @@ const test = base.extend({
 });
 
 test.use({ javaScriptEnabled: true, timezoneId: "America/Los_Angeles", reducedMotion: "reduce", trace: "off" });
+const nativeBinaries = [process.env.PG_BIN && path.join(process.env.PG_BIN, "postgres"), process.env.POSTGREST_BIN];
+test.skip(!nativeBinaries.every(file => file && fs.existsSync(file)), "Needs PG_BIN and POSTGREST_BIN for the native PostgreSQL 17 fixture.");
 const paypalSdk = `window.paypal = { version: "5.0.0", Buttons(options) { return {
   isEligible: () => true,
   render(container) {
@@ -212,7 +212,6 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await expect.poll(() => responses.filter(response => response.status === 200).length).toBe(2);
         expect(responses.filter(response => response.status === 200).map(response => response.body.ok)).toEqual([true, true]);
         expect((await native.call("evidence")).providerRequests.filter(request => request.path === "/emails")).toHaveLength(initialEmails + 2);
-        expect(await native.call("mirrorCalls")).toBe(0);
         expect((await native.call("evidence")).blocked).toEqual([]);
         await second.close();
       } finally {

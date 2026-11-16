@@ -67,7 +67,7 @@ test("an ordinary foreign active hold keeps its existing 409 response", async ()
 
 test("a legacy paid booking creates its missing payment record", async () => {
   const payload = await fixture.hold();
-  assert.ok(new Date(payload.slotHoldExpiresAt).getTime() > Date.now());
+  assert.ok(new Date(fixture.evidence.http.findLast(entry => entry.path === "/api/holdSlot").response.expiresAt).getTime() > Date.now());
   const emailsBefore = fixture.evidence.providerRequests.filter(request => request.path === "/emails").length;
   const response = await fixture.post("/api/ref/createBooking", {
     ...payload,
@@ -107,7 +107,7 @@ test("a legacy paid booking creates its missing payment record", async () => {
 
 test("historical reconstruction keeps delivered emails and accounting unchanged", async () => {
   const payload = await fixture.hold();
-  assert.ok(new Date(payload.slotHoldExpiresAt).getTime() > Date.now());
+  assert.ok(new Date(fixture.evidence.http.findLast(entry => entry.path === "/api/holdSlot").response.expiresAt).getTime() > Date.now());
   fixture.setPaymentStatus("succeeded");
   try {
     const started = await fixture.start(payload);
@@ -119,6 +119,9 @@ test("historical reconstruction keeps delivered emails and accounting unchanged"
     const referralId = "referral.fixture.historical";
     await fixture.content.create({ _id: referralId, _type: "referral", creatorEmail: "creator@example.invalid",
       registrationStatus: "active", successfulReferrals: 4 });
+    await fixture.commerce.create({ _id: "coupon.fixture.historical", _type: "coupon", code: "HISTORICAL", isActive: true,
+      discountType: "percent", discountPercent: 10, canCombineWithReferral: true,
+      timesUsed: 0, activeReservations: 0, maxUses: 0, backendOwner: "supabase", cutoverGeneration: 0 });
     const completedAt = "2099-01-15T10:05:00.000Z";
     await fixture.commerce.patch(record._id).set({ historicalBookingReconstruction: true,
       emailDispatch: { allSent: true, client: { sent: true }, owner: { sent: true } },
@@ -129,6 +132,7 @@ test("historical reconstruction keeps delivered emails and accounting unchanged"
     const emailsBefore = fixture.evidence.providerRequests.filter(request => request.path === "/emails").length;
     const redemptionsBefore = await fixture.commerce.fetch('*[_type == "couponRedemption"]{_id}');
     const response = await fixture.post("/api/payment/finalize", {}, `Bearer ${started.body.paymentAccessToken}`);
+    assert.deepEqual(await fixture.commerce.fetch('*[_type == "couponRedemption"]{_id}'), redemptionsBefore);
     assert.equal(response.status, 200, JSON.stringify(response));
     const booking = await fixture.commerce.getDocument(response.body.bookingId);
     const payment = await fixture.commerce.getDocument(record._id);
@@ -138,7 +142,6 @@ test("historical reconstruction keeps delivered emails and accounting unchanged"
     assert.equal(booking.emailDispatchClientSentAt, completedAt);
     assert.equal(booking.emailDispatchOwnerSentAt, completedAt);
     assert.equal(fixture.evidence.providerRequests.filter(request => request.path === "/emails").length, emailsBefore);
-    assert.deepEqual(await fixture.commerce.fetch('*[_type == "couponRedemption"]{_id}'), redemptionsBefore);
     assert.equal((await fixture.content.getDocument(referralId)).successfulReferrals, 4);
     assert.equal(payment.status, "booked");
     assert.equal(payment.bookingId, booking._id);
