@@ -3,6 +3,7 @@ import { IMAGE_SIZE_WIDTHS, imageSizeFile, storedHeight } from "../../lib/imageS
 
 export const IMAGE_SIZE_QUALITY = 75;
 const ANIMATED_IMAGE_SIZE_QUALITY = 40;
+const ANIMATED_IMAGE_SIZE_EFFORT = 5;
 export const IMAGE_SIZE_MIME_TYPE = "image/webp";
 export const IMAGE_SIZE_CACHE_SECONDS = 365 * 24 * 60 * 60;
 const IMAGE_SIZE_TIMEOUT_SECONDS = 30;
@@ -38,7 +39,7 @@ export const makeImageSizes = async ({ bytes, extension, width, height }) => {
     for (const step of widths) {
       moving.push({
         width: step,
-        bytes: await decode(bytes, extension, true).autoOrient().resize(exact(step)).webp({ quality: ANIMATED_IMAGE_SIZE_QUALITY }).toBuffer(),
+        bytes: await decode(bytes, extension, true).autoOrient().resize(exact(step)).webp({ quality: ANIMATED_IMAGE_SIZE_QUALITY, effort: ANIMATED_IMAGE_SIZE_EFFORT }).toBuffer(),
       });
     }
     return moving;
