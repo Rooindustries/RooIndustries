@@ -494,16 +494,16 @@ jobs:
       - uses: ./.github/actions/hold-ports
         with:
           playwright-ports: "3281"
-      - name: Run native booking-hold, payment recovery, coupon and slot lifecycle browser cases
+      - name: Run native booking-hold, hold rules, payment recovery, coupon and slot lifecycle browser cases
         env:
           PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/native-booking-hold.json
         run: |
-          xvfb-run -a npx playwright test tests/booking-hold.spec.js tests/booking-payment-recovery.spec.js tests/booking-coupons.spec.js tests/booking-slot-lifecycle.spec.js --project=chromium --workers=1 --retries=0 --output=test-results/booking-hold-e2e --reporter=line,json
+          xvfb-run -a npx playwright test tests/booking-hold.spec.js tests/booking-hold-rules.spec.js tests/booking-payment-recovery.spec.js tests/booking-coupons.spec.js tests/booking-slot-lifecycle.spec.js --project=chromium --workers=1 --retries=0 --output=test-results/booking-hold-e2e --reporter=line,json
           node - <<'NODE'
           const assert = require('node:assert/strict');
           const { stats } = require('./test-results/native-booking-hold.json');
           assert.equal(stats.skipped, 0, 'Native booking-hold cases must not skip');
-          assert.equal(stats.expected, 40, 'All native booking cases must pass');
+          assert.equal(stats.expected, 68, 'All native booking cases must pass');
           assert.equal(stats.unexpected, 0);
           assert.equal(stats.flaky, 0);
           NODE
