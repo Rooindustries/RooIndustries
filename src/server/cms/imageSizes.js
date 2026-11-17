@@ -2,7 +2,7 @@ import sharp from "sharp";
 import { IMAGE_SIZE_WIDTHS, imageSizeFile, storedHeight } from "../../lib/imageSizeLadder.js";
 
 export const IMAGE_SIZE_QUALITY = 75;
-const ANIMATED_IMAGE_SIZE_QUALITY = 40;
+const ANIMATED_IMAGE_SIZE_QUALITY = 65;
 const ANIMATED_IMAGE_SIZE_EFFORT = 5;
 export const IMAGE_SIZE_MIME_TYPE = "image/webp";
 export const IMAGE_SIZE_CACHE_SECONDS = 365 * 24 * 60 * 60;
