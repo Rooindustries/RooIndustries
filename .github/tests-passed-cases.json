@@ -117,13 +117,13 @@
       "name": "a merge queue run whose tree check failed with no output fails and names it",
       "event": "merge_group", "fork": false, "tested": null,
       "default": "skipped", "results": {"tested-tree": "failure"},
-      "exit": 1, "phrase": "Tests did not pass: tested-tree=failure"
+      "exit": 1, "phrase": "Tests did not pass: tested-tree=failure, monitoring=skipped, jest=skipped, booking-model=skipped, playwright=skipped, routes=skipped, native=skipped, native-booking=skipped, native-publish=skipped, native-payouts=skipped, revalidation=skipped, record-tested-tree=skipped"
     },
     {
       "name": "a failed tree check on a pull request fails and names it",
       "event": "pull_request", "fork": false, "tested": null,
       "default": "skipped", "results": {"tested-tree": "failure"},
-      "exit": 1, "phrase": "Tests did not pass: tested-tree=failure"
+      "exit": 1, "phrase": "Tests did not pass: tested-tree=failure, monitoring=skipped, jest=skipped, booking-model=skipped, playwright=skipped, routes=skipped, native=skipped, native-booking=skipped, native-publish=skipped, native-payouts=skipped, revalidation=skipped, record-tested-tree=skipped"
     },
     {
       "name": "a fork pull request whose tree check ran fails",

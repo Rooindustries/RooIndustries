@@ -706,17 +706,16 @@ jobs:
             && github.event.pull_request.head.repo.full_name != github.repository }}
         run: |
           failed="$(jq -r --arg event "$GITHUB_EVENT_NAME" --argjson fork "$FORK" '
-            if $event == "pull_request" and ($fork or .["tested-tree"].outputs.tested != "true") then
-              to_entries | map(select(.value.result != (
-                if .key == "tested-tree" and $fork then "skipped" else "success" end)))
-            elif ($event | IN("merge_group", "push", "workflow_dispatch"))
-              and .["tested-tree"].outputs.tested == "false" then
-              to_entries | map(select(.value.result != "success"))
-            elif ($event | IN("pull_request", "merge_group", "push", "workflow_dispatch"))
-              and .["tested-tree"].result == "success" and .["tested-tree"].outputs.tested == "true" then
+            if ($event | IN("pull_request", "merge_group", "push", "workflow_dispatch") | not) then
+              [{key: "invalid test results", value: {result: "failure"}}]
+            elif $fork then
+              to_entries | map(select(.value.result != (if .key == "tested-tree" then "skipped" else "success" end)))
+            elif .["tested-tree"].outputs.tested == "true" then
               to_entries | map(select(.value.result != (if .key == "tested-tree" then "success" else "skipped" end)))
             else
-              [{key: "invalid test results", value: {result: "failure"}}]
+              .["tested-tree"].outputs.tested as $tested
+              | to_entries | map(select(.value.result != "success"))
+              | if . == [] and $tested != "false" then [{key: "invalid test results", value: {result: "failure"}}] else . end
             end
             | map("\(.key)=\(.value.result)") | join(", ")
           ' <<< "$NEEDS")"

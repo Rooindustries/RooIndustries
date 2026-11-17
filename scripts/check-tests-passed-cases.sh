@@ -68,7 +68,7 @@ for ((i = 0; i < count; i++)); do
   expected_exit="$(jq -r .exit "$work/case.json")"
   phrase="$(jq -r .phrase "$work/case.json")"
   checked=$((checked + 1))
-  if [ "$exit_code" != "$expected_exit" ] || ! grep -qF -- "$phrase" <<< "$output"; then
+  if [ "$exit_code" != "$expected_exit" ] || ! grep -qxF -- "$phrase" <<< "$output"; then
     wrong=$((wrong + 1))
     printf 'Case "%s" should exit %s saying "%s". It exited %s saying:\n%s\n\n' \
       "$name" "$expected_exit" "$phrase" "$exit_code" "$output" >&2
