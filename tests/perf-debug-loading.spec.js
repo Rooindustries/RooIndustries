@@ -1,5 +1,8 @@
-const { test, expect } = require("@playwright/test");
+const { test: base, expect } = require("@playwright/test");
 const fs = require("node:fs");
+const { heldRouteFixtures, inspectChunks } = require("./fixtures/held-routes.cjs");
+
+const test = base.extend(heldRouteFixtures);
 
 test.use({ javaScriptEnabled: true, viewport: { width: 1440, height: 900 }, serviceWorkers: "block", trace: "off", video: "off" });
 
@@ -13,6 +16,10 @@ test.beforeEach(async ({ context, baseURL }) => {
   const { guardBrowserContext } = await import("../scripts/lib/test-target-safety.mjs");
   await guardBrowserContext(context, [baseURL]);
   await context.addInitScript(() => {
+    window.__failedScripts = [];
+    window.addEventListener("error", (event) => {
+      if (event.target instanceof HTMLScriptElement) window.__failedScripts.push(event.target.src);
+    }, true);
     window.__debugObservers = [];
     const Original = window.PerformanceObserver;
     window.PerformanceObserver = class extends Original {
@@ -37,6 +44,36 @@ const trackDebugScripts = (page) => {
     }
   });
   return async () => { await Promise.all(pending); return urls; };
+};
+
+const failOverlayCode = async (page, baseURL, failures) => {
+  const asks = [];
+  await inspectChunks(page, { origin: new URL(baseURL).origin }, () => undefined, (route, response, body) => {
+    if (!body.includes('"Perf Debug"')) return route.fulfill({ response, body });
+    asks.push(route.request().url());
+    return asks.length > failures ? route.fulfill({ response, body }) : route.abort("failed");
+  });
+  return asks;
+};
+
+const failedLoads = async (page, count) => {
+  await expect.poll(() => page.evaluate(() => window.__failedScripts.length)).toBe(count);
+};
+
+const turnDebug = (page, on) => page.evaluate((enabled) => {
+  if (enabled) {
+    localStorage.setItem("roo_perf_debug", "1");
+  } else {
+    history.replaceState(history.state, "", location.pathname);
+    localStorage.removeItem("roo_perf_debug");
+  }
+  window.dispatchEvent(new CustomEvent("roo-perf-debug-change"));
+}, on);
+
+const pageErrors = (page) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  return errors;
 };
 
 test("ordinary loads exclude the debug overlay and its observers", async ({ page }, testInfo) => {
@@ -84,3 +121,40 @@ for (const enabledBy of ["query", "storage", "event"]) {
     await attachJson(testInfo, "debug-scripts", await scripts());
   });
 }
+
+test("a failed overlay load asks for its code again when debug is turned on again", async ({ page, baseURL }) => {
+  const errors = pageErrors(page);
+  const asks = await failOverlayCode(page, baseURL, 1);
+  await page.goto("/?perfdebug=1");
+  await failedLoads(page, 1);
+  await expect(page.locator("h1").first()).toBeVisible();
+  await expect(page.getByText("Perf Debug", { exact: true })).toHaveCount(0);
+  expect(asks).toHaveLength(1);
+  await turnDebug(page, true);
+  await expect(page.getByText("Perf Debug", { exact: true })).toBeVisible();
+  expect(asks).toHaveLength(2);
+  await page.getByLabel("Disable navbar blur", { exact: true }).check();
+  await expect(page.locator("html")).toHaveClass(/perf-no-navbar-blur/);
+  expect(errors).toEqual([]);
+});
+
+test("the overlay asks again on every turn on until its code arrives and never while off", async ({ page, baseURL }) => {
+  const errors = pageErrors(page);
+  const asks = await failOverlayCode(page, baseURL, 2);
+  await page.goto("/?perfdebug=1");
+  await failedLoads(page, 1);
+  await turnDebug(page, true);
+  await expect.poll(() => asks.length).toBe(2);
+  await failedLoads(page, 2);
+  await expect(page.locator("h1").first()).toBeVisible();
+  await expect(page.getByText("Perf Debug", { exact: true })).toHaveCount(0);
+  await turnDebug(page, false);
+  await page.waitForTimeout(500);
+  expect(asks).toHaveLength(2);
+  await turnDebug(page, true);
+  await expect(page.getByText("Perf Debug", { exact: true })).toBeVisible();
+  expect(asks).toHaveLength(3);
+  await page.getByRole("button", { name: "Hide", exact: true }).click();
+  await expect(page.getByText("Perf Debug", { exact: true })).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
