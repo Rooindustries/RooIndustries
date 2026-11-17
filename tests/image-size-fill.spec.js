@@ -32,7 +32,7 @@ const webp = (width, height) => picture(noise(width, height).webp(), "webp");
 const turnedJpeg = (width, height) => picture(noise(height, width).jpeg().withMetadata({ orientation: 6 }), "jpg", { width, height });
 const tallPng = (width, height) => picture(flat(width, height).png(), "png");
 const largeAvif = (width, height) => picture(flat(width, height).avif({ effort: 0 }), "avif");
-const animatedGif = (width, height) => picture(sharp(randomBytes(width * height * 6), { raw: { width, height: height * 2, channels: 3, pageHeight: height } }).gif(), "gif", { width, height });
+const animatedGif = (width, height) => picture(sharp(randomBytes(width * height * 6), { raw: { width, height: height * 2, channels: 3, pageHeight: height } }).gif({ loop: 2, delay: [70, 120] }), "gif", { width, height });
 const vector = (width, height) => ({ name: "picture.svg", mimeType: MIME_TYPES.svg, extension: "svg", width, height, buffer: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><text x="0" y="40">${randomUUID()}</text></svg>`) });
 const cutShort = async (width, height) => {
   const whole = await png(width, height);
@@ -40,7 +40,7 @@ const cutShort = async (width, height) => {
 };
 
 const storedWidths = ({ width, height, extension }) => {
-  if (["svg", "gif"].includes(extension)) return [];
+  if (extension === "svg") return [];
   const top = Math.min(width, LADDER.at(-1), Math.floor((TALLEST_FILE * width) / height));
   return [...LADDER.filter(step => step < top), top];
 };
@@ -92,14 +92,20 @@ const fill = async (...run) => (await startFill(...run)).finished;
 const outcomeOf = (result, image) => result.lines.find(line => line.startsWith(`${image.id} `))?.slice(image.id.length + 1);
 const listed = widths => (widths.length ? ` ${widths.join(",")}` : "");
 
+const motionOf = async bytes => {
+  const { pages, loop, delay } = await sharp(bytes).metadata();
+  return { pages, loop, delay };
+};
 const expectStoredSizes = async (request, image, widths) => {
   const origin = (await (await control(request, "/fixture")).json()).origins[1];
   for (const width of widths) {
     const response = await request.get(`${origin}${PUBLIC_PATH}${sizeFile(image, width)}`);
     expect(response.headers()).toMatchObject({ "content-type": "image/webp", "cache-control": ONE_YEAR });
-    const { info } = await sharp(await response.body(), { failOn: "error" }).raw().toBuffer({ resolveWithObject: true });
+    const stored = await response.body();
+    const { info } = await sharp(stored, { failOn: "error" }).raw().toBuffer({ resolveWithObject: true });
     expect(info.width).toBe(width);
     expect(Math.abs(info.height - (image.height * width) / image.width)).toBeLessThan(1);
+    expect(await motionOf(stored)).toEqual(await motionOf(image.buffer));
   }
 };
 const publishReview = (gate, image) => gate.cms("/api/admin/content/publish", {
@@ -171,7 +177,7 @@ test("images uploaded before sizes existed get theirs stored and recorded, and t
   const screenshot = await seed(request, await png(1600, 900));
   const photo = await seed(request, await jpeg(800, 600));
   const images = [screenshot, photo, await seed(request, await turnedJpeg(600, 1000)), await seed(request, await webp(500, 300)), await seed(request, await tallPng(1280, 20000)), await seed(request, vector(1400, 700)), await seed(request, await animatedGif(320, 200))];
-  expect(images.map(storedWidths)).toEqual([[128, 320, 640, 960, 1280], [128, 320, 640, 800], [128, 320, 600], [128, 320, 500], [128, 320, 640, 960, 1048], [], []]);
+  expect(images.map(storedWidths)).toEqual([[128, 320, 640, 960, 1280], [128, 320, 640, 800], [128, 320, 600], [128, 320, 500], [128, 320, 640, 960, 1048], [], [128, 320]]);
   const raster = images.filter(image => storedWidths(image).length);
   const unreported = "failed 0, missing 0, no document 0";
 
