@@ -114,10 +114,10 @@
       "exit": 1, "phrase": "Tests did not pass: monitoring=failure"
     },
     {
-      "name": "a failed tree check fails",
+      "name": "a merge queue run whose tree check failed with no output fails and names it",
       "event": "merge_group", "fork": false, "tested": null,
       "default": "skipped", "results": {"tested-tree": "failure"},
-      "exit": 1, "phrase": "Tests did not pass: invalid test results=failure"
+      "exit": 1, "phrase": "Tests did not pass: tested-tree=failure"
     },
     {
       "name": "a failed tree check on a pull request fails and names it",
@@ -142,6 +142,30 @@
       "event": "schedule", "fork": false, "tested": "false",
       "default": "success", "results": {},
       "exit": 1, "phrase": "Tests did not pass: invalid test results=failure"
+    },
+    {
+      "name": "a pull request whose tree check gave no answer fails though every job passed",
+      "event": "pull_request", "fork": false, "tested": null,
+      "default": "success", "results": {},
+      "exit": 1, "phrase": "Tests did not pass: invalid test results=failure"
+    },
+    {
+      "name": "a pull request whose tree check gave an unknown answer fails though every job passed",
+      "event": "pull_request", "fork": false, "tested": "maybe",
+      "default": "success", "results": {},
+      "exit": 1, "phrase": "Tests did not pass: invalid test results=failure"
+    },
+    {
+      "name": "a merge queue run whose tree check failed after saying tested fails and names it",
+      "event": "merge_group", "fork": false, "tested": "true",
+      "default": "skipped", "results": {"tested-tree": "failure"},
+      "exit": 1, "phrase": "Tests did not pass: tested-tree=failure"
+    },
+    {
+      "name": "a push whose tree check failed after saying tested fails and names it",
+      "event": "push", "fork": false, "tested": "true",
+      "default": "skipped", "results": {"tested-tree": "failure"},
+      "exit": 1, "phrase": "Tests did not pass: tested-tree=failure"
     }
   ]
 }

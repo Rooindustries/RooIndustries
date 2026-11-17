@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$(realpath "$0")")/.."
 cases=.github/tests-passed-cases.json
-expected_cases=21
+expected_cases=25
 work="$(mktemp -d)"
 trap 'rm -rf -- "${work:?}"' EXIT
 
