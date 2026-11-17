@@ -39,10 +39,16 @@ const cutShort = async (width, height) => {
   const whole = await png(width, height);
   return { ...whole, buffer: whole.buffer.subarray(0, Math.floor(whole.buffer.length / 2)) };
 };
-const animatedGif = async (width, height) => ({
+const flatFrames = (width, height, count) => {
+  const pixels = Buffer.alloc(width * height * count);
+  const first = randomBytes(1)[0];
+  for (let frame = 0; frame < count; frame += 1) pixels.fill((first + frame * Math.floor(256 / count)) % 256, frame * width * height, (frame + 1) * width * height);
+  return sharp(pixels, { raw: { width, height: height * count, channels: 1, pageHeight: height } });
+};
+const animatedGif = async (width, height, count, options) => ({
   name: "clip.gif",
   mimeType: "image/gif",
-  buffer: await sharp(noisyPixels(width, height * 2), { raw: { width, height: height * 2, channels: 3, pageHeight: height } }).gif().toBuffer(),
+  buffer: await flatFrames(width, height, count).gif(options).toBuffer(),
 });
 const svg = () => ({
   name: "mark.svg",
@@ -261,19 +267,21 @@ test("a strip too tall for any width is refused", async ({ page, request }) => {
   expect(await registered(request, `image-${sha1Of(file.buffer)}-1x16384-png`)).toEqual({ document: null, assets: 0 });
 });
 
-test("the largest picture each format may hold: 100 megapixels gets its sizes, an AVIF just over 36 is refused", async ({ page, request }) => {
+test("the largest picture each format may hold: 100 megapixels gets its sizes, an AVIF just over 36 and a GIF whose frames add up to 104 are refused", async ({ page, request }) => {
   const asset = await openReviewImage(page);
   const largest = { width: 10000, height: 10000 };
   const png = await flat(largest.width, largest.height, "png");
   expect((await upload(page, asset, png)).ok).toBe(true);
   await expectSizes(request, png, largest);
-  const avif = await flat(6000, 6001, "avif");
-  const sha1 = sha1Of(avif.buffer);
-  expect(await upload(page, asset, avif)).toMatchObject({ ok: false, code: "ASSET_VERIFICATION_FAILED", error: INVALID_MESSAGE });
-  await expect(asset.getByRole("alert")).toHaveText(INVALID_MESSAGE);
-  expect(await registered(request, `image-${sha1}-6000x6001-avif`)).toEqual({ document: null, assets: 0 });
-  expect(await sizesInBucket(request, sha1, 6000)).toEqual({});
-  expect((await request.get(`${await storageOrigin(request)}/storage/v1/object/public/site-content-public/images/${sha1}.avif`)).ok()).toBe(false);
+  for (const [file, width, height] of [[await flat(6000, 6001, "avif"), 6000, 6001], [await animatedGif(2000, 2000, 26), 2000, 2000]]) {
+    const sha1 = sha1Of(file.buffer);
+    const extension = file.name.split(".").pop();
+    expect(await upload(page, asset, file)).toMatchObject({ ok: false, code: "ASSET_VERIFICATION_FAILED", error: INVALID_MESSAGE });
+    await expect(asset.getByRole("alert")).toHaveText(INVALID_MESSAGE);
+    expect(await registered(request, `image-${sha1}-${width}x${height}-${extension}`)).toEqual({ document: null, assets: 0 });
+    expect(await sizesInBucket(request, sha1, width)).toEqual({});
+    expect((await request.get(`${await storageOrigin(request)}/storage/v1/object/public/site-content-public/images/${sha1}.${extension}`)).ok()).toBe(false);
+  }
 });
 
 test("a published review image reaches visitors from its stored sizes", async ({ page, request, baseURL }) => {
@@ -298,16 +306,45 @@ test("a published review image reaches visitors from its stored sizes", async ({
   } finally { expect((await request.post(`${adminControl()}/reset-content`)).ok()).toBe(true); }
 });
 
-test("a vector image and an animated image are stored as before and record no sizes", async ({ page, request }) => {
+test("a vector image and an animated image that is stored on its side are stored as before and record no sizes", async ({ page, request }) => {
   const asset = await openReviewImage(page);
-  for (const file of [svg(), await animatedGif(1400, 700)]) {
+  const onItsSide = { name: "clip.webp", mimeType: "image/webp", buffer: await flatFrames(700, 700, 3).webp().withMetadata({ orientation: 6 }).toBuffer() };
+  expect(await sharp(onItsSide.buffer).metadata()).toMatchObject({ pages: 3, orientation: 6 });
+  for (const [file, shape] of [[svg(), { width: 1400, height: 700 }], [onItsSide, { width: 700, height: 700 }]]) {
     const outcome = await upload(page, asset, file);
     expect(outcome.ok).toBe(true);
     await expect(asset.locator("img")).toHaveAttribute("src", new RegExp(`/images/${sha1Of(file.buffer)}\\.`));
     const record = await registered(request, outcome.data.assetId);
     expect(record.assets).toBe(1);
-    expect(record.document.metadata.dimensions).toMatchObject({ width: 1400, height: 700 });
+    expect(record.document.metadata.dimensions).toMatchObject(shape);
     expect(record.document.metadata.sizes).toEqual([]);
-    expect(await sizesInBucket(request, sha1Of(file.buffer), 1400)).toEqual({});
+    expect(await sizesInBucket(request, sha1Of(file.buffer), shape.width)).toEqual({});
   }
+});
+
+test("an animated image gets sizes that keep its frames, timing and loop, and visitors see it move", async ({ page, request, baseURL }) => {
+  const original = { width: 320, height: 200 };
+  const motion = { pages: 3, delay: [150, 250, 400], loop: 0 };
+  const file = await animatedGif(original.width, original.height, motion.pages, { delay: motion.delay, loop: motion.loop });
+  expect(await sharp(file.buffer).metadata()).toMatchObject(motion);
+  const sha1 = sha1Of(file.buffer);
+  const asset = await openReviewImage(page);
+  try {
+    expect((await upload(page, asset, file)).ok).toBe(true);
+    await expectSizes(request, file, original);
+    const origin = await storageOrigin(request);
+    for (const [width, height] of [[128, 80], [320, 200]]) {
+      const stored = await request.get(`${origin}${sizePath(sha1, width).replace("/object/", "/object/public/")}`);
+      expect(await sharp(await stored.body()).metadata()).toMatchObject({ format: "webp", width, height, ...motion });
+    }
+    await page.getByRole("button", { name: "Publish", exact: true }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Published. The live site" })).toBeVisible();
+    await createContentGate(request, baseURL).rebuild(["/reviews"]);
+    await page.goto("/reviews");
+    const shown = page.locator(`img[src*="${sha1}"]`);
+    await shown.scrollIntoViewIfNeeded();
+    await expect.poll(() => shown.evaluate(image => image.naturalWidth > 0 && image.currentSrc.split("/").pop())).toMatch(new RegExp(`^${sha1}-w(128|320)\\.webp$`));
+    const first = await shown.screenshot();
+    await expect.poll(async () => first.equals(await shown.screenshot())).toBe(false);
+  } finally { expect((await request.post(`${adminControl()}/reset-content`)).ok()).toBe(true); }
 });
