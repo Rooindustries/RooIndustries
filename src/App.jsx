@@ -13,7 +13,7 @@ import JsonLd from "./next/JsonLd";
 import { isProductionBrowser } from "./lib/productionBrowser";
 import SalesTelemetry from "./components/SalesTelemetry";
 import { loadPostHog } from "./lib/loadPostHog";
-import { SpeedInsights } from "@vercel/speed-insights/react";
+import { reportRequestError } from "./lib/clientRequest";
 import ReservationBanner from "./components/ReservationBanner";
 import RouteProgress, { RouteWaiting } from "./components/RouteProgress";
 import { BookingDialogReady } from "./lib/bookingDialogHold";
@@ -98,6 +98,7 @@ const isReferralResetHash = (hash) => {
 const DeferredTelemetry = () => {
   const location = useLocation();
   const [enabled, setEnabled] = useState(false);
+  const [SpeedInsights, setSpeedInsights] = useState(null);
 
   useEffect(() => {
     setEnabled(false);
@@ -115,19 +116,25 @@ const DeferredTelemetry = () => {
     );
     if (protectedPath) return undefined;
     if (!isProductionBrowser()) return undefined;
+    const enable = () => {
+      setEnabled(true);
+      import("@vercel/speed-insights/react")
+        .then((module) => setSpeedInsights(() => module.SpeedInsights))
+        .catch(reportRequestError);
+    };
 
     if ("requestIdleCallback" in window) {
-      const idleId = window.requestIdleCallback(() => setEnabled(true), {
+      const idleId = window.requestIdleCallback(enable, {
         timeout: 6000,
       });
       return () => window.cancelIdleCallback?.(idleId);
     }
 
-    const timeoutId = window.setTimeout(() => setEnabled(true), 5000);
+    const timeoutId = window.setTimeout(enable, 5000);
     return () => window.clearTimeout(timeoutId);
   }, [location.pathname]);
 
-  if (!enabled) return null;
+  if (!enabled || !SpeedInsights) return null;
 
   return (
     <>

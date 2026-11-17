@@ -230,6 +230,10 @@
       "js": 6144,
       "css": 1024
     },
+    "src/App.jsx -> @vercel/speed-insights/react": {
+      "js": 3072,
+      "css": 1024
+    },
     "src/components/Footer.jsx -> ../lib/consent": {
       "js": 1024,
       "css": 1024
