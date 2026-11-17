@@ -1518,7 +1518,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       const reached = new Promise(resolve => { forwarded = resolve; });
       const hold = async route => {
         const response = await fixture.requestRoute(baseURL, '/api/ref/verifyRegistration', { data: route.request().postDataJSON() });
-        const reply = { status: response.status, body: await response.json() };
+        const reply = { status: response.status, body: await response.json(), cache: response.headers.get('cache-control') };
         forwarded(reply);
         await held;
         await route.fulfill({ status: reply.status, json: reply.body }).catch(() => {});
@@ -1544,7 +1544,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       const storedToken = await page.evaluate(() => sessionStorage.getItem('referral_registration_verification'));
       const signedIn = (await context.cookies()).some(cookie => cookie.name === 'ref_session');
       await record(page, testInfo, `verify-timeout-reload-${size}`, { first, status: response.status(), body, replayCalls: replayCalls.map(call => call.path), referralWrites, accountCalls, storedToken, signedIn, before: confirmed, after: portalSource(after) });
-      expect(first).toEqual({ status: 200, body: { ok: true } });
+      expect(first).toEqual({ status: 200, body: { ok: true }, cache: 'private, no-store' });
       expect(confirmed.registrationStatus).toBe('active');
       expect(confirmed.registrationVerificationDeliveryToken).toBeUndefined();
       expect(response.status()).toBe(200);
@@ -1564,7 +1564,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await expect(page.getByRole('heading', { name: 'Welcome, Pending Creator' })).toBeVisible();
     });
 
-    test('confirmation succeeds and a reused link stays confirmed until it expires', async ({ page, baseURL }, testInfo) => {
+    test('confirmation succeeds, a reused link stays confirmed until it expires, and another link is refused', async ({ page, baseURL }, testInfo) => {
       await page.goto('/referrals/verify#token=' + 'b'.repeat(43));
       await expect(page.getByRole('status')).toContainText('Email confirmed');
       expect(new URL(page.url()).hash).toBe('');
@@ -1577,6 +1577,19 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       expect((await reuse).status()).toBe(200);
       await expect(page.getByRole('status')).toContainText('Your account is confirmed');
       await expect(page.getByRole('link', { name: 'Sign in', exact: true })).toHaveAttribute('href', '/referrals/login?notice=email-confirmed');
+      const confirmed = (await (await configure(baseURL, {})).json()).documents.find(row => row._id === 'portal-pending');
+      await page.goto('/referrals/login');
+      const other = page.waitForResponse(response => response.url().endsWith('/api/ref/verifyRegistration'));
+      await page.goto('/referrals/verify#token=' + 'c'.repeat(43));
+      const otherReply = await other;
+      await expect(page.getByRole('status')).toContainText('Invalid or expired confirmation link');
+      const afterOther = (await (await configure(baseURL, {})).json()).documents.find(row => row._id === 'portal-pending');
+      await record(page, testInfo, `verify-other-link-${size}`, { status: otherReply.status(), body: await otherReply.json(), unchanged: JSON.stringify(afterOther) === JSON.stringify(confirmed) });
+      expect(confirmed.registrationStatus).toBe('active');
+      expect(Date.parse(confirmed.registrationVerificationExpiresAt)).toBeGreaterThan(Date.now());
+      expect(otherReply.request().postDataJSON()).toEqual({ token: 'c'.repeat(43) });
+      expect(otherReply.status()).toBe(400);
+      expect(afterOther).toEqual(confirmed);
       await configure(baseURL, { documents: [{ _id: 'portal-pending', registrationVerificationExpiresAt: '2020-01-01T00:00:00Z' }] });
       await page.goto('/referrals/login');
       const expired = page.waitForResponse(response => response.url().endsWith('/api/ref/verifyRegistration'));
