@@ -147,13 +147,23 @@ test("unconfigured, sub-minute, and invalid starts do not create holds", async (
   assert.deepEqual(await holdDocuments(), before);
 });
 
-test("the twenty-first hold request from one address is rate limited", async t => {
+const withDatabaseLimiter = async run => {
   const previousNodeEnv = process.env.NODE_ENV;
   const previousSecret = process.env.RATE_LIMIT_HASH_SECRET;
-  const now = Date.now();
-  const clock = t.mock.method(Date, "now", () => now);
   process.env.NODE_ENV = "development";
   process.env.RATE_LIMIT_HASH_SECRET = "fixture-only-rate-limit";
+  try {
+    await run();
+  } finally {
+    process.env.NODE_ENV = previousNodeEnv;
+    if (previousSecret === undefined) delete process.env.RATE_LIMIT_HASH_SECRET;
+    else process.env.RATE_LIMIT_HASH_SECRET = previousSecret;
+  }
+};
+
+test("the twenty-first hold request from one address is rate limited", t => withDatabaseLimiter(async () => {
+  const now = Date.now();
+  const clock = t.mock.method(Date, "now", () => now);
   try {
     const before = await holdDocuments();
     const startTimeUTC = `${fixture.nextSlotDate()}T04:30:00.000Z`;
@@ -174,11 +184,30 @@ test("the twenty-first hold request from one address is rate limited", async t =
     assert.deepEqual(after.filter(hold => hold._id !== buildSlotHoldId(startTimeUTC)), before);
   } finally {
     clock.mock.restore();
-    process.env.NODE_ENV = previousNodeEnv;
-    if (previousSecret === undefined) delete process.env.RATE_LIMIT_HASH_SECRET;
-    else process.env.RATE_LIMIT_HASH_SECRET = previousSecret;
   }
-});
+}));
+
+test("a limiter that cannot count refuses a reservation without writing", () => withDatabaseLimiter(async () => {
+  const startTimeUTC = `${fixture.nextSlotDate()}T04:30:00.000Z`;
+  const request = () => fetch(`${fixture.baseURL}/api/holdSlot`, {
+    method: "POST", headers: { "content-type": "application/json", origin: fixture.baseURL,
+      "x-forwarded-for": "192.0.2.60" },
+    body: JSON.stringify({ startTimeUTC, packageTitle: "Performance Vertex Overhaul" }),
+  });
+  const before = await fixture.snapshot(startTimeUTC);
+  await fixture.setFault("limiter");
+  let response;
+  try {
+    response = await request();
+  } finally {
+    await fixture.clearFault("limiter");
+  }
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("retry-after"), "30");
+  assert.deepEqual(await response.json(), { ok: false, error: "Request protection is temporarily unavailable." });
+  assert.deepEqual(await fixture.snapshot(startTimeUTC), before);
+  assert.equal((await request()).status, 200);
+}));
 
 test("environment and database pauses prevent new holds", async () => {
   const { createSupabaseAdminClient } = await import("../src/server/supabase/adminClient.js");

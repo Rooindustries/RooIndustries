@@ -162,6 +162,10 @@ export async function createBookingHoldFixture() {
         language plpgsql as $$ begin raise exception 'fixture hold write refused'; end; $$;
         create trigger fixture_refuse_hold_write before insert or update on migration.source_documents
         for each row when (new.document_type = 'slotHold') execute function migration.fixture_refuse_hold_write();`);
+      else if (mode === "limiter") await database.sql.unsafe(`create function commerce.fixture_refuse_rate_count() returns trigger
+        language plpgsql as $$ begin raise exception 'fixture rate count refused'; end; $$;
+        create trigger fixture_refuse_rate_count before insert or update on commerce.rate_limit_buckets
+        for each row execute function commerce.fixture_refuse_rate_count();`);
       else if (mode === "settings") {
         missingSettings = await content.getDocument(originalSettings._id);
         await content.delete(originalSettings._id);
@@ -172,6 +176,7 @@ export async function createBookingHoldFixture() {
       else if (mode === "control") await database.sql`update migration.commerce_control set starts_paused = false where singleton`;
       else if (mode === "unreachable") database.setRequestHook(null);
       else if (mode === "write") await database.sql.unsafe("drop trigger fixture_refuse_hold_write on migration.source_documents; drop function migration.fixture_refuse_hold_write();");
+      else if (mode === "limiter") await database.sql.unsafe("drop trigger fixture_refuse_rate_count on commerce.rate_limit_buckets; drop function commerce.fixture_refuse_rate_count();");
       else if (mode === "settings") await content.createOrReplace(missingSettings);
     };
     const createBooking = async startTimeUTC => {
