@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { registerHooks } from "node:module";
 import { pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
@@ -45,6 +45,7 @@ const fixture = await start({
 let active, restoreEmailFetch, databaseSnapshot, resetIsolation;
 const emails = [];
 let notificationSequence = 0;
+const IMAGE_BUCKET = "site-content-public";
 const storeRules = new Map();
 const storeCalls = [];
 const storeHolds = [];
@@ -421,6 +422,38 @@ try {
       const [{ assets }] = await fixture.sql`select count(*)::int as assets from cms.assets where legacy_sanity_asset_id=${id}`;
       response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify({ document: source?.payload ?? null, assets })); return;
     }
+    if (request.method === "POST" && request.url === "/seed-legacy-image") {
+      const { bytes, extension, mimeType, width, height } = await readJson(request);
+      const body = Buffer.from(bytes, "base64");
+      const sha1 = createHash("sha1").update(body).digest("hex");
+      const id = `image-${sha1}-${width}x${height}-${extension}`;
+      const storagePath = `images/${sha1}.${extension}`;
+      const bucket = fixture.client.storage.from(IMAGE_BUCKET);
+      const url = bucket.getPublicUrl(storagePath).data.publicUrl;
+      const stored = await bucket.upload(storagePath, body, { contentType: mimeType, upsert: false });
+      const registered = stored.error ? stored : await fixture.client.rpc("roo_register_verified_cms_asset", {
+        p_asset: { legacy_sanity_asset_id: id, storage_bucket: IMAGE_BUCKET, storage_path: storagePath, source_url: url, mime_type: mimeType, byte_size: body.length, sha256: createHash("sha256").update(body).digest("hex"), width, height },
+        p_asset_document: { _id: id, _type: "sanity.imageAsset", url, sha1hash: sha1, size: body.length, mimeType, extension, metadata: { dimensions: { width, height, aspectRatio: width / height } } },
+      });
+      response.writeHead(registered.error ? 500 : 200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify(registered.error ? { error: registered.error.message } : { id, sha1, path: storagePath })); return;
+    }
+    if (request.method === "POST" && request.url === "/remove-object") {
+      const removed = await fixture.client.storage.from(IMAGE_BUCKET).remove([(await readJson(request)).path]);
+      response.writeHead(removed.error || removed.data.length !== 1 ? 500 : 200); response.end(); return;
+    }
+    if (request.method === "POST" && request.url === "/record-no-image-sizes") {
+      const [{ outcome }] = await fixture.sql`select public.roo_record_cms_image_sizes(${(await readJson(request)).id}, '[]'::jsonb) as outcome`;
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(outcome)); return;
+    }
+    if (request.method === "GET" && request.url === "/image-store") {
+      const objects = await fixture.sql`select name, version, updated_at from storage.objects where bucket_id=${IMAGE_BUCKET} order by name`;
+      const documents = await fixture.sql`select legacy_sanity_id as id, source_revision as revision, payload #> '{metadata,sizes}' as sizes, payload #> '{metadata,dimensions}' as dimensions from migration.source_documents where document_type='sanity.imageAsset' and not tombstoned order by legacy_sanity_id`;
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify({ objects, documents })); return;
+    }
+    if (request.method === "GET" && request.url === "/operator-environment") {
+      response.writeHead(200, { "Content-Type": "text/plain" }); response.end(`SUPABASE_URL=${fixture.origin}\nSUPABASE_SECRET_KEY=${fixture.serviceRoleKey}\n`); return;
+    }
     if (request.method === "POST" && request.url === "/reset-rate-limits") {
       await fixture.sql`update commerce.rate_limit_buckets set count=0`;
       response.writeHead(200); response.end("ok"); return;
@@ -501,7 +534,11 @@ try {
       ...controls.active.map(({ trace, content, pages, holds }) => `hang control ${trace}/${[content && "content purge", pages && "page mark", holds && `${holds} holds`].filter(Boolean).join(", ")}`),
       ...controls.failures.map(({ trace, content, pages }) => `forced failure ${trace}/${[content && "content purge", pages && "page mark"].filter(Boolean).join(", ")}`),
       ...controls.pageStoreHolds.map(trace => `unused page store hold ${trace}`),
+      ...fixture.storageFailures.map(({ method, path }) => `storage failure rule ${method} ${path}`),
+      ...fixture.storageHolds.map(() => "held storage request"),
     ];
+    fixture.storageFailures.length = 0;
+    for (const refuse of fixture.storageHolds.splice(0)) refuse();
     await step("clear controls", () => hook("x-roo-test-reset-all-controls", { "x-roo-test-clear-rounds": "1" }));
     for (const hold of storeHolds.splice(0)) hold.release();
     for (const waiter of eventWaiters) waiter.cancel();

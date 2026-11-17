@@ -361,6 +361,20 @@ jobs:
           playwright-ports: "3211"
       - name: Run native admin CMS suite
         run: xvfb-run -a npx playwright test -c playwright.admin-native.config.js
+      - name: Run image size fill suite
+        if: ${{ !cancelled() }}
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/image-size-fill.json
+        run: |
+          xvfb-run -a npx playwright test -c playwright.admin.config.js tests/image-size-fill.spec.js --output=test-results/image-size-fill --reporter=line,json
+          node - <<'NODE'
+          const assert = require('node:assert/strict');
+          const { stats } = require('./test-results/image-size-fill.json');
+          assert.equal(stats.skipped, 0, 'Image size fill cases must not skip');
+          assert.equal(stats.expected, 8, 'All image size fill cases must pass');
+          assert.equal(stats.unexpected, 0);
+          assert.equal(stats.flaky, 0);
+          NODE
       - name: Run write conflict browser cases
         run: xvfb-run -a npm run test:conflict-ui:postgres17
       - name: Run the tooling safety suite

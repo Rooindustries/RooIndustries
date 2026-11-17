@@ -1,0 +1,338 @@
+const { spawn } = require("node:child_process");
+const { randomBytes, randomUUID } = require("node:crypto");
+const fs = require("node:fs");
+const path = require("node:path");
+const sharp = require("sharp");
+const { test, expect } = require("./fixtures/isolated-content-test.cjs");
+const { adminControl, login, choose, prepareAdminContext } = require("./fixtures/admin-content.cjs");
+const { createContentGate } = require("./fixtures/content-store-gate.cjs");
+
+const ROOT = path.resolve(__dirname, "..");
+const SCRIPT = path.join(ROOT, "scripts/fill-image-sizes.mjs");
+const LADDER = [128, 320, 640, 960, 1280];
+const TALLEST_FILE = 16383;
+const ONE_YEAR = "max-age=31536000";
+const PUBLIC_PATH = "/storage/v1/object/public/site-content-public/";
+const RESIZE_PATH = "/storage/v1/render/image/";
+const STORAGE_PATH = "/storage/v1/";
+const SIZE_FILE = /-w\d+\.webp$/;
+const INVALID_MESSAGE = "Image format or dimensions are invalid.";
+const UNREADABLE_MESSAGE = "Image bytes do not parse as the declared format.";
+const MIME_TYPES = { png: "image/png", jpg: "image/jpeg", webp: "image/webp", avif: "image/avif", gif: "image/gif", svg: "image/svg+xml" };
+
+const noise = (width, height) => sharp(randomBytes(width * height * 3), { raw: { width, height, channels: 3 } });
+const flat = (width, height) => sharp({ create: { width, height, channels: 3, background: { r: randomBytes(1)[0], g: randomBytes(1)[0], b: randomBytes(1)[0] } }, limitInputPixels: false });
+const picture = async (pixels, extension, shown) => {
+  const { data, info } = await pixels.toBuffer({ resolveWithObject: true });
+  return { name: `picture.${extension}`, mimeType: MIME_TYPES[extension], extension, width: info.width, height: info.height, ...shown, buffer: data };
+};
+const png = (width, height) => picture(noise(width, height).png(), "png");
+const jpeg = (width, height) => picture(noise(width, height).jpeg(), "jpg");
+const webp = (width, height) => picture(noise(width, height).webp(), "webp");
+const turnedJpeg = (width, height) => picture(noise(height, width).jpeg().withMetadata({ orientation: 6 }), "jpg", { width, height });
+const tallPng = (width, height) => picture(flat(width, height).png(), "png");
+const largeAvif = (width, height) => picture(flat(width, height).avif({ effort: 0 }), "avif");
+const animatedGif = (width, height) => picture(sharp(randomBytes(width * height * 6), { raw: { width, height: height * 2, channels: 3, pageHeight: height } }).gif(), "gif", { width, height });
+const vector = (width, height) => ({ name: "picture.svg", mimeType: MIME_TYPES.svg, extension: "svg", width, height, buffer: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><text x="0" y="40">${randomUUID()}</text></svg>`) });
+const cutShort = async (width, height) => {
+  const whole = await png(width, height);
+  return { ...whole, buffer: whole.buffer.subarray(0, Math.floor(whole.buffer.length / 2)) };
+};
+
+const storedWidths = ({ width, height, extension }) => {
+  if (["svg", "gif"].includes(extension)) return [];
+  const top = Math.min(width, LADDER.at(-1), Math.floor((TALLEST_FILE * width) / height));
+  return [...LADDER.filter(step => step < top), top];
+};
+const sizeFile = (image, width) => `images/${image.sha1}-w${width}.webp`;
+const filesFor = (image, widths) => [image.path, ...widths.map(width => sizeFile(image, width))].sort();
+const control = (request, route, data) => (data === undefined ? request.get(`${adminControl()}${route}`) : request.post(`${adminControl()}${route}`, { data }));
+const seed = async (request, file) => {
+  const response = await control(request, "/seed-legacy-image", { bytes: file.buffer.toString("base64"), extension: file.extension, mimeType: file.mimeType, width: file.width, height: file.height });
+  expect(response.ok(), await response.text()).toBe(true);
+  return { ...file, ...(await response.json()) };
+};
+const store = async request => (await control(request, "/image-store")).json();
+const filesOf = (stored, image) => stored.objects.map(object => object.name).filter(name => name.includes(image.sha1));
+const recordOf = (stored, image) => stored.documents.find(document => document.id === image.id);
+const failStorage = async (request, rules) => expect((await control(request, "/storage-failures", { rules })).ok()).toBe(true);
+const refusedSizeUpload = (image, width, hold = false) => ({ method: "POST", path: `/storage/v1/object/site-content-public/${sizeFile(image, width)}`, hold });
+
+const startFill = async (request, testInfo, args, env = {}) => {
+  const environment = testInfo.outputPath("operator.env");
+  fs.writeFileSync(environment, await (await control(request, "/operator-environment")).text(), { mode: 0o600 });
+  const child = spawn(process.execPath, [SCRIPT, "--env", environment, ...args], { cwd: ROOT, env: { PATH: process.env.PATH, CMS_WRITES_PAUSED: "0", ...env }, stdio: ["ignore", "pipe", "pipe"] });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", chunk => { stdout += chunk; });
+  child.stderr.on("data", chunk => { stderr += chunk; });
+  const finished = new Promise(resolve => child.once("close", (code, signal) => {
+    console.log(`fill ${args.join(" ") || "(dry run)"} exited ${signal || code}\n${stdout}${stderr}`);
+    resolve({ code, signal, stdout, stderr, lines: stdout.trim().split("\n") });
+  }));
+  return { child, finished };
+};
+const fill = async (...run) => (await startFill(...run)).finished;
+const outcomeOf = (result, image) => result.lines.find(line => line.startsWith(`${image.id} `))?.slice(image.id.length + 1);
+const listed = widths => (widths.length ? ` ${widths.join(",")}` : "");
+
+const expectStoredSizes = async (request, image, widths) => {
+  const origin = (await (await control(request, "/fixture")).json()).origins[1];
+  for (const width of widths) {
+    const response = await request.get(`${origin}${PUBLIC_PATH}${sizeFile(image, width)}`);
+    expect(response.headers()).toMatchObject({ "content-type": "image/webp", "cache-control": ONE_YEAR });
+    const { info } = await sharp(await response.body(), { failOn: "error" }).raw().toBuffer({ resolveWithObject: true });
+    expect(info.width).toBe(width);
+    expect(Math.abs(info.height - (image.height * width) / image.width)).toBeLessThan(1);
+  }
+};
+const publishReview = (gate, image) => gate.cms("/api/admin/content/publish", {
+  operation: "create", type: "review", createIntentId: randomUUID(),
+  document: { title: `Review ${image.sha1}`, alt: `Review ${image.sha1}`, image: { _type: "image", asset: { _type: "reference", _ref: image.id } } },
+});
+const openReviews = async (gate, page, image) => {
+  const requested = [];
+  const record = request => { if (new URL(request.url()).pathname.startsWith(STORAGE_PATH)) requested.push(request.url()); };
+  await gate.rebuild(["/reviews"]);
+  page.on("request", record);
+  await page.goto("/reviews");
+  const shown = page.locator(`img[src*="${image.sha1}"]`);
+  await shown.scrollIntoViewIfNeeded();
+  await expect.poll(() => requested.filter(address => address.includes(image.sha1)).length).toBeGreaterThan(0);
+  page.off("request", record);
+  return { shown, requested, addresses: await page.locator(`img[src*="${STORAGE_PATH}"]`).evaluateAll(elements => elements.map(element => `${element.getAttribute("src")} ${element.getAttribute("srcset") || ""}`)) };
+};
+const openReviewUpload = async (page, image) => {
+  const steps = [];
+  page.on("response", response => {
+    const step = /\/api\/admin\/content\/assets\/(upload|finalize)$/.exec(new URL(response.url()).pathname);
+    if (step) steps.push(step[1]);
+  });
+  await login(page);
+  await choose(page, "Reviews");
+  await page.getByRole("region", { name: "Reviews list" }).getByRole("button", { name: "New", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Editor", exact: true })).toHaveAttribute("aria-busy", "false");
+  const asset = page.locator('input[type="file"][aria-label="Review Image"]').locator("xpath=../..");
+  return async () => {
+    const chooser = page.waitForEvent("filechooser");
+    const answered = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/assets/upload"));
+    await asset.getByRole("button", { name: /^(Upload|Replace)$/ }).click();
+    await (await chooser).setFiles({ name: image.name, mimeType: image.mimeType, buffer: image.buffer });
+    await answered;
+    await expect(asset.getByRole("button", { name: "Replace", exact: true })).toBeEnabled();
+    await expect(asset.locator("img")).toHaveAttribute("src", new RegExp(`/${image.path.replace(".", "\\.")}$`));
+    return steps.splice(0);
+  };
+};
+
+test.beforeAll(async ({ playwright }) => {
+  const earlier = await playwright.request.newContext();
+  expect((await earlier.post(`${adminControl()}/reset-isolation`)).ok()).toBe(true);
+  await earlier.dispose();
+});
+test.beforeEach(prepareAdminContext);
+
+test("images uploaded before sizes existed get theirs stored and recorded, and the reviews page stops asking the resizer", async ({ page, request, baseURL }, testInfo) => {
+  const gate = createContentGate(request, baseURL);
+  const screenshot = await seed(request, await png(1600, 900));
+  const photo = await seed(request, await jpeg(800, 600));
+  const images = [screenshot, photo, await seed(request, await turnedJpeg(600, 1000)), await seed(request, await webp(500, 300)), await seed(request, await tallPng(1280, 20000)), await seed(request, vector(1400, 700)), await seed(request, await animatedGif(320, 200))];
+  expect(images.map(storedWidths)).toEqual([[128, 320, 640, 960, 1280], [128, 320, 640, 800], [128, 320, 600], [128, 320, 500], [128, 320, 640, 960, 1048], [], []]);
+  const raster = images.filter(image => storedWidths(image).length);
+  const unreported = "failed 0, missing 0, no document 0";
+
+  await publishReview(gate, screenshot);
+  const resized = await openReviews(gate, page, screenshot);
+  await expect(resized.shown).toHaveAttribute("src", new RegExp(`${RESIZE_PATH}public/site-content-public/${screenshot.path.replace(".", "\\.")}`));
+  expect(resized.requested.filter(address => address.includes(RESIZE_PATH)).length).toBeGreaterThan(0);
+
+  const untouched = await store(request);
+  expect(untouched.objects.map(object => object.name)).toEqual(images.map(image => image.path).sort());
+  expect(untouched.documents.map(document => document.sizes)).toEqual(images.map(() => null));
+  const reportFile = testInfo.outputPath("plan.json");
+  const sizesFolder = testInfo.outputPath("sizes");
+  const plan = await fill(request, testInfo, ["--report", reportFile, "--save-sizes", sizesFolder]);
+  expect(plan.code).toBe(0);
+  for (const image of images) expect(outcomeOf(plan, image)).toBe(storedWidths(image).length ? `to fill${listed(storedWidths(image))}` : "to record empty: vector or animated");
+  expect(plan.lines.at(-1)).toBe(`to fill ${raster.length}, already filled 0, to record empty ${images.length - raster.length}, ${unreported}`);
+  expect(await store(request)).toEqual(untouched);
+  const report = JSON.parse(fs.readFileSync(reportFile, "utf8"));
+  expect(report).toEqual({
+    target: new URL((await (await control(request, "/fixture")).json()).origins[1]).host,
+    apply: false,
+    summary: { "to fill": raster.length, "already filled": 0, "to record empty": images.length - raster.length, failed: 0, missing: 0, "no document": 0 },
+    images: expect.any(Array),
+  });
+  expect(report.images.sort((left, right) => left.id.localeCompare(right.id))).toEqual([...images].sort((left, right) => left.id.localeCompare(right.id)).map(image => (storedWidths(image).length
+    ? { id: image.id, path: image.path, outcome: "to fill", sizes: storedWidths(image) }
+    : { id: image.id, path: image.path, outcome: "to record empty", sizes: [], reason: "vector or animated" })));
+  expect(fs.readdirSync(sizesFolder).sort()).toEqual(raster.flatMap(image => storedWidths(image).map(width => path.basename(sizeFile(image, width)))).sort());
+
+  const applied = await fill(request, testInfo, ["--apply"]);
+  expect(applied.code).toBe(0);
+  for (const image of images) expect(outcomeOf(applied, image)).toBe(storedWidths(image).length ? `filled${listed(storedWidths(image))}` : "recorded empty: vector or animated");
+  expect(applied.lines.at(-1)).toBe(`filled ${raster.length}, already filled 0, recorded empty ${images.length - raster.length}, ${unreported}`);
+  const filled = await store(request);
+  expect(filled.objects.filter(object => !SIZE_FILE.test(object.name))).toEqual(untouched.objects);
+  for (const image of images) {
+    expect(filesOf(filled, image)).toEqual(filesFor(image, storedWidths(image)));
+    expect(recordOf(filled, image)).toEqual({ ...recordOf(untouched, image), sizes: storedWidths(image), revision: expect.not.stringMatching(recordOf(untouched, image).revision) });
+    await expectStoredSizes(request, image, storedWidths(image));
+  }
+
+  await publishReview(gate, photo);
+  const stored = await openReviews(gate, page, screenshot);
+  await expect(stored.shown).toHaveAttribute("src", new RegExp(`${PUBLIC_PATH}images/${screenshot.sha1}-w\\d+\\.webp$`));
+  await expect.poll(() => stored.shown.evaluate(shown => shown.naturalWidth > 0 && shown.currentSrc)).toMatch(SIZE_FILE);
+  expect(stored.addresses.filter(address => address.includes(photo.sha1) || address.includes(screenshot.sha1))).toHaveLength(2);
+  expect(stored.addresses.filter(address => address.includes(RESIZE_PATH))).toEqual([]);
+  expect(stored.requested.filter(address => address.includes(RESIZE_PATH))).toEqual([]);
+
+  const again = await fill(request, testInfo, ["--apply"]);
+  expect(again.code).toBe(0);
+  for (const image of images) expect(outcomeOf(again, image)).toBe(`already filled${listed(storedWidths(image))}`);
+  expect(again.lines.at(-1)).toBe(`filled 0, already filled ${images.length}, recorded empty 0, ${unreported}`);
+  expect(await store(request)).toEqual(filled);
+});
+
+test("a size that cannot be stored fails its image and records nothing, and the next run finishes it", async ({ request }, testInfo) => {
+  const blocked = await seed(request, await png(800, 500));
+  const other = await seed(request, await jpeg(400, 300));
+  const untouched = await store(request);
+  let refused;
+  try {
+    await failStorage(request, [refusedSizeUpload(blocked, 640)]);
+    refused = await fill(request, testInfo, ["--apply"]);
+  } finally { await failStorage(request, []); }
+  expect(refused.code).toBe(1);
+  expect(outcomeOf(refused, blocked)).toBe("failed: storage");
+  expect(outcomeOf(refused, other)).toBe("filled 128,320,400");
+  expect(refused.lines.at(-1)).toBe("filled 1, already filled 0, recorded empty 0, failed 1, missing 0, no document 0");
+  const partial = await store(request);
+  expect(filesOf(partial, blocked)).toEqual(filesFor(blocked, [128, 320, 800]));
+  expect(recordOf(partial, blocked)).toEqual(recordOf(untouched, blocked));
+
+  const finished = await fill(request, testInfo, ["--apply"]);
+  expect(finished.code).toBe(0);
+  expect(outcomeOf(finished, blocked)).toBe("filled 128,320,640,800");
+  expect(outcomeOf(finished, other)).toBe("already filled 128,320,400");
+  const complete = await store(request);
+  expect(filesOf(complete, blocked)).toEqual(filesFor(blocked, [128, 320, 640, 800]));
+  expect(recordOf(complete, blocked).sizes).toEqual([128, 320, 640, 800]);
+  expect(complete.objects.filter(object => object.name !== sizeFile(blocked, 640))).toEqual(partial.objects);
+  await expectStoredSizes(request, blocked, [128, 320, 640, 800]);
+});
+
+test("an image whose original or whose record is gone is reported, and the run fails", async ({ request }, testInfo) => {
+  const lost = await seed(request, await png(800, 500));
+  const unrecorded = await seed(request, await jpeg(400, 300));
+  const whole = await seed(request, await webp(500, 300));
+  expect((await control(request, "/remove-object", { path: lost.path })).ok()).toBe(true);
+  expect((await control(request, "/remove-content-document", { id: unrecorded.id })).ok()).toBe(true);
+  const untouched = await store(request);
+
+  const result = await fill(request, testInfo, ["--apply"]);
+  expect(result.code).toBe(1);
+  expect(outcomeOf(result, lost)).toBe("missing");
+  expect(outcomeOf(result, unrecorded)).toBe("no document: document missing");
+  expect(outcomeOf(result, whole)).toBe("filled 128,320,500");
+  expect(result.lines.at(-1)).toBe("filled 1, already filled 0, recorded empty 0, failed 0, missing 1, no document 1");
+  const stored = await store(request);
+  expect(stored.objects.filter(object => !object.name.includes(whole.sha1))).toEqual(untouched.objects.filter(object => !object.name.includes(whole.sha1)));
+  expect(stored.documents.filter(document => document.id !== whole.id)).toEqual(untouched.documents.filter(document => document.id !== whole.id));
+  expect(recordOf(stored, whole).sizes).toEqual([128, 320, 500]);
+});
+
+test("an image over its format's pixel limit and one whose pixels cannot be read fail with the reason and record nothing, until the operator records no sizes", async ({ request }, testInfo) => {
+  const oversized = await seed(request, await largeAvif(6000, 6001));
+  const broken = await seed(request, await cutShort(800, 500));
+  const untouched = await store(request);
+  expect(untouched.documents.map(document => document.sizes)).toEqual([null, null]);
+
+  for (const [args, counts] of [[[], "to fill 0, already filled 0, to record empty 0"], [["--apply"], "filled 0, already filled 0, recorded empty 0"]]) {
+    const result = await fill(request, testInfo, args);
+    expect(outcomeOf(result, oversized)).toBe(`failed: ${INVALID_MESSAGE}`);
+    expect(outcomeOf(result, broken)).toBe(`failed: ${UNREADABLE_MESSAGE}`);
+    expect(result.lines.at(-1)).toBe(`${counts}, failed 2, missing 0, no document 0`);
+    expect(result.code).toBe(1);
+    expect(await store(request)).toEqual(untouched);
+  }
+
+  const byHand = await control(request, "/record-no-image-sizes", { id: broken.id });
+  expect(await byHand.json()).toEqual({ recorded: true, sizes: [] });
+  const again = await fill(request, testInfo, ["--apply"]);
+  expect(outcomeOf(again, broken)).toBe("already filled");
+  expect(outcomeOf(again, oversized)).toBe(`failed: ${INVALID_MESSAGE}`);
+  expect(again.lines.at(-1)).toBe("filled 0, already filled 1, recorded empty 0, failed 1, missing 0, no document 0");
+  expect(again.code).toBe(1);
+  const stored = await store(request);
+  expect(stored.objects).toEqual(untouched.objects);
+  expect(recordOf(stored, broken)).toMatchObject({ sizes: [], dimensions: recordOf(untouched, broken).dimensions });
+  expect(recordOf(stored, oversized)).toEqual(recordOf(untouched, oversized));
+});
+
+test("a run killed while it stores a size records nothing, and the next run completes the image", async ({ request }, testInfo) => {
+  const image = await seed(request, await png(800, 500));
+  const untouched = await store(request);
+  await failStorage(request, [refusedSizeUpload(image, 640, true)]);
+  const { child, finished } = await startFill(request, testInfo, ["--apply"]);
+  try {
+    await expect.poll(async () => (await (await control(request, "/storage-holds")).json()).held).toBe(1);
+    child.kill("SIGKILL");
+    expect(await finished).toMatchObject({ code: null, signal: "SIGKILL" });
+    expect(await (await control(request, "/storage-release", {})).json()).toEqual({ released: 1 });
+  } finally {
+    child.kill("SIGKILL");
+    await control(request, "/storage-release", {});
+    await failStorage(request, []);
+  }
+  expect((await store(request)).documents).toEqual(untouched.documents);
+
+  const rerun = await fill(request, testInfo, ["--apply"]);
+  expect(rerun.code).toBe(0);
+  expect(outcomeOf(rerun, image)).toBe("filled 128,320,640,800");
+  const stored = await store(request);
+  expect(filesOf(stored, image)).toEqual(filesFor(image, recordOf(stored, image).sizes));
+  expect(recordOf(stored, image).sizes).toEqual([128, 320, 640, 800]);
+  await expectStoredSizes(request, image, [128, 320, 640, 800]);
+});
+
+test("an apply while content writes are paused is refused before anything is read or written", async ({ request }, testInfo) => {
+  await seed(request, await png(800, 500));
+  const untouched = await store(request);
+  const refused = await fill(request, testInfo, ["--apply"], { CMS_WRITES_PAUSED: "1" });
+  expect(refused).toMatchObject({ code: 1, stdout: "" });
+  expect(refused.stderr).toContain("CMS_WRITES_PAUSED: Content publishing is paused.");
+  expect(await store(request)).toEqual(untouched);
+});
+
+test("an image whose shape differs from its record fails and keeps its record, in a run and when it is uploaded again", async ({ page, request }, testInfo) => {
+  const image = await seed(request, { ...(await turnedJpeg(600, 1000)), width: 1000, height: 600 });
+  const untouched = await store(request);
+
+  const result = await fill(request, testInfo, ["--apply"]);
+  expect(result.code).toBe(1);
+  expect(outcomeOf(result, image)).toBe("failed: shape differs");
+  expect(result.lines.at(-1)).toBe("filled 0, already filled 0, recorded empty 0, failed 1, missing 0, no document 0");
+  expect(await store(request)).toEqual(untouched);
+
+  const uploadAgain = await openReviewUpload(page, image);
+  expect(await uploadAgain()).toEqual(["upload"]);
+  expect(await store(request)).toEqual(untouched);
+});
+
+test("an image uploaded before sizes existed gets them when it is uploaded again", async ({ page, request }) => {
+  const image = await seed(request, await png(800, 500));
+  const untouched = await store(request);
+  const uploadAgain = await openReviewUpload(page, image);
+
+  expect(await uploadAgain()).toEqual(["upload", "finalize"]);
+  const stored = await store(request);
+  expect(filesOf(stored, image)).toEqual(filesFor(image, [128, 320, 640, 800]));
+  expect(stored.objects.filter(object => !SIZE_FILE.test(object.name))).toEqual(untouched.objects);
+  expect(recordOf(stored, image)).toMatchObject({ sizes: [128, 320, 640, 800], dimensions: recordOf(untouched, image).dimensions });
+  await expectStoredSizes(request, image, [128, 320, 640, 800]);
+
+  expect(await uploadAgain()).toEqual(["upload"]);
+  expect(await store(request)).toEqual(stored);
+});
