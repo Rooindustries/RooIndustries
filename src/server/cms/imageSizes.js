@@ -1,5 +1,5 @@
 import sharp from "sharp";
-import { IMAGE_SIZE_WIDTHS, imageSizeFile } from "../../lib/imageSizeLadder.js";
+import { IMAGE_SIZE_WIDTHS, imageSizeFile, storedHeight } from "../../lib/imageSizeLadder.js";
 
 export const IMAGE_SIZE_QUALITY = 75;
 export const IMAGE_SIZE_MIME_TYPE = "image/webp";
@@ -29,7 +29,7 @@ export const makeImageSizes = async ({ bytes, extension, width, height }) => {
   const { pages = 1 } = await decode(bytes, extension).metadata();
   if (pages > 1) return [];
   const widths = imageSizeWidths({ width, height });
-  const exact = (step) => ({ width: step, height: Math.max(1, Math.round((step * height) / width)), fit: "fill" });
+  const exact = (step) => ({ width: step, height: storedHeight(step, { width, height }), fit: "fill" });
   const { data, info } = await decode(bytes, extension).autoOrient().resize(exact(widths.at(-1))).raw().toBuffer({ resolveWithObject: true });
   const raw = { width: info.width, height: info.height, channels: info.channels };
   const sizes = [];

@@ -1,5 +1,5 @@
 import { cleanOutsideValue } from "./outsideValue.cjs";
-import { imageSizeFile } from "./imageSizeLadder.js";
+import { hasUsableShape, imageSizeFile, storedHeight } from "./imageSizeLadder.js";
 const SUPABASE_PUBLIC_IMAGE_PATH = "/storage/v1/object/public/";
 const SUPABASE_RENDER_IMAGE_PATH = "/storage/v1/render/image/public/";
 const TRANSFORMABLE_IMAGE_PATH = /\.(?:gif|jpe?g|png)$/i;
@@ -44,18 +44,21 @@ const transformedSupabaseUrl = (directUrl, transforms, forceTransform) => {
   }
 };
 
-const storedSizeUrl = (directUrl, sizes, width) =>
-  imageSizeFile(
+const storedSizeUrl = (directUrl, sizes, shape, { width, height, resize }) => {
+  const cropped = height && resize === "cover" && hasUsableShape(shape);
+  return imageSizeFile(
     directUrl.replace(IMAGE_EXTENSION, ""),
-    sizes.find((size) => size >= width) ?? sizes.at(-1)
+    sizes.find((size) => size >= width && (!cropped || storedHeight(size, shape) >= height)) ?? sizes.at(-1)
   );
+};
 
 class DirectAssetUrlBuilder {
-  constructor(url, transforms = {}, forceTransform = false, sizes = null) {
+  constructor(url, transforms = {}, forceTransform = false, sizes = null, shape = null) {
     this.directUrl = url;
     this.transforms = { ...transforms };
     this.forceTransform = forceTransform;
     this.sizes = sizes;
+    this.shape = shape;
   }
 
   withTransform(key, value) {
@@ -64,7 +67,8 @@ class DirectAssetUrlBuilder {
       this.directUrl,
       { ...this.transforms, [key]: value },
       true,
-      this.sizes
+      this.sizes,
+      this.shape
     );
   }
 
@@ -91,7 +95,8 @@ class DirectAssetUrlBuilder {
       this.directUrl,
       this.transforms,
       true,
-      this.sizes
+      this.sizes,
+      this.shape
     );
   }
 
@@ -108,7 +113,7 @@ class DirectAssetUrlBuilder {
       );
     }
     return this.sizes.length && this.transforms.width
-      ? storedSizeUrl(this.directUrl, this.sizes, this.transforms.width)
+      ? storedSizeUrl(this.directUrl, this.sizes, this.shape, this.transforms)
       : this.directUrl;
   }
 }
@@ -139,7 +144,8 @@ export const urlFor = (source) => {
     directUrl,
     {},
     false,
-    Array.isArray(source?.sizes) ? source.sizes : null
+    Array.isArray(source?.sizes) ? source.sizes : null,
+    source?.dimensions
   );
 };
 

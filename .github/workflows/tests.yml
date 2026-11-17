@@ -620,7 +620,7 @@ jobs:
           const assert = require('node:assert/strict');
           const { stats } = require('./test-results/stored-image-sizes.json');
           assert.equal(stats.skipped, 0, 'Stored image size cases must not skip');
-          assert.equal(stats.expected, 10, 'All stored image size cases must pass');
+          assert.equal(stats.expected, 15, 'All stored image size cases must pass');
           assert.equal(stats.unexpected, 0);
           assert.equal(stats.flaky, 0);
           NODE

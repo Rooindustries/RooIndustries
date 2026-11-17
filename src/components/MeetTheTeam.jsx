@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { urlFor } from "../lib/cmsImageUrl";
+import { croppedImageSrcSet } from "../lib/croppedImageSrcSet";
 import { reportRequestError } from "../lib/clientRequest";
 import { getPublicContent } from "../lib/publicContentClient";
 
@@ -247,8 +248,10 @@ const AvatarHex = ({
   placeholderClassName,
   priority = false,
   imageSize = 200,
+  imageSizes = "84px",
 }) => {
   const imageUrl = buildImageUrl(image, imageSize);
+  const srcSet = croppedImageSrcSet(image, 1, 1);
   const clipStyle = { clipPath: HEX_CLIP_PATH };
 
   return (
@@ -261,6 +264,8 @@ const AvatarHex = ({
         {imageUrl ? (
           <img
             src={imageUrl}
+            srcSet={srcSet}
+            sizes={srcSet && imageSizes}
             alt={alt}
             className="h-full w-full object-cover"
             style={clipStyle}
@@ -423,6 +428,7 @@ export default function MeetTheTeam({ onSeoData, initialData = null }) {
                       placeholderClassName="text-2xl font-bold text-accent"
                       priority
                       imageSize={400}
+                      imageSizes="114px"
                     />
                   </div>
                   <div className="text-[28px] font-bold">

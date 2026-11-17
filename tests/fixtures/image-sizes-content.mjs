@@ -48,8 +48,18 @@ export async function createImageSizesContent() {
     images.push(image);
     return image;
   };
-  const avatars = [await add('avatar-square', 256, 256, 'png', photo(256, 256, 20)), await add('avatar-wide', 600, 400, 'jpg', photo(600, 400, 200))];
+  const avatars = [await add('avatar-square', 256, 256, 'png', photo(256, 256, 20)), await add('avatar-wide', 600, 300, 'jpg', photo(600, 300, 200))];
   const covers = await Promise.all([0, 1, 2, 3, 4, 5, 6, 7].map(index => add(`cover-${index}`, 900, 1200, 'jpg', photo(900, 1200, index * 45))));
+  const shapedCovers = [
+    await add('cover-wide', 1600, 900, 'jpg', photo(1600, 900, 30)),
+    await add('cover-strip', 1145, 334, 'jpg', photo(1145, 334, 75)),
+    await add('cover-tall', 600, 1200, 'jpg', photo(600, 1200, 165)),
+  ];
+  const team = {
+    founder: await add('team-founder', 800, 1200, 'jpg', photo(800, 1200, 210)),
+    alpha: await add('team-alpha', 3209, 2000, 'jpg', photo(3209, 2000, 255)),
+    beta: await add('team-beta', 256, 256, 'png', photo(256, 256, 300)),
+  };
   const reviews = [
     await add('review-screenshot', 800, 500, 'png', screenshot(800, 500, 'Valorant')),
     await add('review-photo', 1600, 1066, 'jpg', photo(1600, 1066, 300)),
@@ -89,10 +99,14 @@ export async function createImageSizesContent() {
     images,
     respond,
     avatar: index => reference(avatars[index % avatars.length]),
+    team: { founder: reference(team.founder), alpha: reference(team.alpha), beta: reference(team.beta) },
     games: {
       title: 'Synthetic games',
       featuredGames: covers.slice(0, 6).map((cover, index) => ({ _key: `featured-${index}`, title: `Featured game ${index + 1}`, coverImage: reference(cover) })),
-      moreGames: covers.slice(6).map((cover, index) => ({ _key: `more-${index}`, title: `Extra game ${index + 1}`, coverImage: reference(cover) })),
+      moreGames: [
+        ...covers.slice(6).map((cover, index) => ({ _key: `more-${index}`, title: `Extra game ${index + 1}`, coverImage: reference(cover) })),
+        ...shapedCovers.map(cover => ({ _key: `more-${cover.name}`, title: `Game with a ${cover.name}`, coverImage: reference(cover) })),
+      ],
     },
     reviews: reviews.map(image => ({ id: `review-${image.name}`, alt: `Fixture ${image.name.replaceAll('-', ' ')}`, image: reference(image) })),
     benchmark: {
