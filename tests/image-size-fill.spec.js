@@ -63,7 +63,10 @@ const storeRpc = async (request, name, data) => {
 const imagesWithoutSizes = async request => {
   const images = [];
   for (;;) {
-    const page = await (await storeRpc(request, "roo_cms_image_size_records", { p_after: images.at(-1)?.id ?? null, p_limit: 100 })).json();
+    const response = await storeRpc(request, "roo_cms_image_size_records", { p_after: images.at(-1)?.id ?? null, p_limit: 100 });
+    expect(response.status()).toBe(200);
+    const page = await response.json();
+    expect(page).toEqual(expect.any(Array));
     if (!page.length) return images.filter(image => !image.sizes);
     images.push(...page);
   }
@@ -458,7 +461,7 @@ test("the service key cannot write an asset row without its record, on its own o
     p_command_id: `cms:${command}`, p_request_hash: command, p_actor: "sanity:fixture", p_assets: [row], p_asset_links: [],
     p_mutations: [{ operation: "create", id: review, document: { _id: review, _type: "review", title: "Fixture review", image: { _type: "image", asset: { _type: "reference", _ref: id } } } }],
   }));
-  expect({ direct, published }).toMatchObject({ direct: { status: 403, code: "42501" }, published: { status: 409, code: "23503", message: "CMS_ASSET_RECORD_MISSING" } });
+  expect({ direct, published }).toMatchObject({ direct: { status: 403, code: "42501", message: "permission denied for function roo_upsert_asset" }, published: { status: 409, code: "23503", message: "CMS_ASSET_RECORD_MISSING" } });
   expect(await assetOf(request, { id })).toEqual({ document: null, assets: 0 });
   expect(await assetOf(request, { id: review })).toEqual({ document: null, assets: 0 });
 });
