@@ -62,6 +62,20 @@ const failOverlayCode = async (page, baseURL, failures) => {
   return asks;
 };
 
+const holdFirstOverlayLoad = async (page, baseURL) => {
+  const hold = { asks: 0, failed: false };
+  hold.gate = new Promise((resolve) => { hold.release = resolve; });
+  const isOverlay = (body) => body.includes('"Perf Debug"');
+  await inspectChunks(page, { origin: new URL(baseURL).origin },
+    (body) => (isOverlay(body) && ++hold.asks === 1 ? hold.gate : undefined),
+    (route, response, body) => {
+      if (!isOverlay(body) || hold.failed) return route.fulfill({ response, body });
+      hold.failed = true;
+      return route.abort("failed");
+    });
+  return hold;
+};
+
 const failedLoads = async (page, count) => {
   await expect.poll(() => page.evaluate(() => window.__failedScripts.length)).toBe(count);
 };
@@ -153,7 +167,6 @@ test("a failed overlay load asks for its code again when debug is turned on agai
   const asks = await failOverlayCode(page, baseURL, 1);
   await page.goto("/?perfdebug=1");
   await failedLoads(page, 1);
-  await expect.poll(() => reports.length).toBe(1);
   await expect(page.locator("h1").first()).toBeVisible();
   await expect(page.getByText("Perf Debug", { exact: true })).toHaveCount(0);
   expect(asks).toHaveLength(1);
@@ -162,7 +175,7 @@ test("a failed overlay load asks for its code again when debug is turned on agai
   expect(asks).toHaveLength(2);
   await page.getByLabel("Disable navbar blur", { exact: true }).check();
   await expect(page.locator("html")).toHaveClass(/perf-no-navbar-blur/);
-  expect(reports).toHaveLength(1);
+  await expect.poll(() => reports.length).toBe(1);
   expect(errors).toEqual([]);
 });
 
@@ -172,7 +185,6 @@ test("the overlay asks again on every turn on until its code arrives and never w
   const asks = await failOverlayCode(page, baseURL, 2);
   await page.goto("/?perfdebug=1");
   await failedLoads(page, 1);
-  await expect.poll(() => reports.length).toBe(1);
   await turnDebug(page, true);
   await expect.poll(() => asks.length).toBe(2);
   await failedLoads(page, 2);
@@ -221,5 +233,22 @@ test("Hide keeps the overlay hidden when storage cannot be used", async ({ page,
   await turnDebug(page, null);
   await renderedAfterChange(page);
   await expect(page.getByText("Perf Debug", { exact: true })).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test("turning debug on during a failing load asks once and reports the failure once", async ({ page, baseURL }) => {
+  const errors = pageErrors(page);
+  const reports = loadFailureReports(page);
+  const hold = await holdFirstOverlayLoad(page, baseURL);
+  await page.goto("/?perfdebug=1", { waitUntil: "domcontentloaded" });
+  await expect.poll(() => hold.asks).toBe(1);
+  for (let signal = 0; signal < 3; signal += 1) expect(await turnDebug(page, true)).toEqual([]);
+  hold.release();
+  await failedLoads(page, 1);
+  expect(hold.asks).toBe(1);
+  await turnDebug(page, true);
+  await expect(page.getByText("Perf Debug", { exact: true })).toBeVisible();
+  expect(hold.asks).toBe(2);
+  expect(reports).toHaveLength(1);
   expect(errors).toEqual([]);
 });
