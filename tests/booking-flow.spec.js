@@ -15,6 +15,25 @@ test.afterEach(async ({ page, flow }, testInfo) => {
 const hold = (page) => page.evaluate(() => JSON.parse(sessionStorage.getItem("my_slot_hold")));
 const failureTypes = [429, 503, "non-json", "unknown", "network", "timeout"];
 
+const timeGrid = (page) => page.locator(".booking-slot-grid");
+const timeButton = (page, name) => timeGrid(page).getByRole("button", { name, exact: true });
+const dayButton = (page, date) =>
+  page.locator(".booking-calendar-grid button").filter({ hasText: new RegExp(`^${Number(date.slice(-2))}$`) });
+
+async function expectPressedTime(page, pressed) {
+  for (const name of ["10:00 AM", "11:00 AM"]) {
+    await expect(timeButton(page, name)).toHaveAttribute("aria-pressed", String(name === pressed));
+  }
+  await expect(timeGrid(page).locator('[aria-pressed="true"]')).toHaveCount(pressed ? 1 : 0);
+  await expect(timeGrid(page).locator("button:not([aria-pressed])")).toHaveCount(0);
+}
+
+async function expectPressedDay(page, date) {
+  await expect(dayButton(page, date)).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator('.booking-calendar-grid [aria-pressed="true"]')).toHaveCount(1);
+  await expect(page.locator(".booking-calendar-grid button:not([aria-pressed])")).toHaveCount(0);
+}
+
 async function expectNoPaymentWarning(page) {
   const payment = page.locator(".booking-payment");
   const method = payment.getByRole("heading", { name: "Payment Method", exact: true });
@@ -592,6 +611,65 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await pay.dblclick();
       await expect(page.getByRole("heading", { name: "Checkout handoff", exact: true })).toBeVisible();
       expect(flow.state.calls.filter(({ path }) => path === "/api/payment/start")).toHaveLength(2);
+    });
+
+    test("the time and the day say which one is selected", async ({ page, flow }) => {
+      const first = flow.state.slots[0].date;
+      const day = Number(first.slice(-2));
+      const other = `${first.slice(0, 8)}${String(day < 28 ? day + 1 : day - 1).padStart(2, "0")}`;
+      flow.state.slots.push({ date: other, times: ["10:00", "11:00"] });
+      const [earlier, later] = [first, other].sort();
+      await flow.booking();
+      await expectPressedDay(page, earlier);
+      await expectPressedTime(page, "10:00 AM");
+      await timeButton(page, "11:00 AM").click();
+      await expectPressedTime(page, "11:00 AM");
+      await dayButton(page, later).click();
+      await expectPressedDay(page, later);
+      await expectPressedTime(page, null);
+      await expect(page.getByRole("button", { name: "Next", exact: true }).last()).toHaveAttribute("aria-disabled", "true");
+    });
+
+    test("a reservation the server could not make keeps the chosen time selected", async ({ page, flow }) => {
+      await flow.booking();
+      await timeButton(page, "11:00 AM").click();
+      flow.state.failures["/api/holdSlot"] = 503;
+      await page.getByRole("button", { name: "Next", exact: true }).last().click();
+      await expect(page.getByRole("alert").filter({ hasText: "Could not reserve this slot. Please check your internet and try again." })).toBeVisible();
+      await expectPressedTime(page, "11:00 AM");
+      delete flow.state.failures["/api/holdSlot"];
+      await page.getByRole("button", { name: "Next", exact: true }).last().click();
+      await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toBeVisible();
+      expect((await hold(page)).startTimeUTC).toBe(new Date(`${flow.state.slots[0].date}T11:00:00+05:30`).toISOString());
+    });
+
+    test("a reservation refused because the time was taken leaves no time selected", async ({ page, flow }) => {
+      await flow.booking();
+      await timeButton(page, "11:00 AM").click();
+      flow.state.failures["/api/holdSlot"] = 409;
+      await page.getByRole("button", { name: "Next", exact: true }).last().click();
+      await expect(page.getByRole("alert").filter({ hasText: /slot was just taken/i })).toBeVisible();
+      await expectPressedTime(page, null);
+      await timeButton(page, "10:00 AM").click();
+      await expectPressedTime(page, "10:00 AM");
+    });
+
+    test("Back shows the reserved time as selected until another time is chosen", async ({ page, flow }) => {
+      await flow.reserve();
+      await page.getByRole("button", { name: "Back", exact: true }).last().click();
+      await expectPressedTime(page, "10:00 AM");
+      await timeButton(page, "11:00 AM").click();
+      await expectPressedTime(page, "11:00 AM");
+      await expect(timeButton(page, "10:00 AM")).toHaveClass(/(?:^|\s)border-purple-500\/60(?:\s|$)/);
+    });
+
+    test("the reserved time is still the selected one after a reload and Back", async ({ page, flow }) => {
+      await flow.reserve();
+      await page.reload();
+      await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "Back", exact: true }).last().click();
+      await expectPressedDay(page, flow.state.slots[0].date);
+      await expectPressedTime(page, "10:00 AM");
     });
   });
 }
