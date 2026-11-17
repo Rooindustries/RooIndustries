@@ -423,18 +423,27 @@ try {
       response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify({ document: source?.payload ?? null, assets })); return;
     }
     if (request.method === "POST" && request.url === "/seed-legacy-image") {
-      const { bytes, extension, mimeType, width, height } = await readJson(request);
+      const { bytes, extension, mimeType, width, height, document } = await readJson(request);
       const body = Buffer.from(bytes, "base64");
       const sha1 = createHash("sha1").update(body).digest("hex");
       const id = `image-${sha1}-${width}x${height}-${extension}`;
       const storagePath = `images/${sha1}.${extension}`;
       const bucket = fixture.client.storage.from(IMAGE_BUCKET);
       const url = bucket.getPublicUrl(storagePath).data.publicUrl;
+      const asset = { legacy_sanity_asset_id: id, storage_bucket: IMAGE_BUCKET, storage_path: storagePath, source_url: url, mime_type: mimeType, byte_size: body.length, sha256: createHash("sha256").update(body).digest("hex"), width, height };
       const stored = await bucket.upload(storagePath, body, { contentType: mimeType, upsert: false });
-      const registered = stored.error ? stored : await fixture.client.rpc("roo_register_verified_cms_asset", {
-        p_asset: { legacy_sanity_asset_id: id, storage_bucket: IMAGE_BUCKET, storage_path: storagePath, source_url: url, mime_type: mimeType, byte_size: body.length, sha256: createHash("sha256").update(body).digest("hex"), width, height },
-        p_asset_document: { _id: id, _type: "sanity.imageAsset", url, sha1hash: sha1, size: body.length, mimeType, extension, metadata: { dimensions: { width, height, aspectRatio: width / height } } },
-      });
+      let registered = stored;
+      if (!stored.error && document === false) {
+        await fixture.sql.begin(async sql => {
+          await sql`set local session_replication_role = replica`;
+          await sql`select public.roo_upsert_asset(${sql.json({ ...asset, source_url: `https://cdn.sanity.io/images/fixture/production/${sha1}-${width}x${height}.${extension}`, metadata: { source_sha1: sha1 } })})`;
+        });
+      } else if (!stored.error) {
+        registered = await fixture.client.rpc("roo_register_verified_cms_asset", {
+          p_asset: asset,
+          p_asset_document: { _id: id, _type: "sanity.imageAsset", url, sha1hash: sha1, size: body.length, mimeType, extension, metadata: { dimensions: { width, height, aspectRatio: width / height } } },
+        });
+      }
       response.writeHead(registered.error ? 500 : 200, { "Content-Type": "application/json" });
       response.end(JSON.stringify(registered.error ? { error: registered.error.message } : { id, sha1, path: storagePath })); return;
     }
