@@ -339,3 +339,20 @@ test("other-tab listeners go away with the parts of the page that added them", a
   expect(await listeners()).toBe(away);
   expect(errors).toEqual([]);
 });
+
+test("Hide in another tab lets this tab's paused reviews carousel move again", async ({ page, context }) => {
+  const errors = pageErrors(page);
+  await page.goto("/?perfdebug=1");
+  await expect(page.getByText("Perf Debug", { exact: true })).toBeVisible();
+  const carousel = page.locator(".ri-reviews-viewport").first();
+  await carousel.scrollIntoViewIfNeeded();
+  await page.getByLabel("Pause reviews autoplay", { exact: true }).check();
+  const other = await context.newPage();
+  await other.goto("/?perfdebug=1");
+  await expect(other.getByText("Perf Debug", { exact: true })).toBeVisible();
+  const scrollLeft = () => carousel.evaluate((node) => node.scrollLeft);
+  const paused = await scrollLeft();
+  await other.getByRole("button", { name: "Hide", exact: true }).click();
+  await expect.poll(scrollLeft).not.toBe(paused);
+  expect(errors).toEqual([]);
+});
