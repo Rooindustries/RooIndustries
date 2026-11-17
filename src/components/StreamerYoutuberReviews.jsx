@@ -69,17 +69,14 @@ const commitReviewScroll = (viewport, motion, position) => {
   motion.written = viewport.scrollLeft;
 };
 
-const getReviewAvatarUrl = (pfp) => {
-  const optimized = urlFor(pfp)
+const getReviewAvatarUrl = (pfp) =>
+  urlFor(pfp)
     .width(112)
     .height(112)
     .fit("crop")
     .format("webp")
     .quality(55)
     .url();
-
-  return `${optimized}${optimized.includes("?") ? "&" : "?"}frame=1`;
-};
 
 export default function StreamerYoutuberReviews({ initialData = null }) {
   const [data, setData] = useState(() => initialData);

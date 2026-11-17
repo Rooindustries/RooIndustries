@@ -126,8 +126,8 @@ const detectBytes = async (bytes, signal) => {
   if (!format) throw verifyFailure("Bytes do not identify an allowed image, ZIP or PE file.");
   const extension = format === "jpeg" ? "jpg" : format === "heif" ? "avif" : format;
   let metadata;
-  try { metadata = await sharp(bytes, { failOn: "error", limitInputPixels: false }).timeout({ seconds: 10 }).metadata(); } catch { throw verifyFailure(UNREADABLE_IMAGE); }
-  if (metadata.format !== format || !Number.isSafeInteger(metadata.width) || !Number.isSafeInteger(metadata.height) || metadata.width <= 0 || metadata.height <= 0 || metadata.width > 100000 || metadata.height > 100000 || metadata.width * metadata.height > imagePixelLimit(extension) || (format === "heif" && metadata.compression !== "av1")) throw verifyFailure(INVALID_IMAGE);
+  try { metadata = await sharp(bytes, { failOn: "error", limitInputPixels: false }).metadata(); } catch { throw verifyFailure(UNREADABLE_IMAGE); }
+  if (metadata.format !== format || !Number.isSafeInteger(metadata.width) || !Number.isSafeInteger(metadata.height) || metadata.width <= 0 || metadata.height <= 0 || metadata.width > 100000 || metadata.height > 100000 || metadata.width * metadata.height * (metadata.pages || 1) > imagePixelLimit(extension) || (format === "heif" && metadata.compression !== "av1")) throw verifyFailure(INVALID_IMAGE);
   const { width, height } = metadata.autoOrient;
   if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width <= 0 || height <= 0 || width > 100000 || height > 100000) throw verifyFailure("Oriented image dimensions are invalid.");
   if (format !== "svg" && imageSizeWidths({ width, height }).at(-1) < 1) throw verifyFailure(INVALID_IMAGE);
