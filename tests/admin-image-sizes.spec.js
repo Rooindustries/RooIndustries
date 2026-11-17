@@ -1,4 +1,4 @@
-const { test, expect } = require("@playwright/test");
+const { test, expect } = require("./fixtures/isolated-content-test.cjs");
 const sharp = require("sharp");
 const { createHash, randomBytes } = require("node:crypto");
 const { adminControl, login, choose, prepareAdminContext } = require("./fixtures/admin-content.cjs");
