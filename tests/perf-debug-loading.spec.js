@@ -61,13 +61,21 @@ const failedLoads = async (page, count) => {
 };
 
 const turnDebug = (page, on) => page.evaluate((enabled) => {
-  if (enabled) {
+  if (enabled === true) {
     localStorage.setItem("roo_perf_debug", "1");
-  } else {
+  } else if (enabled === false) {
     history.replaceState(history.state, "", location.pathname);
     localStorage.removeItem("roo_perf_debug");
   }
-  window.dispatchEvent(new CustomEvent("roo-perf-debug-change"));
+  const added = new MutationObserver(() => {});
+  added.observe(document, { childList: true, subtree: true });
+  const trigger = document.createElement("button");
+  trigger.addEventListener("click", () => window.dispatchEvent(new CustomEvent("roo-perf-debug-change")));
+  trigger.click();
+  const scripts = added.takeRecords().flatMap(({ addedNodes }) => [...addedNodes])
+    .filter((node) => node.nodeName === "SCRIPT").map((node) => node.src);
+  added.disconnect();
+  return scripts;
 }, on);
 
 const pageErrors = (page) => {
@@ -148,13 +156,44 @@ test("the overlay asks again on every turn on until its code arrives and never w
   await failedLoads(page, 2);
   await expect(page.locator("h1").first()).toBeVisible();
   await expect(page.getByText("Perf Debug", { exact: true })).toHaveCount(0);
-  await turnDebug(page, false);
-  await page.waitForTimeout(500);
+  expect(await turnDebug(page, false)).toEqual([]);
   expect(asks).toHaveLength(2);
   await turnDebug(page, true);
   await expect(page.getByText("Perf Debug", { exact: true })).toBeVisible();
   expect(asks).toHaveLength(3);
   await page.getByRole("button", { name: "Hide", exact: true }).click();
+  await expect(page.getByText("Perf Debug", { exact: true })).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test("debug turned on again after Hide shows the overlay", async ({ page }) => {
+  const errors = pageErrors(page);
+  await page.goto("/?perfdebug=1");
+  await expect(page.getByText("Perf Debug", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Hide", exact: true }).click();
+  await expect(page.getByText("Perf Debug", { exact: true })).toHaveCount(0);
+  await turnDebug(page, null);
+  await expect(page.getByText("Perf Debug", { exact: true })).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem("roo_perf_debug"))).toBeNull();
+  await turnDebug(page, true);
+  await expect(page.getByText("Perf Debug", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Hide", exact: true }).click();
+  await expect(page.getByText("Perf Debug", { exact: true })).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test("Hide keeps the overlay hidden when storage cannot be used", async ({ page, context }) => {
+  const errors = pageErrors(page);
+  await context.addInitScript(() => {
+    for (const name of ["getItem", "setItem", "removeItem"]) {
+      Storage.prototype[name] = () => { throw new DOMException("blocked", "SecurityError"); };
+    }
+  });
+  await page.goto("/?perfdebug=1");
+  await expect(page.getByText("Perf Debug", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Hide", exact: true }).click();
+  await expect(page.getByText("Perf Debug", { exact: true })).toHaveCount(0);
+  await turnDebug(page, null);
   await expect(page.getByText("Perf Debug", { exact: true })).toHaveCount(0);
   expect(errors).toEqual([]);
 });
