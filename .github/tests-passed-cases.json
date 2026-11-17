@@ -1,0 +1,33 @@
+{
+  "jobNames": [
+    "Check for an already tested tree",
+    "Production-only monitoring",
+    "Jest",
+    "Booking hold model",
+    "Playwright ${{ matrix.suite.name }}",
+    "Playwright creator portal and API routes",
+    "Native PostgreSQL 17 suites",
+    "Native PostgreSQL 17 booking suites",
+    "Native PostgreSQL 17 publish suite",
+    "Native PostgreSQL 17 payout and recovery suites",
+    "Playwright revalidation",
+    "Record the tested tree",
+    "All tests passed"
+  ],
+  "cases": [
+    {
+      "name": "a push that skipped an already tested tree passes while the job list still shows the tree check running",
+      "event": "push", "fork": false, "tested": "true",
+      "default": "skipped", "results": {"tested-tree": "success"},
+      "jobList": {"conclusion": "skipped", "lagging": "Check for an already tested tree"},
+      "exit": 0, "phrase": "Tests passed: the tree was already tested and every test job was skipped."
+    },
+    {
+      "name": "a full merge queue run passes while the job list still shows the tree being recorded",
+      "event": "merge_group", "fork": false, "tested": "false",
+      "default": "success", "results": {},
+      "jobList": {"conclusion": "success", "lagging": "Record the tested tree"},
+      "exit": 0, "phrase": "Tests passed: every job passed."
+    }
+  ]
+}
