@@ -10,7 +10,8 @@ wrong=0
 
 ln -s "$PWD" "$work/linked"
 
-start_modes=("NODE_OPTIONS= node" "NODE_OPTIONS= node --preserve-symlinks-main" "NODE_OPTIONS=--preserve-symlinks-main node")
+unset NODE_OPTIONS NODE_PRESERVE_SYMLINKS
+start_modes=("node" "node --preserve-symlinks-main" "NODE_OPTIONS=--preserve-symlinks-main node")
 missing_module() { grep -qF 'MODULE_NOT_FOUND' "$work/stderr"; }
 
 check_starts() {
