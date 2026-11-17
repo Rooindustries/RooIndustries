@@ -10,7 +10,7 @@ const IMAGE_SIZE_TIMEOUT_SECONDS = 30;
 const TALLEST_IMAGE_SIZE = 16383;
 const IMAGE_PIXEL_LIMIT = 100000000;
 const AVIF_PIXEL_LIMIT = 36000000;
-const FIRST_QUARTER_TURN_ORIENTATION = 5;
+const UPRIGHT_ORIENTATION = 1;
 const TIMEOUT_MESSAGE = /timeout: \d+% complete/;
 const SIZED_EXTENSIONS = new Set(["png", "jpg", "gif", "webp", "avif"]);
 
@@ -29,9 +29,9 @@ const decode = (bytes, extension, animated = false) =>
 
 export const makeImageSizes = async ({ bytes, extension, width, height }) => {
   if (!SIZED_EXTENSIONS.has(extension)) return [];
-  const { pages = 1, orientation = 1 } = await decode(bytes, extension).metadata();
+  const { pages = 1, orientation = UPRIGHT_ORIENTATION } = await decode(bytes, extension).metadata();
   const animated = pages > 1;
-  if (animated && orientation >= FIRST_QUARTER_TURN_ORIENTATION) return [];
+  if (animated && orientation !== UPRIGHT_ORIENTATION) return [];
   const widths = imageSizeWidths({ width, height });
   const exact = (step) => ({ width: step, height: storedHeight(step, { width, height }), fit: "fill" });
   if (animated) {
@@ -39,7 +39,7 @@ export const makeImageSizes = async ({ bytes, extension, width, height }) => {
     for (const step of widths) {
       moving.push({
         width: step,
-        bytes: await decode(bytes, extension, true).autoOrient().resize(exact(step)).webp({ quality: ANIMATED_IMAGE_SIZE_QUALITY, effort: ANIMATED_IMAGE_SIZE_EFFORT }).toBuffer(),
+        bytes: await decode(bytes, extension, true).resize(exact(step)).webp({ quality: ANIMATED_IMAGE_SIZE_QUALITY, effort: ANIMATED_IMAGE_SIZE_EFFORT }).toBuffer(),
       });
     }
     return moving;

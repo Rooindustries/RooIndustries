@@ -306,11 +306,15 @@ test("a published review image reaches visitors from its stored sizes", async ({
   } finally { expect((await request.post(`${adminControl()}/reset-content`)).ok()).toBe(true); }
 });
 
-test("a vector image and an animated image that is stored on its side are stored as before and record no sizes", async ({ page, request }) => {
+test("a vector image and an animated image that is stored turned are stored as before and record no sizes", async ({ page, request }) => {
   const asset = await openReviewImage(page);
-  const onItsSide = { name: "clip.webp", mimeType: "image/webp", buffer: await flatFrames(700, 700, 3).webp().withMetadata({ orientation: 6 }).toBuffer() };
-  expect(await sharp(onItsSide.buffer).metadata()).toMatchObject({ pages: 3, orientation: 6 });
-  for (const [file, shape] of [[svg(), { width: 1400, height: 700 }], [onItsSide, { width: 700, height: 700 }]]) {
+  const turned = [];
+  for (const orientation of [3, 6]) {
+    const file = { name: "clip.webp", mimeType: "image/webp", buffer: await flatFrames(700, 700, 3).webp().withMetadata({ orientation }).toBuffer() };
+    expect(await sharp(file.buffer).metadata()).toMatchObject({ pages: 3, orientation });
+    turned.push([file, { width: 700, height: 700 }]);
+  }
+  for (const [file, shape] of [[svg(), { width: 1400, height: 700 }], ...turned]) {
     const outcome = await upload(page, asset, file);
     expect(outcome.ok).toBe(true);
     await expect(asset.locator("img")).toHaveAttribute("src", new RegExp(`/images/${sha1Of(file.buffer)}\\.`));
