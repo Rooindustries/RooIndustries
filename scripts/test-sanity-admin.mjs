@@ -364,7 +364,7 @@ try {
     const {default:sharp}=await import('sharp');const bytes=await sharp({create:{width:800,height:1000,channels:4,background:'#aabbcc'}}).png().toBuffer(),hash=hashes(bytes),legacyId=`image-${hash.sha1}-1000x800-png`,path=`images/${hash.sha1}.png`;
     assert.equal((await fixture.client.storage.from('site-content-public').upload(path,bytes,{contentType:'image/png',upsert:false})).error,null);
     const legacy={legacy_sanity_asset_id:legacyId,asset_kind:'image',storage_bucket:'site-content-public',storage_path:path,source_url:fixture.origin+'/storage/v1/object/public/site-content-public/'+path,mime_type:'image/png',byte_size:bytes.length,sha256:hash.sha256,width:1000,height:800,migration_status:'verified',verified_at:new Date().toISOString(),metadata:{}};
-    assert.equal((await fixture.client.rpc('roo_upsert_asset',{p_asset:legacy})).error,null);
+    await fixture.sql`select public.roo_upsert_asset(${fixture.sql.json(legacy)})`;
     const result=await upload(bytes,'image','image/png',{width:800,height:1000});observed('legacy dimensions collision',result);assert.equal(result.finalized.ok,true,JSON.stringify(result));assert.equal(result.finalized.data.assetId,legacyId);
   });
   await scenario('svg-doctype-upload', async () => {

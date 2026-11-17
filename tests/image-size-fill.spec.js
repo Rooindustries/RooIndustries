@@ -1,5 +1,5 @@
 const { spawn } = require("node:child_process");
-const { randomBytes, randomUUID } = require("node:crypto");
+const { createHash, randomBytes, randomUUID } = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const sharp = require("sharp");
@@ -47,14 +47,27 @@ const storedWidths = ({ width, height, extension }) => {
 const sizeFile = (image, width) => `images/${image.sha1}-w${width}.webp`;
 const filesFor = (image, widths) => [image.path, ...widths.map(width => sizeFile(image, width))].sort();
 const control = (request, route, data) => (data === undefined ? request.get(`${adminControl()}${route}`) : request.post(`${adminControl()}${route}`, { data }));
-const seed = async (request, file) => {
-  const response = await control(request, "/seed-legacy-image", { bytes: file.buffer.toString("base64"), extension: file.extension, mimeType: file.mimeType, width: file.width, height: file.height });
+const seed = async (request, file, options) => {
+  const response = await control(request, "/seed-legacy-image", { bytes: file.buffer.toString("base64"), extension: file.extension, mimeType: file.mimeType, width: file.width, height: file.height, ...options });
   expect(response.ok(), await response.text()).toBe(true);
   return { ...file, ...(await response.json()) };
 };
 const store = async request => (await control(request, "/image-store")).json();
 const filesOf = (stored, image) => stored.objects.map(object => object.name).filter(name => name.includes(image.sha1));
 const recordOf = (stored, image) => stored.documents.find(document => document.id === image.id);
+const assetOf = async (request, image) => (await control(request, `/asset-document?id=${image.id}`)).json();
+const storeRpc = async (request, name, data) => {
+  const { SUPABASE_URL, SUPABASE_SECRET_KEY } = Object.fromEntries((await (await control(request, "/operator-environment")).text()).trim().split("\n").map(line => line.split(/=(.*)/s)));
+  return request.post(`${SUPABASE_URL}/rest/v1/rpc/${name}`, { headers: { apikey: SUPABASE_SECRET_KEY, authorization: `Bearer ${SUPABASE_SECRET_KEY}` }, data });
+};
+const imagesWithoutSizes = async request => {
+  const images = [];
+  for (;;) {
+    const page = await (await storeRpc(request, "roo_cms_image_size_records", { p_after: images.at(-1)?.id ?? null, p_limit: 100 })).json();
+    if (!page.length) return images.filter(image => !image.sizes);
+    images.push(...page);
+  }
+};
 const failStorage = async (request, rules) => expect((await control(request, "/storage-failures", { rules })).ok()).toBe(true);
 const refusedSizeUpload = (image, width, hold = false) => ({ method: "POST", path: `/storage/v1/object/site-content-public/${sizeFile(image, width)}`, hold });
 
@@ -90,39 +103,57 @@ const publishReview = (gate, image) => gate.cms("/api/admin/content/publish", {
   operation: "create", type: "review", createIntentId: randomUUID(),
   document: { title: `Review ${image.sha1}`, alt: `Review ${image.sha1}`, image: { _type: "image", asset: { _type: "reference", _ref: image.id } } },
 });
-const openReviews = async (gate, page, image) => {
+const openPage = async (gate, page, path, image) => {
   const requested = [];
   const record = request => { if (new URL(request.url()).pathname.startsWith(STORAGE_PATH)) requested.push(request.url()); };
-  await gate.rebuild(["/reviews"]);
+  await gate.rebuild([path]);
   page.on("request", record);
-  await page.goto("/reviews");
-  const shown = page.locator(`img[src*="${image.sha1}"]`);
+  await page.goto(path);
+  const shown = page.locator(`img[src*="${image.sha1}"]`).first();
   await shown.scrollIntoViewIfNeeded();
   await expect.poll(() => requested.filter(address => address.includes(image.sha1)).length).toBeGreaterThan(0);
   page.off("request", record);
   return { shown, requested, addresses: await page.locator(`img[src*="${STORAGE_PATH}"]`).evaluateAll(elements => elements.map(element => `${element.getAttribute("src")} ${element.getAttribute("srcset") || ""}`)) };
 };
-const openReviewUpload = async (page, image) => {
+const openEditor = async (page, type, create = false) => {
+  await choose(page, type);
+  if (create) await page.getByRole("region", { name: `${type} list` }).getByRole("button", { name: "New", exact: true }).click();
+  const editor = page.getByRole("region", { name: "Editor", exact: true });
+  await expect(editor).toHaveAttribute("aria-busy", "false");
+  const closed = editor.locator('button[aria-expanded="false"]');
+  while (await closed.count()) await closed.first().click();
+  return editor;
+};
+const imageFields = editor => editor.locator('input[type="file"]').locator("xpath=../..");
+const uploadInto = async (page, asset, image) => {
   const steps = [];
-  page.on("response", response => {
+  const record = response => {
     const step = /\/api\/admin\/content\/assets\/(upload|finalize)$/.exec(new URL(response.url()).pathname);
     if (step) steps.push(step[1]);
-  });
-  await login(page);
-  await choose(page, "Reviews");
-  await page.getByRole("region", { name: "Reviews list" }).getByRole("button", { name: "New", exact: true }).click();
-  await expect(page.getByRole("region", { name: "Editor", exact: true })).toHaveAttribute("aria-busy", "false");
-  const asset = page.locator('input[type="file"][aria-label="Review Image"]').locator("xpath=../..");
-  return async () => {
-    const chooser = page.waitForEvent("filechooser");
-    const answered = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/assets/upload"));
-    await asset.getByRole("button", { name: /^(Upload|Replace)$/ }).click();
-    await (await chooser).setFiles({ name: image.name, mimeType: image.mimeType, buffer: image.buffer });
-    await answered;
-    await expect(asset.getByRole("button", { name: "Replace", exact: true })).toBeEnabled();
-    await expect(asset.locator("img")).toHaveAttribute("src", new RegExp(`/${image.path.replace(".", "\\.")}$`));
-    return steps.splice(0);
   };
+  const labels = await asset.evaluateHandle(field => {
+    const seen = [];
+    new MutationObserver(() => {
+      const label = field.querySelector('[role="status"] span')?.textContent;
+      if (label && seen.at(-1) !== label) seen.push(label);
+    }).observe(field, { subtree: true, childList: true, characterData: true });
+    return seen;
+  });
+  page.on("response", record);
+  const chooser = page.waitForEvent("filechooser");
+  const answered = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/assets/upload"));
+  await asset.getByRole("button", { name: /^(Upload|Replace)$/ }).click();
+  await (await chooser).setFiles({ name: image.name, mimeType: image.mimeType, buffer: image.buffer });
+  await answered;
+  await expect(asset.getByRole("button", { name: "Replace", exact: true })).toBeEnabled();
+  await expect(asset.locator("img")).toHaveAttribute("src", new RegExp(`/${image.path.replace(".", "\\.")}$`));
+  page.off("response", record);
+  return { steps, shown: await labels.jsonValue() };
+};
+const openReviewUpload = async (page, image) => {
+  await login(page);
+  const editor = await openEditor(page, "Reviews", true);
+  return () => uploadInto(page, imageFields(editor).filter({ has: page.locator('[aria-label="Review Image"]') }), image);
 };
 
 test.beforeAll(async ({ playwright }) => {
@@ -142,7 +173,7 @@ test("images uploaded before sizes existed get theirs stored and recorded, and t
   const unreported = "failed 0, missing 0, no document 0";
 
   await publishReview(gate, screenshot);
-  const resized = await openReviews(gate, page, screenshot);
+  const resized = await openPage(gate, page, "/reviews", screenshot);
   await expect(resized.shown).toHaveAttribute("src", new RegExp(`${RESIZE_PATH}public/site-content-public/${screenshot.path.replace(".", "\\.")}`));
   expect(resized.requested.filter(address => address.includes(RESIZE_PATH)).length).toBeGreaterThan(0);
 
@@ -181,7 +212,7 @@ test("images uploaded before sizes existed get theirs stored and recorded, and t
   }
 
   await publishReview(gate, photo);
-  const stored = await openReviews(gate, page, screenshot);
+  const stored = await openPage(gate, page, "/reviews", screenshot);
   await expect(stored.shown).toHaveAttribute("src", new RegExp(`${PUBLIC_PATH}images/${screenshot.sha1}-w\\d+\\.webp$`));
   await expect.poll(() => stored.shown.evaluate(shown => shown.naturalWidth > 0 && shown.currentSrc)).toMatch(SIZE_FILE);
   expect(stored.addresses.filter(address => address.includes(photo.sha1) || address.includes(screenshot.sha1))).toHaveLength(2);
@@ -317,7 +348,7 @@ test("an image whose shape differs from its record fails and keeps its record, i
   expect(await store(request)).toEqual(untouched);
 
   const uploadAgain = await openReviewUpload(page, image);
-  expect(await uploadAgain()).toEqual(["upload"]);
+  expect((await uploadAgain()).steps).toEqual(["upload"]);
   expect(await store(request)).toEqual(untouched);
 });
 
@@ -326,13 +357,100 @@ test("an image uploaded before sizes existed gets them when it is uploaded again
   const untouched = await store(request);
   const uploadAgain = await openReviewUpload(page, image);
 
-  expect(await uploadAgain()).toEqual(["upload", "finalize"]);
+  expect((await uploadAgain()).steps).toEqual(["upload", "finalize"]);
   const stored = await store(request);
   expect(filesOf(stored, image)).toEqual(filesFor(image, [128, 320, 640, 800]));
   expect(stored.objects.filter(object => !SIZE_FILE.test(object.name))).toEqual(untouched.objects);
   expect(recordOf(stored, image)).toMatchObject({ sizes: [128, 320, 640, 800], dimensions: recordOf(untouched, image).dimensions });
   await expectStoredSizes(request, image, [128, 320, 640, 800]);
 
-  expect(await uploadAgain()).toEqual(["upload"]);
+  expect((await uploadAgain()).steps).toEqual(["upload"]);
   expect(await store(request)).toEqual(stored);
+});
+
+test("a live image with no record gets its record and its sizes when the same file is uploaded into the field that holds it", async ({ context, page, request, baseURL }, testInfo) => {
+  const gate = createContentGate(request, baseURL);
+  const member = await seed(request, await png(512, 512), { document: false });
+  const reviewer = await seed(request, await png(504, 504), { document: false });
+  const images = [member, reviewer];
+  expect(images.map(storedWidths)).toEqual([[128, 320, 512], [128, 320, 504]]);
+  const held = image => ({ _type: "image", asset: { _type: "reference", _ref: image.id } });
+  const documents = ["tooling-meetTheTeam", "tooling-proReviewsCarousel"];
+  const revisions = () => Promise.all(documents.map(async id => (await gate.document(id)).revision));
+  await gate.publish(await gate.document(documents[0]), { sections: [{ _key: "crew", title: "Fixture crew", variant: "standard", cards: [{ _key: "member", name: "Fixture member", title: "Fixture role", bio: "Fixture bio", avatar: held(member) }] }] });
+  await gate.publish(await gate.document(documents[1]), { reviews: [{ _key: "reviewer", name: "Fixture reviewer", text: "Fixture review", rating: 5, pfp: held(reviewer) }] });
+  const published = await revisions();
+  const places = [{ path: "/meet-the-team", type: "Meet The Team Page", image: member }, { path: "/", type: "Pro Reviews Carousel", image: reviewer }];
+  const site = await context.newPage();
+  const of = image => address => address.includes(image.sha1);
+
+  const untouched = await store(request);
+  const plan = await fill(request, testInfo, []);
+  for (const image of images) expect(outcomeOf(plan, image)).toBe("no document: document missing");
+  expect(plan.lines.at(-1)).toBe("to fill 0, already filled 0, to record empty 0, failed 0, missing 0, no document 2");
+  expect(plan.code).toBe(1);
+  expect(await store(request)).toEqual(untouched);
+  expect(untouched.objects.map(object => object.name)).toEqual(images.map(image => image.path).sort());
+  expect(untouched.documents).toEqual([]);
+  for (const image of images) expect(await assetOf(request, image)).toEqual({ document: null, assets: 1 });
+  for (const { path, image } of places) {
+    const resized = await openPage(gate, site, path, image);
+    await expect(resized.shown).toHaveAttribute("src", new RegExp(`${RESIZE_PATH}public/site-content-public/${image.path.replace(".", "\\.")}`));
+    expect(resized.requested.filter(of(image)).filter(address => address.includes(RESIZE_PATH)).length).toBeGreaterThan(0);
+  }
+
+  await login(page);
+  await (await context.newCDPSession(page)).send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: 256 * 1024 });
+  const uploadAgain = async ({ type, image }) => {
+    const editor = await openEditor(page, type);
+    const outcome = await uploadInto(page, imageFields(editor).filter({ has: page.locator(`img[src$="/${image.path}"]`) }), image);
+    await expect(editor.getByText("Unpublished changes")).toHaveCount(0);
+    return outcome;
+  };
+  for (const place of places) expect(await uploadAgain(place)).toEqual({ steps: ["upload", "finalize"], shown: ["Checking file…", "Preparing upload…", "Uploading…", "Verifying on the server…"] });
+  const origin = (await (await control(request, "/fixture")).json()).origins[1];
+  const recorded = await store(request);
+  for (const image of images) {
+    expect(await assetOf(request, image)).toEqual({ assets: 1, document: expect.objectContaining({
+      _id: image.id, _type: "sanity.imageAsset", url: `${origin}${PUBLIC_PATH}${image.path}`, sha1hash: image.sha1, size: image.buffer.length, mimeType: "image/png", extension: "png",
+      metadata: { dimensions: { width: image.width, height: image.height, aspectRatio: 1 }, sizes: storedWidths(image) },
+    }) });
+    expect(filesOf(recorded, image)).toEqual(filesFor(image, storedWidths(image)));
+    await expectStoredSizes(request, image, storedWidths(image));
+  }
+  expect(recorded.documents.map(document => document.id).sort()).toEqual(images.map(image => image.id).sort());
+  expect(recorded.objects.filter(object => !SIZE_FILE.test(object.name))).toEqual(untouched.objects);
+  expect(await revisions()).toEqual(published);
+
+  await gate.publish(await gate.document("tooling-hero"), { subtext: "Fixture subtext after the images were uploaded again" });
+  for (const { path, image } of places) {
+    const stored = await openPage(gate, site, path, image);
+    await expect(stored.shown).toHaveAttribute("src", new RegExp(`${PUBLIC_PATH}images/${image.sha1}-w\\d+\\.webp(\\?frame=1)?$`));
+    await expect.poll(() => stored.shown.evaluate(shown => shown.naturalWidth > 0 && shown.currentSrc)).toMatch(SIZE_FILE);
+    expect(stored.addresses.filter(of(image)).filter(address => address.includes(RESIZE_PATH))).toEqual([]);
+    expect(stored.requested.filter(of(image)).filter(address => address.includes(RESIZE_PATH))).toEqual([]);
+  }
+
+  for (const place of places) expect(await uploadAgain(place)).toEqual({ steps: ["upload"], shown: ["Checking file…", "Preparing upload…"] });
+  expect(await store(request)).toEqual(recorded);
+  expect(await revisions()).toEqual(published);
+
+  const filled = await fill(request, testInfo, ["--apply"]);
+  expect(filled.code).toBe(0);
+  for (const image of images) expect(outcomeOf(filled, image)).toBe(`already filled${listed(storedWidths(image))}`);
+  expect(filled.lines.at(-1)).toBe("filled 0, already filled 2, recorded empty 0, failed 0, missing 0, no document 0");
+  expect(await imagesWithoutSizes(request)).toEqual([]);
+  expect(await store(request)).toEqual(recorded);
+});
+
+test("the service key cannot write an asset row that has no record", async ({ request }) => {
+  const image = await png(64, 64);
+  const sha1 = createHash("sha1").update(image.buffer).digest("hex");
+  const id = `image-${sha1}-64x64-png`;
+  const refused = await storeRpc(request, "roo_upsert_asset", { p_asset: {
+    legacy_sanity_asset_id: id, storage_bucket: "site-content-public", storage_path: `images/${sha1}.png`, source_url: `https://cdn.sanity.io/images/fixture/production/${sha1}-64x64.png`,
+    mime_type: "image/png", byte_size: image.buffer.length, sha256: createHash("sha256").update(image.buffer).digest("hex"), width: 64, height: 64, metadata: { source_sha1: sha1 },
+  } });
+  expect({ status: refused.status(), body: await refused.json() }).toMatchObject({ status: 403, body: { code: "42501" } });
+  expect(await assetOf(request, { id })).toEqual({ document: null, assets: 0 });
 });

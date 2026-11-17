@@ -371,7 +371,7 @@ jobs:
           const assert = require('node:assert/strict');
           const { stats } = require('./test-results/image-size-fill.json');
           assert.equal(stats.skipped, 0, 'Image size fill cases must not skip');
-          assert.equal(stats.expected, 8, 'All image size fill cases must pass');
+          assert.equal(stats.expected, 10, 'All image size fill cases must pass');
           assert.equal(stats.unexpected, 0);
           assert.equal(stats.flaky, 0);
           NODE
