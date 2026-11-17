@@ -346,6 +346,9 @@ test("Hide in another tab lets this tab's paused reviews carousel move again", a
   await expect(page.getByText("Perf Debug", { exact: true })).toBeVisible();
   const carousel = page.locator(".ri-reviews-viewport").first();
   await carousel.scrollIntoViewIfNeeded();
+  const scrollLeft = () => carousel.evaluate((node) => node.scrollLeft);
+  const beforePause = await scrollLeft();
+  await expect.poll(scrollLeft).not.toBe(beforePause);
   await page.getByLabel("Pause reviews autoplay", { exact: true }).check();
   const stillAcrossFrames = () => carousel.evaluate((node) => new Promise((resolve) => {
     let start = null;
@@ -362,7 +365,6 @@ test("Hide in another tab lets this tab's paused reviews carousel move again", a
   const other = await context.newPage();
   await other.goto("/?perfdebug=1");
   await expect(other.getByText("Perf Debug", { exact: true })).toBeVisible();
-  const scrollLeft = () => carousel.evaluate((node) => node.scrollLeft);
   const paused = await scrollLeft();
   await other.getByRole("button", { name: "Hide", exact: true }).click();
   await expect.poll(scrollLeft).not.toBe(paused);
