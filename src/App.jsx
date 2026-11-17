@@ -50,9 +50,6 @@ const Privacy = lazy(async () => {
   ]);
   return { default: (props) => <Page {...props} initialData={props.initialData || initialData} /> };
 });
-const PerfDebugOverlay = lazy(() =>
-  import("./components/PerfDebugOverlay").catch(() => ({ default: () => null }))
-);
 const Reviews = lazy(() => import("./legacyPages/Reviews"));
 const Tools = lazy(() => import("./legacyPages/Tools"));
 const RefLogin = lazy(() => import("./legacyPages/RefLogin"));
@@ -159,17 +156,29 @@ const withRouteSuspense = (node, fallback = <RouteFallback />) => (
 );
 
 const PerfDebugRuntime = () => {
-  const [loaded, setLoaded] = useState(false);
+  const [Overlay, setOverlay] = useState(null);
+  const request = useRef("idle");
 
   useEffect(() => {
     const sync = () => {
-      if (syncPerfDebugFromEnvironment().enabled) setLoaded(true);
+      if (!syncPerfDebugFromEnvironment().enabled || request.current !== "idle") return;
+      request.current = "loading";
+      import("./components/PerfDebugOverlay").then(
+        (module) => {
+          request.current = "loaded";
+          setOverlay(() => module.default);
+        },
+        (error) => {
+          request.current = "idle";
+          reportRequestError(error);
+        }
+      );
     };
     sync();
     return subscribePerfDebugChanges(sync);
   }, []);
 
-  return loaded ? withRouteSuspense(<PerfDebugOverlay />, null) : null;
+  return Overlay ? <Overlay /> : null;
 };
 
 function RedirectToDiscord() {
