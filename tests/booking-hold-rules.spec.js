@@ -57,7 +57,10 @@ test.skip(nativeBinariesMissing, "Needs PG_BIN and POSTGREST_BIN for the native 
 const readHold = page => page.evaluate(() => JSON.parse(sessionStorage.getItem("my_slot_hold")));
 const expectNoSelection = async (page, hold = null) => {
   await expect(page.getByRole("button", { name: "Next", exact: true }).last()).toHaveAttribute("aria-disabled", "true");
-  await expect(page.locator(".booking-slot-grid .bg-accent-strong")).toHaveCount(0);
+  const grid = page.locator(".booking-slot-grid");
+  await expect(grid.locator("button")).not.toHaveCount(0);
+  await expect(grid.locator('[aria-pressed="true"]')).toHaveCount(0);
+  await expect(grid.locator("button:not([aria-pressed])")).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toHaveCount(0);
   expect(await readHold(page)).toEqual(hold);
 };
@@ -133,7 +136,8 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
             await expect(page.getByRole("alert").filter({ hasText: "Could not reserve this slot. Please check your internet and try again." }))
               .toHaveText("Could not reserve this slot. Please check your internet and try again.");
             await expect(page.getByRole("button", { name: "Next", exact: true }).last()).toHaveAttribute("aria-disabled", "false");
-            await expect(page.getByRole("button", { name: "11:00 AM", exact: true })).not.toHaveClass(/(?:^|\s)bg-accent-strong(?:\s|$)/);
+            await expect(page.getByRole("button", { name: "10:00 AM", exact: true })).toHaveAttribute("aria-pressed", "true");
+            await expect(page.getByRole("button", { name: "11:00 AM", exact: true })).toHaveAttribute("aria-pressed", "false");
             await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toHaveCount(0);
             expect(await readHold(page)).toEqual(previous);
             expect(await native.verifyHold({ token: previous.holdToken, holdId: previous.holdId })).toBe(true);
@@ -259,7 +263,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
             await expect(page.getByRole("alert").filter({ hasText: "Could not reserve this slot. Please check your internet and try again." }))
               .toHaveText("Could not reserve this slot. Please check your internet and try again.");
             await expect(page.getByRole("button", { name: "Next", exact: true }).last()).toHaveAttribute("aria-disabled", "false");
-            await expect(page.getByRole("button", { name: "10:00 AM", exact: true })).toHaveClass(/(?:^|\s)bg-accent-strong(?:\s|$)/);
+            await expect(page.getByRole("button", { name: "10:00 AM", exact: true })).toHaveAttribute("aria-pressed", "true");
             await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toHaveCount(0);
             expect(await readHold(page)).toBeNull();
             expect(await native.snapshot(start)).toEqual(before);

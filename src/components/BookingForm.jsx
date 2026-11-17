@@ -2706,6 +2706,7 @@ export default function BookingForm() {
                                   : dateLabel
                               }
                               disabled={disabled}
+                              aria-pressed={Boolean(isSelected)}
                               onClick={() => handleDayClick(day)}
                               className={`p-2 rounded-lg transition-all duration-200 flex flex-col items-center justify-center ${lockingSlot ? "cursor-wait opacity-60" : ""} ${
                                 isSelected
@@ -2770,6 +2771,7 @@ export default function BookingForm() {
                             return (
                               <button
                                 key={t.slotId}
+                                aria-pressed={selectedSlot?.slotId === t.slotId}
                                 onClick={() => {
                                   if (lockingSlot) return;
                                   if (isMyHold) {
