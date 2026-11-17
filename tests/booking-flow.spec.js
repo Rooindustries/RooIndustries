@@ -20,6 +20,14 @@ const timeButton = (page, name) => timeGrid(page).getByRole("button", { name, ex
 const dayButton = (page, date) =>
   page.locator(".booking-calendar-grid button").filter({ hasText: new RegExp(`^${Number(date.slice(-2))}$`) });
 
+const addSecondDay = (flow) => {
+  const first = flow.state.slots[0].date;
+  const day = Number(first.slice(-2));
+  const other = `${first.slice(0, 8)}${String(day < 28 ? day + 1 : day - 1).padStart(2, "0")}`;
+  flow.state.slots.push({ date: other, times: ["10:00", "11:00"] });
+  return [first, other].sort();
+};
+
 async function expectPressedTime(page, pressed) {
   for (const name of ["10:00 AM", "11:00 AM"]) {
     await expect(timeButton(page, name)).toHaveAttribute("aria-pressed", String(name === pressed));
@@ -620,11 +628,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     });
 
     test("the time and the day say which one is selected", async ({ page, flow }) => {
-      const first = flow.state.slots[0].date;
-      const day = Number(first.slice(-2));
-      const other = `${first.slice(0, 8)}${String(day < 28 ? day + 1 : day - 1).padStart(2, "0")}`;
-      flow.state.slots.push({ date: other, times: ["10:00", "11:00"] });
-      const [earlier, later] = [first, other].sort();
+      const [earlier, later] = addSecondDay(flow);
       await flow.booking();
       await expectPressedDay(page, earlier);
       await expectPressedTime(page, "10:00 AM");
@@ -636,10 +640,14 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await expect(page.getByRole("button", { name: "Next", exact: true }).last()).toHaveAttribute("aria-disabled", "true");
     });
 
-    test("another month shows no selected day and coming back shows it again", async ({ page, flow }) => {
+    test("no other month up to the same month next year shows a selected day, and coming back shows it again", async ({ page, flow }) => {
       const date = flow.state.slots[0].date;
       await flow.booking();
-      for (const [control, monthsLater] of [["Next month", 1], ["Next month", 2], ["Previous month", 1], ["Previous month", 0]]) {
+      const visits = [
+        ...Array.from({ length: 12 }, (_, index) => ["Next month", index + 1]),
+        ...Array.from({ length: 12 }, (_, index) => ["Previous month", 11 - index]),
+      ];
+      for (const [control, monthsLater] of visits) {
         await page.getByRole("button", { name: control, exact: true }).click();
         await expect(page.getByRole("heading", { name: monthTitle(date, monthsLater), exact: true })).toBeVisible();
         await expectPressedDay(page, monthsLater ? null : date);
@@ -678,6 +686,18 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await timeButton(page, "11:00 AM").click();
       await expectPressedTime(page, "11:00 AM");
       await expect(timeButton(page, "10:00 AM")).toHaveClass(/(?:^|\s)border-purple-500\/60(?:\s|$)/);
+    });
+
+    test("another day chosen after Back is the only selected day, not the reserved time's day", async ({ page, flow }) => {
+      const [reserved, other] = addSecondDay(flow);
+      await flow.reserve();
+      await page.getByRole("button", { name: "Back", exact: true }).last().click();
+      await expectPressedDay(page, reserved);
+      await dayButton(page, other).click();
+      await expectPressedDay(page, other);
+      await expect(dayButton(page, reserved)).toHaveAttribute("aria-pressed", "false");
+      await expectPressedTime(page, null);
+      await expect(page.getByRole("button", { name: "Next", exact: true }).last()).toHaveAttribute("aria-disabled", "true");
     });
 
     test("the reserved time is still the selected one after a reload and Back", async ({ page, flow }) => {
