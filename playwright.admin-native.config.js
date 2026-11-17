@@ -3,5 +3,5 @@ const config = require("./playwright.admin.config");
 
 module.exports = defineConfig({
   ...config,
-  testIgnore: /content-publish-[^/]+\.spec\.js$/,
+  testIgnore: /(content-publish-[^/]+|image-size-fill)\.spec\.js$/,
 });
