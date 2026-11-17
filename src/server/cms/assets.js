@@ -62,6 +62,8 @@ export const issueCmsUpload = async ({ body, client, env = process.env, actor = 
     const detected = { extension: existing.legacy_sanity_asset_id.split("-").at(-1), mimeType: existing.mime_type };
     if (!mimeAgrees(input.mimeType, detected)) continue;
     const assetId = existing.legacy_sanity_asset_id;
+    const sameShape = input.kind === "image" && input.width === existing.width && input.height === existing.height;
+    if (sameShape && !Array.isArray(rpcData(await client.rpc("roo_asset_manifest_for_refs", { p_asset_ids: [assetId], p_source_urls: [] }), "Asset lookup")?.[0]?.sizes)) break;
     const url = input.kind === "image" ? client.storage.from(existing.storage_bucket).getPublicUrl(existing.storage_path).data.publicUrl : null;
     rpcData(await client.rpc("roo_register_verified_cms_asset", { p_asset: { ...existing, source_url: url || `storage://${existing.storage_bucket}/${existing.storage_path}` }, p_asset_document: { _id: assetId, _type: `sanity.${input.kind}Asset`, sha1hash: input.sha1, size: Number(existing.byte_size), mimeType: existing.mime_type, extension: detected.extension, ...(url ? { url } : {}), metadata: input.kind === "image" ? { dimensions: { width: existing.width, height: existing.height, aspectRatio: existing.width / existing.height } } : {} } }), "Verified asset reuse");
     return { uploadId: null, alreadyExists: true, asset: { _type: "reference", _ref: assetId }, assetId, url, width: existing.width, height: existing.height, mimeType: existing.mime_type, byteSize: Number(existing.byte_size) };
@@ -216,7 +218,8 @@ const finalizeUpload = async ({ body, client, env = process.env, actor = "admin:
     rpcData(await client.rpc("roo_refuse_cms_upload", { p_upload_id: row.upload_id, p_error_code: "ASSET_REGISTRY_COLLISION" }), "Asset collision refusal");
     throw verifyFailure("The verified asset registry disagrees with these bytes. Owner attention is required.");
   }
-  rpcData(registration, "Verified asset registration");
+  const { replayed } = rpcData(registration, "Verified asset registration");
+  if (replayed && row.kind === "image") rpcData(await client.rpc("roo_record_cms_image_sizes", { p_asset_id: assetId, p_sizes: assetDocument.metadata.sizes }), "Image size recording");
   const result = { asset: { _type: "reference", _ref: assetId }, assetId, url, ...dimensions, mimeType, byteSize: upload.byteSize, sha256: upload.sha256, reused };
   const completed = await client.rpc("roo_complete_cms_upload", { p_upload_id: row.upload_id, p_result: result });
   let saved;
