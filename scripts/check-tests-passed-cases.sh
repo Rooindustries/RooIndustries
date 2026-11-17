@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$(realpath "$0")")/.."
 cases=.github/tests-passed-cases.json
-expected_cases=2
+expected_cases=21
 work="$(mktemp -d)"
 trap 'rm -rf -- "${work:?}"' EXIT
 
@@ -36,6 +36,7 @@ jq -r .run "$work/gate.json" > "$work/gate.sh"
 mkdir "$work/bin"
 cat > "$work/bin/gh" <<'STUB'
 #!/usr/bin/env bash
+echo "gh $*" >> "$GH_CALLS"
 cat "$JOB_LIST"
 STUB
 chmod +x "$work/bin/gh"
@@ -56,13 +57,11 @@ for ((i = 0; i < count; i++)); do
   jq -c --slurpfile all "$cases" '
     .jobList as $list
     | {jobs: [$all[0].jobNames[] | {name: ., status: "completed", conclusion: (
-        if $list == null then "success"
-        elif . == "Check for an already tested tree" then "success"
-        else $list.conclusion end)}
-      | if $list != null and .name == $list.lagging then .status = "in_progress" | .conclusion = null else . end]}
+        if . == "Check for an already tested tree" then "success" else $list.conclusion end)}
+      | if $list.lagging == null or .name == $list.lagging then .status = "in_progress" | .conclusion = null else . end]}
   ' "$work/case.json" > "$work/jobs.json"
   exit_code=0
-  output="$(env PATH="$work/bin:$PATH" JOB_LIST="$work/jobs.json" GH_TOKEN=unused \
+  output="$(env PATH="$work/bin:$PATH" JOB_LIST="$work/jobs.json" GH_CALLS="$work/gh-calls" \
     GITHUB_EVENT_NAME="$(jq -r .event "$work/case.json")" FORK="$(jq -r .fork "$work/case.json")" \
     NEEDS="$needs" GITHUB_REPOSITORY=Rooindustries/RooIndustries GITHUB_RUN_ID=1 GITHUB_RUN_ATTEMPT=1 \
     bash -e "$work/gate.sh" 2>&1)" || exit_code=$?
@@ -76,6 +75,10 @@ for ((i = 0; i < count; i++)); do
   fi
 done
 
+if [ -s "$work/gh-calls" ]; then
+  echo "The test gate must judge from needs alone, but it called: $(sort -u "$work/gh-calls" | paste -sd ';')" >&2
+  exit 1
+fi
 if [ "$wrong" != 0 ]; then
   echo "Test gate cases judged wrongly: $wrong of $checked." >&2
   exit 1

@@ -28,6 +28,120 @@
       "default": "success", "results": {},
       "jobList": {"conclusion": "success", "lagging": "Record the tested tree"},
       "exit": 0, "phrase": "Tests passed: every job passed."
+    },
+    {
+      "name": "a pull request whose jobs all passed passes",
+      "event": "pull_request", "fork": false, "tested": "false",
+      "default": "success", "results": {},
+      "exit": 0, "phrase": "Tests passed: every job passed."
+    },
+    {
+      "name": "a fork pull request with the tree check skipped and every other job passed passes",
+      "event": "pull_request", "fork": true, "tested": null,
+      "default": "success", "results": {"tested-tree": "skipped"},
+      "exit": 0, "phrase": "Tests passed: every job passed."
+    },
+    {
+      "name": "a hand-started run whose jobs all passed passes",
+      "event": "workflow_dispatch", "fork": false, "tested": "false",
+      "default": "success", "results": {},
+      "exit": 0, "phrase": "Tests passed: every job passed."
+    },
+    {
+      "name": "a push whose jobs all passed passes",
+      "event": "push", "fork": false, "tested": "false",
+      "default": "success", "results": {},
+      "exit": 0, "phrase": "Tests passed: every job passed."
+    },
+    {
+      "name": "a pull request on an already tested tree passes",
+      "event": "pull_request", "fork": false, "tested": "true",
+      "default": "skipped", "results": {"tested-tree": "success"},
+      "exit": 0, "phrase": "Tests passed: the tree was already tested and every test job was skipped."
+    },
+    {
+      "name": "a merge queue run on an already tested tree passes",
+      "event": "merge_group", "fork": false, "tested": "true",
+      "default": "skipped", "results": {"tested-tree": "success"},
+      "exit": 0, "phrase": "Tests passed: the tree was already tested and every test job was skipped."
+    },
+    {
+      "name": "a hand-started run on an already tested tree passes",
+      "event": "workflow_dispatch", "fork": false, "tested": "true",
+      "default": "skipped", "results": {"tested-tree": "success"},
+      "exit": 0, "phrase": "Tests passed: the tree was already tested and every test job was skipped."
+    },
+    {
+      "name": "a merge queue run with a failed test job fails and names it",
+      "event": "merge_group", "fork": false, "tested": "false",
+      "default": "success", "results": {"native": "failure"},
+      "exit": 1, "phrase": "Tests did not pass: native=failure"
+    },
+    {
+      "name": "a merge queue run with a cancelled test job fails and names it",
+      "event": "merge_group", "fork": false, "tested": "false",
+      "default": "success", "results": {"jest": "cancelled"},
+      "exit": 1, "phrase": "Tests did not pass: jest=cancelled"
+    },
+    {
+      "name": "a merge queue run with a skipped test job fails and names it",
+      "event": "merge_group", "fork": false, "tested": "false",
+      "default": "success", "results": {"record-tested-tree": "skipped"},
+      "exit": 1, "phrase": "Tests did not pass: record-tested-tree=skipped"
+    },
+    {
+      "name": "a hand-started run with a failed Playwright leg fails and names it",
+      "event": "workflow_dispatch", "fork": false, "tested": "false",
+      "default": "success", "results": {"playwright": "failure", "record-tested-tree": "skipped"},
+      "exit": 1, "phrase": "Tests did not pass: playwright=failure, record-tested-tree=skipped"
+    },
+    {
+      "name": "a pull request with a failed test job fails and names it",
+      "event": "pull_request", "fork": false, "tested": "false",
+      "default": "success", "results": {"routes": "failure"},
+      "exit": 1, "phrase": "Tests did not pass: routes=failure"
+    },
+    {
+      "name": "an already tested tree where a test job still ran fails",
+      "event": "push", "fork": false, "tested": "true",
+      "default": "skipped", "results": {"tested-tree": "success", "booking-model": "success"},
+      "exit": 1, "phrase": "Tests did not pass: booking-model=success"
+    },
+    {
+      "name": "an already tested tree where a test job failed fails",
+      "event": "merge_group", "fork": false, "tested": "true",
+      "default": "skipped", "results": {"tested-tree": "success", "monitoring": "failure"},
+      "exit": 1, "phrase": "Tests did not pass: monitoring=failure"
+    },
+    {
+      "name": "a failed tree check fails",
+      "event": "merge_group", "fork": false, "tested": null,
+      "default": "skipped", "results": {"tested-tree": "failure"},
+      "exit": 1, "phrase": "Tests did not pass: invalid test results=failure"
+    },
+    {
+      "name": "a failed tree check on a pull request fails and names it",
+      "event": "pull_request", "fork": false, "tested": null,
+      "default": "skipped", "results": {"tested-tree": "failure"},
+      "exit": 1, "phrase": "Tests did not pass: tested-tree=failure"
+    },
+    {
+      "name": "a fork pull request whose tree check ran fails",
+      "event": "pull_request", "fork": true, "tested": "false",
+      "default": "success", "results": {},
+      "exit": 1, "phrase": "Tests did not pass: tested-tree=success"
+    },
+    {
+      "name": "a tree check that says neither tested nor untested fails",
+      "event": "push", "fork": false, "tested": "maybe",
+      "default": "success", "results": {},
+      "exit": 1, "phrase": "Tests did not pass: invalid test results=failure"
+    },
+    {
+      "name": "an unknown event fails",
+      "event": "schedule", "fork": false, "tested": "false",
+      "default": "success", "results": {},
+      "exit": 1, "phrase": "Tests did not pass: invalid test results=failure"
     }
   ]
 }

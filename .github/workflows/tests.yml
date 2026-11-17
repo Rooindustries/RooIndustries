@@ -107,6 +107,7 @@ jobs:
       - run: npm run test:playwright-groups
       - run: npm run test:scripts-start
       - run: npm run test:tested-tree
+      - run: bash scripts/check-tests-passed-cases.sh
       - run: npm run test:free-ports
       - run: npm run test:fixture-ports
       - run: npm run test:reproducible-build
@@ -681,9 +682,6 @@ jobs:
 
   tests-passed:
     name: All tests passed
-    permissions:
-      actions: read
-      contents: read
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-24.04' || vars.TESTS_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 5
     needs:
@@ -703,7 +701,6 @@ jobs:
     steps:
       - env:
           NEEDS: ${{ toJSON(needs) }}
-          GH_TOKEN: ${{ github.token }}
           FORK: >-
             ${{ github.event_name == 'pull_request'
             && github.event.pull_request.head.repo.full_name != github.repository }}
@@ -713,8 +710,8 @@ jobs:
               to_entries | map(select(.value.result != (
                 if .key == "tested-tree" and $fork then "skipped" else "success" end)))
             elif ($event | IN("merge_group", "push", "workflow_dispatch"))
-              and .["tested-tree"].outputs.tested == "false" and all(.[]; .result == "success") then
-              []
+              and .["tested-tree"].outputs.tested == "false" then
+              to_entries | map(select(.value.result != "success"))
             elif ($event | IN("pull_request", "merge_group", "push", "workflow_dispatch"))
               and .["tested-tree"].result == "success" and .["tested-tree"].outputs.tested == "true" then
               to_entries | map(select(.value.result != (if .key == "tested-tree" then "success" else "skipped" end)))
@@ -727,24 +724,8 @@ jobs:
             echo "Tests did not pass: $failed"
             exit 1
           fi
-          shortcut="$(jq -r --arg event "$GITHUB_EVENT_NAME" '
-            ($event | IN("pull_request", "merge_group", "push", "workflow_dispatch"))
-            and .["tested-tree"].result == "success" and .["tested-tree"].outputs.tested == "true"
-            and (all(.[]; .result == "success") | not)
-          ' <<< "$NEEDS")"
-          jobs="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100")"
-          failed="$(jq -sr --argjson fork "$FORK" --argjson shortcut "$shortcut" '
-            [.[].jobs[] | select(.name != "All tests passed")] as $jobs
-            | [$jobs[] | select(
-                .status != "completed" or
-                .conclusion != (if .name == "Check for an already tested tree" then
-                  if $fork then "skipped" else "success" end
-                elif $shortcut then "skipped" else "success" end)
-              ) | "\(.name)=\(.status)/\(.conclusion // "null")"]
-            + (if any($jobs[]; (.name | startswith("Playwright ")) and .name != "Playwright creator portal and API routes" and .name != "Playwright revalidation") then [] else ["No Playwright matrix jobs listed"] end)
-            | join(", ")
-          ' <<< "$jobs")"
-          if [ -n "$failed" ]; then
-            echo "Tests did not pass: $failed"
-            exit 1
+          if [ "$(jq -r '.["tested-tree"].outputs.tested' <<< "$NEEDS")" = true ]; then
+            echo "Tests passed: the tree was already tested and every test job was skipped."
+          else
+            echo "Tests passed: every job passed."
           fi
