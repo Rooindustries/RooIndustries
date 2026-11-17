@@ -22,6 +22,24 @@ test.beforeEach(async ({ context, baseURL }) => {
       inject: () => 1,
       onCommitFiberRoot: () => { window.__reactCommits += 1; },
     };
+    for (const name of ["play", "pause"]) {
+      const original = HTMLMediaElement.prototype[name];
+      HTMLMediaElement.prototype[name] = function (...args) {
+        this.dataset.lastCall = name;
+        return original.apply(this, args);
+      };
+    }
+    window.__storageListeners = new Set();
+    const addListener = window.addEventListener;
+    const removeListener = window.removeEventListener;
+    window.addEventListener = function (type, listener, options) {
+      if (type === "storage") window.__storageListeners.add(listener);
+      return addListener.call(this, type, listener, options);
+    };
+    window.removeEventListener = function (type, listener, options) {
+      if (type === "storage") window.__storageListeners.delete(listener);
+      return removeListener.call(this, type, listener, options);
+    };
     window.__failedScripts = [];
     window.addEventListener("error", (event) => {
       if (event.target instanceof HTMLScriptElement) window.__failedScripts.push(event.target.src);
@@ -84,7 +102,6 @@ const turnDebug = (page, on) => page.evaluate((enabled) => {
   if (enabled === true) {
     localStorage.setItem("roo_perf_debug", "1");
   } else if (enabled === false) {
-    history.replaceState(history.state, "", location.pathname);
     localStorage.removeItem("roo_perf_debug");
   }
   const added = new MutationObserver(() => {});
@@ -250,5 +267,75 @@ test("turning debug on during a failing load asks once and reports the failure o
   await expect(page.getByText("Perf Debug", { exact: true })).toBeVisible();
   expect(hold.asks).toBe(2);
   expect(reports).toHaveLength(1);
+  expect(errors).toEqual([]);
+});
+
+test("debug turned on in another tab shows the overlay hidden in this one", async ({ page, context }) => {
+  const errors = pageErrors(page);
+  await page.goto("/?perfdebug=1");
+  await expect(page.getByText("Perf Debug", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Hide", exact: true }).click();
+  await expect(page.getByText("Perf Debug", { exact: true })).toHaveCount(0);
+  const other = await context.newPage();
+  await other.goto("/?perfdebug=1");
+  await expect(other.getByText("Perf Debug", { exact: true })).toBeVisible();
+  await expect(page.getByText("Perf Debug", { exact: true })).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test("Hide in another tab hides the overlay and its effects in this one", async ({ page, context }) => {
+  const errors = pageErrors(page);
+  await page.goto("/?perfdebug=1");
+  await expect(page.getByText("Perf Debug", { exact: true })).toBeVisible();
+  const video = page.locator(".ri-hiw-video video").first();
+  await video.scrollIntoViewIfNeeded();
+  await expect(video).toHaveAttribute("data-last-call", "play");
+  const other = await context.newPage();
+  await other.goto("/?perfdebug=1");
+  await expect(other.getByText("Perf Debug", { exact: true })).toBeVisible();
+  await other.getByLabel("Disable navbar blur", { exact: true }).check();
+  await other.getByLabel("Pause how-it-works videos", { exact: true }).check();
+  await expect(page.locator("html")).toHaveClass(/perf-no-navbar-blur/);
+  await expect(video).toHaveAttribute("data-last-call", "pause");
+  await other.getByRole("button", { name: "Hide", exact: true }).click();
+  await expect(other.getByText("Perf Debug", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Perf Debug", { exact: true })).toHaveCount(0);
+  await expect(page.locator("html")).not.toHaveClass(/perf-no-navbar-blur/);
+  await expect(video).toHaveAttribute("data-last-call", "play");
+  expect(await page.evaluate(() => localStorage.getItem("roo_perf_debug"))).toBeNull();
+  expect(errors).toEqual([]);
+});
+
+test("clearing storage in another tab hides the overlay in this one", async ({ page, context }) => {
+  const errors = pageErrors(page);
+  await page.goto("/?perfdebug=1");
+  await expect(page.getByText("Perf Debug", { exact: true })).toBeVisible();
+  const other = await context.newPage();
+  await other.goto("/?perfdebug=1");
+  await expect(other.getByText("Perf Debug", { exact: true })).toBeVisible();
+  await other.evaluate(() => localStorage.clear());
+  await expect(page.getByText("Perf Debug", { exact: true })).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem("roo_perf_debug"))).toBeNull();
+  expect(errors).toEqual([]);
+});
+
+test("other-tab listeners go away with the parts of the page that added them", async ({ page }) => {
+  const errors = pageErrors(page);
+  const listeners = () => page.evaluate(() => window.__storageListeners.size);
+  const goTo = (path) => page.locator(`a[href="${path}"]:visible`).first().click();
+  await page.goto("/?perfdebug=1");
+  await expect(page.getByText("Perf Debug", { exact: true })).toBeVisible();
+  await expect(page.locator(".ri-hiw-video").first()).toBeAttached();
+  const onHome = await listeners();
+  await goTo("/reviews");
+  await expect(page.locator(".ri-hiw-video")).toHaveCount(0);
+  const away = await listeners();
+  expect(away).toBeLessThan(onHome);
+  await goTo("/");
+  await expect(page.locator(".ri-hiw-video").first()).toBeAttached();
+  expect(await listeners()).toBe(onHome);
+  await goTo("/reviews");
+  await expect(page.locator(".ri-hiw-video")).toHaveCount(0);
+  expect(await listeners()).toBe(away);
   expect(errors).toEqual([]);
 });
