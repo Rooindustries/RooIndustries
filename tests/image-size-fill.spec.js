@@ -442,14 +442,23 @@ test("a live image with no record gets its record and its sizes when the same fi
   expect(await store(request)).toEqual(recorded);
 });
 
-test("the service key cannot write an asset row that has no record", async ({ request }) => {
+test("the service key cannot write an asset row without its record, on its own or inside a publish", async ({ request }) => {
   const image = await png(64, 64);
   const sha1 = createHash("sha1").update(image.buffer).digest("hex");
   const id = `image-${sha1}-64x64-png`;
-  const refused = await storeRpc(request, "roo_upsert_asset", { p_asset: {
+  const row = {
     legacy_sanity_asset_id: id, storage_bucket: "site-content-public", storage_path: `images/${sha1}.png`, source_url: `https://cdn.sanity.io/images/fixture/production/${sha1}-64x64.png`,
     mime_type: "image/png", byte_size: image.buffer.length, sha256: createHash("sha256").update(image.buffer).digest("hex"), width: 64, height: 64, metadata: { source_sha1: sha1 },
-  } });
-  expect({ status: refused.status(), body: await refused.json() }).toMatchObject({ status: 403, body: { code: "42501" } });
+  };
+  const review = `fixture-review-${sha1}`;
+  const command = createHash("sha256").update(review).digest("hex");
+  const answer = async response => ({ status: response.status(), ...(await response.json()) });
+  const direct = await answer(await storeRpc(request, "roo_upsert_asset", { p_asset: row }));
+  const published = await answer(await storeRpc(request, "roo_apply_cms_publish_command", {
+    p_command_id: `cms:${command}`, p_request_hash: command, p_actor: "sanity:fixture", p_assets: [row], p_asset_links: [],
+    p_mutations: [{ operation: "create", id: review, document: { _id: review, _type: "review", title: "Fixture review", image: { _type: "image", asset: { _type: "reference", _ref: id } } } }],
+  }));
+  expect({ direct, published }).toMatchObject({ direct: { status: 403, code: "42501" }, published: { status: 409, code: "23503", message: "CMS_ASSET_RECORD_MISSING" } });
   expect(await assetOf(request, { id })).toEqual({ document: null, assets: 0 });
+  expect(await assetOf(request, { id: review })).toEqual({ document: null, assets: 0 });
 });

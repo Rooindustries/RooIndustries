@@ -434,7 +434,10 @@ try {
       const stored = await bucket.upload(storagePath, body, { contentType: mimeType, upsert: false });
       let registered = stored;
       if (!stored.error && document === false) {
-        await fixture.sql`select public.roo_upsert_asset(${fixture.sql.json({ ...asset, source_url: `https://cdn.sanity.io/images/fixture/production/${sha1}-${width}x${height}.${extension}`, metadata: { source_sha1: sha1 } })})`;
+        await fixture.sql.begin(async sql => {
+          await sql`set local session_replication_role = replica`;
+          await sql`select public.roo_upsert_asset(${sql.json({ ...asset, source_url: `https://cdn.sanity.io/images/fixture/production/${sha1}-${width}x${height}.${extension}`, metadata: { source_sha1: sha1 } })})`;
+        });
       } else if (!stored.error) {
         registered = await fixture.client.rpc("roo_register_verified_cms_asset", {
           p_asset: asset,
