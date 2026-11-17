@@ -13,7 +13,6 @@ import JsonLd from "./next/JsonLd";
 import { isProductionBrowser } from "./lib/productionBrowser";
 import SalesTelemetry from "./components/SalesTelemetry";
 import { loadPostHog } from "./lib/loadPostHog";
-import { SpeedInsights } from "@vercel/speed-insights/react";
 import ReservationBanner from "./components/ReservationBanner";
 import RouteProgress, { RouteWaiting } from "./components/RouteProgress";
 import { BookingDialogReady } from "./lib/bookingDialogHold";
@@ -52,6 +51,11 @@ const Privacy = lazy(async () => {
 });
 const PerfDebugOverlay = lazy(() =>
   import("./components/PerfDebugOverlay").catch(() => ({ default: () => null }))
+);
+const SpeedInsights = lazy(() =>
+  import("@vercel/speed-insights/react")
+    .then((module) => ({ default: module.SpeedInsights }))
+    .catch(() => ({ default: () => null }))
 );
 const Reviews = lazy(() => import("./legacyPages/Reviews"));
 const Tools = lazy(() => import("./legacyPages/Tools"));
@@ -130,9 +134,9 @@ const DeferredTelemetry = () => {
   if (!enabled) return null;
 
   return (
-    <>
+    <Suspense fallback={null}>
       <SpeedInsights />
-    </>
+    </Suspense>
   );
 };
 
