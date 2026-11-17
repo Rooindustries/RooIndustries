@@ -50,7 +50,10 @@ const getQueryPerfDebug = () => {
 
 export const isPerfDebugEnabled = () => {
   if (!isBrowser()) return false;
-  if (enabledOverride !== null) return enabledOverride;
+  if (enabledOverride?.stored === readBrowserStorage("localStorage", PERF_DEBUG_STORAGE_KEY)) {
+    return enabledOverride.enabled;
+  }
+  enabledOverride = null;
   if (getQueryPerfDebug()) {
     writeBrowserStorage("localStorage", PERF_DEBUG_STORAGE_KEY, "1");
     return true;
@@ -106,12 +109,15 @@ export const syncPerfDebugFromEnvironment = () => {
 
 export const setPerfDebugEnabled = (enabled) => {
   if (!isBrowser()) return;
-  enabledOverride = Boolean(enabled);
   if (enabled) {
     writeBrowserStorage("localStorage", PERF_DEBUG_STORAGE_KEY, "1");
   } else {
     removeBrowserStorage("localStorage", PERF_DEBUG_STORAGE_KEY);
   }
+  enabledOverride = {
+    enabled: Boolean(enabled),
+    stored: readBrowserStorage("localStorage", PERF_DEBUG_STORAGE_KEY),
+  };
   const toggles = readPerfDebugToggles();
   applyPerfDebugClasses(toggles);
   dispatchPerfDebugChange({ enabled, toggles });
