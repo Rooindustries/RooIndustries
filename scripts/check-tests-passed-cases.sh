@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$(realpath "$0")")/.."
 cases=.github/tests-passed-cases.json
-expected_cases=25
+expected_cases=29
 work="$(mktemp -d)"
 trap 'rm -rf -- "${work:?}"' EXIT
 
@@ -19,12 +19,18 @@ console.log(JSON.stringify({
   needs,
   missing: Object.keys(jobs).filter((job) => job !== "tests-passed" && !needs.includes(job)),
   always: gate.if === "always()",
+  continueOnError: Object.keys(jobs).filter((job) => (jobs[job]["continue-on-error"] ?? false) !== false),
 }));
 ' > "$work/gate.json"
 
 missing="$(jq -r '.missing | join(", ")' "$work/gate.json")"
 if [ -n "$missing" ]; then
   echo "Jobs the test gate does not wait for: $missing. Add them to tests-passed needs." >&2
+  exit 1
+fi
+lenient="$(jq -r '.continueOnError | join(", ")' "$work/gate.json")"
+if [ -n "$lenient" ]; then
+  echo "Jobs with continue-on-error: $lenient. The test gate would see their failures as success." >&2
   exit 1
 fi
 if [ "$(jq -r .always "$work/gate.json")" != true ]; then

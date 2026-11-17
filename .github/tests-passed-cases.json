@@ -166,6 +166,30 @@
       "event": "push", "fork": false, "tested": "true",
       "default": "skipped", "results": {"tested-tree": "failure"},
       "exit": 1, "phrase": "Tests did not pass: tested-tree=failure"
+    },
+    {
+      "name": "a fork pull request with a failed test job fails and names it",
+      "event": "pull_request", "fork": true, "tested": null,
+      "default": "success", "results": {"tested-tree": "skipped", "jest": "failure"},
+      "exit": 1, "phrase": "Tests did not pass: jest=failure"
+    },
+    {
+      "name": "an already tested tree with a cancelled test job fails and names it",
+      "event": "merge_group", "fork": false, "tested": "true",
+      "default": "skipped", "results": {"tested-tree": "success", "native-payouts": "cancelled"},
+      "exit": 1, "phrase": "Tests did not pass: native-payouts=cancelled"
+    },
+    {
+      "name": "a push with a cancelled test job fails and names it",
+      "event": "push", "fork": false, "tested": "false",
+      "default": "success", "results": {"revalidation": "cancelled"},
+      "exit": 1, "phrase": "Tests did not pass: revalidation=cancelled"
+    },
+    {
+      "name": "a push whose skipped tree check says tested fails and names it",
+      "event": "push", "fork": false, "tested": "true",
+      "default": "skipped", "results": {},
+      "exit": 1, "phrase": "Tests did not pass: tested-tree=skipped"
     }
   ]
 }
