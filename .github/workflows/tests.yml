@@ -578,9 +578,10 @@ jobs:
           build-dirs: |
             .next-e2e-revalidation-benchmarks/cache/webpack
             .next-e2e-revalidation-static/cache/webpack
+            .next-e2e-image-sizes/cache/webpack
       - uses: ./.github/actions/hold-ports
         with:
-          playwright-ports: "3251 3261"
+          playwright-ports: "3251 3261 3271"
       - name: Run benchmarks revalidation suite
         id: benchmarks-revalidation
         env:
@@ -593,11 +594,28 @@ jobs:
           PW_PORT: "3261"
           PW_SERVER_ID: revalidation-static
         run: xvfb-run -a npm run test:static:revalidation -- --output=test-results/static-revalidation
+      - name: Run stored image sizes suite
+        if: ${{ !cancelled() }}
+        env:
+          PW_PORT: "3271"
+          PW_SERVER_ID: image-sizes
+          PLAYWRIGHT_JSON_OUTPUT_NAME: test-results/stored-image-sizes.json
+        run: |
+          xvfb-run -a npm run test:image-sizes -- --output=test-results/image-sizes --reporter=line,json
+          node - <<'NODE'
+          const assert = require('node:assert/strict');
+          const { stats } = require('./test-results/stored-image-sizes.json');
+          assert.equal(stats.skipped, 0, 'Stored image size cases must not skip');
+          assert.equal(stats.expected, 10, 'All stored image size cases must pass');
+          assert.equal(stats.unexpected, 0);
+          assert.equal(stats.flaky, 0);
+          NODE
       - uses: ./.github/actions/save-caches
         with:
           build-dirs: |
             .next-e2e-revalidation-benchmarks/cache/webpack
             .next-e2e-revalidation-static/cache/webpack
+            .next-e2e-image-sizes/cache/webpack
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

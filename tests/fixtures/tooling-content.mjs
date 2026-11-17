@@ -10,6 +10,7 @@ import { referralEmail } from './api-routes.mjs';
 import fixturePorts from './fixture-ports.cjs';
 import { matchesShadowFilter } from './shadow-filter.mjs';
 import referralDefaults from '../../src/lib/referralBoxDefaults.js';
+import { createImageSizesContent } from './image-sizes-content.mjs';
 
 const posthogReceived = [];
 const heldPosthog = new Set();
@@ -21,7 +22,9 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
   const content = resource => reused.content(resource, target);
   const document = (type, data, id = `tooling-${type}`) => ({ ...data, _type: type, _id: id, _rev: 'tooling-fixture-v1', _createdAt: '2026-01-01T00:00:00Z', _updatedAt: '2026-01-01T00:00:00Z' });
   const paragraph = 'This is synthetic privacy content for an isolated local Roo Industries application test. The fixture describes how example contact details, booking preferences, and browser settings may be represented on a policy page. All names and addresses in this fixture are invented. This content is used only to verify server rendering, heading structure, paragraph visibility, content negotiation, and client hydration. It does not describe an actual customer, a live account, or a production data collection practice. No real messages, payments, credentials, or account changes are performed by this fixture. A reader can use the local contact route to inspect the application navigation without sending a message.';
+  const sized = process.env.TOOLING_IMAGE_SIZES === '1' ? await createImageSizesContent() : null;
   const reviews = content('reviews');
+  if (sized) reviews.reviews.forEach((review, index) => { review.pfp = sized.avatar(index); });
   if (process.env.TOOLING_REVIEW_COUNT) reviews.reviews = reviews.reviews.slice(0, Number(process.env.TOOLING_REVIEW_COUNT));
   const policy = title => ({ title, sections: [{ heading: 'Synthetic local information', content: [{ _type: 'block', _key: 'privacy-body', style: 'normal', markDefs: [], children: [{ _type: 'span', _key: 'privacy-span', text: paragraph, marks: [] }] }] }] });
   const privacy = policy('Privacy Policy');
@@ -69,7 +72,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
     }),
     ...content('packages-list').map((pkg, index) => document('package', { ...pkg, price: index === 1 ? '$149.95' : pkg.price, order: index }, `tooling-package-${index}`)),
     document('proReviewsCarousel', reviews),
-    document('supportedGames', content('supported-games')),
+    document('supportedGames', sized ? sized.games : content('supported-games')),
     document('referralBox', referralDefaults.REFERRAL_BOX_DEFAULTS),
     document('faqSettings', content('faq-settings')),
     document('faqSection', {
@@ -145,7 +148,13 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
       afterImage: { _type: 'image', asset: { _type: 'reference', _ref: benchmarkImages[1].id } },
     }, 'tooling-benchmark-a-beta'),
   );
-  const images = [...layoutImages, ...benchmarkImages];
+  if (sized) {
+    documents.push(
+      ...sized.reviews.map(({ id, ...review }) => document('review', review, id)),
+      document('benchmark', sized.benchmark, 'tooling-benchmark-gamma'),
+    );
+  }
+  const images = [...layoutImages, ...benchmarkImages].map(image => (sized ? { ...image, sizes: [] } : image)).concat(sized?.images || []);
   const initialDocuments = structuredClone(documents);
   const dispatches = new Map();
   const rateLimits = new Map();
@@ -383,8 +392,11 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
           sha256: createHash('sha256').update(image.body).digest('hex'),
           width: image.width,
           height: image.height,
+          ...(image.sizes ? { sizes: image.sizes } : {}),
         }));
         call.status = 200; json(res, 200, assets);
+      } else if (req.method === 'GET' && sized && await sized.respond(url, res)) {
+        call.status = 200;
       } else if (req.method === 'GET' && images.some(image => url.pathname === `/storage/v1/object/public/site-content-public/${image.storagePath}`)) {
         const image = images.find(image => url.pathname.endsWith(image.storagePath));
         call.status = 200;

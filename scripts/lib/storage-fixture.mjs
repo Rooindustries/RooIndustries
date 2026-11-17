@@ -39,6 +39,8 @@ export async function start({ storageSource = path.join(os.tmpdir(), 'roo-storag
   let storagePort, storageUrl, gatewayPort, supabaseUrl;
   const explicitPorts = [ports.storage, ports.gateway, ports.postgres, ports.rest ?? ports.postgrest, ports.proxy].filter(Boolean);
   let serviceRoleKey, anonKey;
+  const storageFailures = [];
+  const storageHolds = [];
   const cleanup = { storagePid: null, postgresPid: null, postgrestPid: null, databaseScratch: null, storageScratch: scratch, stopped: false };
   let stopping;
   const stop = () => stopping ||= (async () => {
@@ -124,6 +126,18 @@ export async function start({ storageSource = path.join(os.tmpdir(), 'roo-storag
         response.end();
         return;
       }
+      const failure = storage && storageFailures.find(rule => rule.method === request.method && request.url.split('?')[0] === rule.path);
+      if (failure) {
+        const refuse = () => {
+          request.resume();
+          response.writeHead(503, { ...cors, 'content-type': 'application/json' });
+          response.end(JSON.stringify({ statusCode: '503', error: 'ServiceUnavailable', message: 'Fixture storage failure' }));
+        };
+        if (!failure.hold) { refuse(); return; }
+        storageFailures.splice(storageFailures.indexOf(failure), 1);
+        storageHolds.push(refuse);
+        return;
+      }
       const destination = storage ? storageUrl : database.origin;
       const pathname = storage ? request.url.slice(11) : request.url;
       const headers = { ...request.headers, host: new URL(destination).host };
@@ -140,7 +154,7 @@ export async function start({ storageSource = path.join(os.tmpdir(), 'roo-storag
       request.pipe(upstream);
     });
     const client = createClient(supabaseUrl, serviceRoleKey, { auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false } });
-    return { ...database, start, stop, client, origin: supabaseUrl, token: serviceRoleKey, supabaseUrl, baseUrl: supabaseUrl, postgrestUrl: database.postgrestUrl, storageUrl, serviceRoleKey, anonKey, scratch, databaseScratch: database.scratch, storageMigrations, versions: { postgres: database.postgresVersion, postgrest: database.postgrestVersion, storage: storageRelease, node: process.version, supabaseJs: JSON.parse(fs.readFileSync(path.join(root, 'node_modules/@supabase/supabase-js/package.json'), 'utf8')).version }, ports: { postgres: database.pgPort, postgrest: database.restPort, storage: storagePort, gateway: gatewayPort } };
+    return { ...database, start, stop, client, storageFailures, storageHolds, origin: supabaseUrl, token: serviceRoleKey, supabaseUrl, baseUrl: supabaseUrl, postgrestUrl: database.postgrestUrl, storageUrl, serviceRoleKey, anonKey, scratch, databaseScratch: database.scratch, storageMigrations, versions: { postgres: database.postgresVersion, postgrest: database.postgrestVersion, storage: storageRelease, node: process.version, supabaseJs: JSON.parse(fs.readFileSync(path.join(root, 'node_modules/@supabase/supabase-js/package.json'), 'utf8')).version }, ports: { postgres: database.pgPort, postgrest: database.restPort, storage: storagePort, gateway: gatewayPort } };
   } catch (error) {
     failedDatabaseScratch = error.scratch;
     if (fs.existsSync(storageLog)) error.storageLog = fs.readFileSync(storageLog, 'utf8').replace(/eyJ[A-Za-z0-9_.-]+/g, '[redacted-jwt]');

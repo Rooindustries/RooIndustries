@@ -2,16 +2,22 @@ import React, { useEffect, useMemo, useState } from "react";
 import { reportRequestError } from "../lib/clientRequest";
 import { ChevronDown } from "lucide-react";
 import { urlFor } from "../lib/cmsImageUrl";
+import { imageSrcSet } from "../lib/imageSizeLadder";
 import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
+
+const COVER_WIDTH = 450;
+const COVER_HEIGHT = 600;
+const buildCoverUrl = (image, width) =>
+  urlFor(image)
+    .width(width)
+    .height(Math.round((width * COVER_HEIGHT) / COVER_WIDTH))
+    .fit("crop")
+    .url();
 
 function GameCard({ game, index }) {
   const title = game?.title || "Game";
   const image = game?.coverImage;
-  const width = 450;
-  const height = 600;
-  const imageUrl = image
-    ? urlFor(image).width(width).height(height).fit("crop").url()
-    : "";
+  const imageUrl = image ? buildCoverUrl(image, COVER_WIDTH) : "";
 
   return (
     <figure
@@ -26,13 +32,14 @@ function GameCard({ game, index }) {
             <>
               <img
                 src={imageUrl}
+                srcSet={imageSrcSet(image, buildCoverUrl)}
                 alt={title}
-                width={width}
-                height={height}
+                width={COVER_WIDTH}
+                height={COVER_HEIGHT}
                 loading="lazy"
                 decoding="async"
                 className="absolute inset-0 h-full w-full object-cover transition-all duration-500 ease-out group-hover:scale-105"
-                sizes="(min-width: 1280px) 14vw, (min-width: 1024px) 18vw, (min-width: 640px) 26vw, 30vw"
+                sizes="(min-width: 1200px) 172px, (min-width: 1024px) calc((100vw - 168px) / 6), (min-width: 768px) calc((100vw - 152px) / 5), (min-width: 640px) calc((100vw - 124px) / 4), calc((100vw - 80px) / 3)"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
 

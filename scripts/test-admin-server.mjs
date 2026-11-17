@@ -402,6 +402,25 @@ try {
       if (!cleared.ok) { response.writeHead(500); response.end("Fixture timer reset failed."); return; }
       response.writeHead(200); response.end("ok"); return;
     }
+    if (request.method === "POST" && request.url === "/storage-failures") {
+      const { rules } = await readJson(request);
+      fixture.storageFailures.splice(0, fixture.storageFailures.length, ...rules.map(({ method, path, hold }) => ({ method, path, hold: hold === true })));
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end("{}"); return;
+    }
+    if (request.method === "GET" && request.url === "/storage-holds") {
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify({ held: fixture.storageHolds.length })); return;
+    }
+    if (request.method === "POST" && request.url === "/storage-release") {
+      const released = fixture.storageHolds.splice(0, fixture.storageHolds.length);
+      for (const refuse of released) refuse();
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify({ released: released.length })); return;
+    }
+    if (request.method === "GET" && request.url.startsWith("/asset-document?")) {
+      const id = new URL(request.url, controlOrigin).searchParams.get("id");
+      const [source] = await fixture.sql`select payload from migration.source_documents where legacy_sanity_id=${id} and not tombstoned`;
+      const [{ assets }] = await fixture.sql`select count(*)::int as assets from cms.assets where legacy_sanity_asset_id=${id}`;
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify({ document: source?.payload ?? null, assets })); return;
+    }
     if (request.method === "POST" && request.url === "/reset-rate-limits") {
       await fixture.sql`update commerce.rate_limit_buckets set count=0`;
       response.writeHead(200); response.end("ok"); return;
