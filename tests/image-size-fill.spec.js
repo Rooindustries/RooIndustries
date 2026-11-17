@@ -144,11 +144,11 @@ const uploadInto = async (page, asset, image) => {
   const answered = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/assets/upload"));
   await asset.getByRole("button", { name: /^(Upload|Replace)$/ }).click();
   await (await chooser).setFiles({ name: image.name, mimeType: image.mimeType, buffer: image.buffer });
-  await answered;
+  const issued = await answered;
   await expect(asset.getByRole("button", { name: "Replace", exact: true })).toBeEnabled();
   await expect(asset.locator("img")).toHaveAttribute("src", new RegExp(`/${image.path.replace(".", "\\.")}$`));
   page.off("response", record);
-  return { steps, shown: await labels.jsonValue() };
+  return { steps, shown: await labels.jsonValue(), issued: { ok: issued.ok(), ...(await issued.json()).data } };
 };
 const openReviewUpload = async (page, image) => {
   await login(page);
@@ -382,7 +382,6 @@ test("a live image with no record gets its record and its sizes when the same fi
   const published = await revisions();
   const places = [{ path: "/meet-the-team", type: "Meet The Team Page", image: member }, { path: "/", type: "Pro Reviews Carousel", image: reviewer }];
   const site = await context.newPage();
-  const of = image => address => address.includes(image.sha1);
 
   const untouched = await store(request);
   const plan = await fill(request, testInfo, []);
@@ -396,7 +395,7 @@ test("a live image with no record gets its record and its sizes when the same fi
   for (const { path, image } of places) {
     const resized = await openPage(gate, site, path, image);
     await expect(resized.shown).toHaveAttribute("src", new RegExp(`${RESIZE_PATH}public/site-content-public/${image.path.replace(".", "\\.")}`));
-    expect(resized.requested.filter(of(image)).filter(address => address.includes(RESIZE_PATH)).length).toBeGreaterThan(0);
+    expect(resized.requested.filter(address => address.includes(RESIZE_PATH) && address.includes(image.sha1)).length).toBeGreaterThan(0);
   }
 
   await login(page);
@@ -407,7 +406,7 @@ test("a live image with no record gets its record and its sizes when the same fi
     await expect(editor.getByText("Unpublished changes")).toHaveCount(0);
     return outcome;
   };
-  for (const place of places) expect(await uploadAgain(place)).toEqual({ steps: ["upload", "finalize"], shown: ["Checking file…", "Preparing upload…", "Uploading…", "Verifying on the server…"] });
+  for (const place of places) expect(await uploadAgain(place)).toEqual({ steps: ["upload", "finalize"], shown: ["Checking file…", "Preparing upload…", "Uploading…", "Verifying on the server…"], issued: expect.objectContaining({ ok: true, uploadId: expect.any(String) }) });
   const origin = (await (await control(request, "/fixture")).json()).origins[1];
   const recorded = await store(request);
   for (const image of images) {
@@ -427,11 +426,11 @@ test("a live image with no record gets its record and its sizes when the same fi
     const stored = await openPage(gate, site, path, image);
     await expect(stored.shown).toHaveAttribute("src", new RegExp(`${PUBLIC_PATH}images/${image.sha1}-w\\d+\\.webp(\\?frame=1)?$`));
     await expect.poll(() => stored.shown.evaluate(shown => shown.naturalWidth > 0 && shown.currentSrc)).toMatch(SIZE_FILE);
-    expect(stored.addresses.filter(of(image)).filter(address => address.includes(RESIZE_PATH))).toEqual([]);
-    expect(stored.requested.filter(of(image)).filter(address => address.includes(RESIZE_PATH))).toEqual([]);
+    expect(stored.addresses.filter(address => address.includes(RESIZE_PATH))).toEqual([]);
+    expect(stored.requested.filter(address => address.includes(RESIZE_PATH))).toEqual([]);
   }
 
-  for (const place of places) expect(await uploadAgain(place)).toEqual({ steps: ["upload"], shown: ["Checking file…", "Preparing upload…"] });
+  for (const place of places) expect(await uploadAgain(place)).toEqual({ steps: ["upload"], shown: ["Checking file…", "Preparing upload…"], issued: expect.objectContaining({ ok: true, alreadyExists: true, uploadId: null, assetId: place.image.id }) });
   expect(await store(request)).toEqual(recorded);
   expect(await revisions()).toEqual(published);
 
