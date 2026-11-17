@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { reportRequestError } from "../lib/clientRequest";
 import { urlFor } from "../lib/cmsImageUrl";
 import { croppedImageSrcSet } from "../lib/croppedImageSrcSet";
-import { getPerfToggleEnabled, isPerfDebugEnabled, PERF_DEBUG_EVENT, PERF_TOGGLE_KEYS } from "../lib/perfDebug";
+import { getPerfToggleEnabled, isPerfDebugEnabled, PERF_TOGGLE_KEYS, subscribePerfDebugChanges } from "../lib/perfDebug";
 import {
   fetchHomeSectionData,
   HOME_SECTION_DATA_KEYS,
@@ -428,7 +428,7 @@ function AutoReviewCarousel({ reviews }) {
       wake();
     };
     updatePause();
-    window.addEventListener(PERF_DEBUG_EVENT, updatePause);
+    const unsubscribePerf = subscribePerfDebugChanges(updatePause);
     swipeOnly.addEventListener("change", updatePause);
 
     const visibilityObserver =
@@ -460,7 +460,7 @@ function AutoReviewCarousel({ reviews }) {
       motion.wake = null;
       viewport.removeEventListener("scroll", onScroll);
       visibilityObserver?.disconnect();
-      window.removeEventListener(PERF_DEBUG_EVENT, updatePause);
+      unsubscribePerf();
       swipeOnly.removeEventListener("change", updatePause);
     };
   }, [reviews.length]);
