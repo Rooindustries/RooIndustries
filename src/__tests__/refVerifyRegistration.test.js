@@ -108,54 +108,6 @@ describe("referral registration confirmation", () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  test("imports bcrypt, revision-locks activation, and creates the domain session", async () => {
-    mockFetch
-      .mockResolvedValueOnce(pendingReferral)
-      .mockResolvedValueOnce({
-        ...pendingReferral,
-        _rev: "revision-two",
-        registrationStatus: "active",
-        passwordResetRequired: false,
-      });
-    const response = createResponse();
-
-    await handler(
-      { method: "POST", body: { token: "A".repeat(43) }, headers: {} },
-      response
-    );
-
-    expect(response.statusCode).toBe(200);
-    expect(mockCreateSupabaseCreatorAccount).toHaveBeenCalledWith(
-      expect.objectContaining({
-        passwordHash: pendingReferral.creatorPassword,
-        referral: pendingReferral,
-      })
-    );
-    const patch = mockPatch.mock.results[0].value;
-    expect(patch.ifRevisionId).toHaveBeenCalledWith("revision-one");
-    expect(patch.set).toHaveBeenCalledWith(
-      expect.objectContaining({
-        registrationStatus: "active",
-        passwordResetRequired: false,
-      })
-    );
-    expect(patch.unset).toHaveBeenCalledWith([
-      "registrationVerificationTokenHash",
-      "registrationVerificationExpiresAt",
-      "registrationVerificationDeliveryToken",
-    ]);
-    expect(mockSetReferralSessionCookie).toHaveBeenCalledWith(
-      response,
-      expect.objectContaining({
-        authBackend: "supabase",
-        code: "creator",
-        referralId: "referral.creator",
-      }),
-      true
-    );
-    expect(response.headers["Cache-Control"]).toBe("private, no-store");
-  });
-
   test("does not create a session after a revision conflict", async () => {
     mockFetch.mockResolvedValueOnce(pendingReferral);
     mockCommit.mockRejectedValue(Object.assign(new Error("conflict"), { status: 409 }));

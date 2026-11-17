@@ -1509,7 +1509,62 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await expect(page.getByRole('status')).toContainText('Email confirmed');
     });
 
-    test('confirmation succeeds and reused links are rejected', async ({ page }, testInfo) => {
+    test('a confirmation that went through before the page gave up shows as confirmed on reload', async ({ page, context, baseURL }, testInfo) => {
+      const portalState = async () => (await configure(baseURL, {})).json();
+      const portalSource = state => state.documents.find(row => row._id === 'portal-pending');
+      await configure(baseURL, { documents: [{ _id: 'portal-pending', registrationVerificationDeliveryToken: 'fixture-delivery-token' }] });
+      let release, forwarded;
+      const held = new Promise(resolve => { release = resolve; });
+      const reached = new Promise(resolve => { forwarded = resolve; });
+      const hold = async route => {
+        const response = await fixture.requestRoute(baseURL, '/api/ref/verifyRegistration', { data: route.request().postDataJSON() });
+        const reply = { status: response.status, body: await response.json(), cache: response.headers.get('cache-control') };
+        forwarded(reply);
+        await held;
+        await route.fulfill({ status: reply.status, json: reply.body }).catch(() => {});
+      };
+      await page.route('**/api/ref/verifyRegistration', hold);
+      await page.goto('/referrals/verify#token=' + 'b'.repeat(43));
+      const first = await reached;
+      await expect(page.getByRole('status')).toContainText("We couldn't tell if your email was confirmed", { timeout: 45000 });
+      expect(await page.evaluate(() => sessionStorage.getItem('referral_registration_verification'))).toBe('b'.repeat(43));
+      release();
+      await page.unroute('**/api/ref/verifyRegistration', hold);
+      const before = await portalState();
+      const confirmed = portalSource(before);
+      const replay = page.waitForResponse(response => response.url().endsWith('/api/ref/verifyRegistration'));
+      await page.reload();
+      const response = await replay;
+      const body = await response.json();
+      await expect(page.getByRole('status')).toContainText('Your account is confirmed');
+      const after = await portalState();
+      const replayCalls = after.requests.slice(before.requests.length);
+      const referralWrites = replayCalls.filter(call => call.path.endsWith('/roo_apply_document_mutations') && /portal-pending|"_type":"referral"/.test(JSON.stringify(call.body)));
+      const accountCalls = replayCalls.map(call => call.path).filter(path => /\/auth\/v1\/|creator_account|referral_session|credential_operation/.test(path));
+      const storedToken = await page.evaluate(() => sessionStorage.getItem('referral_registration_verification'));
+      const signedIn = (await context.cookies()).some(cookie => cookie.name === 'ref_session');
+      await record(page, testInfo, `verify-timeout-reload-${size}`, { first, status: response.status(), body, replayCalls: replayCalls.map(call => call.path), referralWrites, accountCalls, storedToken, signedIn, before: confirmed, after: portalSource(after) });
+      expect(first).toEqual({ status: 200, body: { ok: true }, cache: 'private, no-store' });
+      expect(confirmed.registrationStatus).toBe('active');
+      expect(confirmed.registrationVerificationDeliveryToken).toBeUndefined();
+      expect(response.status()).toBe(200);
+      expect(body).toEqual({ ok: true, requiresLogin: true });
+      expect(response.headers()['cache-control']).toBe('private, no-store');
+      expect(portalSource(after)).toEqual(confirmed);
+      expect(referralWrites).toEqual([]);
+      expect(accountCalls).toEqual([]);
+      expect(storedToken).toBeNull();
+      expect(signedIn).toBe(false);
+      await expect(page.getByRole('link', { name: 'Sign in', exact: true })).toHaveAttribute('href', '/referrals/login?notice=email-confirmed');
+      await page.getByRole('link', { name: 'Sign in', exact: true }).click();
+      await expect(page.getByRole('heading', { name: 'Referral Creator Login', exact: true })).toBeVisible();
+      await page.getByLabel('Referral code or login email', { exact: true }).fill('pending-code');
+      await page.getByLabel('Password', { exact: true }).fill('Synthetic-password1!');
+      await page.getByRole('button', { name: 'Login', exact: true }).click();
+      await expect(page.getByRole('heading', { name: 'Welcome, Pending Creator' })).toBeVisible();
+    });
+
+    test('confirmation succeeds, a reused link stays confirmed until it expires, and another link is refused', async ({ page, baseURL }, testInfo) => {
       await page.goto('/referrals/verify#token=' + 'b'.repeat(43));
       await expect(page.getByRole('status')).toContainText('Email confirmed');
       expect(new URL(page.url()).hash).toBe('');
@@ -1517,13 +1572,35 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await page.getByRole('button', { name: 'Open dashboard' }).click();
       await expect(page.getByRole('heading', { name: 'Welcome, Pending Creator' })).toBeVisible();
       await record(page, testInfo, `verified-dashboard-${size}`);
+      const reuse = page.waitForResponse(response => response.url().endsWith('/api/ref/verifyRegistration'));
       await page.goto('/referrals/verify#token=' + 'b'.repeat(43));
+      expect((await reuse).status()).toBe(200);
+      await expect(page.getByRole('status')).toContainText('Your account is confirmed');
+      await expect(page.getByRole('link', { name: 'Sign in', exact: true })).toHaveAttribute('href', '/referrals/login?notice=email-confirmed');
+      const confirmed = (await (await configure(baseURL, {})).json()).documents.find(row => row._id === 'portal-pending');
+      await page.goto('/referrals/login');
+      const other = page.waitForResponse(response => response.url().endsWith('/api/ref/verifyRegistration'));
+      await page.goto('/referrals/verify#token=' + 'c'.repeat(43));
+      const otherReply = await other;
+      await expect(page.getByRole('status')).toContainText('Invalid or expired confirmation link');
+      const afterOther = (await (await configure(baseURL, {})).json()).documents.find(row => row._id === 'portal-pending');
+      await record(page, testInfo, `verify-other-link-${size}`, { status: otherReply.status(), body: await otherReply.json(), unchanged: JSON.stringify(afterOther) === JSON.stringify(confirmed) });
+      expect(confirmed.registrationStatus).toBe('active');
+      expect(Date.parse(confirmed.registrationVerificationExpiresAt)).toBeGreaterThan(Date.now());
+      expect(otherReply.request().postDataJSON()).toEqual({ token: 'c'.repeat(43) });
+      expect(otherReply.status()).toBe(400);
+      expect(afterOther).toEqual(confirmed);
+      await configure(baseURL, { documents: [{ _id: 'portal-pending', registrationVerificationExpiresAt: '2020-01-01T00:00:00Z' }] });
+      await page.goto('/referrals/login');
+      const expired = page.waitForResponse(response => response.url().endsWith('/api/ref/verifyRegistration'));
+      await page.goto('/referrals/verify#token=' + 'b'.repeat(43));
+      expect((await expired).status()).toBe(400);
       await expect(page.getByRole('status')).toContainText('Invalid or expired confirmation link');
     });
 
     for (const outage of ['linkUnavailable', 'sessionInstallUnavailable']) {
       test(`a confirmation session outage does not leave a consumed link asking for retry (${outage})`, async ({ page, context, baseURL }, testInfo) => {
-        await configure(baseURL, { settings: { [outage]: true } });
+        const pending = (await (await configure(baseURL, { settings: { [outage]: true }, documents: [{ _id: 'portal-pending', registrationVerificationDeliveryToken: 'fixture-delivery-token' }] })).json()).documents.find(row => row._id === 'portal-pending');
         await signIn(context, baseURL);
         const responsePromise = page.waitForResponse(response => response.url().endsWith('/api/ref/verifyRegistration'));
         await page.goto('/referrals/verify#token=' + 'b'.repeat(43));
@@ -1531,11 +1608,14 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         const body = await response.json();
         const state = await (await configure(baseURL, {})).json();
         const source = state.documents.find(row => row._id === 'portal-pending');
-        await record(page, testInfo, `verify-consumed-${outage}-${size}`, { status: response.status(), body, registrationStatus: source.registrationStatus, tokenRetained: Boolean(source.registrationVerificationTokenHash) });
+        await record(page, testInfo, `verify-consumed-${outage}-${size}`, { status: response.status(), body, registrationStatus: source.registrationStatus, linkKept: source.registrationVerificationTokenHash === pending.registrationVerificationTokenHash, deliveryTokenRemoved: !('registrationVerificationDeliveryToken' in source) });
         expect(response.status()).toBe(200);
         expect(body).toEqual({ ok: true, requiresLogin: true });
         expect(source.registrationStatus).toBe('active');
-        expect(source.registrationVerificationTokenHash).toBeUndefined();
+        expect(pending.registrationVerificationTokenHash).toMatch(/^[0-9a-f]{64}$/);
+        expect(source.registrationVerificationTokenHash).toBe(pending.registrationVerificationTokenHash);
+        expect(source.registrationVerificationExpiresAt).toBe(pending.registrationVerificationExpiresAt);
+        expect(source.registrationVerificationDeliveryToken).toBeUndefined();
         await expect(page.getByRole('status')).toContainText('Your account is confirmed');
         expect(await page.evaluate(() => sessionStorage.getItem('referral_registration_verification'))).toBeNull();
         await configure(baseURL, { settings: { [outage]: false } });
@@ -1548,7 +1628,8 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await page.getByRole('button', { name: 'Login', exact: true }).click();
         await expect(page.getByRole('heading', { name: 'Welcome, Pending Creator' })).toBeVisible();
         await page.goto('/referrals/verify#token=' + 'b'.repeat(43));
-        await expect(page.getByRole('status')).toContainText('Invalid or expired confirmation link');
+        await expect(page.getByRole('status')).toContainText('Your account is confirmed');
+        await expect(page.getByRole('link', { name: 'Sign in', exact: true })).toBeVisible();
       });
     }
 

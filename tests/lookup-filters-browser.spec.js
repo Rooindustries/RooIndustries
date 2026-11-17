@@ -76,7 +76,8 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       const code = `newcreator${viewport.width}`;
       const earlier = creator(`aaa-verify${viewport.width}`, `waitingcreator${viewport.width}`, { registrationStatus: 'pending_email' });
       const real = creator(`zzz-verify${viewport.width}`, code, { registrationStatus: 'pending_email',
-        registrationVerificationTokenHash: sha256(token), registrationVerificationExpiresAt: inAnHour() });
+        registrationVerificationTokenHash: sha256(token), registrationVerificationExpiresAt: inAnHour(),
+        registrationVerificationDeliveryToken: `delivery${viewport.width}` });
       await seeded(context, native, [earlier, real], [real.creatorEmail], async () => {
         await page.goto(`/referrals/verify#token=${token}`);
         await expect(page.getByRole('status')).toHaveText('Your account is confirmed. Sign in to open your creator dashboard.');
@@ -84,7 +85,8 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await signIn(page, code, OLD_PASSWORD);
         const stored = await native('document', real._id);
         expect(stored.registrationStatus).toBe('active');
-        expect(stored).not.toHaveProperty('registrationVerificationTokenHash');
+        expect(stored.registrationVerificationTokenHash).toBe(sha256(token));
+        expect(stored).not.toHaveProperty('registrationVerificationDeliveryToken');
       });
     });
 
