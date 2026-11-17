@@ -442,6 +442,10 @@ try {
       const removed = await fixture.client.storage.from(IMAGE_BUCKET).remove([(await readJson(request)).path]);
       response.writeHead(removed.error || removed.data.length !== 1 ? 500 : 200); response.end(); return;
     }
+    if (request.method === "POST" && request.url === "/record-no-image-sizes") {
+      const [{ outcome }] = await fixture.sql`select public.roo_record_cms_image_sizes(${(await readJson(request)).id}, '[]'::jsonb) as outcome`;
+      response.writeHead(200, { "Content-Type": "application/json" }); response.end(JSON.stringify(outcome)); return;
+    }
     if (request.method === "GET" && request.url === "/image-store") {
       const objects = await fixture.sql`select name, version, updated_at from storage.objects where bucket_id=${IMAGE_BUCKET} order by name`;
       const documents = await fixture.sql`select legacy_sanity_id as id, source_revision as revision, payload #> '{metadata,sizes}' as sizes, payload #> '{metadata,dimensions}' as dimensions from migration.source_documents where document_type='sanity.imageAsset' and not tombstoned order by legacy_sanity_id`;

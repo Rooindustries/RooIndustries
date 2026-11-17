@@ -243,20 +243,32 @@ test("an image whose original or whose record is gone is reported, and the run f
   expect(recordOf(stored, whole).sizes).toEqual([128, 320, 500]);
 });
 
-test("an image over its format's pixel limit and one whose pixels cannot be read record no sizes, with the reason", async ({ request }, testInfo) => {
+test("an image over its format's pixel limit and one whose pixels cannot be read fail with the reason and record nothing, until the operator records no sizes", async ({ request }, testInfo) => {
   const oversized = await seed(request, await largeAvif(6000, 6001));
   const broken = await seed(request, await cutShort(800, 500));
   const untouched = await store(request);
+  expect(untouched.documents.map(document => document.sizes)).toEqual([null, null]);
 
-  const result = await fill(request, testInfo, ["--apply"]);
-  expect(result.code).toBe(0);
-  expect(outcomeOf(result, oversized)).toBe(`recorded empty: ${INVALID_MESSAGE}`);
-  expect(outcomeOf(result, broken)).toBe(`recorded empty: ${UNREADABLE_MESSAGE}`);
-  expect(result.lines.at(-1)).toBe("filled 0, already filled 0, recorded empty 2, failed 0, missing 0, no document 0");
+  for (const [args, counts] of [[[], "to fill 0, already filled 0, to record empty 0"], [["--apply"], "filled 0, already filled 0, recorded empty 0"]]) {
+    const result = await fill(request, testInfo, args);
+    expect(outcomeOf(result, oversized)).toBe(`failed: ${INVALID_MESSAGE}`);
+    expect(outcomeOf(result, broken)).toBe(`failed: ${UNREADABLE_MESSAGE}`);
+    expect(result.lines.at(-1)).toBe(`${counts}, failed 2, missing 0, no document 0`);
+    expect(result.code).toBe(1);
+    expect(await store(request)).toEqual(untouched);
+  }
+
+  const byHand = await control(request, "/record-no-image-sizes", { id: broken.id });
+  expect(await byHand.json()).toEqual({ recorded: true, sizes: [] });
+  const again = await fill(request, testInfo, ["--apply"]);
+  expect(outcomeOf(again, broken)).toBe("already filled");
+  expect(outcomeOf(again, oversized)).toBe(`failed: ${INVALID_MESSAGE}`);
+  expect(again.lines.at(-1)).toBe("filled 0, already filled 1, recorded empty 0, failed 1, missing 0, no document 0");
+  expect(again.code).toBe(1);
   const stored = await store(request);
   expect(stored.objects).toEqual(untouched.objects);
-  expect(stored.documents.map(document => document.sizes)).toEqual([[], []]);
-  expect(stored.documents.map(document => document.dimensions)).toEqual(untouched.documents.map(document => document.dimensions));
+  expect(recordOf(stored, broken)).toMatchObject({ sizes: [], dimensions: recordOf(untouched, broken).dimensions });
+  expect(recordOf(stored, oversized)).toEqual(recordOf(untouched, oversized));
 });
 
 test("a run killed while it stores a size records nothing, and the next run completes the image", async ({ request }, testInfo) => {
