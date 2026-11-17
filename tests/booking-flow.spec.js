@@ -28,10 +28,16 @@ async function expectPressedTime(page, pressed) {
   await expect(timeGrid(page).locator("button:not([aria-pressed])")).toHaveCount(0);
 }
 
+const monthTitle = (date, monthsLater) =>
+  new Date(Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1 + monthsLater, 1))
+    .toLocaleString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+
 async function expectPressedDay(page, date) {
-  await expect(dayButton(page, date)).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator('.booking-calendar-grid [aria-pressed="true"]')).toHaveCount(1);
-  await expect(page.locator(".booking-calendar-grid button:not([aria-pressed])")).toHaveCount(0);
+  const grid = page.locator(".booking-calendar-grid");
+  await expect(grid.locator("button")).not.toHaveCount(0);
+  if (date) await expect(dayButton(page, date)).toHaveAttribute("aria-pressed", "true");
+  await expect(grid.locator('[aria-pressed="true"]')).toHaveCount(date ? 1 : 0);
+  await expect(grid.locator("button:not([aria-pressed])")).toHaveCount(0);
 }
 
 async function expectNoPaymentWarning(page) {
@@ -628,6 +634,17 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await expectPressedDay(page, later);
       await expectPressedTime(page, null);
       await expect(page.getByRole("button", { name: "Next", exact: true }).last()).toHaveAttribute("aria-disabled", "true");
+    });
+
+    test("another month shows no selected day and coming back shows it again", async ({ page, flow }) => {
+      const date = flow.state.slots[0].date;
+      await flow.booking();
+      for (const [control, monthsLater] of [["Next month", 1], ["Next month", 2], ["Previous month", 1], ["Previous month", 0]]) {
+        await page.getByRole("button", { name: control, exact: true }).click();
+        await expect(page.getByRole("heading", { name: monthTitle(date, monthsLater), exact: true })).toBeVisible();
+        await expectPressedDay(page, monthsLater ? null : date);
+        await expectPressedTime(page, "10:00 AM");
+      }
     });
 
     test("a reservation the server could not make keeps the chosen time selected", async ({ page, flow }) => {
