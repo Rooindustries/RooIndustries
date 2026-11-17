@@ -2,7 +2,7 @@
 set -euo pipefail
 
 cd "$(dirname "$(realpath "$0")")/.."
-expected_cases=16
+expected_cases=48
 work="$(mktemp -d)"
 trap 'rm -rf -- "${work:?}"' EXIT
 checked=0
@@ -10,21 +10,34 @@ wrong=0
 
 ln -s "$PWD" "$work/linked"
 
+start_modes=("NODE_OPTIONS= node" "NODE_OPTIONS= node --preserve-symlinks-main" "NODE_OPTIONS=--preserve-symlinks-main node")
+missing_module() { grep -qF 'MODULE_NOT_FOUND' "$work/stderr"; }
+
 check_starts() {
-  local script="$1" expected_exit="$2" expected="$3" judge="$4"
+  local script="$1" works_exit="$2" works_with="$3" works="$4"
   shift 4
-  local start exit_code
-  ln -s "$PWD/scripts/$script.mjs" "$work/$script.mjs"
-  for start in "scripts/$script.mjs" "$PWD/scripts/$script.mjs" "$work/linked/scripts/$script.mjs" "$work/$script.mjs"; do
-    exit_code=0
-    node "$start" "$@" > "$work/stdout" 2> "$work/stderr" || exit_code=$?
-    checked=$((checked + 1))
-    [ -e "$work/$script.stdout" ] || cp "$work/stdout" "$work/$script.stdout"
-    if [ "$exit_code" != "$expected_exit" ] || ! "$judge" || ! cmp -s "$work/stdout" "$work/$script.stdout"; then
-      wrong=$((wrong + 1))
-      printf 'node %s should exit %s with %s, the same as its other starts. It exited %s.\nstdout:\n%s\nstderr:\n%s\n\n' \
-        "$start" "$expected_exit" "$expected" "$exit_code" "$(cat "$work/stdout")" "$(cat "$work/stderr")" >&2
-    fi
+  local link="$work/$script.mjs" mode start exit_code expected_exit expected judge stdout
+  local -a node_start
+  ln -s "$PWD/scripts/$script.mjs" "$link"
+  for mode in "${start_modes[@]}"; do
+    read -r -a node_start <<< "$mode"
+    for start in "scripts/$script.mjs" "$PWD/scripts/$script.mjs" "$work/linked/scripts/$script.mjs" "$link"; do
+      expected_exit="$works_exit" expected="$works_with, the same as its other starts" judge="$works"
+      stdout="$work/$script.stdout"
+      if [ "$start" = "$link" ] && [[ "$mode" == *preserve-symlinks-main* ]]; then
+        expected_exit=1 expected="Node's missing-module error on stderr and nothing on stdout" judge=missing_module
+        stdout=/dev/null
+      fi
+      exit_code=0
+      env "${node_start[@]}" "$start" "$@" > "$work/stdout" 2> "$work/stderr" || exit_code=$?
+      checked=$((checked + 1))
+      [ -e "$work/$script.stdout" ] || cp "$work/stdout" "$work/$script.stdout"
+      if [ "$exit_code" != "$expected_exit" ] || ! "$judge" || ! cmp -s "$work/stdout" "$stdout"; then
+        wrong=$((wrong + 1))
+        printf '%s %s should exit %s with %s. It exited %s.\nstdout:\n%s\nstderr:\n%s\n\n' \
+          "$mode" "$start" "$expected_exit" "$expected" "$exit_code" "$(cat "$work/stdout")" "$(cat "$work/stderr")" >&2
+      fi
+    done
   done
 }
 
