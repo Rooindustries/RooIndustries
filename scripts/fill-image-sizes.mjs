@@ -13,6 +13,8 @@ const USAGE = `Usage: node scripts/fill-image-sizes.mjs --env <private-file> [--
 
 For every image with no recorded sizes: makes the sizes, stores them, then records them.
 It never deletes or overwrites a stored file, and it is safe to run again.
+Only a vector or an animated image is recorded with no sizes. An image that cannot be read or decoded
+fails with its reason and nothing is recorded for it; any failed image makes the run exit 1.
 
   --env <private-file>  the operator environment file holding SUPABASE_URL and SUPABASE_SECRET_KEY
   --apply               store and record the sizes; needs CMS_WRITES_PAUSED=0 in the shell

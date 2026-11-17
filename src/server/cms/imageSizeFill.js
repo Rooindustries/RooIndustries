@@ -34,7 +34,7 @@ const makeOrEmpty = async (original, image) => {
     const made = await makeSizes(original.bytes, detected);
     return { made, ...(made.length ? {} : { reason: "vector or animated" }) };
   } catch (error) {
-    if (error.code === UNREADABLE) return { made: [], reason: error.message };
+    if (error.code === UNREADABLE) return failed(error.message);
     if (error.code === STORAGE_UNAVAILABLE) return failed("making sizes timed out");
     throw error;
   }
