@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { reportRequestError } from "../lib/clientRequest";
 import { urlFor } from "../lib/cmsImageUrl";
+import { croppedImageSrcSet } from "../lib/croppedImageSrcSet";
 import { getPerfToggleEnabled, isPerfDebugEnabled, PERF_DEBUG_EVENT, PERF_TOGGLE_KEYS } from "../lib/perfDebug";
 import {
   fetchHomeSectionData,
@@ -172,9 +173,12 @@ export default function StreamerYoutuberReviews({ initialData = null }) {
 
 function ReviewerAvatar({ review, isCreator }) {
   if (review.pfp) {
+    const srcSet = croppedImageSrcSet(review.pfp, 1, 1);
     return (
       <img
         src={getReviewAvatarUrl(review.pfp)}
+        srcSet={srcSet}
+        sizes={srcSet && "(min-width: 640px) 32px, 40px"}
         alt={review.name}
         className="w-10 h-10 sm:w-8 sm:h-8 rounded-full object-cover flex-shrink-0"
         style={{

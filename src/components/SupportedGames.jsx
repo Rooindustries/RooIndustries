@@ -3,6 +3,7 @@ import { reportRequestError } from "../lib/clientRequest";
 import { ChevronDown } from "lucide-react";
 import { urlFor } from "../lib/cmsImageUrl";
 import { imageSrcSet } from "../lib/imageSizeLadder";
+import { croppedImageSrcSet } from "../lib/croppedImageSrcSet";
 import { fetchHomeSectionData, HOME_SECTION_DATA_KEYS } from "../lib/homeSectionData";
 
 const COVER_WIDTH = 450;
@@ -18,6 +19,9 @@ function GameCard({ game, index }) {
   const title = game?.title || "Game";
   const image = game?.coverImage;
   const imageUrl = image ? buildCoverUrl(image, COVER_WIDTH) : "";
+  const srcSet = image?.sizes
+    ? croppedImageSrcSet(image, COVER_WIDTH, COVER_HEIGHT)
+    : imageSrcSet(image, buildCoverUrl);
 
   return (
     <figure
@@ -32,14 +36,14 @@ function GameCard({ game, index }) {
             <>
               <img
                 src={imageUrl}
-                srcSet={imageSrcSet(image, buildCoverUrl)}
+                srcSet={srcSet}
                 alt={title}
                 width={COVER_WIDTH}
                 height={COVER_HEIGHT}
                 loading="lazy"
                 decoding="async"
                 className="absolute inset-0 h-full w-full object-cover transition-all duration-500 ease-out group-hover:scale-105"
-                sizes="(min-width: 1200px) 172px, (min-width: 1024px) calc((100vw - 168px) / 6), (min-width: 768px) calc((100vw - 152px) / 5), (min-width: 640px) calc((100vw - 124px) / 4), calc((100vw - 80px) / 3)"
+                sizes={srcSet && "(min-width: 1200px) 172px, (min-width: 1024px) calc((100vw - 168px) / 6), (min-width: 768px) calc((100vw - 152px) / 5), (min-width: 640px) calc((100vw - 124px) / 4), calc((100vw - 80px) / 3)"}
               />
               <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
 
