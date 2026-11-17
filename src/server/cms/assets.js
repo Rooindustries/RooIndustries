@@ -150,6 +150,7 @@ const storeImageSizes = async ({ client, bucket, upload, sizes }) => {
   const failed = stored.find(({ error }) => error && logicalStatus(error) !== 409);
   if (failed) storageData(failed, "Image size storage");
 };
+export { readBytes, detectBytes, makeSizes, storeImageSizes, missing as objectMissing };
 const finalizeUpload = async ({ body, client, env = process.env, actor = "admin:key", signal, now = Date.now } = {}) => {
   assertGlobalCmsWritesAllowed(env);
   signal = AbortSignal.any([AbortSignal.timeout(210000), ...(signal ? [signal] : [])]);
