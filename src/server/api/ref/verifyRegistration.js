@@ -52,6 +52,21 @@ export default async function handler(req, res) {
       ][0]`,
       { now, tokenHash }
     );
+    if (!referral?._id) {
+      const confirmed = await client.fetch(
+        `*[
+          _type == "referral"
+          && registrationStatus == "active"
+          && registrationVerificationTokenHash == $tokenHash
+          && registrationVerificationExpiresAt > $now
+        ][0]{ _id }`,
+        { now, tokenHash }
+      );
+      if (confirmed?._id) {
+        res.setHeader("Cache-Control", "private, no-store");
+        return res.status(200).json({ ok: true, requiresLogin: true });
+      }
+    }
     if (!referral?._id || !/^\$2[aby]\$/.test(String(referral.creatorPassword || ""))) {
       return res.status(400).json({
         ok: false,
@@ -76,11 +91,7 @@ export default async function handler(req, res) {
         passwordResetRequired: false,
         emailVerifiedAt: now,
       })
-      .unset([
-        "registrationVerificationTokenHash",
-        "registrationVerificationExpiresAt",
-        "registrationVerificationDeliveryToken",
-      ])
+      .unset(["registrationVerificationDeliveryToken"])
       .commit({ visibility: "sync" });
 
     try {
