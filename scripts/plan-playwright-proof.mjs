@@ -2,7 +2,7 @@ import fs from "node:fs";
 import { planProblems } from "./lib/playwright-proof.mjs";
 import {
   FIXED_GROUPS, assignRestGroups, groupPattern, groupSpecFiles, listReport, readTimings, reportTests,
-} from "./playwright-groups.mjs";
+} from "./lib/playwright-groups.mjs";
 
 const USAGE = "usage: plan-playwright-proof.mjs plan <tests at a time> <legs json> <timings file> [<config>]\n" +
   "       plan-playwright-proof.mjs files <plan file> <leg>";

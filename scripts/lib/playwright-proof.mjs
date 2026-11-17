@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { FIXED_GROUPS, REST_GROUPS, reportTests } from "../playwright-groups.mjs";
+import { FIXED_GROUPS, REST_GROUPS, reportTests } from "./playwright-groups.mjs";
 
 const PLAN_FILE = "plan.json";
 const WORKER_COUNTS = [1, 2];

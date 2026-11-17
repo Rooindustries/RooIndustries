@@ -85,7 +85,7 @@ jobs:
             exit 1
           fi
           known="$(node --input-type=module -e '
-            import { FIXED_GROUPS, REST_GROUPS } from "./scripts/playwright-groups.mjs";
+            import { FIXED_GROUPS, REST_GROUPS } from "./scripts/lib/playwright-groups.mjs";
             console.log(JSON.stringify({ fixed: Object.keys(FIXED_GROUPS), rest: REST_GROUPS }));
           ')"
           legs="$(jq -cn --argjson known "$known" --arg groups "$PROOF_GROUPS" \

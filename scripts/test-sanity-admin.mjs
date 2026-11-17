@@ -172,7 +172,7 @@ try {
     const malformed=await create('coupon',{title:'Legacy malformed counters',code:'LEGACYCOUNTERS',discountType:'percent',discountPercent:10});assert.equal(malformed.ok,true);await fixture.sql`update migration.source_documents set payload=payload||'{"timesUsed":"legacy","activeReservations":"legacy","redemptionCount":"legacy"}'::jsonb where legacy_sanity_id=${malformed.data.documentId}`;assert.equal((await publish({operation:'delete',type:'coupon',documentId:malformed.data.documentId,expectedRevision:malformed.data.revision})).status,200);
   });
   await scenario('admin-session-login-and-origin', async () => {
-    const { provisionContentAdmin } = await import('./provision-content-admin.mjs');
+    const { provisionContentAdmin } = await import('./lib/provision-content-admin.mjs');
     const { issueAdminSessionCookie } = await import('../src/server/cms/adminSession.js');
     execFileSync(process.execPath, ['scripts/check-content-regions.mjs']);
     let sessionAddress=1;
