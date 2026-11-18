@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
-import { provisionContentAdmin } from "../provision-content-admin.mjs";
+import { provisionContentAdmin } from "./provision-content-admin.mjs";
 
 export const CONTENT_ADMIN_EMAIL = "content-admin@example.invalid";
 export const CONTENT_ADMIN_PASSWORD = "Synthetic-Content-Password-123";

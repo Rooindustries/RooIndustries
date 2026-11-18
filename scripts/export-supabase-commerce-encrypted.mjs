@@ -2,9 +2,7 @@
 
 import crypto from "node:crypto";
 import fs from "node:fs";
-import path from "node:path";
 import process from "node:process";
-import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
 import migrationTargetSafety from "../src/server/supabase/migrationTargetSafety.cjs";
 import envValue from "../src/server/supabase/envValue.cjs";
@@ -23,7 +21,7 @@ import {
 
 const { assertTourneyCutoverSupabaseApiTarget, computeTourneyCutoverSupabaseApiTargetFingerprint } =
   migrationTargetSafety;
-export const SNAPSHOT_ARRAYS = Object.freeze([
+const SNAPSHOT_ARRAYS = Object.freeze([
   "source_documents",
   "booking_settings",
   "bookings",
@@ -57,7 +55,7 @@ const readEnv = (env, ...keys) =>
   keys.map((key) => String(env[key] || "").trim()).find(Boolean) || "";
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 
-export const validateCommerceExportSnapshot = (snapshot) => {
+const validateCommerceExportSnapshot = (snapshot) => {
   if (
     !snapshot || typeof snapshot !== "object" || Array.isArray(snapshot) ||
     snapshot.format !== "roo-supabase-commerce-export-v1" ||
@@ -88,7 +86,7 @@ export const validateCommerceExportSnapshot = (snapshot) => {
   };
 };
 
-export const runCommerceEncryptedExport = async ({
+const runCommerceEncryptedExport = async ({
   argv = process.argv.slice(2),
   env = process.env,
   outputRoot = defaultExportRoot,
@@ -190,11 +188,9 @@ export const runCommerceEncryptedExport = async ({
   }
 };
 
-if (path.resolve(process.argv[1] || "") === fileURLToPath(import.meta.url)) {
-  runCommerceEncryptedExport()
-    .then((result) => process.stdout.write(`${JSON.stringify(result, null, 2)}\n`))
-    .catch(() => {
-      process.stderr.write("[supabase-commerce-encrypted-export] Export failed.\n");
-      process.exitCode = 1;
-    });
-}
+runCommerceEncryptedExport()
+  .then((result) => process.stdout.write(`${JSON.stringify(result, null, 2)}\n`))
+  .catch(() => {
+    process.stderr.write("[supabase-commerce-encrypted-export] Export failed.\n");
+    process.exitCode = 1;
+  });

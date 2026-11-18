@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { test } from "node:test";
-import { execFileSync } from "node:child_process";
 import path from "node:path";
 import {
   assignRestGroups,
@@ -9,8 +8,8 @@ import {
   listSpecFiles,
   REST_1_EXTRA_SECONDS,
   REST_GROUPS,
-} from "../scripts/playwright-groups.mjs";
-import { mergeTimings } from "../scripts/playwright-timings.mjs";
+} from "../scripts/lib/playwright-groups.mjs";
+import { mergeTimings } from "../scripts/lib/playwright-timings.mjs";
 
 const specFiles = listSpecFiles();
 const timings = JSON.parse(fs.readFileSync(".github/playwright-timings.json", "utf8"));
@@ -112,11 +111,5 @@ test("a spec Playwright can't load fails the listing with its error", () => {
     assert.throws(() => listSpecFiles({ config }), /broken spec file/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("both scripts can be imported without a script path", () => {
-  for (const script of ["playwright-groups", "playwright-timings"]) {
-    execFileSync(process.execPath, ["--input-type=module", "-e", `await import("./scripts/${script}.mjs");`]);
   }
 });
