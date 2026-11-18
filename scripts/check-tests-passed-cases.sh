@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$(realpath "$0")")/.."
 root="$PWD"
 cases=.github/tests-passed-cases.json
-expected_cases=60
+expected_cases=61
 work="$(mktemp -d)"
 trap 'rm -rf -- "${work:?}"' EXIT
 
@@ -205,6 +205,7 @@ uses_plant "an action.yaml beside action.yml" ./.github/actions/twin "$folder" \
   .github/actions/twin/action.yml "$passing" .github/actions/twin/action.yaml "$passing"
 uses_plant "a JavaScript action under .github/actions" ./.github/actions/js "$folder" \
   .github/actions/js/action.yml $'name: Js\nruns:\n  using: node20\n  main: index.js' .github/actions/js/index.js ""
+plant "a step using docker://" 0 "$workflow" "$after_lint      - uses: docker://alpine:3.20" ""
 plant "a reusable workflow job" 1 "$workflow" "\$a\\  reuse:\n    uses: octo/repo/.github/workflows/x.yml@v1" \
   "$workflow: jobs.reuse uses octo/repo/.github/workflows/x.yml@v1, a reusable workflow the test gate cannot check."
 plant "continue-on-error in a local action another local action uses" 1 "$workflow" \
