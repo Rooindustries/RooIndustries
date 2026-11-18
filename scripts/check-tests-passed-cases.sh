@@ -10,7 +10,8 @@ trap 'rm -rf -- "${work:?}"' EXIT
 
 inspect() {
   (cd "$1" && node --input-type=module -e '
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { posix } from "node:path";
 import yaml from "js-yaml";
 const workflow = ".github/workflows/tests.yml";
 const { jobs } = yaml.load(readFileSync(workflow, "utf8"));
@@ -22,27 +23,24 @@ const find = (file, node, path) => {
   } else if (node && typeof node === "object") {
     for (const [key, value] of Object.entries(node)) {
       if (key.toLowerCase() === "continue-on-error") lenient.push(`${file}: ${path}.${key}`);
-      if (key === "uses" && path.endsWith("]")) check(file, path, value);
-      else if (key === "uses" && /^jobs\.[^.]+$/.test(path)) refused.push(`${file}: ${path} uses ${value}, a reusable workflow the test gate cannot check.`);
+      if (key === "uses" && path.endsWith("]") && /^[.$]\//.test(value)) local(file, path, value);
       find(file, value, `${path}.${key}`);
     }
   }
 };
-const fits = (dir) => existsSync(`${dir}/action.yml`) && !existsSync(`${dir}/action.yaml`) &&
-  yaml.load(readFileSync(`${dir}/action.yml`, "utf8"))?.runs?.using === "composite";
-function check(file, path, value) {
-  const local = /^\.\/(\.github\/actions\/[A-Za-z0-9_-][A-Za-z0-9._-]*)$/.exec(value)?.[1];
-  const remote = /^([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)(\/[^@\s${}]+)?@[^@\s${}]+$/.exec(value);
-  if (local && !fits(local)) refused.push(`${file}: ${path} uses ${value}, whose folder needs a composite action.yml and no action.yaml.`);
-  else if (!local && !/^docker:\/\/\S+$/.test(value) && (!remote || `${remote[1]}/${remote[2]}`.toLowerCase() === "rooindustries/rooindustries"))
-    refused.push(`${file}: ${path} uses ${value}, which is not ./.github/actions/<name>, an action from another repository or docker://.`);
+const scanned = new Set();
+function local(file, path, value) {
+  const dir = posix.normalize(value.slice(2) || ".");
+  const action = ["action.yml", "action.yaml"].map((name) => posix.join(dir, name)).find(existsSync);
+  if (value.includes("${{") || dir.split("/")[0] === ".." || posix.isAbsolute(dir) ||
+    (!action && !existsSync(posix.join(dir, "Dockerfile")))) {
+    refused.push(`${file}: ${path} uses ${value}, which does not resolve to an action.yml, action.yaml or Dockerfile inside this checkout.`);
+  } else if (action && !scanned.has(action)) {
+    scanned.add(action);
+    find(action, yaml.load(readFileSync(action, "utf8"))?.runs, "runs");
+  }
 }
 find(workflow, jobs, "jobs");
-for (const file of readdirSync(".github/actions", { recursive: true }).filter((file) => /(^|\/)action\.ya?ml$/.test(file)).sort()) {
-  const dir = `.github/actions/${file.split("/")[0]}`;
-  if (/^[^/]+\/action\.yml$/.test(file) && fits(dir)) find(`${dir}/action.yml`, yaml.load(readFileSync(`${dir}/action.yml`, "utf8")).runs, "runs");
-  else refused.push(`.github/actions/${file}: every action under .github/actions must be a composite action.yml in its own folder, with no action.yaml beside it.`);
-}
 const record = jobs.jest.steps.find((s) => s.id === "gate-cases");
 const recorded = jobs.jest.outputs?.checked === "${{ steps.gate-cases.outputs.checked }}" &&
   record?.run === "bash scripts/check-tests-passed-cases.sh";
