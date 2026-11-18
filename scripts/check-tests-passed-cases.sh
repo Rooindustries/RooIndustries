@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$(realpath "$0")")/.."
 root="$PWD"
 cases=.github/tests-passed-cases.json
-expected_cases=61
+expected_cases=63
 work="$(mktemp -d)"
 trap 'rm -rf -- "${work:?}"' EXIT
 
@@ -180,42 +180,44 @@ plant "continue-on-error on a step of a local action" 1 "$setup" \
   "/^    - uses: actions\/setup-node@v4$/a\\      continue-on-error: true" \
   "$setup: runs.steps[actions/setup-node@v4].continue-on-error"
 failing=$'name: Checks\nruns:\n  using: composite\n  steps:\n    - shell: bash\n      run: exit 1\n      continue-on-error: true'
-passing=$'name: Checks\nruns:\n  using: composite\n  steps:\n    - shell: bash\n      run: "true"'
-outside="which is not ./.github/actions/<name>, an action from another repository or docker://."
-folder="whose folder needs a composite action.yml and no action.yaml."
+js=$'name: Js\nruns:\n  using: node20\n  main: index.js'
+unresolved="which does not resolve to an action.yml, action.yaml or Dockerfile inside this checkout."
 uses_plant() {
-  local name="$1" ref="$2" phrase="$3"
-  shift 3
-  plant "$name" 1 "$workflow" "$after_lint      - uses: $ref" \
-    "$workflow: jobs.jest.steps[$ref] uses $ref, $phrase" "$@"
+  local name="$1" expected_exit="$2" ref="$3" phrase="$4"
+  shift 4
+  plant "$name" "$expected_exit" "$workflow" "$after_lint      - uses: $ref" "$phrase" "$@"
 }
-uses_plant "a nested local action a job uses" ./.github/actions/group/checks "$outside" \
-  .github/actions/group/checks/action.yml "$failing"
-uses_plant "a composite action outside .github/actions" ./tools/checks "$outside" tools/checks/action.yml "$passing"
-uses_plant "a JavaScript action outside .github/actions" ./tools/js "$outside" \
-  tools/js/action.yml $'name: Js\nruns:\n  using: node20\n  main: index.js' tools/js/index.js ""
-uses_plant "a self-repository reference" '$/tools/checks' "$outside" tools/checks/action.yml "$failing"
-uses_plant "this repository by name" rooINDUSTRIES/RooIndustries/tools/checks@main "$outside" \
-  tools/checks/action.yml "$failing"
-uses_plant "an expression in uses" '${{ vars.CHECKS }}' "$outside"
-uses_plant "an expression in another repository's path" 'octo/repo/${{vars.PATH}}@v1' "$outside"
-uses_plant "a Dockerfile-only local action" ./.github/actions/docker "$folder" \
-  .github/actions/docker/Dockerfile "FROM alpine:3.20"
-uses_plant "an action.yaml beside action.yml" ./.github/actions/twin "$folder" \
-  .github/actions/twin/action.yml "$passing" .github/actions/twin/action.yaml "$passing"
-uses_plant "a JavaScript action under .github/actions" ./.github/actions/js "$folder" \
-  .github/actions/js/action.yml $'name: Js\nruns:\n  using: node20\n  main: index.js' .github/actions/js/index.js ""
+uses_plant "continue-on-error in a nested local action a step uses" 1 ./.github/actions/group/checks \
+  ".github/actions/group/checks/action.yml: runs.steps[exit 1].continue-on-error" .github/actions/group/checks/action.yml "$failing"
+uses_plant "continue-on-error in a local action outside .github/actions" 1 ./tools/checks \
+  "tools/checks/action.yml: runs.steps[exit 1].continue-on-error" tools/checks/action.yml "$failing"
+uses_plant "continue-on-error in a self-repository reference" 1 '$/tools/checks' \
+  "tools/checks/action.yml: runs.steps[exit 1].continue-on-error" tools/checks/action.yml "$failing"
+uses_plant "continue-on-error in an action.yaml with no action.yml" 1 ./tools/checks \
+  "tools/checks/action.yaml: runs.steps[exit 1].continue-on-error" tools/checks/action.yaml "$failing"
+uses_plant "continue-on-error only in an action.yaml beside action.yml" 0 ./tools/checks "" \
+  tools/checks/action.yml "$js" tools/checks/action.yaml "$failing"
+uses_plant "a Dockerfile-only local action" 0 ./.github/actions/docker "" .github/actions/docker/Dockerfile "FROM alpine:3.20"
+uses_plant "a JavaScript local action" 0 ./tools/js "" tools/js/action.yml "$js" tools/js/index.js ""
+uses_plant "an expression in a local uses" 1 './${{ vars.CHECKS }}' \
+  "$workflow: jobs.jest.steps[./\${{ vars.CHECKS }}] uses ./\${{ vars.CHECKS }}, $unresolved" \
+  "\${{ vars.CHECKS }}/action.yml" "$failing"
+uses_plant "a local uses leaving the repository" 1 ./../checks \
+  "$workflow: jobs.jest.steps[./../checks] uses ./../checks, $unresolved" ../checks/action.yml "$failing"
+uses_plant "an absolute local uses" 1 ".//$work/checks" \
+  "$workflow: jobs.jest.steps[.//$work/checks] uses .//$work/checks, $unresolved" ../checks/action.yml "$failing"
+uses_plant "a local action that uses itself" 0 ./tools/loop "" \
+  tools/loop/action.yml $'name: Loop\nruns:\n  using: composite\n  steps:\n    - uses: ./tools/loop'
+uses_plant "a local uses with no action file" 1 ./.github/actions/none \
+  "$workflow: jobs.jest.steps[./.github/actions/none] uses ./.github/actions/none, $unresolved"
 plant "a step using docker://" 0 "$workflow" "$after_lint      - uses: docker://alpine:3.20" ""
-plant "a reusable workflow job" 1 "$workflow" "\$a\\  reuse:\n    uses: octo/repo/.github/workflows/x.yml@v1" \
-  "$workflow: jobs.reuse uses octo/repo/.github/workflows/x.yml@v1, a reusable workflow the test gate cannot check."
+plant "a job using a local reusable workflow" 0 "$workflow" "\$a\\  reuse:\n    uses: ./.github/workflows/reuse.yml" ""
 plant "continue-on-error in a local action another local action uses" 1 "$workflow" \
   "$after_lint      - uses: ./.github/actions/outer" \
   ".github/actions/inner/action.yml: runs.steps[exit 1].continue-on-error" \
-  .github/actions/outer/action.yml $'name: Outer\nruns:\n  using: composite\n  steps:\n    - uses: ./.github/actions/inner' \
+  .github/actions/outer/action.yml $'name: Outer\nruns:\n  using: composite\n  steps:\n    - uses: $/.github/actions/inner' \
   .github/actions/inner/action.yml "$failing"
-plant "continue-on-error in a nested local action no job uses" 1 "$workflow" "" \
-  ".github/actions/group/unused/action.yml: every action under .github/actions must be a composite action.yml in its own folder, with no action.yaml beside it." \
-  .github/actions/group/unused/action.yml "$failing"
+plant "continue-on-error in a local action no step uses" 0 "$workflow" "" "" .github/actions/group/unused/action.yml "$failing"
 plant "a Jest record not written by this script" 1 "$workflow" \
   "s/checked: \${{ steps.gate-cases.outputs.checked }}/checked: \"true\"/" \
   "The Jest job must run bash scripts/check-tests-passed-cases.sh in step gate-cases and output checked: \${{ steps.gate-cases.outputs.checked }}, the record the test gate requires."
