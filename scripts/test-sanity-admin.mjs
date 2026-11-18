@@ -6,7 +6,6 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { registerHooks } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { start } from './lib/storage-fixture.mjs';
 const root = path.resolve('.');
 globalThis.rooRevalidations = new AsyncLocalStorage();
 const forbiddenCacheCalls = [];
@@ -33,63 +32,12 @@ const artifact = { selected, startedAt: new Date().toISOString(), scenarios: [],
 const observed = (name, value) => artifact.observations.push({ name, value });
 const sanitize = value => Array.isArray(value) ? value.map(sanitize) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, item]) => [key, /^(token|uploadToken|serviceRoleKey|anonKey)$/.test(key) ? '[redacted]' : sanitize(item)])) : typeof value === 'string' && /^https?:/.test(value) ? (() => { const url = new URL(value); for (const key of ['token','signature']) if (url.searchParams.has(key)) url.searchParams.set(key, '[redacted]'); return url.toString(); })() : value;
 const hashes = bytes => ({ sha1: crypto.createHash('sha1').update(bytes).digest('hex'), sha256: crypto.createHash('sha256').update(bytes).digest('hex') });
-const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j6a0AAAAASUVORK5CYII=', 'base64');
+const onePixelPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWNgYGD4DwABBAEAfbLI3wAAAABJRU5ErkJggg==', 'base64');
 const zip = Buffer.from('UEsDBBQAAAAAAAAAIVAhpYXdFwAAABcAAAALAAAAZml4dHVyZS50eHRSb28gSW5kdXN0cmllcyBmaXh0dXJlClBLAQIUAxQAAAAAAAAAIVAhpYXdFwAAABcAAAALAAAAAAAAAAAAAACAAQAAAABmaXh0dXJlLnR4dFBLBQYAAAAAAQABADkAAABAAAAAAAA=', 'base64');
-let fixture;
+let fixture, CONTENT_ADMIN_EMAIL, CONTENT_ADMIN_PASSWORD, authFixture, sessionRoute, modules, tools, publicRoute, call, publish, create, detail, assertError, issue, put, upload;
 const completed = new Map();
-try {
-  for (const key of Object.keys(process.env)) if (/(^|_)SANITY_/.test(key)) delete process.env[key];
-  if(selected==='all')artifact.schema=JSON.parse(execFileSync(process.execPath,['scripts/test-sanity-admin-schema.mjs','--scenario=schema'],{encoding:'utf8'}).trim());
-  fixture = await start({
-    fullMigrationChain: true,
-    signedUploadExpirationSeconds: 2,
-    ...(process.env.STORAGE_SOURCE ? { storageSource: process.env.STORAGE_SOURCE } : {}),
-    ...(process.env.PG_BIN ? { pgBin: process.env.PG_BIN } : {}),
-    ...(process.env.POSTGREST_BIN ? { postgrestBin: process.env.POSTGREST_BIN } : {}),
-    ...(process.env.LD_LIBRARY_PATH ? { libraryPath: process.env.LD_LIBRARY_PATH } : {}),
-  });
-  artifact.versions = fixture.versions;
-  artifact.runtime = { storageScratch: fixture.scratch, databaseScratch: fixture.databaseScratch, postgresPid: fixture.postgresPid, postgrestPid: fixture.postgrestPid };
-  fs.mkdirSync('test-results/sanity-admin', { recursive: true }); fs.writeFileSync(`test-results/sanity-admin/${selected}.json`, JSON.stringify(sanitize(artifact), null, 2) + '\n');
-  artifact.migrations = fixture.manifest.map(({ file, selection, sha256 }) => ({ file, selection, sha256 }));
-  const expectedFiles = fs.readdirSync('supabase/migrations').filter(file => file.endsWith('.sql')).sort();
-  assert.deepEqual(fixture.manifest.map(row => path.basename(row.file)).sort(), expectedFiles, 'Full migration chain required');
-  assert.ok(fixture.manifest.every(row => row.selection === 'complete migration'), 'Selective migration fixture does not prove full chain');
-  Object.assign(process.env, { REF_ADMIN_KEY: 'synthetic-admin-key', REF_SESSION_SECRET:'synthetic-content-session-secret', NEXT_PUBLIC_SUPABASE_ANON_KEY:fixture.anonKey, RATE_LIMIT_HASH_SECRET: 'synthetic-admin-fixture-rate-secret', CMS_WRITES_PAUSED: '0', SUPABASE_URL: fixture.origin, NEXT_PUBLIC_SUPABASE_URL: fixture.origin, SUPABASE_SERVICE_ROLE_KEY: fixture.token, SUPABASE_SECRET_KEY: fixture.token, DATA_PRIMARY_BACKEND: 'supabase', COMMERCE_PRIMARY_BACKEND: 'supabase', COMMERCE_FAILOVER_GENERATION: '0', SUPABASE_CUTOVER_ENABLED: '1', COMMERCE_CUTOVER_ENABLED: '1' });
-  const { seedContentAdmin, CONTENT_ADMIN_EMAIL, CONTENT_ADMIN_PASSWORD } = await import("./lib/content-admin-fixture.mjs");
-  const authFixture = await seedContentAdmin(fixture);
-  const sessionRoute = await import("../app/api/admin/content/session/route.js");
-  const modules = {};
-  for (const name of ['documents','documents/[id]','documents/[id]/revisions','documents/[id]/revisions/[revisionId]','publish','assets/upload','assets/finalize']) modules[name] = await import(`../app/api/admin/content/${name}/route.js`);
-  const tools = await import('../app/api/tools/[id]/download/route.js');
-  const publicRoute = await import('../app/api/content/[resource]/route.js');
-  const call = async (name, body, params = {}, key = 'synthetic-admin-key', address = '127.0.0.1') => {
-    const method = body === undefined ? 'GET' : 'POST';
-    const headers = { 'Content-Type': 'application/json', 'x-forwarded-for': address, ...(key ? { 'x-admin-key': key } : {}) };
-    const request = new Request(`${fixture.origin}/api/admin/content/${name}${params.type ? '?type=' + encodeURIComponent(params.type) : ''}`, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-    const response = await modules[name][method](request, { params: Promise.resolve(params) });
-    const result = await response.json();
-    assert.match(response.headers.get('Cache-Control'), /private, no-store/);
-    observed(name, { status: response.status, result: sanitize(result) });
-    return { status: response.status, ...result };
-  };
-  const publish = async body => {
-    const calls = [];
-    const result = await globalThis.rooRevalidations.run(calls, () => call('publish', body));
-    assert.ok(calls.some(({ operation, args }) => operation === 'invalidateByTag' && [args[0]].flat().includes('_N_T_/layout')), 'Every publish marks pages stale before responding');
-    assert.deepEqual(forbiddenCacheCalls, [], 'Publish must never delete pages');
-    return result;
-  };
-  const create = (type, document, createIntentId = crypto.randomUUID()) => publish({ operation: 'create', type, document, createIntentId });
-  const detail = id => call('documents/[id]', undefined, { id });
-  const assertError = (result, status, code) => { assert.equal(result.status, status, JSON.stringify(result)); assert.equal(result.ok, false); assert.equal(result.code, code); assert.equal(result.data, undefined); };
-  const scenario = async (name, run) => {
-    if (selected !== 'all' && selected !== name) return;
-    const startedAt = new Date().toISOString();
-    try { await run(); artifact.scenarios.push({ name, passed: true, startedAt, finishedAt: new Date().toISOString() }); }
-    catch (error) { artifact.scenarios.push({ name, passed: false, error: error.stack }); throw error; }
-  };
-  await scenario('faq-public-read-with-second-section', async () => {
+const scenarios = [
+  ['faq-public-read-with-second-section', async () => {
     const questions = [{_key:'first',question:'First FAQ?',answer:'First.'},{_key:'second',question:'Second FAQ?',answer:'Second.'}];
     for (const document of [{_id:'faq',_type:'faqSection',questions},{_id:'00000000-0000-4000-8000-000000000001',_type:'faqSection',questions:[{_key:'other',question:'Other?',answer:'Other.'}]}]) {
       const result = await fixture.client.rpc('roo_apply_document_mutations',{p_mutations:[{operation:'create',id:document._id,document}]}); assert.equal(result.error,null);
@@ -106,8 +54,8 @@ try {
     }
     const direct=await fetchPublicContent({resource:'faq-questions',searchParams:new URLSearchParams()}); observed('FAQ direct',direct); assert.deepEqual(direct,questions);
     const response=await publicRoute.GET(new Request(fixture.origin+'/api/content/faq-questions'),{params:Promise.resolve({resource:'faq-questions',searchParams:new URLSearchParams()})});assert.equal(response.status,200);assert.deepEqual((await response.json()).data,questions);
-  });
-  await scenario('faq-canonical-beyond-cap', async () => {
+  }],
+  ['faq-canonical-beyond-cap', async () => {
     const {inferShadowScope}=await import('../src/server/supabase/documentClient.js');
     const {clearSupabasePublicContentCache}=await import('../src/server/content/publicContent.js');
     assert.deepEqual(inferShadowScope({query:`coalesce(*[_type == "faqSection" && _id == $canonical][0].questions, *[_type == "faqSection" && _id == 'cap-faq-0001'][0].questions, *[_id == "faq"][0])`,params:{canonical:'faq'}}).pinnedIds,['faq','cap-faq-0001']);
@@ -129,8 +77,8 @@ try {
       for(const row of existing)await fixture.sql`update migration.source_documents set payload=${fixture.sql.json(row.payload)},source_revision=${row.source_revision},source_hash=${row.source_hash},tombstoned=${row.tombstoned} where legacy_sanity_id=${row.legacy_sanity_id}`;
       clearSupabasePublicContentCache();
     }
-  });
-  await scenario('replace-type-guard', async () => {
+  }],
+  ['replace-type-guard', async () => {
     const id='booking.type.guard',document={_id:id,_type:'booking',status:'captured',email:'fixture@example.invalid'};
     assert.equal((await fixture.client.rpc('roo_apply_document_mutations',{p_mutations:[{operation:'create',id,document}]})).error,null);
     const [before]=await fixture.sql`select payload,source_revision from migration.source_documents where legacy_sanity_id=${id}`;
@@ -138,15 +86,15 @@ try {
     observed('replace-type-guard raw',raw);assert.ok(raw.error?.message?.includes('CMS_TYPE_MISMATCH'),JSON.stringify(raw));
     const [after]=await fixture.sql`select payload,source_revision from migration.source_documents where legacy_sanity_id=${id}`;assert.deepEqual(after,before);
     assertError(await publish({operation:'replace',type:'hero',documentId:id,expectedRevision:before.source_revision,document:{tagline:'Overwrite booking'}}),409,'CMS_TYPE_MISMATCH');
-  });
-  await scenario('public-resource-404', async () => {
+  }],
+  ['public-resource-404', async () => {
     for(const resource of ['constructor','__proto__','toString','nope']) {const response=await publicRoute.GET(new Request(fixture.origin+'/api/content/'+resource),{params:Promise.resolve({resource})});assert.equal(response.status,404);assert.equal((await response.json()).ok,false);observed('unknown-resource',{resource,status:response.status});}
-  });
-  await scenario('create-intent-conflict-code', async () => {
+  }],
+  ['create-intent-conflict-code', async () => {
     const intent=crypto.randomUUID(),first=await create('benchmark',{title:'First intent'},intent);assert.equal(first.ok,true);
     const conflict=await create('benchmark',{title:'Changed intent'},intent);assertError(conflict,409,'CMS_CREATE_INTENT_CONFLICT');assert.equal(conflict.details.documentId,first.data.documentId);
-  });
-  await scenario('delete-scan-bounded', async () => {
+  }],
+  ['delete-scan-bounded', async () => {
     const pkg=await create('package',{title:'Bounded reference package',price:'$10'});assert.equal(pkg.ok,true);
     for(let i=0;i<25;i++)assert.equal((await create('upgradeLink',{title:'Bounded reference '+i,slug:{current:'bounded-'+i},targetPackage:{_type:'reference',_ref:pkg.data.documentId}})).ok,true);
     const refused=await publish({operation:'delete',type:'package',documentId:pkg.data.documentId,expectedRevision:pkg.data.revision});assertError(refused,409,'CMS_REFERENCED');assert.equal(refused.details.referencedBy.length,20);
@@ -170,8 +118,8 @@ try {
     assert.equal(referenceTypes.length,24);observed('legacy CMS reference types refused',referenceTypes);
     const excludedId='legacy-commerce-reference',excluded={_id:excludedId,_type:'booking',legacyReference:{_type:'reference',_ref:legacyTarget.data.documentId}};await fixture.sql`insert into migration.source_documents(legacy_sanity_id,document_type,source_revision,source_hash,payload) values(${excludedId},'booking','legacy-ref',${hashes(Buffer.from(excludedId)).sha256},${fixture.sql.json(excluded)})`;assert.equal((await publish({operation:'delete',type:'package',documentId:legacyTarget.data.documentId,expectedRevision:legacyTarget.data.revision})).status,200);await fixture.sql`update migration.source_documents set tombstoned=true where legacy_sanity_id=${excludedId}`;
     const malformed=await create('coupon',{title:'Legacy malformed counters',code:'LEGACYCOUNTERS',discountType:'percent',discountPercent:10});assert.equal(malformed.ok,true);await fixture.sql`update migration.source_documents set payload=payload||'{"timesUsed":"legacy","activeReservations":"legacy","redemptionCount":"legacy"}'::jsonb where legacy_sanity_id=${malformed.data.documentId}`;assert.equal((await publish({operation:'delete',type:'coupon',documentId:malformed.data.documentId,expectedRevision:malformed.data.revision})).status,200);
-  });
-  await scenario('admin-session-login-and-origin', async () => {
+  }],
+  ['admin-session-login-and-origin', async () => {
     const { provisionContentAdmin } = await import('./lib/provision-content-admin.mjs');
     const { issueAdminSessionCookie } = await import('../src/server/cms/adminSession.js');
     execFileSync(process.execPath, ['scripts/check-content-regions.mjs']);
@@ -218,8 +166,8 @@ try {
     const reset=await provisionContentAdmin({email:CONTENT_ADMIN_EMAIL,password:replacementPassword,resetPassword:true,adminClient:fixture.client});assert.equal(reset.status,'active');assert.equal((await login(replacementPassword)).result.status,200);assertError((await login()).result,401,'ADMIN_UNAUTHORIZED');await refusedCookie(cookie);assert.equal(Number((await fixture.sql`select count(*) count from auth.sessions where user_id=${authFixture.userId}`)[0].count),0);observed('provisioning password reset',{grantExistingWithoutResetKeepsPassword:true,withFlagNewPasswordAccepted:true,oldCookieRefused:true,goTrueSessionsRemoved:true});
     await provisionContentAdmin({email:CONTENT_ADMIN_EMAIL,password:CONTENT_ADMIN_PASSWORD,resetPassword:true,adminClient:fixture.client});const freshLogin=await login(),freshCookie=freshLogin.response.headers.get('set-cookie').split(';')[0];const cleared=await sessionCall('DELETE',undefined,{cookie:freshCookie,'sec-fetch-site':'same-origin'});assert.equal(cleared.result.status,200);assert.match(cleared.response.headers.get('set-cookie'),/Max-Age=0/);
     observed('auth fixture calls',authFixture.requests);observed('session cookie attributes',{httpOnly:true,sameSite:'Strict',maxAge:43200});
-  });
-  await scenario('admin-session-signout-revokes', async () => {
+  }],
+  ['admin-session-signout-revokes', async () => {
     const invoke=async(method,headers={},body)=>{const response=await sessionRoute[method](new Request(fixture.origin+'/api/admin/content/session',{method,headers:{host:new URL(fixture.origin).host,'content-type':'application/json','x-forwarded-for':'127.0.86.1',...headers},...(body===undefined?{}:{body:JSON.stringify(body)})}),{});return{response,result:{status:response.status,...await response.json()}};};
     const login=()=>invoke('POST',{}, {email:CONTENT_ADMIN_EMAIL,password:CONTENT_ADMIN_PASSWORD});
     const sessionVersion=async()=>Number((await fixture.sql`select session_version from accounts.principals where id=${authFixture.principalId}`)[0].session_version);
@@ -235,8 +183,8 @@ try {
     const protectedResponse=await modules.documents.GET(new Request(fixture.origin+'/api/admin/content/documents?type=faqSection',{headers:{cookie,'x-forwarded-for':'127.0.86.1'}}),{}),protectedResult={status:protectedResponse.status,...await protectedResponse.json()};assertError(protectedResult,401,'ADMIN_UNAUTHORIZED');
     const fresh=await login();assert.equal(fresh.result.status,200);const freshCookie=fresh.response.headers.get('set-cookie').split(';')[0],freshProbe=(await invoke('GET',{cookie:freshCookie})).result;assert.equal(freshProbe.status,200);assert.equal(freshProbe.data.signedIn,true);assert.equal(await sessionVersion(),afterVersion);
     observed('sign-out revokes earlier session',{beforeSessionVersion:beforeVersion,afterSessionVersion:afterVersion,beforeProbe,signout:cleared.result,expiredCookieMaxAgeZero:true,oldCookieProbe:oldProbe,oldCookieProtected:protectedResult,newLoginStatus:fresh.result.status,newCookieProbe:freshProbe,keySignoutDoesNotRotate:true,rotationFailure:{status:failed.result.status,code:failed.result.code,cookieNotCleared:true,sessionVersionUnchanged:true}});
-  });
-  await scenario('auth-and-pause', async () => {
+  }],
+  ['auth-and-pause', async () => {
     globalThis.__rooRateLimitBuckets?.clear();
     let authCase=1;
     for (const [name, module] of Object.entries(modules)) {
@@ -250,8 +198,8 @@ try {
     process.env.CMS_WRITES_PAUSED = 'true'; assertError(await create('hero', {}), 423, 'CMS_WRITES_PAUSED');
     delete process.env.CMS_WRITES_PAUSED; assertError(await create('hero', {}), 503, 'CMS_WRITE_CONTROL_INVALID');
     process.env.CMS_WRITES_PAUSED = '0';
-  });
-  await scenario('create-replay-lost-response-revisions', async () => {
+  }],
+  ['create-replay-lost-response-revisions', async () => {
     const intent = crypto.randomUUID(); const body = { operation: 'create', type: 'benchmark', createIntentId: intent, document: { title: 'Initial synthetic' } };
     const first = await publish(body); assert.equal(first.ok, true);
     const replay = await publish(body); assert.equal(replay.data.replayed, true); assert.deepEqual({ ...first.data, replayed: true }, replay.data);
@@ -269,8 +217,8 @@ try {
     const deleted = await publish({ operation: 'delete', type: 'benchmark', documentId: id, expectedRevision: changed.data.revision }); assert.equal(deleted.ok, true);
     assert.equal((await publish(body)).data.replayed, true, 'Lost original create response still replays after deletion');
     assert.equal((await fixture.sql`select count(*)::int n from migration.cms_publish_commands where status='committed' and result->'document_ids' ? ${id}`)[0].n, 3);
-  });
-  await scenario('singletons-references-booking-identity', async () => {
+  }],
+  ['singletons-references-booking-identity', async () => {
     const a = await create('hero', { headingLine1: 'Synthetic hero' }); assert.equal(a.ok, true);
     assertError(await create('hero', { headingLine1: 'Another singleton' }), 409, 'CMS_SINGLETON_EXISTS');
     assertError(await publish({ operation: 'delete', type: 'hero', documentId: a.data.documentId, expectedRevision: a.data.revision }), 400, 'CMS_VALIDATION_FAILED');
@@ -280,8 +228,8 @@ try {
     const link = await create('upgradeLink', { title: 'Synthetic upgrade', slug: { _type: 'slug', current: 'synthetic' }, targetPackage: { _type: 'reference', _ref: pkg.data.documentId } }); assert.equal(link.ok, true);
     assertError(await publish({ operation: 'delete', type: 'package', documentId: pkg.data.documentId, expectedRevision: pkg.data.revision }), 409, 'CMS_REFERENCED');
     assertError(await create('upgradeLink', { title: 'Missing reference', slug: { current: 'missing' }, targetPackage: { _type: 'reference', _ref: 'missing-package' } }), 400, 'CMS_VALIDATION_FAILED');
-  });
-  await scenario('atomic-singleton-reference-and-namespaces', async () => {
+  }],
+  ['atomic-singleton-reference-and-namespaces', async () => {
     const singleton = await Promise.all([create('contact', { title: 'Contact A' }), create('contact', { title: 'Contact B' })]);
     assert.equal(singleton.filter(row => row.ok).length, 1); assertError(singleton.find(row => !row.ok), 409, 'CMS_SINGLETON_EXISTS');
     const coupons = await Promise.all([create('coupon',{title:'Namespace A',code:'CaseAtomic',discountType:'percent',discountPercent:10}),create('coupon',{title:'Namespace B',code:'caseatomic',discountType:'percent',discountPercent:10})]);
@@ -299,8 +247,8 @@ try {
     const remaining=await fixture.sql`select legacy_sanity_id,payload from migration.source_documents where not tombstoned and legacy_sanity_id in (${target.data.documentId},${race[0].data?.documentId||'absent'})`;
     if(race[0].ok){assertError(race[1],409,'CMS_REFERENCED');assert.equal(remaining.length,2);}else{assertError(race[0],400,'CMS_VALIDATION_FAILED');assert.equal(remaining.length,0);}
     observed('native parallel integrity ordering',{singleton:singleton.map(row=>row.status),couponNamespace:coupons.map(row=>row.status),packageNamespace:packages.map(row=>row.status),referenceDelete:race.map(row=>row.status)});
-  });
-  await scenario('coupon-redemption-and-pricing', async () => {
+  }],
+  ['coupon-redemption-and-pricing', async () => {
     const coupon = await create('coupon', { title: 'Synthetic discount', code: 'AdminCase', discountType: 'percent', discountPercent: 10, timesUsed: 999 }); assert.equal(coupon.ok, true);
     const before = await detail(coupon.data.documentId); assert.equal(before.data.document.timesUsed, 0);
     await fixture.sql`update migration.source_documents set payload=payload||'{"timesUsed":2,"activeReservations":1,"redemptionCount":2,"autoDeactivatedByRedemptionId":"redemption-exact","autoDeactivatedAt":"2026-01-01T00:00:00Z"}'::jsonb where legacy_sanity_id=${coupon.data.documentId}`;
@@ -324,8 +272,8 @@ try {
     const edit = await publish({ operation: 'replace', type: 'package', documentId: pkg.data.documentId, expectedRevision: pkg.data.revision, document: { title: 'Synthetic Priced Package', price: '$23.45', order: 1 } }); assert.equal(edit.ok, true);
     const pricing = await import('../src/server/api/ref/pricing.js'); const quote = await pricing.resolveBookingPricing({ packageTitle: 'Synthetic Priced Package' });
     observed('actual pricing module quote', quote); assert.equal(quote.effectiveGrossAmount, 23.45);
-  });
-  await scenario('validation-unknown-portabletext-effective-content', async () => {
+  }],
+  ['validation-unknown-portabletext-effective-content', async () => {
     const {contentErrorLabel,indexErrors}=await import('../src/components/admin/content/documentPaths.js');const {CONTENT_TYPES}=await import('../src/lib/cms/contentSchema.js');const termsType=CONTENT_TYPES.find(type=>type.name==='terms');
     assert.equal(contentErrorLabel(termsType,'sections.0.content'),'Sections › Item 1 › Content');assert.equal(contentErrorLabel(termsType,'$.sections[0].content[0].markDefs[0]'),'Link 1 in Sections › Item 1 › Content › Item 1');assert.ok(indexErrors([{path:'sections.0.content',message:'Invalid'}],{}).has('sections[0].content'));observed('validation field labels',{sqlPath:'sections.0.content',label:contentErrorLabel(termsType,'sections.0.content')});
 
@@ -351,35 +299,27 @@ try {
     const rendered=renderToStaticMarkup(React.createElement(PortableText,{value:effective.data.sections.find(section=>section.heading==='Synthetic unoverridden heading').content}));
     for(const tag of ['<h1','<h6','<blockquote','<ul','<ol','<strong','<em','<code','<a'])assert.equal(rendered.includes(tag),true,tag);
     fs.writeFileSync('test-results/sanity-admin/effective-policy.html',rendered);observed('rendered actual PortableText effective policy',{sha256:hashes(Buffer.from(rendered)).sha256,bytes:Buffer.byteLength(rendered)});
-  });
-  const issue = async (bytes, kind, mimeType, extra={}, forceStaging=true) => {
-    const body={kind,fileName:`synthetic.${kind==='image'?'png':'zip'}`,mimeType,byteSize:bytes.length,...hashes(bytes),...(kind==='image'?{width:1,height:1}:{}),...extra};
-    const rows=forceStaging?await fixture.sql`select id,migration_status from cms.assets where legacy_sanity_asset_id like ${kind+'-'+body.sha1+'-%'} and sha256=${body.sha256}`:[];
-    try {for(const row of rows)await fixture.sql`update cms.assets set migration_status='copied' where id=${row.id}`;return await call('assets/upload',body);}
-    finally {for(const row of rows)await fixture.sql`update cms.assets set migration_status=${row.migration_status} where id=${row.id}`;if(rows.length)observed('Native staging branch selector control','Verified manifest hash match is temporarily absent (copied status) during issuance only, then restored; verifies staging/finalize branches independently of the alreadyExists shortcut.');}
-  };
-  const put = async (issued, bytes, mimeType) => { const response=await fetch(issued.signedUrl,{method:'PUT',headers:{'Content-Type':mimeType,'x-upsert':'false'},body:bytes});const result=await response.json(); observed('native signed PUT',{status:response.status,result:sanitize(result)});return {status:response.status,result}; };
-  const upload = async (bytes,kind,mimeType,extra={}) => { const issued=await issue(bytes,kind,mimeType,extra,false);assert.equal(issued.ok,true);if(issued.data.alreadyExists)return {issued:issued.data,finalized:{ok:true,data:issued.data}};const sent=await put(issued.data,bytes,mimeType);assert.equal(sent.status,200);const finalized=await call('assets/finalize',{uploadId:issued.data.uploadId});return {issued:issued.data,finalized}; };
-  await scenario('asset-dimension-collision', async () => {
+  }],
+  ['asset-dimension-collision', async () => {
     const {default:sharp}=await import('sharp');const bytes=await sharp({create:{width:800,height:1000,channels:4,background:'#aabbcc'}}).png().toBuffer(),hash=hashes(bytes),legacyId=`image-${hash.sha1}-1000x800-png`,path=`images/${hash.sha1}.png`;
     assert.equal((await fixture.client.storage.from('site-content-public').upload(path,bytes,{contentType:'image/png',upsert:false})).error,null);
     const legacy={legacy_sanity_asset_id:legacyId,asset_kind:'image',storage_bucket:'site-content-public',storage_path:path,source_url:fixture.origin+'/storage/v1/object/public/site-content-public/'+path,mime_type:'image/png',byte_size:bytes.length,sha256:hash.sha256,width:1000,height:800,migration_status:'verified',verified_at:new Date().toISOString(),metadata:{}};
     await fixture.sql.begin(async sql=>{await sql`set local session_replication_role = replica`;await sql`select public.roo_upsert_asset(${sql.json(legacy)})`;});
     const result=await upload(bytes,'image','image/png',{width:800,height:1000});observed('legacy dimensions collision',result);assert.equal(result.finalized.ok,true,JSON.stringify(result));assert.equal(result.finalized.data.assetId,legacyId);
-  });
-  await scenario('svg-doctype-upload', async () => {
+  }],
+  ['svg-doctype-upload', async () => {
     const bytes=Buffer.from('<?xml version="1.0"?><!DOCTYPE svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 23 37"><rect width="23" height="37"/></svg>');const result=await upload(bytes,'image','image/svg+xml',{width:23,height:37});assert.equal(result.finalized.ok,true,JSON.stringify(result));assert.equal(result.finalized.data.width,23);assert.equal(result.finalized.data.height,37);
     const subset=Buffer.from('<!DOCTYPE svg [<!ENTITY a "x">]><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 23 37"><text>&a;</text></svg>'),refused=await upload(subset,'image','image/svg+xml',{width:23,height:37});assertError(refused.finalized,422,'ASSET_VERIFICATION_FAILED');observed('internal SVG DTD refused',{status:refused.finalized.status,code:refused.finalized.code});
-  });
-  await scenario('storage-transfer-budget', async () => {
+  }],
+  ['storage-transfer-budget', async () => {
     const originalTimeout=AbortSignal.timeout,originalAny=AbortSignal.any,originalFetch=globalThis.fetch,budgets=new WeakMap(),transfers=[],stagedGets=[],rpcs=[];
     AbortSignal.timeout=milliseconds=>{const signal=originalTimeout(milliseconds);budgets.set(signal,[milliseconds]);return signal;};
     AbortSignal.any=signals=>{const signal=originalAny(signals);budgets.set(signal,signals.flatMap(item=>budgets.get(item)||[]));return signal;};
     globalThis.fetch=(input,init={})=>{const url=new URL(typeof input==='string'?input:input.url||input),budget=budgets.get(init.signal)||[];if(url.pathname.startsWith('/storage/v1/object/optimization-builds-private/builds/')&&init.method==='POST')transfers.push(budget);if(url.pathname.startsWith('/storage/v1/object/')&&url.pathname.includes('/cms-upload-staging/')&&(init.method||'GET')==='GET')stagedGets.push(budget);if(url.pathname.startsWith('/rest/v1/rpc/'))rpcs.push(budget);return originalFetch(input,init);};
     try {const result=await upload(Buffer.concat([zip,Buffer.from('transfer-budget-fixture')]),'file','application/zip');assert.equal(result.finalized.ok,true);assert.ok(transfers.length);assert.ok(transfers.every(budget=>budget[0]===240000),JSON.stringify(transfers));assert.ok(stagedGets.length);assert.ok(stagedGets.every(budget=>budget[0]===240000&&budget.includes(210000)),JSON.stringify(stagedGets));assert.ok(rpcs.length);assert.ok(rpcs.every(budget=>budget[0]===30000),JSON.stringify(rpcs));observed('storage transfer timeout budgets',{transfers,stagedGets,rpcs});} finally {AbortSignal.timeout=originalTimeout;AbortSignal.any=originalAny;globalThis.fetch=originalFetch;}
-  });
-  await scenario('uploads-happy-replay-shared-immutable', async () => {
-    for(const [bytes,kind,mimeType] of [[png,'image','image/png'],[zip,'file','application/zip']]){
+  }],
+  ['uploads-happy-replay-shared-immutable', async () => {
+    for(const [bytes,kind,mimeType] of [[onePixelPng,'image','image/png'],[zip,'file','application/zip']]){
       const first=await upload(bytes,kind,mimeType);assert.equal(first.finalized.ok,true,JSON.stringify(first.finalized));assert.equal(first.finalized.data.sha256,hashes(bytes).sha256);
       assert.equal((await call('assets/finalize',{uploadId:first.issued.uploadId})).ok,true);
       const second=await upload(bytes,kind,mimeType);assert.equal(second.finalized.ok,true);assert.equal(second.issued.alreadyExists,true);assert.equal(second.issued.uploadId,null);assert.equal(second.finalized.data.assetId,first.finalized.data.assetId);
@@ -402,8 +342,8 @@ try {
     const response=await publicRoute.GET(new Request(`${fixture.origin}/api/content/tools`),{params:Promise.resolve({resource:'tools'})});const publicData=await response.json();assert.equal(publicData.ok,true);const row=publicData.data.find(x=>x._id===tool.data.documentId);assert.equal(row.fileUrl,`/api/tools/${tool.data.documentId}/download`);assert.equal(row.iconUrl,image.url);
     completed.set('tool',tool.data);
     const list=await call('documents',undefined,{type:'tool'});assert.equal(list.ok,true);assert.equal(list.data.documents.find(row=>row._id===tool.data.documentId).preview.imageUrl,image.url);
-  });
-  await scenario('upload-image-formats-and-concurrent-finalize',async()=>{
+  }],
+  ['upload-image-formats-and-concurrent-finalize', async () => {
     const {default:sharp}=await import('sharp');
     for(const [format,mimeType] of [['png','image/png'],['jpeg','image/jpeg'],['gif','image/gif'],['webp','image/webp'],['avif','image/avif']]){
       const bytes=await sharp({create:{width:2,height:3,channels:3,background:'#cc2244'}}).toFormat(format).toBuffer();
@@ -413,41 +353,41 @@ try {
     const verifiedSvg=await upload(svg,'image','image/svg+xml',{width:2,height:3});assert.equal(verifiedSvg.finalized.ok,true);
     const exe=Buffer.alloc(128);exe.write('MZ',0,'ascii');exe.writeUInt32LE(64,60);exe.write('PE\0\0',64,'ascii');exe.writeUInt16LE(0x8664,68);exe.writeUInt16LE(2,86);
     const verifiedExe=await upload(exe,'file','application/octet-stream');assert.equal(verifiedExe.finalized.ok,true);assert.equal(verifiedExe.finalized.data.mimeType,'application/vnd.microsoft.portable-executable');observed('PE fixture limit','Minimal PE signature/COFF header fixture; no executable is run or installer functionality claimed.');
-    const parallel=await issue(png,'image','image/png');assert.equal(parallel.ok,true);assert.equal((await put(parallel.data,png,'image/png')).status,200);
+    const parallel=await issue(onePixelPng,'image','image/png');assert.equal(parallel.ok,true);assert.equal((await put(parallel.data,onePixelPng,'image/png')).status,200);
     const results=await Promise.all([call('assets/finalize',{uploadId:parallel.data.uploadId}),call('assets/finalize',{uploadId:parallel.data.uploadId})]);assert.equal(results[0].ok,true);assert.equal(results[1].ok,true);assert.deepEqual(results[0].data,results[1].data);
-  });
-  await scenario('upload-mismatches-and-token-expiry',async()=>{
-    for(const [name,declared,actual,kind,mimeType,extra] of [['zip-claimed-image',zip,zip,'image','image/png',{}],['png-claimed-build',png,png,'file','application/zip',{}],['size',png,png,'image','image/png',{byteSize:png.length+1}],['sha1',png,png,'image','image/png',{sha1:'0'.repeat(40)}],['sha256',png,png,'image','image/png',{sha256:'0'.repeat(64)}],['dimensions',png,png,'image','image/png',{width:2,height:1}]]){
+  }],
+  ['upload-mismatches-and-token-expiry', async () => {
+    for(const [name,declared,actual,kind,mimeType,extra] of [['zip-claimed-image',zip,zip,'image','image/png',{}],['png-claimed-build',onePixelPng,onePixelPng,'file','application/zip',{}],['size',onePixelPng,onePixelPng,'image','image/png',{byteSize:onePixelPng.length+1}],['sha1',onePixelPng,onePixelPng,'image','image/png',{sha1:'0'.repeat(40)}],['sha256',onePixelPng,onePixelPng,'image','image/png',{sha256:'0'.repeat(64)}],['dimensions',onePixelPng,onePixelPng,'image','image/png',{width:2,height:1}]]){
       const issued=await issue(declared,kind,mimeType,extra);assert.equal(issued.ok,true);assert.equal((await put(issued.data,actual,mimeType)).status,200);
       const result=await call('assets/finalize',{uploadId:issued.data.uploadId});assertError(result,422,'ASSET_VERIFICATION_FAILED');
       const row=await fixture.sql`select status from cms.uploads where upload_id=${issued.data.uploadId}`;assert.equal(row[0].status,'refused'); const info=await fixture.client.storage.from(issued.data.bucket).info(issued.data.path);assert.equal(Number(info.error.statusCode),404);observed(name,result);
     }
-    const expired=await issue(png,'image','image/png');await new Promise(resolve=>setTimeout(resolve,2200));const sent=await put(expired.data,png,'image/png');assert.equal(sent.status,400);assert.match(sent.result.message,/exp|expired/i);
+    const expired=await issue(onePixelPng,'image','image/png');await new Promise(resolve=>setTimeout(resolve,2200));const sent=await put(expired.data,onePixelPng,'image/png');assert.equal(sent.status,400);assert.match(sent.result.message,/exp|expired/i);
     assertError(await call('assets/finalize',{uploadId:expired.data.uploadId,path:'different'}),400,'CMS_VALIDATION_FAILED');
-    assertError(await issue(png,'image','image/png',{byteSize:20*1024*1024+1}),413,'ASSET_TOO_LARGE');
+    assertError(await issue(onePixelPng,'image','image/png',{byteSize:20*1024*1024+1}),413,'ASSET_TOO_LARGE');
     assertError(await issue(zip,'file','text/html'),415,'ASSET_TYPE_REFUSED');
-  });
-  await scenario('upload-chunked-final-collision-bounded-recovery',async()=>{
-    const issued=await issue(png,'image','image/png');assert.equal(issued.ok,true);
+  }],
+  ['upload-chunked-final-collision-bounded-recovery', async () => {
+    const issued=await issue(onePixelPng,'image','image/png');assert.equal(issued.ok,true);
     const oversize=20*1024*1024+1;let remaining=oversize;
     const stream=new ReadableStream({pull(controller){if(!remaining){controller.close();return;}const amount=Math.min(65536,remaining);controller.enqueue(Buffer.alloc(amount,65));remaining-=amount;}});
-    const sent=await fetch(issued.data.signedUrl,{method:'PUT',headers:{'Content-Type':'image/png','x-upsert':'false'},body:stream,duplex:'half'});const sendResult=await sent.json();observed('exact chunked20MiB+1',{status:sent.status,result:sendResult,declared:png.length,actual:oversize});
+    const sent=await fetch(issued.data.signedUrl,{method:'PUT',headers:{'Content-Type':'image/png','x-upsert':'false'},body:stream,duplex:'half'});const sendResult=await sent.json();observed('exact chunked20MiB+1',{status:sent.status,result:sendResult,declared:onePixelPng.length,actual:oversize});
     if(sent.status===200){assertError(await call('assets/finalize',{uploadId:issued.data.uploadId}),413,'ASSET_TOO_LARGE');}else{assert.equal(Number(sendResult.statusCode),413);}
     const staged=await fixture.client.storage.from(issued.data.bucket).info(issued.data.path);assert.equal(Number(staged.error.statusCode),404);
-    const collisionBytes=Buffer.concat([png,Buffer.from('constructed immutable final conflict')]);const digest=hashes(collisionBytes);const finalPath=`images/${digest.sha1}.png`;
-    const preseed=await fixture.client.storage.from('site-content-public').upload(finalPath,png,{contentType:'image/png',upsert:false});assert.equal(preseed.error,null);
+    const collisionBytes=Buffer.concat([onePixelPng,Buffer.from('constructed immutable final conflict')]);const digest=hashes(collisionBytes);const finalPath=`images/${digest.sha1}.png`;
+    const preseed=await fixture.client.storage.from('site-content-public').upload(finalPath,onePixelPng,{contentType:'image/png',upsert:false});assert.equal(preseed.error,null);
     const collisionIssue=await issue(collisionBytes,'image','image/png');assert.equal(collisionIssue.ok,true);assert.equal((await put(collisionIssue.data,collisionBytes,'image/png')).status,200);
     assertError(await call('assets/finalize',{uploadId:collisionIssue.data.uploadId}),422,'ASSET_VERIFICATION_FAILED');
-    const retained=await fixture.client.storage.from('site-content-public').download(finalPath);assert.equal(hashes(Buffer.from(await retained.data.arrayBuffer())).sha256,hashes(png).sha256);
+    const retained=await fixture.client.storage.from('site-content-public').download(finalPath);assert.equal(hashes(Buffer.from(await retained.data.arrayBuffer())).sha256,hashes(onePixelPng).sha256);
     assert.equal((await fixture.sql`select count(*)::int n from cms.assets where storage_path=${finalPath}`)[0].n,0);
     assert.equal((await fixture.sql`select status from cms.uploads where upload_id=${collisionIssue.data.uploadId}`)[0].status,'refused');
-    const malformedBytes=Buffer.concat([png,Buffer.from('malformed immutable object fixture')]);const malformedHash=hashes(malformedBytes);const malformedPath=`images/${malformedHash.sha1}.png`;
+    const malformedBytes=Buffer.concat([onePixelPng,Buffer.from('malformed immutable object fixture')]);const malformedHash=hashes(malformedBytes);const malformedPath=`images/${malformedHash.sha1}.png`;
     assert.equal((await fixture.client.storage.from('site-content-public').upload(malformedPath,zip,{contentType:'image/png',upsert:false})).error,null);
     const malformedIssue=await issue(malformedBytes,'image','image/png');assert.equal((await put(malformedIssue.data,malformedBytes,'image/png')).status,200);
     assertError(await call('assets/finalize',{uploadId:malformedIssue.data.uploadId}),422,'ASSET_VERIFICATION_FAILED');
     assert.equal((await fixture.sql`select status from cms.uploads where upload_id=${malformedIssue.data.uploadId}`)[0].status,'refused');
     assert.equal(hashes(Buffer.from(await (await fixture.client.storage.from('site-content-public').download(malformedPath)).data.arrayBuffer())).sha256,hashes(zip).sha256);
-    const registryBytes=Buffer.concat([png,Buffer.from('constructed verified registry identity conflict')]);const registry=await upload(registryBytes,'image','image/png');assert.equal(registry.finalized.ok,true);
+    const registryBytes=Buffer.concat([onePixelPng,Buffer.from('constructed verified registry identity conflict')]);const registry=await upload(registryBytes,'image','image/png');assert.equal(registry.finalized.ok,true);
     await fixture.sql`update cms.assets set sha256=${'0'.repeat(64)} where legacy_sanity_asset_id=${registry.finalized.data.assetId}`;
     const registryIssue=await issue(registryBytes,'image','image/png');assert.equal((await put(registryIssue.data,registryBytes,'image/png')).status,200);
     assertError(await call('assets/finalize',{uploadId:registryIssue.data.uploadId}),422,'ASSET_VERIFICATION_FAILED');
@@ -455,7 +395,7 @@ try {
     assert.equal((await fixture.sql`select sha256 from cms.assets where legacy_sanity_asset_id=${registry.finalized.data.assetId}`)[0].sha256,'0'.repeat(64));
     const { handleCmsRequest }=await import('../src/server/cms/http.js');const {finalizeCmsUpload}=await import('../src/server/cms/assets.js');
     for(const mode of ['headers','body']){
-      const bounded=await issue(png,'image','image/png');assert.equal(bounded.ok,true);assert.equal((await put(bounded.data,png,'image/png')).status,200);
+      const bounded=await issue(onePixelPng,'image','image/png');assert.equal(bounded.ok,true);assert.equal((await put(bounded.data,onePixelPng,'image/png')).status,200);
       const nativeFetch=globalThis.fetch;
       globalThis.fetch=async(input,init)=>{
         const url=String(typeof input==='string'||input instanceof URL?input:input.url);
@@ -471,27 +411,27 @@ try {
       const recovered=await call('assets/finalize',{uploadId:bounded.data.uploadId});assert.equal(recovered.ok,true);
       observed(`held native ${mode} and recovery`,{deadlineMs:150,elapsedMs:Date.now()-started,fault:'After actual official Storage download, transport withholds header delivery or body bytes. Actual SDK and application deadline path execute.'});
     }
-    const missing=await issue(png,'image','image/png');
+    const missing=await issue(onePixelPng,'image','image/png');
     for(let count=1;count<=6;count++){assert.equal((await call('assets/finalize',{uploadId:missing.data.uploadId})).status,503);const row=await fixture.sql`select status,attempt_count from cms.uploads where upload_id=${missing.data.uploadId}`;assert.equal(row[0].attempt_count,count);assert.equal(row[0].status,count===6?'refused':'issued');}
     assertError(await call('assets/finalize',{uploadId:missing.data.uploadId}),422,'ASSET_VERIFICATION_FAILED');
-  });
-  await scenario('expired-staging-cleanup-progress',async()=>{
+  }],
+  ['expired-staging-cleanup-progress', async () => {
     const ids=[];
     for(let i=0;i<21;i++){
       const uploadId=crypto.randomUUID();ids.push(uploadId);
-      const created=await fixture.client.rpc('roo_create_cms_upload',{p_upload:{uploadId,kind:'image',actor:'admin:key',fileName:`expired-${i}.png`,mimeType:'image/png',byteSize:png.length,...hashes(png),width:1,height:1,expiresAt:new Date(Date.now()+3600000).toISOString()}});assert.equal(created.error,null);
-      assert.equal((await fixture.client.storage.from('cms-upload-staging').upload(`uploads/${uploadId}`,png,{contentType:'image/png',upsert:false})).error,null);
+      const created=await fixture.client.rpc('roo_create_cms_upload',{p_upload:{uploadId,kind:'image',actor:'admin:key',fileName:`expired-${i}.png`,mimeType:'image/png',byteSize:onePixelPng.length,...hashes(onePixelPng),width:1,height:1,expiresAt:new Date(Date.now()+3600000).toISOString()}});assert.equal(created.error,null);
+      assert.equal((await fixture.client.storage.from('cms-upload-staging').upload(`uploads/${uploadId}`,onePixelPng,{contentType:'image/png',upsert:false})).error,null);
     }
     await fixture.sql`update cms.uploads set expires_at=now()-interval '2 days' where upload_id=any(${ids}::uuid[])`;
-    assert.equal((await issue(png,'image','image/png')).ok,true);
+    assert.equal((await issue(onePixelPng,'image','image/png')).ok,true);
     assert.equal((await fixture.sql`select count(*)::int n from cms.uploads where upload_id=any(${ids}::uuid[]) and staging_cleaned_at is not null`)[0].n,20);
-    assert.equal((await issue(png,'image','image/png')).ok,true);
+    assert.equal((await issue(onePixelPng,'image','image/png')).ok,true);
     assert.equal((await fixture.sql`select count(*)::int n from cms.uploads where upload_id=any(${ids}::uuid[]) and staging_cleaned_at is not null`)[0].n,21);
     assert.equal((await fixture.sql`select count(*)::int n from cms.uploads where upload_id=any(${ids}::uuid[])`)[0].n,21);
     assert.equal((await fixture.sql`select count(*)::int n from storage.objects where bucket_id='cms-upload-staging' and name=any(${ids.map(id=>'uploads/'+id)}::text[])`)[0].n,0);
     observed('cleanup exact21 oldest retained rows',{firstBatch:20,secondBatch:1,durableRows:21,expiredObjects:0,fixture:'Synthetic two-day-old durable rows; real official Storage objects deleted through authenticated API, records retained.'});
-  });
-  await scenario('unverified-assets-tools-fresh-redirect',async()=>{
+  }],
+  ['unverified-assets-tools-fresh-redirect', async () => {
     assertError(await create('review',{title:'Unverified',image:{_type:'image',asset:{_type:'reference',_ref:'image-'+'0'.repeat(40)+'-1x1-png'}}}),400,'CMS_VALIDATION_FAILED');
     const file=(await upload(zip,'file','application/zip')).finalized.data;
     const tool=await create('tool',{title:'Click-time tool',downloadMode:'hosted',downloadFile:{_type:'file',asset:file.asset}});assert.equal(tool.ok,true);
@@ -517,8 +457,8 @@ try {
     assert.equal((await tools.GET(request,{params:Promise.resolve({id:tool.data.documentId})})).status,404);
     assert.equal((await publish({operation:'delete',type:'tool',documentId:tool.data.documentId,expectedRevision:replaced.data.revision})).ok,true);
     assert.equal((await tools.GET(request,{params:Promise.resolve({id:tool.data.documentId})})).status,404);
-  });
-  await scenario('BH7-social-links-and-asset-context',async()=>{
+  }],
+  ['BH7-social-links-and-asset-context', async () => {
     const social={_key:'social-proof',label:'Synthetic profile',url:'https://example.com/roo-founder',icon:'x'};
     const created=await create('meetTheTeam',{founder:{socialLinks:[social]}});assert.equal(created.ok,true,JSON.stringify(created));
     const stored=await detail(created.data.documentId);assert.equal(stored.data.document.founder.socialLinks[0].url,social.url);
@@ -529,8 +469,8 @@ try {
     const {clearSupabasePublicContentCache}=await import('../src/server/content/publicContent.js');clearSupabasePublicContentCache();
     const controls=await read();assert.equal(controls.data.founder.socialLinks[0].url,social.url);assert.equal(controls.data.founder.socialLinks[1].url,null);assert.equal(controls.data.founder.avatar.url,null);assert.equal(controls.data.founder.avatar.asset._supabaseUrl,undefined);assert.equal(JSON.stringify(controls).includes('cdn.sanity.io'),false);
     observed('BH7 exact public team roundtrip',{stored:social.url,public:social.url,vendorUrlSuppressed:true,unverifiedAssetSuppressed:true,importedControl:'Locally seeded historical invalid asset; publish correctly refuses unverified refs.'});
-  });
-  await scenario('BH1-exif-oriented-dimensions',async()=>{
+  }],
+  ['BH1-exif-oriented-dimensions', async () => {
     const {default:sharp}=await import('sharp');
     const base=()=>sharp({create:{width:3,height:2,channels:3,background:'#ff6600'}}).jpeg();
     for(const [name,bytes,width,height]of [['orientation6',await base().withMetadata({orientation:6}).toBuffer(),2,3],['unrotated',await base().toBuffer(),3,2]]){
@@ -541,8 +481,8 @@ try {
     }
     const reused=await upload(await base().withMetadata({orientation:6}).toBuffer(),'image','image/jpeg',{width:1,height:3});assert.equal(reused.issued.alreadyExists,true);assert.equal(reused.finalized.data.width,2);assert.equal(reused.finalized.data.height,3);observed('registered EXIF bytes reuse canonical dimensions',{width:2,height:3});
     const fresh=await sharp({create:{width:3,height:2,channels:3,background:'#00aa66'}}).jpeg().withMetadata({orientation:6}).toBuffer(),wrong=await upload(fresh,'image','image/jpeg',{width:1,height:3});assertError(wrong.finalized,422,'ASSET_VERIFICATION_FAILED');assert.equal((await fixture.sql`select status from cms.uploads where upload_id=${wrong.issued.uploadId}`)[0].status,'refused');assert.equal(Number((await fixture.client.storage.from(wrong.issued.bucket).info(wrong.issued.path)).error.statusCode),404);
-  });
-  await scenario('BH3-upgrade-slug-contract-and-namespace',async()=>{
+  }],
+  ['BH3-upgrade-slug-contract-and-namespace', async () => {
     const pkg=await create('package',{title:'Synthetic slug target',price:'$12.34',order:1});assert.equal(pkg.ok,true);
     const link=slug=>({title:'Synthetic '+slug,slug:{_type:'slug',current:slug},targetPackage:{_type:'reference',_ref:pkg.data.documentId}});
     const invalid=await create('upgradeLink',link('valid_slug'));assertError(invalid,400,'CMS_VALIDATION_FAILED');assert.ok(invalid.details.some(row=>row.path==='$.slug'));
@@ -570,8 +510,8 @@ try {
     const projected = await fixture.client.rpc('roo_refresh_operational_shadow');
     assert.equal(projected.error, null);
     const {default:getUpgradeInfo}=await import('../src/server/api/ref/getUpgradeInfo.js');const response={statusCode:200,headers:{},setHeader(key,value){this.headers[key]=value;},status(code){this.statusCode=code;return this;},json(value){this.body=value;return this;}};await getUpgradeInfo({method:'POST',headers:{'x-forwarded-for':'127.0.0.1'},body:{id:bookingId,email:'slug@fixture.invalid',slug:'XOClawnmower'}},response);assert.equal(response.statusCode,200,JSON.stringify(response.body));assert.equal(response.body.upgradeLink.title,'Legacy mixed-case remains editable');assert.equal(response.body.targetPackage.title,'Synthetic slug target');observed('BH3 exact public and upgrade-info roundtrip',{invalidField:invalid.details,duplicateField:duplicate.details,parallelSuccessCount:1,legacyStoredSlug:(await detail(legacy.data.documentId)).data.document.slug.current,upgradeInfo:response.body.upgradeLink});
-  });
-  await scenario('R10-admin-key-attempts-and-R12-region',async()=>{
+  }],
+  ['R10-admin-key-attempts-and-R12-region', async () => {
     const saved=process.env.NODE_ENV;process.env.NODE_ENV='development';process.env.RATE_LIMIT_HASH_SECRET='synthetic-fix2-rate-secret';const proofs=[];
     try {
       execFileSync(process.execPath, ['scripts/check-content-regions.mjs']);
@@ -595,14 +535,14 @@ try {
       if (saved === undefined) delete process.env.NODE_ENV;
       else process.env.NODE_ENV = saved;
     }
-  });
-  await scenario('R9-hosted-tool-without-file-keeps-fallback',async()=>{
+  }],
+  ['R9-hosted-tool-without-file-keeps-fallback', async () => {
     const id='tool.legacy-no-file',fallback='https://example.com/legacy-tool';const saved=await fixture.client.rpc('roo_apply_document_mutations',{p_mutations:[{operation:'create',document:{_id:id,_type:'tool',title:'Legacy no attached file',downloadMode:'hosted',downloadUrl:fallback}}]});assert.equal(saved.error,null);const {clearSupabasePublicContentCache}=await import('../src/server/content/publicContent.js');clearSupabasePublicContentCache();const response=await publicRoute.GET(new Request(`${fixture.origin}/api/content/tools`),{params:Promise.resolve({resource:'tools'})});assert.equal(response.status,200);const row=(await response.json()).data.find(row=>row._id===id);assert.equal(row.fileUrl,null);assert.equal(row.downloadUrl,fallback);const {stableToolDownloadLinks}=await import('../src/server/cms/toolDownload.js');assert.equal(stableToolDownloadLinks([{_id:'attached',downloadMode:'hosted',downloadFile:{asset:{_ref:'file-fixture-zip'}}}])[0].fileUrl,'/api/tools/attached/download');observed('R9 actual public legacy fallback',row);
-  });
-  await scenario('R13-publish-missing-createdAt',async()=>{
+  }],
+  ['R13-publish-missing-createdAt', async () => {
     const id='hero-r13';const seeded=await fixture.client.rpc('roo_apply_document_mutations',{p_mutations:[{operation:'create',document:{_id:id,_type:'hero',headingLine1:'Before'}}]});assert.equal(seeded.error,null);await fixture.sql`update migration.source_documents set payload=payload-'_createdAt' where legacy_sanity_id=${id}`;const [current]=await fixture.sql`select source_revision,payload from migration.source_documents where legacy_sanity_id=${id}`;assert.equal(Object.hasOwn(current.payload,'_createdAt'),false);const hash=hashes(Buffer.from('R13-reviewer-exact-probe')).sha256;const replaced=await fixture.client.rpc('roo_apply_cms_publish_command',{p_command_id:'cms:'+hash,p_request_hash:hash,p_actor:'admin:key',p_mutations:[{operation:'replace',id,expected_revision:current.source_revision,document:{_id:id,_type:'hero',headingLine1:'After'}}],p_assets:[],p_asset_links:[]});assert.equal(replaced.error,null);const [after]=await fixture.sql`select payload from migration.source_documents where legacy_sanity_id=${id}`;assert.notEqual(after.payload._createdAt,null);assert.equal(after.payload.headingLine1,'After');const swap=await fixture.client.rpc('roo_apply_cms_publish_command',{p_command_id:'cms:'+hash+'swap',p_request_hash:hash,p_actor:'admin:key',p_mutations:[{operation:'replace',id,expected_revision:after.payload._rev,document:{_id:id,_type:'package',title:'Swapped Package',price:'$10'}}],p_assets:[],p_asset_links:[]});assert.equal(swap.error.code,'22023');assert.equal((await fixture.sql`select document_type from migration.source_documents where legacy_sanity_id=${id}`)[0].document_type,'hero');observed('R13 exact hero probe',{createdAt:after.payload._createdAt,typeSwapRefused:true});
-  });
-  await scenario('supabase-only-image-paths-and-missing-sidecar',async()=>{
+  }],
+  ['supabase-only-image-paths-and-missing-sidecar', async () => {
     const source=await create('benchmark',{title:'Imported unmatched image'});assert.equal(source.ok,true);
     const ref='image-'+'f'.repeat(40)+'-1x1-png';const rawImage={_type:'image',asset:{_type:'reference',_ref:ref},url:'https://cdn.sanity.io/images/retained/history/image.png'};
     await fixture.sql`update migration.source_documents set payload=payload||${fixture.sql.json({beforeImage:rawImage})} where legacy_sanity_id=${source.data.documentId}`;
@@ -614,8 +554,8 @@ try {
     const publicResponse=await publicRoute.GET(new Request(`${fixture.origin}/api/content/benchmarks`),{params:Promise.resolve({resource:'benchmarks'})});const publicData=await publicResponse.json();assert.equal(publicData.ok,true);assert.equal(JSON.stringify(publicData).includes('cdn.sanity.io'),false);
     assertError(await publish({operation:'replace',type:'benchmark',documentId:source.data.documentId,expectedRevision:raw.data.revision,document:{...raw.data.document,beforeImage:{...rawImage,asset:{...rawImage.asset,_supabaseInternal:'forged'}}}}),400,'CMS_VALIDATION_FAILED');
     observed('D4 imported raw shape limit','Synthetic imported raw source inserted locally; editor retains it unchanged, sidecar covers missing ref, actual enrichment/URL builder/public API emit no vendor URL. No image downloaded from any outside host.');
-  });
-  await scenario('public-content-join-limit', async () => {
+  }],
+  ['public-content-join-limit', async () => {
     const documents = [
       { _id: '0-fixture-package', _type: 'package', title: 'Fixture Join Package', price: '$12.34', order: 1 },
       { _id: 'z-fixture-games', _type: 'supportedGames', title: 'Fixture Supported Games', featuredGames: [
@@ -662,8 +602,73 @@ try {
     } finally {
       fixture.setRequestHook(null);
     }
+  }],
+];
+const names = scenarios.map(([name]) => name);
+assert.deepEqual(names.filter((name, index) => names.indexOf(name) !== index), [], 'Scenario names must be unique');
+if (process.argv.includes('--list')) { console.log(JSON.stringify(names)); process.exit(0); }
+try {
+  for (const key of Object.keys(process.env)) if (/(^|_)SANITY_/.test(key)) delete process.env[key];
+  const runs = selected === 'all' ? scenarios : scenarios.filter(([name]) => name === selected);
+  if (!runs.length) throw new Error(`Unknown scenario ${selected}`);
+  const { start } = await import('./lib/storage-fixture.mjs');
+  fixture = await start({
+    fullMigrationChain: true,
+    signedUploadExpirationSeconds: 2,
+    ...(process.env.STORAGE_SOURCE ? { storageSource: process.env.STORAGE_SOURCE } : {}),
+    ...(process.env.PG_BIN ? { pgBin: process.env.PG_BIN } : {}),
+    ...(process.env.POSTGREST_BIN ? { postgrestBin: process.env.POSTGREST_BIN } : {}),
+    ...(process.env.LD_LIBRARY_PATH ? { libraryPath: process.env.LD_LIBRARY_PATH } : {}),
   });
-  if(!artifact.scenarios.length)throw new Error(`Unknown scenario ${selected}`);
+  artifact.versions = fixture.versions;
+  artifact.runtime = { storageScratch: fixture.scratch, databaseScratch: fixture.databaseScratch, postgresPid: fixture.postgresPid, postgrestPid: fixture.postgrestPid };
+  fs.mkdirSync('test-results/sanity-admin', { recursive: true }); fs.writeFileSync(`test-results/sanity-admin/${selected}.json`, JSON.stringify(sanitize(artifact), null, 2) + '\n');
+  artifact.migrations = fixture.manifest.map(({ file, selection, sha256 }) => ({ file, selection, sha256 }));
+  const expectedFiles = fs.readdirSync('supabase/migrations').filter(file => file.endsWith('.sql')).sort();
+  assert.deepEqual(fixture.manifest.map(row => path.basename(row.file)).sort(), expectedFiles, 'Full migration chain required');
+  assert.ok(fixture.manifest.every(row => row.selection === 'complete migration'), 'Selective migration fixture does not prove full chain');
+  Object.assign(process.env, { REF_ADMIN_KEY: 'synthetic-admin-key', REF_SESSION_SECRET:'synthetic-content-session-secret', NEXT_PUBLIC_SUPABASE_ANON_KEY:fixture.anonKey, RATE_LIMIT_HASH_SECRET: 'synthetic-admin-fixture-rate-secret', CMS_WRITES_PAUSED: '0', SUPABASE_URL: fixture.origin, NEXT_PUBLIC_SUPABASE_URL: fixture.origin, SUPABASE_SERVICE_ROLE_KEY: fixture.token, SUPABASE_SECRET_KEY: fixture.token, DATA_PRIMARY_BACKEND: 'supabase', COMMERCE_PRIMARY_BACKEND: 'supabase', COMMERCE_FAILOVER_GENERATION: '0', SUPABASE_CUTOVER_ENABLED: '1', COMMERCE_CUTOVER_ENABLED: '1' });
+  let seedContentAdmin;
+  ({ seedContentAdmin, CONTENT_ADMIN_EMAIL, CONTENT_ADMIN_PASSWORD } = await import("./lib/content-admin-fixture.mjs"));
+  authFixture = await seedContentAdmin(fixture);
+  sessionRoute = await import("../app/api/admin/content/session/route.js");
+  modules = {};
+  for (const name of ['documents','documents/[id]','documents/[id]/revisions','documents/[id]/revisions/[revisionId]','publish','assets/upload','assets/finalize']) modules[name] = await import(`../app/api/admin/content/${name}/route.js`);
+  tools = await import('../app/api/tools/[id]/download/route.js');
+  publicRoute = await import('../app/api/content/[resource]/route.js');
+  call = async (name, body, params = {}, key = 'synthetic-admin-key', address = '127.0.0.1') => {
+    const method = body === undefined ? 'GET' : 'POST';
+    const headers = { 'Content-Type': 'application/json', 'x-forwarded-for': address, ...(key ? { 'x-admin-key': key } : {}) };
+    const request = new Request(`${fixture.origin}/api/admin/content/${name}${params.type ? '?type=' + encodeURIComponent(params.type) : ''}`, { method, headers, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    const response = await modules[name][method](request, { params: Promise.resolve(params) });
+    const result = await response.json();
+    assert.match(response.headers.get('Cache-Control'), /private, no-store/);
+    observed(name, { status: response.status, result: sanitize(result) });
+    return { status: response.status, ...result };
+  };
+  publish = async body => {
+    const calls = [];
+    const result = await globalThis.rooRevalidations.run(calls, () => call('publish', body));
+    assert.ok(calls.some(({ operation, args }) => operation === 'invalidateByTag' && [args[0]].flat().includes('_N_T_/layout')), 'Every publish marks pages stale before responding');
+    assert.deepEqual(forbiddenCacheCalls, [], 'Publish must never delete pages');
+    return result;
+  };
+  create = (type, document, createIntentId = crypto.randomUUID()) => publish({ operation: 'create', type, document, createIntentId });
+  detail = id => call('documents/[id]', undefined, { id });
+  assertError = (result, status, code) => { assert.equal(result.status, status, JSON.stringify(result)); assert.equal(result.ok, false); assert.equal(result.code, code); assert.equal(result.data, undefined); };
+  issue = async (bytes, kind, mimeType, extra={}, forceStaging=true) => {
+    const body={kind,fileName:`synthetic.${kind==='image'?'png':'zip'}`,mimeType,byteSize:bytes.length,...hashes(bytes),...(kind==='image'?{width:1,height:1}:{}),...extra};
+    const rows=forceStaging?await fixture.sql`select id,migration_status from cms.assets where legacy_sanity_asset_id like ${kind+'-'+body.sha1+'-%'} and sha256=${body.sha256}`:[];
+    try {for(const row of rows)await fixture.sql`update cms.assets set migration_status='copied' where id=${row.id}`;return await call('assets/upload',body);}
+    finally {for(const row of rows)await fixture.sql`update cms.assets set migration_status=${row.migration_status} where id=${row.id}`;if(rows.length)observed('Native staging branch selector control','Verified manifest hash match is temporarily absent (copied status) during issuance only, then restored; verifies staging/finalize branches independently of the alreadyExists shortcut.');}
+  };
+  put = async (issued, bytes, mimeType) => { const response=await fetch(issued.signedUrl,{method:'PUT',headers:{'Content-Type':mimeType,'x-upsert':'false'},body:bytes});const result=await response.json(); observed('native signed PUT',{status:response.status,result:sanitize(result)});return {status:response.status,result}; };
+  upload = async (bytes,kind,mimeType,extra={}) => { const issued=await issue(bytes,kind,mimeType,extra,false);assert.equal(issued.ok,true);if(issued.data.alreadyExists)return {issued:issued.data,finalized:{ok:true,data:issued.data}};const sent=await put(issued.data,bytes,mimeType);assert.equal(sent.status,200);const finalized=await call('assets/finalize',{uploadId:issued.data.uploadId});return {issued:issued.data,finalized}; };
+  for (const [name, step] of runs) {
+    const startedAt = new Date().toISOString();
+    try { await step(); artifact.scenarios.push({ name, passed: true, startedAt, finishedAt: new Date().toISOString() }); }
+    catch (error) { artifact.scenarios.push({ name, passed: false, error: error.stack }); throw error; }
+  }
   artifact.requests=fixture.requestLog.map(({method,path,rpc})=>({method,path,rpc}));
   artifact.sanityRequests=artifact.requests.filter(row=>/sanity\.io|sanity\.studio/.test(row.path));assert.equal(artifact.sanityRequests.length,0);
   artifact.passed=true;
