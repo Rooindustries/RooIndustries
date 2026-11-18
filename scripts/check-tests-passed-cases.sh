@@ -4,11 +4,12 @@ set -euo pipefail
 cd "$(dirname "$(realpath "$0")")/.."
 root="$PWD"
 cases=.github/tests-passed-cases.json
-expected_cases=48
+expected_cases=64
 work="$(mktemp -d)"
 trap 'rm -rf -- "${work:?}"' EXIT
 
-node --input-type=module -e '
+inspect() {
+  (cd "$1" && node --input-type=module -e '
 import { readFileSync } from "node:fs";
 import yaml from "js-yaml";
 const { jobs } = yaml.load(readFileSync(".github/workflows/tests.yml", "utf8"));
@@ -23,7 +24,10 @@ console.log(JSON.stringify({
   always: gate.if === "always()",
   check: tree.steps.find((s) => s.id === "check") ?? {},
 }));
-' > "$work/gate.json"
+')
+}
+
+inspect "$root" > "$work/gate.json"
 
 missing="$(jq -r '.missing | join(", ")' "$work/gate.json")"
 if [ -n "$missing" ]; then
@@ -105,7 +109,8 @@ for ((i = 0; i < count; i++)); do
     . as $case
     | $needs | map({key: ., value: {
         result: ($case.results[.] // $case.default),
-        outputs: (if . == "tested-tree" and $case.tested != null then {tested: $case.tested} else {} end)
+        outputs: (if . == "tested-tree" and $case.tested != null then {tested: $case.tested}
+          elif . == "jest" and $case.checked != null then {checked: $case.checked} else {} end)
       }}) | from_entries
   ' "$work/case.json")"
   jq -c --slurpfile all "$cases" '
@@ -136,6 +141,49 @@ check_plant "an escaped double-quoted key" "$on_jest    $escaped: true" "    \"c
 check_plant "a single-quoted key" "$on_jest    'timeout-minutes': 30" "    'timeout-minutes': 30"
 check_plant "a quoted key in a flow mapping" "$after_lint      - {run: exit 1, $escaped: true}" "      - {run: exit 1, \"continue\x2Don\x2Derror\": true}"
 check_plant "an explicit key" "$on_jest    ? $escaped\n    : true" "    ? \"continue\x2Don\x2Derror\""
+
+plant() {
+  local name="$1" expected_exit="$2" file="$3" edit="$4" phrase="$5"
+  rm -rf -- "${work:?}/repo"
+  mkdir -p "$work/repo/.github"
+  cp -r .github/workflows .github/actions "$work/repo/.github/"
+  ln -s "$root/node_modules" "$work/repo/node_modules"
+  sed -i "$edit" "$work/repo/$file"
+  exit_code=0
+  output="$(inspect "$work/repo" 2>&1 > /dev/null)" || exit_code=$?
+  judge "the runner on a copy with $name" "$expected_exit" "$phrase"
+}
+
+workflow=.github/workflows/tests.yml
+setup=.github/actions/setup/action.yml
+plant "tests.yml as it is" 0 "$workflow" "" ""
+plant "continue-on-error on a job" 1 "$workflow" "$on_jest    continue-on-error: true" \
+  "$workflow: jobs.jest.continue-on-error"
+plant "continue-on-error on a step" 1 "$workflow" "$after_lint        continue-on-error: true" \
+  "$workflow: jobs.jest.steps[npm run lint].continue-on-error"
+plant "continue-on-error on the step that writes the record" 1 "$workflow" \
+  "/^      - id: gate-cases$/a\\        continue-on-error: true" \
+  "$workflow: jobs.jest.steps[gate-cases].continue-on-error"
+plant "a tagged continue-on-error key" 1 "$workflow" "$on_jest    !!str continue-on-error: true" \
+  "$workflow: jobs.jest.continue-on-error"
+plant "a folded continue-on-error key" 1 "$workflow" "$on_jest    ? >-\n      continue-on-error\n    : true" \
+  "$workflow: jobs.jest.continue-on-error"
+plant "a continue-on-error key folded across lines in a flow mapping" 1 "$workflow" \
+  "$after_lint      - {run: exit 1, ? \"continue-\\\\\n        on-error\" : true}" \
+  "$workflow: jobs.jest.steps[exit 1].continue-on-error"
+plant "continue-on-error: false" 1 "$workflow" "$on_jest    continue-on-error: false" \
+  "$workflow: jobs.jest.continue-on-error"
+plant "continue-on-error as an expression" 1 "$workflow" \
+  "$on_jest    continue-on-error: \${{ github.event_name == 'push' }}" \
+  "$workflow: jobs.jest.continue-on-error"
+plant "an upper-case continue-on-error key" 1 "$workflow" "$on_jest    Continue-On-Error: true" \
+  "$workflow: jobs.jest.Continue-On-Error"
+plant "continue-on-error merged in from another mapping" 1 "$workflow" \
+  "$on_jest    <<: {continue-on-error: true}" \
+  "$workflow: jobs.jest.continue-on-error"
+plant "continue-on-error on a step of a local action" 1 "$setup" \
+  "/^    - uses: actions\/setup-node@v4$/a\\      continue-on-error: true" \
+  "$setup: runs.steps[actions/setup-node@v4].continue-on-error"
 
 echo '{"jobs":[]}' > "$work/jobs.json"
 for event in pull_request merge_group push workflow_dispatch; do
