@@ -11,46 +11,45 @@ trap 'rm -rf -- "${work:?}"' EXIT
 inspect() {
   (cd "$1" && node --input-type=module -e '
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { posix } from "node:path";
 import yaml from "js-yaml";
 const workflow = ".github/workflows/tests.yml";
 const { jobs } = yaml.load(readFileSync(workflow, "utf8"));
 const lenient = [];
-const unreadable = [];
-const uses = [];
+const refused = [];
 const find = (file, node, path) => {
   if (Array.isArray(node)) {
     node.forEach((item, i) => find(file, item, `${path}[${item?.name ?? item?.id ?? item?.uses ?? String(item?.run ?? i).split("\n")[0]}]`));
   } else if (node && typeof node === "object") {
     for (const [key, value] of Object.entries(node)) {
       if (key.toLowerCase() === "continue-on-error") lenient.push(`${file}: ${path}.${key}`);
-      if (key === "uses" && typeof value === "string" && value.startsWith("./")) uses.push({ file, path, value });
+      if (key === "uses" && path.endsWith("]")) check(file, path, value);
+      else if (key === "uses" && /^jobs\.[^.]+$/.test(path)) refused.push(`${file}: ${path} uses ${value}, a reusable workflow the test gate cannot check.`);
       find(file, value, `${path}.${key}`);
     }
   }
 };
+const fits = (dir) => existsSync(`${dir}/action.yml`) && !existsSync(`${dir}/action.yaml`) &&
+  yaml.load(readFileSync(`${dir}/action.yml`, "utf8"))?.runs?.using === "composite";
+function check(file, path, value) {
+  const local = /^\.\/(\.github\/actions\/[A-Za-z0-9_-][A-Za-z0-9._-]*)$/.exec(value)?.[1];
+  const remote = /^([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)(\/[^@\s${}]+)?@[^@\s${}]+$/.exec(value);
+  if (local && !fits(local)) refused.push(`${file}: ${path} uses ${value}, whose folder needs a composite action.yml and no action.yaml.`);
+  else if (!local && !/^docker:\/\/\S+$/.test(value) && (!remote || `${remote[1]}/${remote[2]}`.toLowerCase() === "rooindustries/rooindustries"))
+    refused.push(`${file}: ${path} uses ${value}, which is not ./.github/actions/<name>, an action from another repository or docker://.`);
+}
 find(workflow, jobs, "jobs");
-const scanned = new Set();
-const scan = (file) => {
-  if (scanned.has(file)) return;
-  scanned.add(file);
-  find(file, yaml.load(readFileSync(file, "utf8"))?.runs, "runs");
-};
-readdirSync(".github/actions", { recursive: true }).filter((file) => /(^|\/)action\.ya?ml$/.test(file)).sort()
-  .forEach((file) => scan(`.github/actions/${file}`));
-for (let i = 0; i < uses.length; i++) {
-  const { file, path, value } = uses[i];
-  const files = ["action.yml", "action.yaml"].map((name) => posix.join(value, name)).filter(existsSync);
-  if (!files.length) unreadable.push(`${file}: ${path} uses ${value}, which has no action.yml or action.yaml.`);
-  files.forEach(scan);
+for (const file of readdirSync(".github/actions", { recursive: true }).filter((file) => /(^|\/)action\.ya?ml$/.test(file)).sort()) {
+  const dir = `.github/actions/${file.split("/")[0]}`;
+  if (/^[^/]+\/action\.yml$/.test(file) && fits(dir)) find(`${dir}/action.yml`, yaml.load(readFileSync(`${dir}/action.yml`, "utf8")).runs, "runs");
+  else refused.push(`.github/actions/${file}: every action under .github/actions must be a composite action.yml in its own folder, with no action.yaml beside it.`);
 }
 const record = jobs.jest.steps.find((s) => s.id === "gate-cases");
 const recorded = jobs.jest.outputs?.checked === "${{ steps.gate-cases.outputs.checked }}" &&
   record?.run === "bash scripts/check-tests-passed-cases.sh";
-if (lenient.length || unreadable.length || !recorded) {
+if (lenient.length || refused.length || !recorded) {
   for (const line of lenient) console.error(line);
   if (lenient.length) console.error("The test gate cannot trust these: continue-on-error lets a failed job or step count as passed. Remove it.");
-  for (const line of unreadable) console.error(line);
+  for (const line of refused) console.error(line);
   if (!recorded) console.error("The Jest job must run bash scripts/check-tests-passed-cases.sh in step gate-cases and output checked: ${{ steps.gate-cases.outputs.checked }}, the record the test gate requires.");
   process.exit(1);
 }
