@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$(realpath "$0")")/.."
 cases=.github/tests-passed-cases.json
-expected_cases=39
+expected_cases=41
 work="$(mktemp -d)"
 trap 'rm -rf -- "${work:?}"' EXIT
 
@@ -22,6 +22,7 @@ console.log(JSON.stringify({
   always: gate.if === "always()",
   guard: tree.steps.slice(0, tree.steps.findIndex((s) => s.id === "check"))
     .find((s) => s.name === "Refuse jobs or steps that pass on failure")?.run ?? "",
+  refusalInCheck: /refuse-lenient-tests-workflow\.sh/.test(tree.steps.find((s) => s.id === "check").run),
 }));
 ' > "$work/gate.json"
 
@@ -75,6 +76,7 @@ run_guard() {
     job) sed '/^  jest:$/a\    continue-on-error: true' .github/workflows/tests.yml > "$work/repo/.github/workflows/tests.yml" ;;
     expression) sed '/^  jest:$/a\    continue-on-error: ${{ github.event_name == '"'push'"' }}' .github/workflows/tests.yml > "$work/repo/.github/workflows/tests.yml" ;;
     quoted) sed '/^  jest:$/a\    "continue-on-error": true' .github/workflows/tests.yml > "$work/repo/.github/workflows/tests.yml" ;;
+    escaped) sed '/^  jest:$/a\    "continue\\x2Don\\x2Derror": true' .github/workflows/tests.yml > "$work/repo/.github/workflows/tests.yml" ;;
     step) sed '/^      - run: npm run lint$/a\        continue-on-error: true' .github/workflows/tests.yml > "$work/repo/.github/workflows/tests.yml" ;;
   esac
   exit_code=0
@@ -126,6 +128,29 @@ for event in pull_request merge_group push workflow_dispatch; do
   run_gate "$event" false "$needs"
   judge "a $event run with continue-on-error on jest fails at the tree check" 1 "Tests did not pass: tested-tree=failure"
 done
+
+run_guard escaped
+tree=success
+[ "$exit_code" = 0 ] || tree=failure
+needs="$(jq -cn --argjson needs "$(jq -c .needs "$work/gate.json")" --arg tree "$tree" '
+  $needs | map({key: ., value: (
+    if . != "tested-tree" then {result: "success", outputs: {}}
+    elif $tree == "success" then {result: "success", outputs: {tested: "false"}}
+    else {result: "failure", outputs: {}} end
+  )}) | from_entries
+')"
+run_gate merge_group false "$needs"
+judge "a merge_group run with an escaped continue-on-error key on jest fails at the tree check" 1 "Tests did not pass: tested-tree=failure"
+
+needs="$(jq -cn --argjson needs "$(jq -c .needs "$work/gate.json")" --argjson inside "$(jq .refusalInCheck "$work/gate.json")" '
+  $needs | map({key: ., value: (
+    if . != "tested-tree" then {result: "success", outputs: {}}
+    elif $inside then {result: "success", outputs: {}}
+    else {result: "success", outputs: {tested: "false"}} end
+  )}) | from_entries
+')"
+run_gate merge_group false "$needs"
+judge "a merge_group run whose refusal is masked by continue-on-error fails" 1 "Tests did not pass: invalid test results=failure"
 
 if [ -s "$work/gh-calls" ]; then
   echo "The test gate must judge from needs alone, but it called: $(sort -u "$work/gh-calls" | paste -sd ';')" >&2
