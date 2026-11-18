@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$(realpath "$0")")/.."
 cases=.github/tests-passed-cases.json
-expected_cases=29
+expected_cases=33
 work="$(mktemp -d)"
 trap 'rm -rf -- "${work:?}"' EXIT
 
@@ -19,6 +19,7 @@ console.log(JSON.stringify({
   needs,
   missing: Object.keys(jobs).filter((job) => job !== "tests-passed" && !needs.includes(job)),
   always: gate.if === "always()",
+  guard: jobs["tested-tree"].steps.find((s) => s.name === "Refuse continue-on-error")?.run ?? "",
   continueOnError: Object.keys(jobs).filter((job) => (jobs[job]["continue-on-error"] ?? false) !== false),
 }));
 ' > "$work/gate.json"
@@ -38,6 +39,7 @@ if [ "$(jq -r .always "$work/gate.json")" != true ]; then
   exit 1
 fi
 jq -r .run "$work/gate.json" > "$work/gate.sh"
+jq -r .guard "$work/gate.json" > "$work/guard.sh"
 
 mkdir "$work/bin"
 cat > "$work/bin/gh" <<'STUB'
@@ -49,6 +51,35 @@ chmod +x "$work/bin/gh"
 
 checked=0
 wrong=0
+
+judge() {
+  local name="$1" expected_exit="$2" phrase="$3"
+  checked=$((checked + 1))
+  if [ "$exit_code" != "$expected_exit" ] || ! grep -qxF -- "$phrase" <<< "$output"; then
+    wrong=$((wrong + 1))
+    printf 'Case "%s" should exit %s saying "%s". It exited %s saying:\n%s\n\n' \
+      "$name" "$expected_exit" "$phrase" "$exit_code" "$output" >&2
+  fi
+}
+
+run_gate() {
+  exit_code=0
+  output="$(env PATH="$work/bin:$PATH" JOB_LIST="$work/jobs.json" GH_CALLS="$work/gh-calls" \
+    GITHUB_EVENT_NAME="$1" FORK="$2" NEEDS="$3" \
+    GITHUB_REPOSITORY=Rooindustries/RooIndustries GITHUB_RUN_ID=1 GITHUB_RUN_ATTEMPT=1 \
+    bash -e "$work/gate.sh" 2>&1)" || exit_code=$?
+}
+
+run_guard() {
+  rm -rf -- "${work:?}/repo"
+  mkdir -p "$work/repo/.github/workflows"
+  case "$1" in
+    none) cp .github/workflows/tests.yml "$work/repo/.github/workflows/tests.yml" ;;
+    job) sed '/^  jest:$/a\    continue-on-error: true' .github/workflows/tests.yml > "$work/repo/.github/workflows/tests.yml" ;;
+  esac
+  exit_code=0
+  output="$(cd "$work/repo" && bash -e "$work/guard.sh" 2>&1)" || exit_code=$?
+}
 count="$(jq '.cases | length' "$cases")"
 for ((i = 0; i < count; i++)); do
   jq ".cases[$i]" "$cases" > "$work/case.json"
@@ -66,19 +97,24 @@ for ((i = 0; i < count; i++)); do
         if . == "Check for an already tested tree" then "success" else $list.conclusion end)}
       | if $list.lagging == null or .name == $list.lagging then .status = "in_progress" | .conclusion = null else . end]}
   ' "$work/case.json" > "$work/jobs.json"
-  exit_code=0
-  output="$(env PATH="$work/bin:$PATH" JOB_LIST="$work/jobs.json" GH_CALLS="$work/gh-calls" \
-    GITHUB_EVENT_NAME="$(jq -r .event "$work/case.json")" FORK="$(jq -r .fork "$work/case.json")" \
-    NEEDS="$needs" GITHUB_REPOSITORY=Rooindustries/RooIndustries GITHUB_RUN_ID=1 GITHUB_RUN_ATTEMPT=1 \
-    bash -e "$work/gate.sh" 2>&1)" || exit_code=$?
-  expected_exit="$(jq -r .exit "$work/case.json")"
-  phrase="$(jq -r .phrase "$work/case.json")"
-  checked=$((checked + 1))
-  if [ "$exit_code" != "$expected_exit" ] || ! grep -qxF -- "$phrase" <<< "$output"; then
-    wrong=$((wrong + 1))
-    printf 'Case "%s" should exit %s saying "%s". It exited %s saying:\n%s\n\n' \
-      "$name" "$expected_exit" "$phrase" "$exit_code" "$output" >&2
-  fi
+  run_gate "$(jq -r .event "$work/case.json")" "$(jq -r .fork "$work/case.json")" "$needs"
+  judge "$name" "$(jq -r .exit "$work/case.json")" "$(jq -r .phrase "$work/case.json")"
+done
+
+for event in pull_request merge_group push workflow_dispatch; do
+  run_guard job
+  tree=success
+  [ "$exit_code" = 0 ] || tree=failure
+  needs="$(jq -cn --argjson needs "$(jq -c .needs "$work/gate.json")" --arg tree "$tree" '
+    $needs | map({key: ., value:
+      if . != "tested-tree" then {result: "success", outputs: {}}
+      elif $tree == "success" then {result: "success", outputs: {tested: "false"}}
+      else {result: "failure", outputs: {}} end
+    }) | from_entries
+  ')"
+  echo '{"jobs":[]}' > "$work/jobs.json"
+  run_gate "$event" false "$needs"
+  judge "a $event run with continue-on-error on jest fails at the tree check" 1 "Tests did not pass: tested-tree=failure"
 done
 
 if [ -s "$work/gh-calls" ]; then
