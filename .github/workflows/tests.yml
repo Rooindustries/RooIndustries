@@ -36,9 +36,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PUSH_BEFORE: ${{ github.event.before }}
-        run: |
-          bash scripts/refuse-lenient-tests-workflow.sh
-          bash scripts/tested-tree.sh
+        run: bash scripts/tested-tree.sh
 
   monitoring:
     name: Production-only monitoring
@@ -89,6 +87,8 @@ jobs:
     if: ${{ !cancelled() && needs.tested-tree.outputs.tested != 'true' }}
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-24.04' || vars.TESTS_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 25
+    outputs:
+      checked: ${{ steps.gate-cases.outputs.checked }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -109,7 +109,8 @@ jobs:
       - run: npm run test:playwright-groups
       - run: npm run test:scripts-start
       - run: npm run test:tested-tree
-      - run: bash scripts/check-tests-passed-cases.sh
+      - id: gate-cases
+        run: bash scripts/check-tests-passed-cases.sh
       - run: npm run test:free-ports
       - run: npm run test:fixture-ports
       - run: npm run test:reproducible-build
@@ -708,15 +709,18 @@ jobs:
             && github.event.pull_request.head.repo.full_name != github.repository }}
         run: |
           failed="$(jq -r --arg event "$GITHUB_EVENT_NAME" --argjson fork "$FORK" '
-            if ($event | IN("pull_request", "merge_group", "push", "workflow_dispatch") | not) then
+            (if .jest.result == "success" and .jest.outputs.checked != "true" then
+              [{key: "jest checked", value: {result: (.jest.outputs.checked // "" | if . == "" then "missing" else . end)}}]
+            else [] end) as $record
+            | if ($event | IN("pull_request", "merge_group", "push", "workflow_dispatch") | not) then
               [{key: "invalid test results", value: {result: "failure"}}]
             elif $fork then
-              to_entries | map(select(.value.result != (if .key == "tested-tree" then "skipped" else "success" end)))
+              to_entries | map(select(.value.result != (if .key == "tested-tree" then "skipped" else "success" end))) + $record
             elif .["tested-tree"].outputs.tested == "true" then
               to_entries | map(select(.value.result != (if .key == "tested-tree" then "success" else "skipped" end)))
             else
               .["tested-tree"].outputs.tested as $tested
-              | to_entries | map(select(.value.result != "success"))
+              | to_entries | map(select(.value.result != "success")) + $record
               | if . == [] and $tested != "false" then [{key: "invalid test results", value: {result: "failure"}}] else . end
             end
             | map("\(.key)=\(.value.result)") | join(", ")

@@ -214,6 +214,12 @@
       "event": "pull_request", "fork": true, "tested": null,
       "default": "success", "results": {"tested-tree": "skipped"},
       "exit": 1, "phrase": "Tests did not pass: jest checked=missing"
+    },
+    {
+      "name": "a hand-started run whose Jest record is empty fails and names the record missing",
+      "event": "workflow_dispatch", "fork": false, "tested": "false", "checked": "",
+      "default": "success", "results": {},
+      "exit": 1, "phrase": "Tests did not pass: jest checked=missing"
     }
   ]
 }

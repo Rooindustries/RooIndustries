@@ -4,17 +4,42 @@ set -euo pipefail
 cd "$(dirname "$(realpath "$0")")/.."
 root="$PWD"
 cases=.github/tests-passed-cases.json
-expected_cases=64
+expected_cases=47
 work="$(mktemp -d)"
 trap 'rm -rf -- "${work:?}"' EXIT
 
 inspect() {
   (cd "$1" && node --input-type=module -e '
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import yaml from "js-yaml";
-const { jobs } = yaml.load(readFileSync(".github/workflows/tests.yml", "utf8"));
+const workflow = ".github/workflows/tests.yml";
+const { jobs } = yaml.load(readFileSync(workflow, "utf8"));
+const lenient = [];
+const find = (file, node, path) => {
+  if (Array.isArray(node)) {
+    node.forEach((item, i) => find(file, item, `${path}[${item?.name ?? item?.id ?? item?.uses ?? String(item?.run ?? i).split("\n")[0]}]`));
+  } else if (node && typeof node === "object") {
+    for (const [key, value] of Object.entries(node)) {
+      if (key.toLowerCase() === "continue-on-error") lenient.push(`${file}: ${path}.${key}`);
+      find(file, value, `${path}.${key}`);
+    }
+  }
+};
+find(workflow, jobs, "jobs");
+for (const action of readdirSync(".github/actions").sort()) {
+  const file = [`.github/actions/${action}/action.yml`, `.github/actions/${action}/action.yaml`].find(existsSync);
+  if (file) find(file, yaml.load(readFileSync(file, "utf8")).runs, "runs");
+}
+const record = jobs.jest.steps.find((s) => s.id === "gate-cases");
+const recorded = jobs.jest.outputs?.checked === "${{ steps.gate-cases.outputs.checked }}" &&
+  record?.run === "bash scripts/check-tests-passed-cases.sh";
+if (lenient.length || !recorded) {
+  for (const line of lenient) console.error(line);
+  if (lenient.length) console.error("The test gate cannot trust these: continue-on-error lets a failed job or step count as passed. Remove it.");
+  if (!recorded) console.error("The Jest job must run bash scripts/check-tests-passed-cases.sh in step gate-cases and output checked: ${{ steps.gate-cases.outputs.checked }}, the record the test gate requires.");
+  process.exit(1);
+}
 const gate = jobs["tests-passed"];
-const tree = jobs["tested-tree"];
 const needs = [gate.needs].flat();
 const step = gate.steps.find((s) => s.run);
 console.log(JSON.stringify({
@@ -22,7 +47,6 @@ console.log(JSON.stringify({
   needs,
   missing: Object.keys(jobs).filter((job) => job !== "tests-passed" && !needs.includes(job)),
   always: gate.if === "always()",
-  check: tree.steps.find((s) => s.id === "check") ?? {},
 }));
 ')
 }
@@ -39,13 +63,6 @@ if [ "$(jq -r .always "$work/gate.json")" != true ]; then
   exit 1
 fi
 jq -r .run "$work/gate.json" > "$work/gate.sh"
-check_run="$(jq -r '.check.run // ""' "$work/gate.json")"
-if [ "$(jq -r '.check.shell // ""' "$work/gate.json")" != "" ] ||
-   [ "$(grep -m1 -v '^[[:space:]]*$' <<< "$check_run")" != "bash scripts/refuse-lenient-tests-workflow.sh" ] ||
-   ! grep -qx 'bash scripts/tested-tree.sh' <<< "$check_run"; then
-  echo "The tree check step (id: check) must run bash scripts/refuse-lenient-tests-workflow.sh first and bash scripts/tested-tree.sh after it, in the default shell, so no answer is written when the refusal fails." >&2
-  exit 1
-fi
 
 mkdir "$work/bin"
 cat > "$work/bin/gh" <<'STUB'
@@ -76,31 +93,6 @@ run_gate() {
     bash -e "$work/gate.sh" 2>&1)" || exit_code=$?
 }
 
-run_refusal() {
-  rm -rf -- "${work:?}/repo"
-  mkdir -p "$work/repo/.github/workflows"
-  [ "$1" = missing ] || sed "$1" .github/workflows/tests.yml > "$work/repo/.github/workflows/tests.yml"
-  exit_code=0
-  output="$(cd "$work/repo" && bash "$root/scripts/refuse-lenient-tests-workflow.sh" 2>&1)" || exit_code=$?
-}
-
-check_plant() {
-  local name="$1" plant="$2" line="$3"
-  run_refusal "$plant"
-  judge "the refusal fails on $name" 1 "$(grep -nF -- "$line" "$work/repo/.github/workflows/tests.yml" | head -1)"
-}
-
-tree_needs() {
-  jq -cn --argjson needs "$(jq -c .needs "$work/gate.json")" --arg tree "$1" '
-    $needs | map({key: ., value: (
-      if . != "tested-tree" then {result: "success", outputs: {}}
-      elif $tree == "answered" then {result: "success", outputs: {tested: "false"}}
-      elif $tree == "masked" then {result: "success", outputs: {}}
-      else {result: "failure", outputs: {}} end
-    )}) | from_entries
-  '
-}
-
 count="$(jq '.cases | length' "$cases")"
 for ((i = 0; i < count; i++)); do
   jq ".cases[$i]" "$cases" > "$work/case.json"
@@ -125,23 +117,6 @@ done
 
 on_jest='/^  jest:$/a\'
 after_lint='/^      - run: npm run lint$/a\'
-on_check='/^      - id: check$/a\'
-escaped='"continue\\x2Don\\x2Derror"'
-
-run_refusal ""
-judge "the refusal accepts tests.yml as it is" 0 ""
-run_refusal missing
-judge "the refusal fails when it cannot read tests.yml" 1 "grep: .github/workflows/tests.yml: No such file or directory"
-check_plant "continue-on-error on a job" "$on_jest    continue-on-error: true" "    continue-on-error: true"
-check_plant "continue-on-error with an expression" "$on_jest    continue-on-error: \${{ github.event_name == 'push' }}" "    continue-on-error: \${{"
-check_plant "continue-on-error on a step" "$after_lint        continue-on-error: true" "        continue-on-error: true"
-check_plant "continue-on-error on the check step" "$on_check        continue-on-error: true" "        continue-on-error: true"
-check_plant "an upper-case spelling" "$on_jest    Continue-On-Error: true" "    Continue-On-Error: true"
-check_plant "an escaped double-quoted key" "$on_jest    $escaped: true" "    \"continue\x2Don\x2Derror\": true"
-check_plant "a single-quoted key" "$on_jest    'timeout-minutes': 30" "    'timeout-minutes': 30"
-check_plant "a quoted key in a flow mapping" "$after_lint      - {run: exit 1, $escaped: true}" "      - {run: exit 1, \"continue\x2Don\x2Derror\": true}"
-check_plant "an explicit key" "$on_jest    ? $escaped\n    : true" "    ? \"continue\x2Don\x2Derror\""
-
 plant() {
   local name="$1" expected_exit="$2" file="$3" edit="$4" phrase="$5"
   rm -rf -- "${work:?}/repo"
@@ -184,20 +159,9 @@ plant "continue-on-error merged in from another mapping" 1 "$workflow" \
 plant "continue-on-error on a step of a local action" 1 "$setup" \
   "/^    - uses: actions\/setup-node@v4$/a\\      continue-on-error: true" \
   "$setup: runs.steps[actions/setup-node@v4].continue-on-error"
-
-echo '{"jobs":[]}' > "$work/jobs.json"
-for event in pull_request merge_group push workflow_dispatch; do
-  run_refusal "$on_jest    $escaped: true"
-  tree=answered
-  [ "$exit_code" = 0 ] || tree=failed
-  run_gate "$event" false "$(tree_needs "$tree")"
-  judge "a $event run with an escaped continue-on-error key on jest fails at the tree check" 1 "Tests did not pass: tested-tree=failure"
-  run_refusal "$on_check        continue-on-error: true"
-  tree=answered
-  [ "$exit_code" = 0 ] || tree=masked
-  run_gate "$event" false "$(tree_needs "$tree")"
-  judge "a $event run whose refusal is masked by continue-on-error on the check step fails" 1 "Tests did not pass: invalid test results=failure"
-done
+plant "a Jest record not written by this script" 1 "$workflow" \
+  "s/checked: \${{ steps.gate-cases.outputs.checked }}/checked: \"true\"/" \
+  "The Jest job must run bash scripts/check-tests-passed-cases.sh in step gate-cases and output checked: \${{ steps.gate-cases.outputs.checked }}, the record the test gate requires."
 
 if [ -s "$work/gh-calls" ]; then
   echo "The test gate must judge from needs alone, but it called: $(sort -u "$work/gh-calls" | paste -sd ';')" >&2
@@ -212,3 +176,6 @@ if [ "$checked" != "$expected_cases" ]; then
   exit 1
 fi
 echo "Test gate cases judged as expected: all $checked."
+if [ -n "${GITHUB_OUTPUT:-}" ]; then
+  echo checked=true >> "$GITHUB_OUTPUT"
+fi
