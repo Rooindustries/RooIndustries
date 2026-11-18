@@ -1,0 +1,25 @@
+name: Booking model cache
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/check-booking-model.sh
+      - .github/actions/booking-model/action.yml
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  booking-model:
+    name: Booking hold model on main
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/booking-model
