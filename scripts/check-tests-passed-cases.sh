@@ -36,9 +36,7 @@ const scan = (file) => {
   scanned.add(file);
   find(file, yaml.load(readFileSync(file, "utf8"))?.runs, "runs");
 };
-readdirSync(".github/actions", { recursive: true })
-  .filter((file) => /(^|\/)action\.ya?ml$/.test(file))
-  .sort()
+readdirSync(".github/actions", { recursive: true }).filter((file) => /(^|\/)action\.ya?ml$/.test(file)).sort()
   .forEach((file) => scan(`.github/actions/${file}`));
 for (let i = 0; i < uses.length; i++) {
   const { file, path, value } = uses[i];
