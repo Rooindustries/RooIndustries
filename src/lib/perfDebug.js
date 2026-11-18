@@ -1,7 +1,8 @@
 import { readBrowserStorage, writeBrowserStorage, removeBrowserStorage } from "./browserStorage";
 
 let memoryToggles = null;
-let enabledOverride = null;
+let memoryEnabled = null;
+let queryApplied = false;
 
 export const PERF_DEBUG_STORAGE_KEY = "roo_perf_debug";
 export const PERF_DEBUG_TOGGLES_KEY = "roo_perf_debug_toggles";
@@ -48,13 +49,20 @@ const getQueryPerfDebug = () => {
   return value === "1";
 };
 
+const storeEnabled = (enabled) => {
+  const stored = enabled
+    ? writeBrowserStorage("localStorage", PERF_DEBUG_STORAGE_KEY, "1")
+    : removeBrowserStorage("localStorage", PERF_DEBUG_STORAGE_KEY);
+  memoryEnabled = stored ? null : enabled;
+};
+
 export const isPerfDebugEnabled = () => {
   if (!isBrowser()) return false;
-  if (enabledOverride !== null) return enabledOverride;
-  if (getQueryPerfDebug()) {
-    writeBrowserStorage("localStorage", PERF_DEBUG_STORAGE_KEY, "1");
-    return true;
+  if (!queryApplied) {
+    queryApplied = true;
+    if (getQueryPerfDebug()) storeEnabled(true);
   }
+  if (memoryEnabled !== null) return memoryEnabled;
   return readBrowserStorage("localStorage", PERF_DEBUG_STORAGE_KEY) === "1";
 };
 
@@ -70,8 +78,8 @@ export const readPerfDebugToggles = () => {
 
 const writePerfDebugToggles = (toggles) => {
   if (!isBrowser()) return;
-  memoryToggles = { ...toggles };
-  writeBrowserStorage("localStorage", PERF_DEBUG_TOGGLES_KEY, JSON.stringify(toggles));
+  const stored = writeBrowserStorage("localStorage", PERF_DEBUG_TOGGLES_KEY, JSON.stringify(toggles));
+  memoryToggles = stored ? null : { ...toggles };
 };
 
 export const dispatchPerfDebugChange = (detail = {}) => {
@@ -106,12 +114,7 @@ export const syncPerfDebugFromEnvironment = () => {
 
 export const setPerfDebugEnabled = (enabled) => {
   if (!isBrowser()) return;
-  enabledOverride = Boolean(enabled);
-  if (enabled) {
-    writeBrowserStorage("localStorage", PERF_DEBUG_STORAGE_KEY, "1");
-  } else {
-    removeBrowserStorage("localStorage", PERF_DEBUG_STORAGE_KEY);
-  }
+  storeEnabled(Boolean(enabled));
   const toggles = readPerfDebugToggles();
   applyPerfDebugClasses(toggles);
   dispatchPerfDebugChange({ enabled, toggles });
@@ -136,7 +139,16 @@ export const setPerfDebugToggle = (key, enabled) => {
 export const subscribePerfDebugChanges = (callback) => {
   if (!isBrowser()) return () => {};
   const handler = (event) => callback?.(event?.detail || {});
+  const storageHandler = (event) => {
+    if (event.key === PERF_DEBUG_STORAGE_KEY || event.key === null) memoryEnabled = null;
+    if (event.key === PERF_DEBUG_TOGGLES_KEY || event.key === null) memoryToggles = null;
+    if ([PERF_DEBUG_STORAGE_KEY, PERF_DEBUG_TOGGLES_KEY, null].includes(event.key)) callback?.({});
+  };
   window.addEventListener(PERF_DEBUG_EVENT, handler);
-  return () => window.removeEventListener(PERF_DEBUG_EVENT, handler);
+  window.addEventListener("storage", storageHandler);
+  return () => {
+    window.removeEventListener(PERF_DEBUG_EVENT, handler);
+    window.removeEventListener("storage", storageHandler);
+  };
 };
 

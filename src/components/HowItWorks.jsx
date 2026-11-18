@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import {
   PERF_TOGGLE_KEYS,
   getPerfToggleEnabled,
+  isPerfDebugEnabled,
   subscribePerfDebugChanges,
 } from "../lib/perfDebug";
 import homeCopy from "../lib/homeCopy";
@@ -127,7 +128,7 @@ export default function HowItWorks({ initialData = null }) {
   useEffect(() => {
     const syncPauseState = () => {
       setPauseVideos(
-        getPerfToggleEnabled(PERF_TOGGLE_KEYS.PAUSE_HOWITWORKS_VIDEOS)
+        isPerfDebugEnabled() && getPerfToggleEnabled(PERF_TOGGLE_KEYS.PAUSE_HOWITWORKS_VIDEOS)
       );
     };
 

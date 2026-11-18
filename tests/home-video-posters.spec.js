@@ -70,6 +70,7 @@ test.describe("How It Works videos", () => {
     await expect.poll(() => video.evaluate(node => !node.paused && node.readyState >= 3), { timeout: 15000 }).toBe(true);
     await page.evaluate(() => document.querySelectorAll(".ri-hiw-video img, .ri-hiw-video video").forEach(node => { node.dataset.firstMount = "1"; }));
     await page.evaluate(() => {
+      localStorage.setItem("roo_perf_debug", "1");
       localStorage.setItem("roo_perf_debug_toggles", JSON.stringify({ pauseHowItWorksVideos: true }));
       window.dispatchEvent(new CustomEvent("roo-perf-debug-change"));
     });
