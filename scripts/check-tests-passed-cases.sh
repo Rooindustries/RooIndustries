@@ -2,8 +2,9 @@
 set -euo pipefail
 
 cd "$(dirname "$(realpath "$0")")/.."
+root="$PWD"
 cases=.github/tests-passed-cases.json
-expected_cases=41
+expected_cases=48
 work="$(mktemp -d)"
 trap 'rm -rf -- "${work:?}"' EXIT
 
@@ -20,9 +21,7 @@ console.log(JSON.stringify({
   needs,
   missing: Object.keys(jobs).filter((job) => job !== "tests-passed" && !needs.includes(job)),
   always: gate.if === "always()",
-  guard: tree.steps.slice(0, tree.steps.findIndex((s) => s.id === "check"))
-    .find((s) => s.name === "Refuse jobs or steps that pass on failure")?.run ?? "",
-  refusalInCheck: /refuse-lenient-tests-workflow\.sh/.test(tree.steps.find((s) => s.id === "check").run),
+  check: tree.steps.find((s) => s.id === "check") ?? {},
 }));
 ' > "$work/gate.json"
 
@@ -36,7 +35,13 @@ if [ "$(jq -r .always "$work/gate.json")" != true ]; then
   exit 1
 fi
 jq -r .run "$work/gate.json" > "$work/gate.sh"
-jq -r .guard "$work/gate.json" > "$work/guard.sh"
+check_run="$(jq -r '.check.run // ""' "$work/gate.json")"
+if [ "$(jq -r '.check.shell // ""' "$work/gate.json")" != "" ] ||
+   [ "$(grep -m1 -v '^[[:space:]]*$' <<< "$check_run")" != "bash scripts/refuse-lenient-tests-workflow.sh" ] ||
+   ! grep -qx 'bash scripts/tested-tree.sh' <<< "$check_run"; then
+  echo "The tree check step (id: check) must run bash scripts/refuse-lenient-tests-workflow.sh first and bash scripts/tested-tree.sh after it, in the default shell, so no answer is written when the refusal fails." >&2
+  exit 1
+fi
 
 mkdir "$work/bin"
 cat > "$work/bin/gh" <<'STUB'
@@ -67,21 +72,31 @@ run_gate() {
     bash -e "$work/gate.sh" 2>&1)" || exit_code=$?
 }
 
-run_guard() {
+run_refusal() {
   rm -rf -- "${work:?}/repo"
   mkdir -p "$work/repo/.github/workflows"
-  case "$1" in
-    missing) ;;
-    none) cp .github/workflows/tests.yml "$work/repo/.github/workflows/tests.yml" ;;
-    job) sed '/^  jest:$/a\    continue-on-error: true' .github/workflows/tests.yml > "$work/repo/.github/workflows/tests.yml" ;;
-    expression) sed '/^  jest:$/a\    continue-on-error: ${{ github.event_name == '"'push'"' }}' .github/workflows/tests.yml > "$work/repo/.github/workflows/tests.yml" ;;
-    quoted) sed '/^  jest:$/a\    "continue-on-error": true' .github/workflows/tests.yml > "$work/repo/.github/workflows/tests.yml" ;;
-    escaped) sed '/^  jest:$/a\    "continue\\x2Don\\x2Derror": true' .github/workflows/tests.yml > "$work/repo/.github/workflows/tests.yml" ;;
-    step) sed '/^      - run: npm run lint$/a\        continue-on-error: true' .github/workflows/tests.yml > "$work/repo/.github/workflows/tests.yml" ;;
-  esac
+  [ "$1" = missing ] || sed "$1" .github/workflows/tests.yml > "$work/repo/.github/workflows/tests.yml"
   exit_code=0
-  output="$(cd "$work/repo" && bash -e "$work/guard.sh" 2>&1)" || exit_code=$?
+  output="$(cd "$work/repo" && bash "$root/scripts/refuse-lenient-tests-workflow.sh" 2>&1)" || exit_code=$?
 }
+
+check_plant() {
+  local name="$1" plant="$2" line="$3"
+  run_refusal "$plant"
+  judge "the refusal fails on $name" 1 "$(grep -nF -- "$line" "$work/repo/.github/workflows/tests.yml" | head -1)"
+}
+
+tree_needs() {
+  jq -cn --argjson needs "$(jq -c .needs "$work/gate.json")" --arg tree "$1" '
+    $needs | map({key: ., value: (
+      if . != "tested-tree" then {result: "success", outputs: {}}
+      elif $tree == "answered" then {result: "success", outputs: {tested: "false"}}
+      elif $tree == "masked" then {result: "success", outputs: {}}
+      else {result: "failure", outputs: {}} end
+    )}) | from_entries
+  '
+}
+
 count="$(jq '.cases | length' "$cases")"
 for ((i = 0; i < count; i++)); do
   jq ".cases[$i]" "$cases" > "$work/case.json"
@@ -103,54 +118,38 @@ for ((i = 0; i < count; i++)); do
   judge "$name" "$(jq -r .exit "$work/case.json")" "$(jq -r .phrase "$work/case.json")"
 done
 
-run_guard none
-judge "the tree check accepts tests.yml as it is" 0 ""
-run_guard missing
-judge "the tree check fails when it cannot read tests.yml" 1 "grep: .github/workflows/tests.yml: No such file or directory"
-for plant in job expression quoted step; do
-  run_guard "$plant"
-  judge "the tree check refuses continue-on-error planted as $plant" 1 \
-    "$(grep -nE 'continue[-]on[-]error' "$work/repo/.github/workflows/tests.yml")"
-done
+on_jest='/^  jest:$/a\'
+after_lint='/^      - run: npm run lint$/a\'
+on_check='/^      - id: check$/a\'
+escaped='"continue\\x2Don\\x2Derror"'
 
+run_refusal ""
+judge "the refusal accepts tests.yml as it is" 0 ""
+run_refusal missing
+judge "the refusal fails when it cannot read tests.yml" 1 "grep: .github/workflows/tests.yml: No such file or directory"
+check_plant "continue-on-error on a job" "$on_jest    continue-on-error: true" "    continue-on-error: true"
+check_plant "continue-on-error with an expression" "$on_jest    continue-on-error: \${{ github.event_name == 'push' }}" "    continue-on-error: \${{"
+check_plant "continue-on-error on a step" "$after_lint        continue-on-error: true" "        continue-on-error: true"
+check_plant "continue-on-error on the check step" "$on_check        continue-on-error: true" "        continue-on-error: true"
+check_plant "an upper-case spelling" "$on_jest    Continue-On-Error: true" "    Continue-On-Error: true"
+check_plant "an escaped double-quoted key" "$on_jest    $escaped: true" "    \"continue\x2Don\x2Derror\": true"
+check_plant "a single-quoted key" "$on_jest    'timeout-minutes': 30" "    'timeout-minutes': 30"
+check_plant "a quoted key in a flow mapping" "$after_lint      - {run: exit 1, $escaped: true}" "      - {run: exit 1, \"continue\x2Don\x2Derror\": true}"
+check_plant "an explicit key" "$on_jest    ? $escaped\n    : true" "    ? \"continue\x2Don\x2Derror\""
+
+echo '{"jobs":[]}' > "$work/jobs.json"
 for event in pull_request merge_group push workflow_dispatch; do
-  run_guard job
-  tree=success
-  [ "$exit_code" = 0 ] || tree=failure
-  needs="$(jq -cn --argjson needs "$(jq -c .needs "$work/gate.json")" --arg tree "$tree" '
-    $needs | map({key: ., value: (
-      if . != "tested-tree" then {result: "success", outputs: {}}
-      elif $tree == "success" then {result: "success", outputs: {tested: "false"}}
-      else {result: "failure", outputs: {}} end
-    )}) | from_entries
-  ')"
-  echo '{"jobs":[]}' > "$work/jobs.json"
-  run_gate "$event" false "$needs"
-  judge "a $event run with continue-on-error on jest fails at the tree check" 1 "Tests did not pass: tested-tree=failure"
+  run_refusal "$on_jest    $escaped: true"
+  tree=answered
+  [ "$exit_code" = 0 ] || tree=failed
+  run_gate "$event" false "$(tree_needs "$tree")"
+  judge "a $event run with an escaped continue-on-error key on jest fails at the tree check" 1 "Tests did not pass: tested-tree=failure"
+  run_refusal "$on_check        continue-on-error: true"
+  tree=answered
+  [ "$exit_code" = 0 ] || tree=masked
+  run_gate "$event" false "$(tree_needs "$tree")"
+  judge "a $event run whose refusal is masked by continue-on-error on the check step fails" 1 "Tests did not pass: invalid test results=failure"
 done
-
-run_guard escaped
-tree=success
-[ "$exit_code" = 0 ] || tree=failure
-needs="$(jq -cn --argjson needs "$(jq -c .needs "$work/gate.json")" --arg tree "$tree" '
-  $needs | map({key: ., value: (
-    if . != "tested-tree" then {result: "success", outputs: {}}
-    elif $tree == "success" then {result: "success", outputs: {tested: "false"}}
-    else {result: "failure", outputs: {}} end
-  )}) | from_entries
-')"
-run_gate merge_group false "$needs"
-judge "a merge_group run with an escaped continue-on-error key on jest fails at the tree check" 1 "Tests did not pass: tested-tree=failure"
-
-needs="$(jq -cn --argjson needs "$(jq -c .needs "$work/gate.json")" --argjson inside "$(jq .refusalInCheck "$work/gate.json")" '
-  $needs | map({key: ., value: (
-    if . != "tested-tree" then {result: "success", outputs: {}}
-    elif $inside then {result: "success", outputs: {}}
-    else {result: "success", outputs: {tested: "false"}} end
-  )}) | from_entries
-')"
-run_gate merge_group false "$needs"
-judge "a merge_group run whose refusal is masked by continue-on-error fails" 1 "Tests did not pass: invalid test results=failure"
 
 if [ -s "$work/gh-calls" ]; then
   echo "The test gate must judge from needs alone, but it called: $(sort -u "$work/gh-calls" | paste -sd ';')" >&2
