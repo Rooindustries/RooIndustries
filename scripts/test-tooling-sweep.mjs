@@ -349,7 +349,7 @@ await run('native-cms-and-download-token', async () => {
   const runs=new Map();for(const {name} of proof.scenarios)runs.set(name,(runs.get(name)||0)+1);
   const problems={failed:proof.scenarios.filter(row=>!row.passed).map(row=>row.name),notRun:listed.filter(name=>!runs.has(name)),moreThanOnce:[...runs].filter(([,count])=>count>1).map(([name])=>name),unexpected:[...runs.keys()].filter(name=>!listed.includes(name))};
   assert.ok(Object.values(problems).every(names=>!names.length),`Admin scenarios ${JSON.stringify(problems)}: ${proof.error||''}`);
-  assert.equal(result.status,0,result.stderr+result.stdout);
+  assert.equal(result.status,0,`Admin scenarios exit ${result.status}, signal ${result.signal}: ${result.stderr}${result.stdout}`);
   assert.equal(proof.passed,true);assert.equal(proof.cleanup.stopped,true);
   const saved=process.env.DOWNLOAD_TOKEN_SECRET;process.env.DOWNLOAD_TOKEN_SECRET='synthetic-tooling-download-secret';
   try {
