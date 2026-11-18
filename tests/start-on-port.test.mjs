@@ -578,37 +578,67 @@ setInterval(() => {}, 1000);`], { stdio: ["ignore", "pipe", "inherit"] });
   }
 });
 
+const takePid = [
+  "use POSIX ();",
+  "my ($nr, $pid) = @ARGV;",
+  "pipe(my $ready, my $tell) or die \"pipe: $!\\n\";",
+  "my $want = pack('i', $pid);",
+  "my $args = pack('Q11', 0, 0, 0, 0, 17, 0, 0, 0, unpack('Q', pack('p', $want)), 1, 0);",
+  "my $got = syscall($nr + 0, $args, length $args);",
+  "die \"clone3: $!\\n\" if $got < 0;",
+  "if ($got == 0) {",
+  "  close $ready;",
+  "  open STDIN, '<', '/dev/null'; open STDOUT, '>', '/dev/null'; open STDERR, '>', '/dev/null';",
+  "  defined POSIX::setsid() or POSIX::_exit(1);",
+  "  syswrite $tell, 'x'; close $tell;",
+  "  exec 'sleep', '300'; POSIX::_exit(127);",
+  "}",
+  "close $tell;",
+  "$SIG{ALRM} = sub { die \"the new process never reported back\\n\" };",
+  "alarm 10;",
+  "sysread($ready, my $led, 1) == 1 or die \"setsid failed in the new process\\n\";",
+  "print \"$got\\n\";",
+].join("\n");
+
 test("a fixture whose exit callback stops another that exited with it never signals the reused PID", async () => {
+  const clone3 = { x64: 435, arm64: 435 }[process.arch];
+  assert.ok(clone3, `no clone3 syscall number for ${process.arch}`);
   const program = `import fs from "node:fs";
-import { spawn } from "node:child_process";
+import { spawnSync } from "node:child_process";
 const { startChildOnPorts, stopChild } = await import(${library("start-on-port.mjs")});
 const wait = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 const zombie = (pid) => { try { return fs.readFileSync("/proc/" + pid + "/stat", "utf8").split(") ")[1][0] === "Z"; } catch { return false; } };
 const start = () => startChildOnPorts({ host: "127.0.0.1", requested: [0], output: () => "", spawnChild: ([port], launch) => launch.spawn(process.execPath, ["-e", 'require("http").createServer().listen(' + port + ', "127.0.0.1")']) });
 const fixtures = [await start(), await start()];
-let victim, target;
+let victim, target, victimLed = false, takeError = "", stopped = 0;
 const stopOther = (other) => () => {
   if (!victim && other.child.exitCode === null && other.child.signalCode === null && !fs.existsSync("/proc/" + other.child.pid)) {
     target = other.child.pid;
     const grouped = () => fs.readdirSync("/proc").some((entry) => { try { return /^\\d+$/.test(entry) && Number(fs.readFileSync("/proc/" + entry + "/stat", "utf8").split(") ")[1].split(" ")[2]) === target; } catch { return false; } });
     for (let tries = 0; tries < 500 && grouped(); tries += 1) wait(10);
-    fs.writeFileSync("/proc/sys/kernel/ns_last_pid", String(target - 1));
-    victim = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore", detached: true });
+    const taken = spawnSync("perl", ["-e", ${JSON.stringify(takePid)}, "${clone3}", String(target)], { encoding: "utf8" });
+    victim = Number((taken.stdout ?? "").trim()) || null;
+    takeError = taken.error?.message ?? (taken.stderr ?? "").trim();
+    try { victimLed = Boolean(victim) && Number(fs.readFileSync("/proc/" + victim + "/stat", "utf8").split(") ")[1].split(" ")[2]) === victim; } catch { victimLed = false; }
   }
   stopChild(other.child);
+  stopped += 1;
 };
 fixtures[0].child.once("exit", stopOther(fixtures[1]));
 fixtures[1].child.once("exit", stopOther(fixtures[0]));
 for (const { child } of fixtures) process.kill(-child.pid, "SIGKILL");
 for (let tries = 0; tries < 500 && !fixtures.every(({ child }) => zombie(child.pid)); tries += 1) wait(10);
-await new Promise((resolve) => setTimeout(resolve, 500));
-console.log(JSON.stringify({ reused: Boolean(victim) && victim.pid === target, victimAlive: victim ? victim.exitCode === null && victim.signalCode === null : null }));
-victim?.kill("SIGKILL");
+for (let tries = 0; tries < 1000 && stopped < 2; tries += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+await new Promise((resolve) => setTimeout(resolve, 1000));
+console.log(JSON.stringify({ stopped, takeError, victimLed, reused: Boolean(victim) && victim === target, victimAlive: victim ? fs.existsSync("/proc/" + victim) && !zombie(victim) : null }));
+if (victim && fs.existsSync("/proc/" + victim)) process.kill(victim, "SIGKILL");
 process.exit(0);`;
   const run = spawnSync("unshare", ["--user", "--map-root-user", "--pid", "--fork", "--mount-proc", "--", "/bin/sh", "-c", "\"$@\"; exit $?", "sh", process.execPath, "--input-type=module", "-e", program], { encoding: "utf8", timeout: 60000 });
   assert.equal(run.status, 0, run.stderr);
   const result = JSON.parse(run.stdout.trim().split("\n").at(-1));
-  assert.equal(result.reused, true, "the second fixture's PID was not reused, so the race never happened");
+  assert.equal(result.stopped, 2, "a fixture's exit callback never ran");
+  assert.equal(result.reused, true, `the second fixture's PID was not reused, so the race never happened: ${result.takeError}`);
+  assert.equal(result.victimLed, true, "the process that took the reused PID does not lead its own process group");
   assert.equal(result.victimAlive, true, "stopping the second fixture signalled the unrelated process that took its PID");
 });
 
