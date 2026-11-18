@@ -337,9 +337,19 @@ await run('fix-b-config', async () => {
   return {cases,loopbackAllowlist:['127.0.0.1','localhost','[::1]'],lighthouseDefault:lighthouse.ci.collect.url,lighthouseEnvScript:scripts['audit:lighthouse'],missingRehearsalArguments:{exit:missing.status,stderr:missing.stderr},productionRequests:0};
 });
 await run('native-cms-and-download-token', async () => {
-  const result=spawnSync(process.execPath,['scripts/test-sanity-admin.mjs','--scenario=create-replay-lost-response-revisions'],{cwd:root,encoding:'utf8',timeout:120000,env:{PATH:process.env.PATH,HOME:process.env.HOME,NODE_ENV:'test',ROO_TEST_HOST:testHost,...Object.fromEntries(['TMPDIR','STORAGE_SOURCE','PG_BIN','POSTGREST_BIN','LD_LIBRARY_PATH'].filter(key=>process.env[key]).map(key=>[key,process.env[key]]))}});
-  assert.equal(result.status,0,result.stderr+result.stdout);
-  const proof=JSON.parse(fs.readFileSync('test-results/sanity-admin/create-replay-lost-response-revisions.json','utf8'));
+  const env={PATH:process.env.PATH,HOME:process.env.HOME,NODE_ENV:'test',ROO_TEST_HOST:testHost,...Object.fromEntries(['TMPDIR','STORAGE_SOURCE','PG_BIN','POSTGREST_BIN','LD_LIBRARY_PATH'].filter(key=>process.env[key]).map(key=>[key,process.env[key]]))};
+  const list=spawnSync(process.execPath,['scripts/test-sanity-admin.mjs','--list'],{cwd:root,encoding:'utf8',timeout:30000,env});
+  assert.equal(list.status,0,list.stderr+list.stdout);
+  const listed=JSON.parse(list.stdout);assert.ok(Array.isArray(listed)&&listed.length&&listed.every(name=>typeof name==='string'),list.stdout);
+  const proofPath='test-results/sanity-admin/all.json';fs.rmSync(proofPath,{force:true});
+  const result=spawnSync(process.execPath,['scripts/test-sanity-admin.mjs'],{cwd:root,encoding:'utf8',timeout:300000,env});
+  console.log(result.stdout.split('\n').findLast(line=>line.startsWith('{"passed":'))??`Admin scenarios printed no summary (exit ${result.status}, signal ${result.signal})`);
+  assert.ok(fs.existsSync(proofPath),`No admin artifact from this run (exit ${result.status}, signal ${result.signal}): ${result.stderr.slice(-4000)}`);
+  const proof=JSON.parse(fs.readFileSync(proofPath,'utf8'));
+  const runs=new Map();for(const {name} of proof.scenarios)runs.set(name,(runs.get(name)||0)+1);
+  const problems={failed:proof.scenarios.filter(row=>!row.passed).map(row=>row.name),notRun:listed.filter(name=>!runs.has(name)),moreThanOnce:[...runs].filter(([,count])=>count>1).map(([name])=>name),unexpected:[...runs.keys()].filter(name=>!listed.includes(name))};
+  assert.ok(Object.values(problems).every(names=>!names.length),`Admin scenarios ${JSON.stringify(problems)}: ${proof.error||''}`);
+  assert.equal(result.status,0,`Admin scenarios exit ${result.status}, signal ${result.signal}: ${result.stderr}${result.stdout}`);
   assert.equal(proof.passed,true);assert.equal(proof.cleanup.stopped,true);
   const saved=process.env.DOWNLOAD_TOKEN_SECRET;process.env.DOWNLOAD_TOKEN_SECRET='synthetic-tooling-download-secret';
   try {
@@ -350,7 +360,7 @@ await run('native-cms-and-download-token', async () => {
       const response=verifyDownloadToken({token,nowMs:now});assert.equal(response.ok,skew<=60);if(skew>60)assert.equal(response.reason,'download_token_invalid_claims');
       assert.equal(verifyDownloadToken({token,nowMs:now+(skew+600)*1000}).reason,'download_token_expired');cases.push({skew,accepted:response.ok});
     }
-    return {rule:'D6/P4 native command receipt/revision checks replace retired mirror waits',nativeArtifact:'test-results/sanity-admin/create-replay-lost-response-revisions.json',migrations:proof.migrations.length,cases,productionRequests:0};
+    return {rule:'D6/P4 native command receipt/revision checks replace retired mirror waits',nativeArtifact:proofPath,scenarios:proof.scenarios.map(({name,passed})=>({name,passed})),migrations:proof.migrations.length,cases,productionRequests:0};
   } finally {if(saved===undefined)delete process.env.DOWNLOAD_TOKEN_SECRET;else process.env.DOWNLOAD_TOKEN_SECRET=saved;}
 });
 
