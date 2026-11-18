@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$(realpath "$0")")/.."
 cases=.github/tests-passed-cases.json
-expected_cases=33
+expected_cases=39
 work="$(mktemp -d)"
 trap 'rm -rf -- "${work:?}"' EXIT
 
@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 import yaml from "js-yaml";
 const { jobs } = yaml.load(readFileSync(".github/workflows/tests.yml", "utf8"));
 const gate = jobs["tests-passed"];
+const tree = jobs["tested-tree"];
 const needs = [gate.needs].flat();
 const step = gate.steps.find((s) => s.run);
 console.log(JSON.stringify({
@@ -19,19 +20,14 @@ console.log(JSON.stringify({
   needs,
   missing: Object.keys(jobs).filter((job) => job !== "tests-passed" && !needs.includes(job)),
   always: gate.if === "always()",
-  guard: jobs["tested-tree"].steps.find((s) => s.name === "Refuse continue-on-error")?.run ?? "",
-  continueOnError: Object.keys(jobs).filter((job) => (jobs[job]["continue-on-error"] ?? false) !== false),
+  guard: tree.steps.slice(0, tree.steps.findIndex((s) => s.id === "check"))
+    .find((s) => s.name === "Refuse jobs or steps that pass on failure")?.run ?? "",
 }));
 ' > "$work/gate.json"
 
 missing="$(jq -r '.missing | join(", ")' "$work/gate.json")"
 if [ -n "$missing" ]; then
   echo "Jobs the test gate does not wait for: $missing. Add them to tests-passed needs." >&2
-  exit 1
-fi
-lenient="$(jq -r '.continueOnError | join(", ")' "$work/gate.json")"
-if [ -n "$lenient" ]; then
-  echo "Jobs with continue-on-error: $lenient. The test gate would see their failures as success." >&2
   exit 1
 fi
 if [ "$(jq -r .always "$work/gate.json")" != true ]; then
@@ -74,8 +70,12 @@ run_guard() {
   rm -rf -- "${work:?}/repo"
   mkdir -p "$work/repo/.github/workflows"
   case "$1" in
+    missing) ;;
     none) cp .github/workflows/tests.yml "$work/repo/.github/workflows/tests.yml" ;;
     job) sed '/^  jest:$/a\    continue-on-error: true' .github/workflows/tests.yml > "$work/repo/.github/workflows/tests.yml" ;;
+    expression) sed '/^  jest:$/a\    continue-on-error: ${{ github.event_name == '"'push'"' }}' .github/workflows/tests.yml > "$work/repo/.github/workflows/tests.yml" ;;
+    quoted) sed '/^  jest:$/a\    "continue-on-error": true' .github/workflows/tests.yml > "$work/repo/.github/workflows/tests.yml" ;;
+    step) sed '/^      - run: npm run lint$/a\        continue-on-error: true' .github/workflows/tests.yml > "$work/repo/.github/workflows/tests.yml" ;;
   esac
   exit_code=0
   output="$(cd "$work/repo" && bash -e "$work/guard.sh" 2>&1)" || exit_code=$?
@@ -99,6 +99,16 @@ for ((i = 0; i < count; i++)); do
   ' "$work/case.json" > "$work/jobs.json"
   run_gate "$(jq -r .event "$work/case.json")" "$(jq -r .fork "$work/case.json")" "$needs"
   judge "$name" "$(jq -r .exit "$work/case.json")" "$(jq -r .phrase "$work/case.json")"
+done
+
+run_guard none
+judge "the tree check accepts tests.yml as it is" 0 ""
+run_guard missing
+judge "the tree check fails when it cannot read tests.yml" 1 "grep: .github/workflows/tests.yml: No such file or directory"
+for plant in job expression quoted step; do
+  run_guard "$plant"
+  judge "the tree check refuses continue-on-error planted as $plant" 1 \
+    "$(grep -nE 'continue[-]on[-]error' "$work/repo/.github/workflows/tests.yml")"
 done
 
 for event in pull_request merge_group push workflow_dispatch; do

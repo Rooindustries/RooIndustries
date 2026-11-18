@@ -32,6 +32,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Refuse jobs or steps that pass on failure
+        run: |
+          lines="$(grep -nE 'continue[-]on[-]error' .github/workflows/tests.yml || [ "$?" = 1 ])"
+          if [ -n "$lines" ]; then
+            echo "$lines"
+            echo "tests.yml lets a failed job or step count as passed on the lines above, so the test gate cannot trust it. Remove them."
+            exit 1
+          fi
       - id: check
         env:
           GH_TOKEN: ${{ github.token }}
