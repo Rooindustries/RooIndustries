@@ -116,11 +116,11 @@ for event in pull_request merge_group push workflow_dispatch; do
   tree=success
   [ "$exit_code" = 0 ] || tree=failure
   needs="$(jq -cn --argjson needs "$(jq -c .needs "$work/gate.json")" --arg tree "$tree" '
-    $needs | map({key: ., value:
+    $needs | map({key: ., value: (
       if . != "tested-tree" then {result: "success", outputs: {}}
       elif $tree == "success" then {result: "success", outputs: {tested: "false"}}
       else {result: "failure", outputs: {}} end
-    }) | from_entries
+    )}) | from_entries
   ')"
   echo '{"jobs":[]}' > "$work/jobs.json"
   run_gate "$event" false "$needs"
