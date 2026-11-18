@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$(realpath "$0")")/.."
 root="$PWD"
 cases=.github/tests-passed-cases.json
-expected_cases=47
+expected_cases=52
 work="$(mktemp -d)"
 trap 'rm -rf -- "${work:?}"' EXIT
 
@@ -119,10 +119,16 @@ on_jest='/^  jest:$/a\'
 after_lint='/^      - run: npm run lint$/a\'
 plant() {
   local name="$1" expected_exit="$2" file="$3" edit="$4" phrase="$5"
+  shift 5
   rm -rf -- "${work:?}/repo"
   mkdir -p "$work/repo/.github"
   cp -r .github/workflows .github/actions "$work/repo/.github/"
   ln -s "$root/node_modules" "$work/repo/node_modules"
+  while [ "$#" -gt 0 ]; do
+    mkdir -p "$work/repo/$1"
+    printf "%s\n" "$2" > "$work/repo/$1/action.yml"
+    shift 2
+  done
   sed -i "$edit" "$work/repo/$file"
   exit_code=0
   output="$(inspect "$work/repo" 2>&1 > /dev/null)" || exit_code=$?
@@ -159,6 +165,26 @@ plant "continue-on-error merged in from another mapping" 1 "$workflow" \
 plant "continue-on-error on a step of a local action" 1 "$setup" \
   "/^    - uses: actions\/setup-node@v4$/a\\      continue-on-error: true" \
   "$setup: runs.steps[actions/setup-node@v4].continue-on-error"
+failing=$'name: Checks\nruns:\n  using: composite\n  steps:\n    - shell: bash\n      run: exit 1\n      continue-on-error: true'
+plant "continue-on-error in a nested local action a job uses" 1 "$workflow" \
+  "$after_lint      - uses: ./.github/actions/group/checks" \
+  ".github/actions/group/checks/action.yml: runs.steps[exit 1].continue-on-error" \
+  .github/actions/group/checks "$failing"
+plant "continue-on-error in a local action outside .github/actions" 1 "$workflow" \
+  "$after_lint      - uses: ./tools/checks" \
+  "tools/checks/action.yml: runs.steps[exit 1].continue-on-error" \
+  tools/checks "$failing"
+plant "continue-on-error in a local action another local action uses" 1 "$workflow" \
+  "$after_lint      - uses: ./tools/outer" \
+  "tools/inner/action.yml: runs.steps[exit 1].continue-on-error" \
+  tools/outer $'name: Outer\nruns:\n  using: composite\n  steps:\n    - uses: ./tools/inner' \
+  tools/inner "$failing"
+plant "continue-on-error in a nested local action no job uses" 1 "$workflow" "" \
+  ".github/actions/group/unused/action.yml: runs.steps[exit 1].continue-on-error" \
+  .github/actions/group/unused "$failing"
+plant "a local action path with no action file" 1 "$workflow" \
+  "$after_lint      - uses: ./tools/none" \
+  ".github/workflows/tests.yml: jobs.jest.steps[./tools/none] uses ./tools/none, which has no action.yml or action.yaml."
 plant "a Jest record not written by this script" 1 "$workflow" \
   "s/checked: \${{ steps.gate-cases.outputs.checked }}/checked: \"true\"/" \
   "The Jest job must run bash scripts/check-tests-passed-cases.sh in step gate-cases and output checked: \${{ steps.gate-cases.outputs.checked }}, the record the test gate requires."
