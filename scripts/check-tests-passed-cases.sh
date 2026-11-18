@@ -11,31 +11,48 @@ trap 'rm -rf -- "${work:?}"' EXIT
 inspect() {
   (cd "$1" && node --input-type=module -e '
 import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { posix } from "node:path";
 import yaml from "js-yaml";
 const workflow = ".github/workflows/tests.yml";
 const { jobs } = yaml.load(readFileSync(workflow, "utf8"));
 const lenient = [];
+const unreadable = [];
+const uses = [];
 const find = (file, node, path) => {
   if (Array.isArray(node)) {
     node.forEach((item, i) => find(file, item, `${path}[${item?.name ?? item?.id ?? item?.uses ?? String(item?.run ?? i).split("\n")[0]}]`));
   } else if (node && typeof node === "object") {
     for (const [key, value] of Object.entries(node)) {
       if (key.toLowerCase() === "continue-on-error") lenient.push(`${file}: ${path}.${key}`);
+      if (key === "uses" && typeof value === "string" && value.startsWith("./")) uses.push({ file, path, value });
       find(file, value, `${path}.${key}`);
     }
   }
 };
 find(workflow, jobs, "jobs");
-for (const action of readdirSync(".github/actions").sort()) {
-  const file = [`.github/actions/${action}/action.yml`, `.github/actions/${action}/action.yaml`].find(existsSync);
-  if (file) find(file, yaml.load(readFileSync(file, "utf8")).runs, "runs");
+const scanned = new Set();
+const scan = (file) => {
+  if (scanned.has(file)) return;
+  scanned.add(file);
+  find(file, yaml.load(readFileSync(file, "utf8"))?.runs, "runs");
+};
+readdirSync(".github/actions", { recursive: true })
+  .filter((file) => /(^|\/)action\.ya?ml$/.test(file))
+  .sort()
+  .forEach((file) => scan(`.github/actions/${file}`));
+for (let i = 0; i < uses.length; i++) {
+  const { file, path, value } = uses[i];
+  const files = ["action.yml", "action.yaml"].map((name) => posix.join(value, name)).filter(existsSync);
+  if (!files.length) unreadable.push(`${file}: ${path} uses ${value}, which has no action.yml or action.yaml.`);
+  files.forEach(scan);
 }
 const record = jobs.jest.steps.find((s) => s.id === "gate-cases");
 const recorded = jobs.jest.outputs?.checked === "${{ steps.gate-cases.outputs.checked }}" &&
   record?.run === "bash scripts/check-tests-passed-cases.sh";
-if (lenient.length || !recorded) {
+if (lenient.length || unreadable.length || !recorded) {
   for (const line of lenient) console.error(line);
   if (lenient.length) console.error("The test gate cannot trust these: continue-on-error lets a failed job or step count as passed. Remove it.");
+  for (const line of unreadable) console.error(line);
   if (!recorded) console.error("The Jest job must run bash scripts/check-tests-passed-cases.sh in step gate-cases and output checked: ${{ steps.gate-cases.outputs.checked }}, the record the test gate requires.");
   process.exit(1);
 }
