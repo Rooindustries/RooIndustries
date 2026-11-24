@@ -2,6 +2,8 @@ import envValue from "../../supabase/envValue.cjs";
 import { asBookingSummary } from "../../../lib/bookingSummary.js";
 import { logSafeWarn } from "../../safeErrorLog.js";
 import { getPaymentRecordById } from "./paymentRecord.js";
+import { buildSalesReceipt } from "./salesReceipt.ts";
+import { resolveLiveAbandonedRefreshedHold } from "./startPrePricingRetry.js";
 
 const { resolveStoreBackend } = envValue;
 const settled = status =>
@@ -20,6 +22,10 @@ const warnMismatch = () =>
 export const buildBrowserCompletionBody = async ({ client, record: authorizedRecord, body }) => {
   let bookingSummary = null;
   let requiresReschedule = body.requiresReschedule === true;
+  let analyticsReceipt = body.analyticsReceipt;
+  const refreshedHold = String(body.status || "").trim().toLowerCase() === "abandoned"
+    ? await resolveLiveAbandonedRefreshedHold({ client, record: authorizedRecord })
+    : null;
   try {
     if (settled(body.status) && body.bookingId) {
       const record = await getPaymentRecordById(client, authorizedRecord._id);
@@ -42,6 +48,7 @@ export const buildBrowserCompletionBody = async ({ client, record: authorizedRec
           const linked = booking._id === record.bookingId &&
             booking.paymentRecordId === record._id && sameAuthority(booking, record);
           if (!linked && !duplicate) warnMismatch();
+          if (linked || duplicate) analyticsReceipt = buildSalesReceipt(record, booking);
           if (linked && !requiresReschedule &&
               ["pending", "captured", "completed"].includes(String(booking.status || "").trim().toLowerCase()) &&
               record.refundState !== "full" && booking.refundStatus !== "full" &&
@@ -59,5 +66,9 @@ export const buildBrowserCompletionBody = async ({ client, record: authorizedRec
   } catch (error) {
     logSafeWarn("Booking summary unavailable", error);
   }
-  return { ...body, bookingSummary, requiresReschedule };
+  return {
+    ...body, bookingSummary, requiresReschedule,
+    ...(Object.hasOwn(body, "analyticsReceipt") ? { analyticsReceipt } : {}),
+    ...(refreshedHold ? { refreshedHold } : {}),
+  };
 };

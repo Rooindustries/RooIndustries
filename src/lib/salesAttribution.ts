@@ -1,5 +1,9 @@
+import { normalizeLinkReferral } from "./refShape.js";
+import { chooseFirstTouchRef, sanitizeRefEntry } from "./refEntry.js";
 import { SALES_PATHS, salesPath } from "./salesPaths";
 import { isRecord, readStoredAttribution, writeStoredAttribution } from "./attributionStore";
+
+export type RefAttribution = { source: string; capturedAt: string };
 
 export type SalesTouch = {
   capturedAt: string;
@@ -17,12 +21,15 @@ export type SalesTouch = {
 
 type SalesLanding = { pathname: string; search: string };
 
-export type SalesAttribution = {
+export type SalesAttribution =
+  | {
   version: 2;
   journeyId: string;
   firstTouch: SalesTouch;
   lastTouch: SalesTouch;
-};
+  ref?: RefAttribution;
+}
+  | { ref: RefAttribution };
 
 const JOURNEY_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const JOURNEY_ID_CHARS = 36;
@@ -31,7 +38,6 @@ const SCAN_CODE_POINTS = 300;
 const REFERRER_HOST_CHARS = 100;
 const LANDING_PATH_CHARS = 100;
 const CAPTURED_AT_CHARS = 40;
-const REFERRAL_CODE_CHARS = 100;
 const PHONE_TEXT = /^[\d\s.()-]+$/;
 const DASH = String.raw`\p{Pd}\u2212`;
 const DATE_PART = String.raw`(\p{Nd}{4}|\p{Nd}{1,2})`;
@@ -56,7 +62,6 @@ const CLICK_ID_CHARS = 200;
 const CLICK_ID = /^[A-Za-z0-9_.-]+$/;
 const HOST = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
 const CAPTURED_AT = /^\d{4}-\d{2}-\d{2}T/;
-const REFERRAL_CODE = /^[a-z0-9][a-z0-9_-]{0,63}$/i;
 
 const bounded = (value: unknown, chars: number): value is string =>
   typeof value === "string" && value.length <= chars;
@@ -115,10 +120,7 @@ export const campaignLabel = (value: unknown) => {
   const kept = trimSpace(head(text, LABEL_CODE_POINTS));
   return privateText(head(text, SCAN_CODE_POINTS)) || privateText(kept) ? "" : kept;
 };
-const referralCode = (value: unknown) =>
-  bounded(value, REFERRAL_CODE_CHARS) && REFERRAL_CODE.test(value.trim()) && /[a-z]/i.test(value)
-    ? value.trim()
-    : "";
+const referralCode = (value: unknown) => normalizeLinkReferral(value);
 const clickId = (value: unknown) =>
   bounded(value, CLICK_ID_CHARS) && CLICK_ID.test(value) && !(PHONE_TEXT.test(value) && containsPhone(value))
     ? value
@@ -168,23 +170,26 @@ const sanitizeTouch = (value: unknown): SalesTouch | null => {
   return touch;
 };
 
-export function sanitizeSalesAttribution(value: unknown): SalesAttribution | null {
+export function sanitizeSalesAttribution(value: unknown, now: number | null = Date.now()): SalesAttribution | null {
   if (!isRecord(value)) return null;
-  if (!bounded(value.journeyId, JOURNEY_ID_CHARS) || !JOURNEY_ID.test(value.journeyId)) return null;
+  const ref = sanitizeRefEntry(value.ref, now);
+  if (!bounded(value.journeyId, JOURNEY_ID_CHARS) || !JOURNEY_ID.test(value.journeyId)) return ref ? { ref } : null;
   const journeyId = value.journeyId.toLowerCase();
   if (value.version === 1) {
     const touch = sanitizeTouch(value);
-    return touch ? { version: 2, journeyId, firstTouch: touch, lastTouch: { ...touch } } : null;
+    if (!touch) return ref ? { ref } : null;
+    return { version: 2, journeyId, firstTouch: touch, lastTouch: { ...touch }, ...(ref ? { ref } : {}) };
   }
-  if (value.version !== 2) return null;
+  if (value.version !== 2) return ref ? { ref } : null;
   const firstTouch = sanitizeTouch(value.firstTouch);
   const lastTouch = sanitizeTouch(value.lastTouch);
-  if (!firstTouch && !lastTouch) return null;
+  if (!firstTouch && !lastTouch) return ref ? { ref } : null;
   return {
     version: 2,
     journeyId,
     firstTouch: firstTouch || { ...lastTouch! },
     lastTouch: lastTouch || { ...firstTouch! },
+    ...(ref ? { ref } : {}),
   };
 }
 
@@ -219,9 +224,16 @@ export function captureSalesAttribution(landing?: SalesLanding): SalesAttributio
   try {
     if (typeof window === "undefined") return null;
     const { pathname, search } = landing || window.location;
+    if (pathname !== "/admin" && !pathname.startsWith("/admin/")) {
+      try {
+        const refWindow = window as Window & { __rooCaptureRef?: (s?: string, p?: string) => unknown };
+        refWindow.__rooCaptureRef?.(search, pathname);
+      } catch {}
+    }
     const landingPath = salesPath(pathname);
     if (!landingPath) return null;
-    const stored = sanitizeSalesAttribution(readStoredAttribution());
+    const rawStored = sanitizeSalesAttribution(readStoredAttribution());
+    const stored = rawStored && "version" in rawStored ? (({ ref: _r, ...rest }) => rest)(rawStored) : null;
     const campaign = landingCampaign(search);
     const referral = campaign.creatorCode || sessionReferral();
     const fields = referral ? { ...campaign, creatorCode: referral } : campaign;
@@ -233,7 +245,8 @@ export function captureSalesAttribution(landing?: SalesLanding): SalesAttributio
       if (!journeyId) return null;
       const touch = newTouch(landingPath, fields);
       const firstTouch = stored?.firstTouch || touch;
-      current = sanitizeSalesAttribution({ version: 2, journeyId, firstTouch, lastTouch: touch });
+      const next = sanitizeSalesAttribution({ version: 2, journeyId, firstTouch, lastTouch: touch });
+      current = next && "version" in next ? next : null;
     }
     if (current) writeStoredAttribution(current);
     return current;
@@ -243,14 +256,16 @@ export function captureSalesAttribution(landing?: SalesLanding): SalesAttributio
 }
 
 export function salesEventProperties(attribution: unknown = captureSalesAttribution()) {
-  const value = sanitizeSalesAttribution(attribution);
+  const value = sanitizeSalesAttribution(attribution, null);
   if (!value) return {};
+  if (!("version" in value)) return value.ref?.source ? { ref_source: value.ref.source } : {};
   const { firstTouch: first, lastTouch: last } = value;
   const properties: Record<string, string | boolean> = { journey_id: value.journeyId, landing_path: last.landingPath };
   const optional: [string, string | undefined][] = [
     ["creator_code", last.creatorCode], ["campaign_source", last.source], ["campaign_medium", last.medium],
     ["campaign", last.campaign], ["campaign_content", last.content], ["campaign_term", last.term],
     ["referrer_host", last.referrerHost], ["first_source", first.source], ["first_campaign", first.campaign],
+    ["ref_source", value.ref?.source],
   ];
   for (const [key, text] of optional) if (text) properties[key] = text;
   properties.has_fbclid = Boolean(last.fbclid || first.fbclid);
@@ -260,3 +275,16 @@ export function salesEventProperties(attribution: unknown = captureSalesAttribut
 
 export const journeySalesAttribution = () =>
   captureSalesAttribution() || sanitizeSalesAttribution(readStoredAttribution());
+
+export const bookingSalesAttribution = (stored?: unknown) => {
+  try {
+    const clean = sanitizeSalesAttribution(stored);
+    const base = clean && "version" in clean ? clean : captureSalesAttribution();
+    let live: unknown = null;
+    try { live = typeof window !== "undefined" ? (window as any).__rooReadRef?.() : null; } catch {}
+    const ref = chooseFirstTouchRef([live, clean?.ref]);
+    if (!base || !("version" in base)) return ref ? { ref } : null;
+    const { ref: _r, ...rest } = base;
+    return ref ? { ...rest, ref } : rest;
+  } catch { return null; }
+};

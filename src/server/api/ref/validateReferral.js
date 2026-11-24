@@ -1,6 +1,7 @@
 import { createDataClient as createClient } from "../../data/documentClient.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
-import { CREATOR_CODE } from "./creatorCode.js";
+import { isSafeCreatorCode } from "./creatorCode.js";
+import { isKnownAdRefTag } from "../../../lib/refShape.js";
 import { logSafeError } from "../../safeErrorLog.js";
 import { resolveSupabaseCreatorRegistrationConflicts } from "../../supabase/accounts.js";
 import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
@@ -37,7 +38,10 @@ export default async function handler(req, res) {
       return res.status(400).json({ ok: false, error: "Missing code" });
 
     if (req.query.purpose === "registration") {
-      if (!CREATOR_CODE.test(code)) {
+      if (isKnownAdRefTag(code)) {
+        return res.status(200).json({ ok: false, error: "Referral code already taken", reason: "reserved" });
+      }
+      if (!isSafeCreatorCode(code)) {
         return res.status(400).json({
           ok: false,
           error: "Invalid referral code",
@@ -90,6 +94,8 @@ export default async function handler(req, res) {
         reason: "available",
       });
     }
+
+    if (isKnownAdRefTag(code)) return res.status(200).json({ ok: false, error: "Not found", reason: "not_found" });
 
     // Public checkout projection. Creator details stay behind authenticated routes.
     const ref = await readClient.fetch(

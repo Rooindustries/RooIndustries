@@ -8,6 +8,7 @@ import { PublicContentProvider } from "@/src/next/PublicContentContext";
 import contentServer from "@/src/lib/contentServer";
 import { getSupabaseAssetOrigin } from "../next.config.mjs";
 import envValue from "@/src/server/supabase/envValue.cjs";
+import { REF_CAPTURE_SCRIPT } from "@/src/lib/refCaptureScript";
 
 export const metadata = seo.getMetadataForPath("/");
 const SUPABASE_ASSET_ORIGIN = getSupabaseAssetOrigin();
@@ -48,6 +49,7 @@ export default async function RootLayout({ children }) {
       <head>
         <meta name="theme-color" content="#070707" />
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        <script dangerouslySetInnerHTML={{ __html: REF_CAPTURE_SCRIPT }} />
         {shouldPreconnectSupabase ? (
           <>
             <link

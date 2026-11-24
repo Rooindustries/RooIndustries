@@ -144,9 +144,7 @@
       "bookingSummary": null,
       "requiresReschedule": false,
       "cancelled": true,
-      "refreshedHold": {
-        "slotHoldId": "slotHold.fixture"
-      }
+      "slotReleased": true
     }
   },
   "needs_recovery": {

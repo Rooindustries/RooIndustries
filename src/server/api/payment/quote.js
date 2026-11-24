@@ -10,6 +10,7 @@ const {
   getClientAddress,
   requireRateLimit,
 } = require("../ref/rateLimit.js");
+const { isKnownAdRefTag } = require("../../../lib/refShape.js");
 
 module.exports = async function handler(req, res) {
   if (req.method !== "POST") {
@@ -48,6 +49,7 @@ module.exports = async function handler(req, res) {
       });
     }
 
+    const safeReferralCode = isKnownAdRefTag(referralCode) ? "" : referralCode;
     const combined =
       !originalOrderId &&
       typeof consumeQuoteRateLimitWithPricing === "function"
@@ -58,7 +60,7 @@ module.exports = async function handler(req, res) {
                 ? getPaymentPackageTitleAliases(packageTitle)
                 : [packageTitle],
             referralId,
-            referralCode,
+            referralCode: safeReferralCode,
             couponCode,
           })
         : { handled: false };
@@ -96,7 +98,7 @@ module.exports = async function handler(req, res) {
       packageTitle,
       originalOrderId,
       referralId,
-      referralCode,
+      referralCode: safeReferralCode,
       couponCode,
       pricingInputs: combined.pricingInputs,
     });

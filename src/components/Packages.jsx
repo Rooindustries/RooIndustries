@@ -11,6 +11,7 @@ import homeCopy from "../lib/homeCopy";
 import packageContent from "../lib/packageContent";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 import { persistBookingPackageSelection } from "../lib/checkoutStorage";
+import { normalizeLinkReferral } from "../lib/refShape.js";
 import { trackEvent, trackPackageView } from "../lib/analytics";
 import { bookingPackagePath } from "../lib/bookingPackagePath";
 import { getSessionAvailability } from "../lib/sessionAvailability";
@@ -109,7 +110,7 @@ export default function Packages({
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const ref = params.get("ref");
+    const ref = normalizeLinkReferral(params.get("ref"));
 
     if (ref) {
       try {

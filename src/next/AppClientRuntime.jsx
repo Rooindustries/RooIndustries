@@ -75,7 +75,8 @@ export const loadSeorceScript = ({
 export default function AppClientRuntime() {
   const [analyticsEnabled, setAnalyticsEnabled] = useState(false);
   const [ConsentRuntime, setConsentRuntime] = useState(null);
-  const staffPage = onRoutes(usePathname() ?? "", STAFF_PREFIXES);
+  const pathname = usePathname() ?? "";
+  const staffPage = onRoutes(pathname, STAFF_PREFIXES);
 
   useEffect(() => {
     const production = isProductionBrowser();
@@ -88,6 +89,9 @@ export default function AppClientRuntime() {
   useEffect(() => {
     if (!CHECKOUT_PATHS.includes(window.location.pathname)) rememberReferralFromSearch(window.location.search);
   }, []);
+  useEffect(() => {
+    if (!staffPage) window.__rooCaptureRef?.(window.location.search, pathname || window.location.pathname);
+  }, [pathname, staffPage]);
 
   useEffect(() => {
     let cancelled = false;

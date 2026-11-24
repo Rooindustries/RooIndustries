@@ -1,6 +1,7 @@
 import { createDataClient as createClient } from "../../data/documentClient.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 import packagePricing from "../../../lib/packagePricing.js";
+import { isKnownAdRefTag } from "../../../lib/refShape.js";
 import { logSafeError } from "../../safeErrorLog.js";
 
 const { normalizePackageTitleForMatch } = packagePricing;
@@ -49,6 +50,9 @@ export default async function handler(req, res) {
   }
 
   const code = rawCode.toLowerCase();
+  if (isKnownAdRefTag(code)) {
+    return res.status(200).json({ ok: false, error: "Coupon not found or invalid.", reason: "not_found" });
+  }
 
   try {
     const coupon = await client.fetch(

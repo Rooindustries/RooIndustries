@@ -10,6 +10,8 @@ const COOKIE_NOTICE = {
       "Always on: in local storage, roo-consent remembers whether you accepted or declined,",
       "roo-consent-declined remembers when you last declined or opened Cookie settings, roo-theme remembers",
       "light or dark mode, and roo-checkouts-counted marks each checkout you start as counted for 30 days.",
+      "When you arrive through a referral or ad link, roo_ref saves only the first link code and time for 30",
+      "days in a first-party cookie and in browser local storage, with no personal details.",
     ].join(" "),
     [
       "Always on: session storage keeps your booking draft, the time slot you are holding, your checkout",
@@ -25,8 +27,9 @@ const COOKIE_NOTICE = {
     ].join(" "),
     [
       "Measurement without cookies: Vercel Analytics counts visits and bookings without cookies, together with",
-      "the campaign, ad or referral link that brought you here. Unless you click Accept, that link is kept for",
-      "the current tab only. Speed Insights measures page speed without cookies. On public pages, Seorce keeps",
+      "the campaign, ad or referral link that brought you here. Unless you click Accept, full campaign details",
+      "are kept for the current tab only (while roo_ref keeps only a link code and time for 30 days). Speed",
+      "Insights measures page speed without cookies. On public pages, Seorce keeps",
       "a visit id and page count in session storage to measure search traffic.",
     ].join(" "),
     [

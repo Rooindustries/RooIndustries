@@ -1,3 +1,5 @@
+import { isKnownAdRefTag, normalizeLinkReferral } from "./refShape.js";
+
 export const BOOKING_DRAFT_STORAGE_KEY = "booking_draft";
 export const CHECKOUT_BOOKING_STORAGE_KEY = "checkout_booking_state";
 
@@ -124,9 +126,22 @@ export const migrateCheckoutStorageToSession = () => {
 
 const REFERRAL_SESSION_STORAGE_KEY = "referral_session";
 
+export const stripReservedCode = (value) => {
+  const code = String(value || "").trim();
+  return !code || isKnownAdRefTag(code) ? "" : code;
+};
+export const readLinkReferralFromSession = () => {
+  try {
+    return typeof window !== "undefined"
+      ? normalizeLinkReferral(window.sessionStorage.getItem(REFERRAL_SESSION_STORAGE_KEY) || "") : "";
+  } catch {
+    return "";
+  }
+};
+
 export const rememberReferralFromSearch = (search) => {
   if (typeof window === "undefined") return;
-  const code = String(new URLSearchParams(search || "").get("ref") || "").trim();
+  const code = normalizeLinkReferral(new URLSearchParams(search || "").get("ref") || "");
   if (!code) return;
   try {
     window.sessionStorage.setItem(REFERRAL_SESSION_STORAGE_KEY, code);

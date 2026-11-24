@@ -410,6 +410,12 @@ export function AppContent({
     initializePerformanceProfile();
   }, []);
 
+  useEffect(() => {
+    if (pathName !== "/admin" && !pathName.startsWith("/admin/")) {
+      window.__rooCaptureRef?.(location.search || window.location.search, pathName || window.location.pathname);
+    }
+  }, [pathName, location.search]);
+
 
   useEffect(() => {
     const intent = consumeRouteTransitionIntent();

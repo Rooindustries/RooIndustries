@@ -23,10 +23,14 @@ import { getWarrantyCallout } from "../lib/packageWarranty";
 import {
   BOOKING_DRAFT_STORAGE_KEY,
   CHECKOUT_BOOKING_STORAGE_KEY,
+  migrateCheckoutStorageToSession,
   persistBookingPackageSelection,
+  readLinkReferralFromSession,
   readStoredCheckoutBooking,
+  stripReservedCode,
   updateStoredCheckoutHold,
 } from "../lib/checkoutStorage";
+import { normalizeLinkReferral } from "../lib/refShape.js";
 import {
   calculateCheckoutDiscounts,
   fetchCheckoutQuote,
@@ -101,7 +105,7 @@ const normalizeForm = (value = {}) => ({
 });
 const readReferralFromSession = () => {
   try {
-    return sessionStorage.getItem(REFERRAL_STORAGE_KEY) || "";
+    return readLinkReferralFromSession();
   } catch {
     return "";
   }
@@ -469,10 +473,8 @@ export default function BookingForm() {
   const navigate = useNavigate();
   const referralQuery = useMemo(() => {
     const params = new URLSearchParams(location.search);
-    return {
-      code: String(params.get("ref") || "").trim(),
-      present: params.has("ref"),
-    };
+    const raw = String(params.get("ref") || "").trim();
+    return { code: normalizeLinkReferral(raw), explicitBlank: params.has("ref") && !raw };
   }, [location.search]);
 
   const [step, setStep] = useState(1);
@@ -622,7 +624,10 @@ export default function BookingForm() {
         referralQuery.code.toLowerCase() !== normalizedDismissed
       ) {
         sessionStorage.setItem(REFERRAL_STORAGE_KEY, referralQuery.code);
-      } else if (referralQuery.present || normalizedDismissed) {
+      } else if (
+        referralQuery.explicitBlank ||
+        (normalizedDismissed && readReferralFromSession().toLowerCase() === normalizedDismissed)
+      ) {
         sessionStorage.removeItem(REFERRAL_STORAGE_KEY);
       }
     } catch {
@@ -1206,6 +1211,7 @@ export default function BookingForm() {
       setCodeInput("");
       setCodeError("");
       setRestoredCodeCandidates(null);
+      migrateCheckoutStorageToSession();
       const storedDraft = sessionStorage.getItem(BOOKING_DRAFT_KEY);
       if (storedDraft) {
         const parsed = JSON.parse(storedDraft);
@@ -1222,15 +1228,9 @@ export default function BookingForm() {
           }
           const checkoutCodes = draftForPkg.checkoutCodes;
           if (checkoutCodes && typeof checkoutCodes === "object") {
-            const referralCode = String(
-              checkoutCodes.referral?.code || ""
-            ).trim();
-            const couponCode = String(
-              checkoutCodes.coupon?.code || ""
-            ).trim();
-            const dismissedCode = String(
-              checkoutCodes.dismissedReferralCode || ""
-            ).trim();
+            const referralCode = stripReservedCode(checkoutCodes.referral?.code);
+            const couponCode = stripReservedCode(checkoutCodes.coupon?.code);
+            const dismissedCode = stripReservedCode(checkoutCodes.dismissedReferralCode);
             setDismissedReferralCode(dismissedCode);
             if (referralCode || couponCode) {
               setRestoredCodeCandidates({
@@ -1657,8 +1657,9 @@ export default function BookingForm() {
 
   const storeReferralSession = (code) => {
     try {
-      if (code) {
-        sessionStorage.setItem(REFERRAL_STORAGE_KEY, code);
+      const safe = normalizeLinkReferral(code);
+      if (safe) {
+        sessionStorage.setItem(REFERRAL_STORAGE_KEY, safe);
       } else {
         sessionStorage.removeItem(REFERRAL_STORAGE_KEY);
       }

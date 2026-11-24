@@ -5,6 +5,7 @@ import { parseMoneySubunits } from "../payment/providerClients.js";
 import { logSafeError } from "../../safeErrorLog.js";
 import { calculateCreatorCommission } from "../../referrals/commissionMoney.js";
 import { buildPaymentUpgradeLockId } from "../payment/paymentRecord.js";
+import { isKnownAdRefTag } from "../../../lib/refShape.js";
 
 const {
   applyPackagePricing,
@@ -456,6 +457,7 @@ export async function resolveBookingPricing({
     );
   }
 
+  const safeReferralCode = isKnownAdRefTag(normalizedReferralCode) ? "" : normalizedReferralCode;
   const hasReferralInput =
     pricingInputs &&
     Object.prototype.hasOwnProperty.call(pricingInputs, "referralDoc");
@@ -471,8 +473,9 @@ export async function resolveBookingPricing({
       { id: referralId }
     );
   }
+  if (referralDoc && isKnownAdRefTag(referralDoc?.slug?.current)) referralDoc = null;
 
-  if (!hasReferralInput && !referralDoc && normalizedReferralCode) {
+  if (!hasReferralInput && !referralDoc && safeReferralCode) {
     referralDoc = await client.fetch(
       `*[_type == "referral" && registrationStatus != "pending_email" && slug.current == $code][0]{
         _id,
@@ -480,13 +483,13 @@ export async function resolveBookingPricing({
         currentCommissionPercent,
         currentDiscountPercent
       }`,
-      { code: normalizedReferralCode }
+      { code: safeReferralCode }
     );
   }
 
   const effectiveReferralId = referralDoc?._id || null;
   const effectiveReferralCode =
-    referralDoc?.slug?.current || normalizedReferralCode || "";
+    referralDoc?.slug?.current || safeReferralCode || "";
   const referralDiscountPercent = clampPercent(
     referralDoc?.currentDiscountPercent || 0
   );
@@ -523,7 +526,7 @@ export async function resolveBookingPricing({
   }
 
   if (normalizedCouponCode) {
-    if (!couponDoc) {
+    if (!couponDoc || isKnownAdRefTag(normalizedCouponCode) || isKnownAdRefTag(couponDoc?.code)) {
       throw createApiError(400, "Coupon is invalid.", "coupon_invalid");
     }
 

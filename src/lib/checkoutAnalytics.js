@@ -46,7 +46,7 @@ const completedBooking = (receipt) => [
     payment_provider: receipt.provider,
     amount: receipt.amount,
     currency: receipt.currency,
-    referral_code: receipt.referralCode || "",
+    ...(receipt.referralCode ? { referral_code: receipt.referralCode } : {}),
   },
 ];
 
