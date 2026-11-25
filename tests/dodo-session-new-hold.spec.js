@@ -12,7 +12,7 @@ const routeAbandonedDodo = async page => {
     await route.fulfill({ json: {
       ok: true, status: "started", provider: "dodo",
       paymentAccessToken: `fixture-payment-${starts.length}`,
-      providerPayload: { checkoutUrl: `${new URL(page.url()).origin}/__test/checkout-handoff` },
+      providerPayload: { checkoutUrl: `${new URL(page.url()).origin}/__test/checkout-handoff`, dodoReturnTag: `fixture-tag-${starts.length}` },
       sessionExpiresAt: new Date(Date.now() + 20 * 60 * 1000).toISOString(),
       refreshedHold: {
         slotHoldId: bookingPayload.slotHoldId,
@@ -52,7 +52,7 @@ test("a new reservation after an abandoned checkout opens a fresh checkout and k
   expect(newHold.holdId).toBe(starts[0].slotHoldId);
   expect(newHold.holdToken).not.toBe(starts[0].slotHoldToken);
   await flow.payment();
-  await page.getByRole("button", { name: "Resume checkout", exact: true }).click();
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
 
   await expect(page).toHaveURL(/checkout-handoff$/);
   expect(starts).toHaveLength(2);

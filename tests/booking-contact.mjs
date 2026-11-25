@@ -136,6 +136,7 @@ test('booking contact validation over HTTP', { timeout: 300000 }, async t => {
       const quote = await post('/api/payment/quote', { bookingPayload: legacy });
       assert.equal(quote.status, 200, JSON.stringify(quote));
       await commerce.patch(record._id).set({ bookingPayload: legacy, quoteFingerprint: quote.body.quoteFingerprint }).commit();
+      if (record.startClaimId) await commerce.patch(record.startClaimId).set({ quoteFingerprint: quote.body.quoteFingerprint }).commit();
       const before = await snapshot();
       result.response = await start(legacy);
       assert.equal(result.response.status, 200, JSON.stringify(result.response));
@@ -162,6 +163,7 @@ test('booking contact validation over HTTP', { timeout: 300000 }, async t => {
       const quote = await post('/api/payment/quote', { bookingPayload: legacy });
       await commerce.patch(record._id).set({ bookingPayload: legacy, quoteFingerprint: quote.body.quoteFingerprint,
         providerOrderId: '', orderCreationLeaseId: 'fixture-pending-order' }).commit();
+      if (record.startClaimId) await commerce.patch(record.startClaimId).set({ quoteFingerprint: quote.body.quoteFingerprint }).commit();
       const before = await snapshot();
       result.response = await start(legacy);
       assert.equal(result.response.status, 409, JSON.stringify(result.response));

@@ -179,6 +179,7 @@ const DeferredTelemetry = () => {
   );
 };
 
+const IntercomMessenger = lazy(() => import("./components/IntercomMessenger"));
 const IntercomRuntime = ({ disabledRoutes, disabled }) => {
   const [Messenger, setMessenger] = useState(null);
   const location = useLocation();

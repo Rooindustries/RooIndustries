@@ -131,7 +131,7 @@ const confirmBooking = async (page, baseURL, { receipt, beforeReturn, afterFinal
   await page.getByRole("button", { name: "Pay your way", exact: true }).click();
   await expect(page).toHaveURL(`${baseURL}/__test/checkout-handoff`);
   await beforeReturn?.();
-  await page.goto("/payment?dodo_return=1", { waitUntil: "domcontentloaded" });
+  await page.goto("/payment?dodo_return=1&dodo_session=fixture-dodo-tag", { waitUntil: "domcontentloaded" });
   await expect.poll(() => Boolean(finalizeRoute)).toBe(true);
   const analyticsReceipt = { ...confirmedBooking.analyticsReceipt, ...receipt };
   await finalizeRoute.fulfill({ json: { ...confirmedBooking, analyticsReceipt } });
@@ -226,7 +226,7 @@ test.describe("production host", () => {
     await page.getByRole("button", { name: "Pay your way", exact: true }).click();
     await expect(page).toHaveURL(`${baseURL}/__test/checkout-handoff`);
     await expect.poll(() => named(seen, "checkout_started").length).toBe(1);
-    await page.goto("/payment?dodo_return=1", { waitUntil: "domcontentloaded" });
+    await page.goto("/payment?dodo_return=1&dodo_session=fixture-dodo-tag", { waitUntil: "domcontentloaded" });
     await expect.poll(() => Boolean(finalizeRoute)).toBe(true);
     await finalizeRoute.fulfill({ json: confirmedBooking });
     await expect(page).toHaveURL(`${baseURL}/payment-success`);

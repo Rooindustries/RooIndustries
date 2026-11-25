@@ -8,7 +8,10 @@ import {
 } from "../lib/checkoutStorage";
 import packagePricing from "../lib/packagePricing";
 import { classifyHoldResponse } from "../lib/holdResponse";
-import { CHECKOUT_CONFIRMATION_EVENT, isCheckoutConfirmationPending } from "../lib/checkoutConfirmation";
+import {
+  CHECKOUT_CONFIRMATION_EVENT,
+  isHoldProtectedFromExpiry,
+} from "../lib/checkoutConfirmation";
 import { CLIENT_REQUEST_TIMEOUT_MS } from "../lib/clientRequest";
 import { scrollWindowTo } from "../lib/scrollWindowTo";
 
@@ -102,7 +105,7 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
       const stored = sessionStorage.getItem(HOLD_STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (new Date(parsed.expiresAt) > new Date()) {
+        if (new Date(parsed.expiresAt) > new Date() || isHoldProtectedFromExpiry(parsed)) {
           const normalizedHold = {
             holdId: parsed.holdId,
             holdToken: parsed.holdToken,
@@ -189,13 +192,9 @@ export default function ReservationBanner({ hidden = false, inline = false, inli
     const tick = () => {
       const diff = expiresAtMs - Date.now();
       if (diff <= 0) {
-        if (isCheckoutConfirmationPending()) {
+        if (isHoldProtectedFromExpiry(hold, { paymentInOtherTab })) {
           setCountdown(0);
-          return false;
-        }
-        if (hold.phase === "payment_pending" && paymentInOtherTab) {
-          setCountdown(0);
-          return false;
+          return true;
         }
         const shouldRedirectHome =
           path === "/payment" || path === "/payment-success" || path === "/booking";

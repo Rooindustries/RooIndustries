@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { currencyDecimals } from "./providerClients.js";
 
 export const PAYMENT_RECORD_TYPE = "paymentRecord";
 export const PAYMENT_START_CLAIM_TYPE = "paymentStartClaim";
@@ -31,10 +32,11 @@ export const stableHash = (value, length = 24) =>
     .slice(0, Math.max(8, Number(length) || 24));
 
 const normalizeLowerTrim = (value) => String(value || "").trim().toLowerCase();
-const normalizeMoney = (value) => {
+const normalizeMoney = (value, currency = "USD") => {
+  const decimals = currencyDecimals(currency);
   const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return "0.00";
-  return parsed.toFixed(2);
+  if (!Number.isFinite(parsed)) return (0).toFixed(decimals);
+  return parsed.toFixed(decimals);
 };
 
 export const stringifyJson = (value) => {
@@ -92,9 +94,9 @@ export const buildPricingFingerprint = ({
     originalOrderId: String(originalOrderId || "").trim(),
     startTimeUTC: String(startTimeUTC || "").trim(),
     email: normalizeLowerTrim(email),
-    grossAmount: normalizeMoney(grossAmount),
-    netAmount: normalizeMoney(netAmount),
-    discountAmount: normalizeMoney(discountAmount),
+    grossAmount: normalizeMoney(grossAmount, currency),
+    netAmount: normalizeMoney(netAmount, currency),
+    discountAmount: normalizeMoney(discountAmount, currency),
     referralId: String(referralId || "").trim(),
     referralCode: normalizeLowerTrim(referralCode),
     couponCode: normalizeLowerTrim(couponCode),
@@ -104,8 +106,13 @@ export const buildPricingFingerprint = ({
 export const buildQuoteFingerprint = ({
   bookingPayload = {},
   quote = {},
-}) =>
-  stableHash(
+  currency = "",
+  legacy = false,
+}) => {
+  const resolvedCurrency = legacy
+    ? "QUOTE"
+    : String(currency || quote.currency || "USD").trim().toUpperCase() || "USD";
+  return stableHash(
     buildPricingFingerprint({
       provider:
         String(quote.paymentProvider || "").trim().toLowerCase() === "free"
@@ -124,10 +131,11 @@ export const buildQuoteFingerprint = ({
       referralId: String(quote.effectiveReferralId || "").trim(),
       referralCode: String(quote.effectiveReferralCode || "").trim(),
       couponCode: bookingPayload.couponCode || "",
-      currency: "QUOTE",
+      currency: resolvedCurrency,
     }),
     64
   );
+};
 
 export const buildPaymentSessionScope = ({
   bookingPayload = {},

@@ -28,10 +28,12 @@ export default async function handler(req, res) {
       dodo: {
         enabled: !!providers?.dodo?.enabled,
         mode: providers?.dodo?.mode || "missing",
+        currency: providers?.dodo?.currency || "USD",
       },
       razorpay: {
         enabled: !!providers?.razorpay?.enabled,
         mode: providers?.razorpay?.mode || "unknown",
+        currency: providers?.razorpay?.currency || "USD",
         ...(providers?.razorpay?.disabledReason
           ? { disabledReason: String(providers.razorpay.disabledReason).trim() }
           : {}),
@@ -39,6 +41,7 @@ export default async function handler(req, res) {
       paypal: {
         enabled: !!providers?.paypal?.enabled,
         mode: providers?.paypal?.mode || "unknown",
+        currency: providers?.paypal?.currency || "USD",
         clientId: String(providers?.paypal?.clientId || "").trim(),
       },
     },

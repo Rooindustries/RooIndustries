@@ -677,7 +677,7 @@ test("after a PayPal claim recovers from ambiguous creation, PayPal retries rece
         ok: true,
         status: "started",
         provider: "paypal",
-        providerPayload: { orderId: "paypal_recovered_1", currency: "USD" },
+        providerPayload: { orderId: "paypal_recovered_1", currency: "USD", amount: 8499 },
       },
     });
   });
@@ -881,7 +881,7 @@ const setupLockedDodo = async (page, flow, token) => {
           provider: "dodo",
           status: "started",
           paymentAccessToken: token,
-          providerPayload: { orderId: "cs_dodo_nr_1", checkoutUrl: "/__test/checkout-handoff", taxInclusive: false },
+          providerPayload: { orderId: "cs_dodo_nr_1", checkoutUrl: "/__test/checkout-handoff", taxInclusive: false, dodoReturnTag: "fixture-dodo-tag" },
           quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
           quoteFingerprint: "fixture-quote",
           sessionExpiresAt: expiry,
@@ -984,7 +984,7 @@ test("Razorpay stays disabled and does not open while Change payment method canc
           provider: "razorpay",
           status: "started",
           paymentAccessToken: "rzp-cancel-race-pat",
-          providerPayload: { orderId: "order_rzp_cancel_1", amount: 8499, currency: "INR", key: "rzp_test_fixture" },
+          providerPayload: { orderId: "order_rzp_cancel_1", amount: 8499, currency: "USD", key: "rzp_test_fixture" },
           quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
           quoteFingerprint: "fixture-quote",
           sessionExpiresAt: expiry,
@@ -1003,7 +1003,7 @@ test("Razorpay stays disabled and does not open while Change payment method canc
         ok: true,
         status: "started",
         provider: "razorpay",
-        providerPayload: { orderId: "order_rzp_cancel_1", amount: 8499, currency: "INR", key: "rzp_test_fixture" },
+        providerPayload: { orderId: "order_rzp_cancel_1", amount: 8499, currency: "USD", key: "rzp_test_fixture" },
       },
     });
   });
@@ -1067,7 +1067,7 @@ test("PayPal rejects clicks and createOrder while Change payment method cancella
         status: "started",
         provider: "paypal",
         paymentAccessToken: "paypal-cancel-race-pat",
-        providerPayload: { orderId: "paypal_cancel_1", currency: "USD" },
+        providerPayload: { orderId: "paypal_cancel_1", currency: "USD", amount: 8499 },
         quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
         quoteFingerprint: "fixture-quote",
         sessionExpiresAt: expiry,
@@ -1079,7 +1079,7 @@ test("PayPal rejects clicks and createOrder while Change payment method cancella
   await page.route("**/api/payment/status", route => {
     statusCalls += 1;
     return route.fulfill({
-      json: { ok: true, status: "started", provider: "paypal", providerPayload: { orderId: "paypal_cancel_1", currency: "USD" } },
+      json: { ok: true, status: "started", provider: "paypal", providerPayload: { orderId: "paypal_cancel_1", currency: "USD", amount: 8499 } },
     });
   });
   let releaseCancel;
@@ -1143,7 +1143,7 @@ test("Change payment method stays disabled while PayPal resume is awaiting statu
         status: "started",
         provider: "paypal",
         paymentAccessToken: "paypal-resume-lock-pat",
-        providerPayload: { orderId: "paypal_resume_1", currency: "USD" },
+        providerPayload: { orderId: "paypal_resume_1", currency: "USD", amount: 8499 },
         quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
         quoteFingerprint: "fixture-quote",
         sessionExpiresAt: expiry,
@@ -1155,7 +1155,7 @@ test("Change payment method stays disabled while PayPal resume is awaiting statu
   await page.route("**/api/payment/status", async route => {
     await new Promise(resolve => { releaseStatus = resolve; });
     await route.fulfill({
-      json: { ok: true, status: "started", provider: "paypal", providerPayload: { orderId: "paypal_resume_1", currency: "USD" } },
+      json: { ok: true, status: "started", provider: "paypal", providerPayload: { orderId: "paypal_resume_1", currency: "USD", amount: 8499 } },
     });
   });
   let cancelCalls = 0;
@@ -1239,7 +1239,7 @@ test("PayPal onApprove still captures and confirms when Change payment method ca
         status: "started",
         provider: "paypal",
         paymentAccessToken: "paypal-approve-cancel-pat",
-        providerPayload: { orderId: "paypal_approve_1", currency: "USD" },
+        providerPayload: { orderId: "paypal_approve_1", currency: "USD", amount: 8499 },
         quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
         quoteFingerprint: "fixture-quote",
         sessionExpiresAt: expiry,
@@ -1299,7 +1299,7 @@ test("Razorpay success handler still finalizes and confirms when Change payment 
         status: "started",
         provider: "razorpay",
         paymentAccessToken: "rzp-handler-cancel-pat",
-        providerPayload: { orderId: "order_rzp_f22", amount: 8499, currency: "INR", key: "rzp_test_fixture" },
+        providerPayload: { orderId: "order_rzp_f22", amount: 8499, currency: "USD", key: "rzp_test_fixture" },
         quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
         quoteFingerprint: "fixture-quote",
         sessionExpiresAt: expiry,
@@ -1397,7 +1397,7 @@ test("delayed cancel 409 does not replace PayPal manual-review notice after onAp
         status: "started",
         provider: "paypal",
         paymentAccessToken: "paypal-review-cancel-pat",
-        providerPayload: { orderId: "paypal_review_1", currency: "USD" },
+        providerPayload: { orderId: "paypal_review_1", currency: "USD", amount: 8499 },
         quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
         quoteFingerprint: "fixture-quote",
         sessionExpiresAt: expiry,
@@ -1462,7 +1462,7 @@ test("delayed cancel 409 does not replace Razorpay manual-review notice after ha
         status: "started",
         provider: "razorpay",
         paymentAccessToken: "rzp-review-cancel-pat",
-        providerPayload: { orderId: "order_rzp_review_1", amount: 8499, currency: "INR", key: "rzp_test_fixture" },
+        providerPayload: { orderId: "order_rzp_review_1", amount: 8499, currency: "USD", key: "rzp_test_fixture" },
         quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
         quoteFingerprint: "fixture-quote",
         sessionExpiresAt: expiry,
@@ -1565,7 +1565,7 @@ test("cancel 200 captured booked still confirms after PayPal capture reply is lo
         status: "started",
         provider: "paypal",
         paymentAccessToken: "paypal-lost-capture-pat",
-        providerPayload: { orderId: "paypal_lost_reply_1", currency: "USD" },
+        providerPayload: { orderId: "paypal_lost_reply_1", currency: "USD", amount: 8499 },
         quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
         quoteFingerprint: "fixture-quote",
         sessionExpiresAt: expiry,
@@ -1616,7 +1616,7 @@ test("cancel 200 captured booked still confirms after Razorpay finalize request 
         status: "started",
         provider: "razorpay",
         paymentAccessToken: "rzp-finalize-fail-pat",
-        providerPayload: { orderId: "order_rzp_f24", amount: 8499, currency: "INR", key: "rzp_test_fixture" },
+        providerPayload: { orderId: "order_rzp_f24", amount: 8499, currency: "USD", key: "rzp_test_fixture" },
         quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
         quoteFingerprint: "fixture-quote",
         sessionExpiresAt: expiry,
@@ -1713,7 +1713,7 @@ test("cancel 200 abandoned does not unlock Pay your way while PayPal capture is 
         status: "started",
         provider: "paypal",
         paymentAccessToken: "paypal-capture-pending-pat",
-        providerPayload: { orderId: "paypal_capture_pending_1", currency: "USD" },
+        providerPayload: { orderId: "paypal_capture_pending_1", currency: "USD", amount: 8499 },
         quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
         quoteFingerprint: "fixture-quote",
         sessionExpiresAt: expiry,
@@ -1847,7 +1847,7 @@ test("cancel 200 abandoned preserves replacement hold token if pending PayPal ca
         status: "started",
         provider: "paypal",
         paymentAccessToken: "paypal-fail-after-cancel-pat",
-        providerPayload: { orderId: "paypal_fail_after_cancel_1", currency: "USD" },
+        providerPayload: { orderId: "paypal_fail_after_cancel_1", currency: "USD", amount: 8499 },
         quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
         quoteFingerprint: "fixture-quote",
         sessionExpiresAt: expiry,
@@ -1955,7 +1955,7 @@ test("concurrent Change payment method 409 abandoned keeps retry available to re
         status: "started",
         provider: "paypal",
         paymentAccessToken: "paypal-tab-race-pat",
-        providerPayload: { orderId: "paypal_tab_race_1", currency: "USD" },
+        providerPayload: { orderId: "paypal_tab_race_1", currency: "USD", amount: 8499 },
         quote: { grossAmount: 84.99, netAmount: 84.99, isFree: false },
         quoteFingerprint: "fixture-quote",
         sessionExpiresAt: expiry,
@@ -2266,6 +2266,7 @@ test("Dodo Resume checkout keeps newer hold when stale abandoned session returns
   await page.evaluate(({ nextHoldId, nextExpiry }) => {
     const newer = { holdId: nextHoldId, holdToken: "dodo-browser-newer-hold", expiresAt: nextExpiry, phase: "holding" };
     sessionStorage.setItem("my_slot_hold", JSON.stringify(newer));
+    sessionStorage.setItem("roo_hold_rotations", JSON.stringify({ [`${nextHoldId}:dodo-old-session-hold`]: "dodo-browser-newer-hold" }));
     const stored = JSON.parse(sessionStorage.getItem("checkout_booking_state") || "{}");
     const nextBooking = { ...stored, slotHoldToken: "dodo-browser-newer-hold" };
     sessionStorage.setItem("checkout_booking_state", JSON.stringify(nextBooking));
@@ -2333,7 +2334,7 @@ test("Dodo Resume checkout on leftover dodo_return URL clears query params on fa
     });
   });
 
-  await page.goto("/payment?dodo_return=1");
+  await page.goto("/payment?dodo_return=1&dodo_session=fixture-dodo-tag");
   await expect(page.getByText("Temporary status outage.")).toBeVisible();
   expect(finalizeCount).toBe(1);
 

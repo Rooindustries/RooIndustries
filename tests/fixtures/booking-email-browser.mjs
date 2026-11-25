@@ -17,8 +17,9 @@ globalThis.fetch = async (input, init = {}) => {
     if (url.pathname === "/v1/oauth2/token") return Response.json({ access_token: "fixture-token" });
     if (url.pathname === "/v2/checkout/orders" && init.method === "POST") {
       const id = `fixture-order-${orders.size + 1}`;
-      orders.set(id, JSON.parse(init.body).purchase_units[0].amount);
-      return Response.json({ id });
+      const amount = JSON.parse(init.body).purchase_units[0].amount;
+      orders.set(id, amount);
+      return Response.json({ id, purchase_units: [{ amount }] });
     }
     const id = url.pathname.split("/").at(-1);
     const amount = orders.get(id);

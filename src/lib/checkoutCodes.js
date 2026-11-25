@@ -1,49 +1,9 @@
-import { fetchJsonWithTimeout } from "./clientRequest";
-
 export const CODE_VALIDATION_UNAVAILABLE_MESSAGE =
   "Code validation is temporarily unavailable. Try again or continue without this code.";
-const unavailableCode = () => ({
-  ok: false,
-  unavailable: true,
-  error: CODE_VALIDATION_UNAVAILABLE_MESSAGE,
-});
+const loadCodeApi = () => import("./paymentCheckoutHold");
 
-const lookupCode = async (url, fetchImpl) => {
-  try {
-    const { response, data } = await fetchJsonWithTimeout(url, {}, fetchImpl);
-    if (response.ok === false && (response.status !== 400 || data?.ok !== false)) {
-      return unavailableCode();
-    }
-    if (typeof data?.ok !== "boolean" || data?.reason === "unavailable") {
-      return unavailableCode();
-    }
-    return data;
-  } catch {
-    return unavailableCode();
-  }
-};
-
-const parseMoneyValue = (value) => {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : null;
-  }
-
-  if (typeof value !== "string") return null;
-  const normalized = value
-    .trim()
-    .replace(/,/g, "")
-    .replace(/[$€£₹]/g, "")
-    .trim();
-  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(normalized)) return null;
-
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : null;
-};
-
-export const toMoney = (value) => {
-  const parsed = parseMoneyValue(value);
-  return parsed === null ? 0 : +parsed.toFixed(2);
-};
+export { currencyDecimals, formatCheckoutAmount, normalizeCurrencyCode, toMoney, toSubunitsClient } from "./checkoutMoney";
+import { formatCheckoutAmount, normalizeCurrencyCode, parseMoneyValue, toMoney } from "./checkoutMoney";
 
 const clamp = (value, minimum, maximum) =>
   Math.min(maximum, Math.max(minimum, value));
@@ -84,25 +44,26 @@ export const getCouponDiscountType = (coupon) =>
     ? "fixed"
     : "percent";
 
-export const getCouponDiscountValue = (coupon) =>
+export const getCouponDiscountValue = (coupon, currency = "USD") =>
   getCouponDiscountType(coupon) === "fixed"
-    ? Math.max(0, toMoney(coupon?.discountAmount))
+    ? Math.max(0, toMoney(coupon?.discountAmount, currency))
     : clampPercent(coupon?.discountPercent);
 
-export const getCouponDiscountAmount = (coupon, baseAmount) => {
-  const normalizedBaseAmount = Math.max(0, toMoney(baseAmount));
+export const getCouponDiscountAmount = (coupon, baseAmount, currency = "USD") => {
+  const normalizedBaseAmount = Math.max(0, toMoney(baseAmount, currency));
   if (!coupon || normalizedBaseAmount <= 0) return 0;
   const discountType = getCouponDiscountType(coupon);
   const rawAmount =
     discountType === "fixed"
-      ? getCouponDiscountValue(coupon)
-      : normalizedBaseAmount * (getCouponDiscountValue(coupon) / 100);
-  return clamp(toMoney(rawAmount), 0, normalizedBaseAmount);
+      ? getCouponDiscountValue(coupon, currency)
+      : normalizedBaseAmount * (getCouponDiscountValue(coupon, currency) / 100);
+  return clamp(toMoney(rawAmount, currency), 0, normalizedBaseAmount);
 };
 
-export const formatCouponValue = (coupon) => {
+export const formatCouponValue = (coupon, currency = "USD") => {
   if (getCouponDiscountType(coupon) === "fixed") {
-    return `$${getCouponDiscountValue(coupon).toFixed(2)} off`;
+    const code = normalizeCurrencyCode(currency);
+    return `${formatCheckoutAmount(getCouponDiscountValue(coupon, code), code, { includeCurrency: code !== "USD" })} off`;
   }
   return `${getCouponDiscountValue(coupon)}% off`;
 };
@@ -158,17 +119,18 @@ const calculateClientDiscounts = ({ baseAmount, referral, coupon }) => {
 };
 
 const calculateFinalDiscounts = ({ baseAmount, client, serverQuote }) => {
+  const quoteCurrency = normalizeCurrencyCode(serverQuote?.currency || "USD");
   const parsedQuotedNetAmount = parseMoneyValue(serverQuote?.netAmount);
   const hasQuotedNetAmount = parsedQuotedNetAmount !== null;
   const quotedIsFree = serverQuote?.isFree === true;
   const hasQuote = hasQuotedNetAmount || quotedIsFree;
   const quotedGrossAmount = hasQuote ? parseMoneyValue(serverQuote?.grossAmount) : null;
   const displayBaseAmount =
-    quotedGrossAmount === null ? baseAmount : Math.max(0, toMoney(quotedGrossAmount));
+    quotedGrossAmount === null ? baseAmount : Math.max(0, toMoney(quotedGrossAmount, quoteCurrency));
   const finalAmount = quotedIsFree
     ? 0
     : hasQuotedNetAmount
-      ? Math.max(0, toMoney(parsedQuotedNetAmount))
+      ? Math.max(0, toMoney(parsedQuotedNetAmount, quoteCurrency))
       : client.rawFinalAmount;
   const isFree =
     quotedIsFree ||
@@ -178,7 +140,7 @@ const calculateFinalDiscounts = ({ baseAmount, client, serverQuote }) => {
   const preventedFreeReduction =
     client.clientIsFree && hasQuotedNetAmount && finalAmount > 0;
   const effectiveDiscountAmount = hasQuote
-    ? clamp(toMoney(displayBaseAmount - finalAmount), 0, displayBaseAmount)
+    ? clamp(toMoney(displayBaseAmount - finalAmount, quoteCurrency), 0, displayBaseAmount)
     : client.totalDiscountAmount;
   const discountPercentCombined =
     displayBaseAmount > 0
@@ -186,7 +148,7 @@ const calculateFinalDiscounts = ({ baseAmount, client, serverQuote }) => {
       : 0;
 
   const quotedLine = (name) =>
-    clamp(parseMoneyValue(serverQuote?.[name]) ?? 0, 0, displayBaseAmount);
+    clamp(toMoney(parseMoneyValue(serverQuote?.[name]) ?? 0, quoteCurrency), 0, displayBaseAmount);
 
   return {
     isFree,
@@ -205,19 +167,8 @@ const calculateFinalDiscounts = ({ baseAmount, client, serverQuote }) => {
   };
 };
 
-export const fetchCheckoutQuote = async (body, { signal }) => {
-  const response = await fetch("/api/payment/quote", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    signal,
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok || !data?.ok) {
-    throw new Error(data?.error || "Unable to confirm checkout price.");
-  }
-  return data;
-};
+export const fetchCheckoutQuote = async (body, opts) =>
+  (await loadCodeApi()).fetchCheckoutQuote(body, opts);
 
 export const calculateCheckoutDiscounts = ({
   baseAmount,
@@ -241,99 +192,12 @@ export const calculateCheckoutDiscounts = ({
   };
 };
 
-export const validateReferralCode = async (code, fetchImpl = fetch) => {
-  const data = await lookupCode(
-    `/api/ref/validateReferral?code=${encodeURIComponent(code)}`,
-    fetchImpl
-  );
-  if (data.unavailable) return data;
-  if (!data?.ok) {
-    return {
-      ok: false,
-      error: data?.error || "Invalid or inactive referral code.",
-    };
-  }
+const unavailableCode = () => ({ ok: false, unavailable: true, error: CODE_VALIDATION_UNAVAILABLE_MESSAGE });
+export const validateReferralCode = async (code, fetchImpl = fetch) =>
+  loadCodeApi().then((m) => m.validateReferralCode(code, fetchImpl), unavailableCode);
 
-  const referral = sanitizeReferralForCheckout(data.referral);
-  if (!referral || data.active === false || data.eligible === false) {
-    return { ok: false, error: "Invalid or inactive referral code." };
-  }
+export const validateCouponCode = async (code, packageTitle, fetchImpl = fetch) =>
+  loadCodeApi().then((m) => m.validateCouponCode(code, packageTitle, fetchImpl), unavailableCode);
 
-  return {
-    ok: true,
-    active: data.active !== false,
-    eligible: data.eligible !== false,
-    referral,
-  };
-};
-
-export const validateCouponCode = async (
-  code,
-  packageTitle,
-  fetchImpl = fetch
-) => {
-  const data = await lookupCode(
-    `/api/ref/validateCoupon?code=${encodeURIComponent(
-      code
-    )}&packageTitle=${encodeURIComponent(packageTitle)}`,
-    fetchImpl
-  );
-  if (data.unavailable) return data;
-  if (!data?.ok) {
-    return {
-      ok: false,
-      error: data?.error || "Invalid referral or coupon code.",
-    };
-  }
-
-  const coupon = sanitizeCouponForCheckout(data.coupon);
-  if (!coupon) {
-    return { ok: false, error: "Invalid referral or coupon code." };
-  }
-
-  return { ok: true, coupon };
-};
-
-export const resolveCheckoutCode = async (
-  code,
-  packageTitle,
-  fetchImpl = fetch
-) => {
-  const [referralAttempt, couponAttempt] = await Promise.allSettled([
-    validateReferralCode(code, fetchImpl),
-    validateCouponCode(code, packageTitle, fetchImpl),
-  ]);
-  const referralResult =
-    referralAttempt.status === "fulfilled" ? referralAttempt.value : null;
-  const couponResult =
-    couponAttempt.status === "fulfilled" ? couponAttempt.value : null;
-  const hasReferral = !!(referralResult?.ok && referralResult.referral);
-  const hasCoupon = !!(couponResult?.ok && couponResult.coupon);
-
-  if (hasReferral && hasCoupon) {
-    console.warn("checkout_code_namespace_collision", {
-      event: "checkout_code_namespace_collision",
-      code: normalizeCode(code).toLowerCase(),
-      precedence: "referral_first",
-      resolvedType: "referral",
-    });
-  }
-
-  if (hasReferral) {
-    return { ok: true, type: "referral", value: referralResult.referral };
-  }
-  if (!referralResult || !couponResult || referralResult.unavailable || couponResult.unavailable) {
-    return unavailableCode();
-  }
-  if (hasCoupon) {
-    return { ok: true, type: "coupon", value: couponResult.coupon };
-  }
-
-  return {
-    ok: false,
-    error:
-      couponResult?.error ||
-      referralResult?.error ||
-      "We couldn't validate that referral or coupon code. Please try again.",
-  };
-};
+export const resolveCheckoutCode = async (code, packageTitle, fetchImpl = fetch) =>
+  loadCodeApi().then((m) => m.resolveCheckoutCode(code, packageTitle, fetchImpl), unavailableCode);

@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import DodoPayments from "dodopayments";
 import envValue from "../../supabase/envValue.cjs";
 import providerConfig from "./providerConfig.js";
@@ -43,7 +44,9 @@ export const createDodoCheckout = async ({ record, lookupOnly = false }) => {
       (read("DODO_PAYMENTS_ENVIRONMENT") === "live_mode" && returnUrl.protocol !== "https:")) {
     throw failure("dodo_return_url_invalid");
   }
+  const dodoReturnTag = String(record.providerPublicData?.dodoReturnTag || "").trim() || crypto.randomBytes(12).toString("hex");
   returnUrl.searchParams.set("dodo_return", "1");
+  returnUrl.searchParams.set("dodo_session", dodoReturnTag);
   const cancelUrl = new URL(returnUrl);
   cancelUrl.searchParams.delete("dodo_return");
   cancelUrl.searchParams.set("dodo_cancel", "1");
@@ -75,6 +78,7 @@ export const createDodoCheckout = async ({ record, lookupOnly = false }) => {
   return {
     orderId: session.session_id,
     checkoutUrl: session.checkout_url,
+    dodoReturnTag,
     currency: DODO_CURRENCY,
     amount,
     productId,

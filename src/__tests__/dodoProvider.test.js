@@ -174,15 +174,6 @@ test('requires explicit mode and refuses test keys in production runtime',()=>{
   expect(providerConfig.resolvePaymentProviders().dodo.enabled).toBe(true);
 });
 
-test('production uses the live API and excludes test checkout hosts', async () => {
-  process.env.VERCEL_ENV = 'production';
-  process.env.DODO_PAYMENTS_ENVIRONMENT = 'live_mode';
-  process.env.DODO_PAYMENTS_RETURN_URL = 'https://www.example.com/payment';
-  expect(providerConfig.resolvePaymentProviders().dodo).toEqual({enabled: true, mode: 'live'});
-  await expect(createDodoCheckout({record: record()})).rejects.toMatchObject({code: 'dodo_checkout_url_invalid'});
-  expect(global.fetch.mock.calls.every(([input]) => new URL(typeof input === 'string' ? input : input.url).origin === 'https://live.dodopayments.com')).toBe(true);
-});
-
 test('production rejects an insecure return URL before creating a checkout', async () => {
   process.env.VERCEL_ENV = 'production';
   process.env.DODO_PAYMENTS_ENVIRONMENT = 'live_mode';

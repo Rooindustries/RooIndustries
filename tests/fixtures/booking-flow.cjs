@@ -12,12 +12,17 @@ const providers = {
 const overhaulPrice = 84.99;
 
 const startedCheckout = (baseURL, checkouts, request) => {
-  const holdId = request.postDataJSON()?.bookingPayload?.slotHoldId || "";
+  const reqBody = request.postDataJSON() || {};
+  const holdId = reqBody?.bookingPayload?.slotHoldId || "";
+  const provider = String(reqBody?.provider || "dodo").trim().toLowerCase();
   const checkoutCreated = !checkouts.has(holdId);
   checkouts.add(holdId);
+  const providerPayload = provider === "razorpay"
+    ? { orderId: `fixture-order-${holdId}`, key: "rzp_test_fixture", currency: "USD", amount: Math.round(overhaulPrice * 100) }
+    : { checkoutUrl: `${baseURL}/__test/checkout-handoff`, orderId: `fixture-order-${holdId}`, dodoReturnTag: "fixture-dodo-tag" };
   return {
     ok: true, paymentAccessToken: "fixture-payment", status: "started", checkoutCreated,
-    providerPayload: { checkoutUrl: `${baseURL}/__test/checkout-handoff`, orderId: `fixture-order-${holdId}` },
+    providerPayload,
     sessionExpiresAt: new Date(Date.now() + 20 * 60 * 1000).toISOString(),
   };
 };

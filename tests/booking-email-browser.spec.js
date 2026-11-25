@@ -76,15 +76,19 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
           xocDateSlots: dateSlots, vertexEssentialsDateSlots: dateSlots, packageDateSlots: [] } };
         await route.fulfill({ status: response.status, json: body });
       });
+      let lastDodoReturnTag = "";
       await context.route(/\/api\/(holdSlot|payment\/(quote|start|finalize|status|cancel)|ref\/sendBookingEmails)(?:\?|$)/, async route => {
         const request = route.request();
         const pathname = new URL(request.url()).pathname;
         const token = (request.headers().authorization || "").replace(/^Bearer /, "");
         const response = await native.call("post", pathname, request.postDataJSON(), token);
+        if (pathname === "/api/payment/start" && response.body?.providerPayload?.dodoReturnTag) {
+          lastDodoReturnTag = response.body.providerPayload.dodoReturnTag;
+        }
         await route.fulfill({ status: response.status, json: response.body });
       });
       await context.route("https://test.checkout.dodopayments.com/session/**", route => route.fulfill({
-        contentType: "text/html", body: `<a href="${new URL(page.url()).origin}/payment?dodo_return=1">Return to booking</a>`,
+        contentType: "text/html", body: `<a href="${new URL(page.url()).origin}/payment?dodo_return=1&dodo_session=${encodeURIComponent(lastDodoReturnTag)}">Return to booking</a>`,
       }));
       await context.route(/https:\/\/www\.(sandbox\.)?paypal\.com\/sdk\/js/, route => route.fulfill({ contentType: "application/javascript", body: paypalSdk }));
       await flow.booking();

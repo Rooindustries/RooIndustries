@@ -32,10 +32,16 @@ import {
   writeStoredCheckoutBooking,
 } from "../lib/checkoutStorage";
 import { readExistingCheckoutReferral, stripRefFromSearch, writeLinkReferralToSession } from "../lib/arrivalSnapshot";
+import {
+  CHECKOUT_CONFIRMATION_EVENT,
+  isHoldProtectedFromExpiry,
+} from "../lib/checkoutConfirmation";
 import { normalizeLinkReferral } from "../lib/refShape.js";
 import {
   calculateCheckoutDiscounts,
   fetchCheckoutQuote,
+  formatCheckoutAmount,
+  normalizeCurrencyCode,
   CODE_VALIDATION_UNAVAILABLE_MESSAGE,
   resolveCheckoutCode,
   sanitizeCouponForCheckout,
@@ -108,7 +114,6 @@ const normalizeForm = (value = {}) => ({
   notes: typeof value.notes === "string" ? value.notes : "",
 });
 const readReferralFromSession = readLinkReferralFromSession;
-const formatUsd = (value) => `$${toMoney(value).toFixed(2)}`;
 const getDraftKey = (pkg) => (pkg?.title ? pkg.title : "_default");
 const isDraftEmpty = (formObj) =>
   !String(formObj?.discord || "").trim() &&
@@ -576,6 +581,12 @@ export default function BookingForm() {
     myHold && checkoutBooking?.slotHoldId === myHold.holdId &&
     checkoutBooking?.slotHoldToken === myHold.holdToken;
   const paymentInOtherTab = myHold?.paymentStartedElsewhere && !hasMatchingCheckoutBooking;
+  const [confirmationVersion, setConfirmationVersion] = useState(0);
+  useEffect(() => {
+    const onConfirmChange = () => setConfirmationVersion((v) => v + 1);
+    window.addEventListener(CHECKOUT_CONFIRMATION_EVENT, onConfirmChange);
+    return () => window.removeEventListener(CHECKOUT_CONFIRMATION_EVENT, onConfirmChange);
+  }, []);
   const [lockingSlot, setLockingSlot] = useState(false);
   const [holdCountdownMs, setHoldCountdownMs] = useState(null);
   const [releasingPayment, setReleasingPayment] = useState(false);
@@ -768,7 +779,7 @@ export default function BookingForm() {
       const stored = sessionStorage.getItem(HOLD_STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (new Date(parsed.expiresAt) > new Date()) {
+        if (new Date(parsed.expiresAt) > new Date() || isHoldProtectedFromExpiry(parsed)) {
           const normalizedHold = {
             holdId: parsed.holdId,
             holdToken: parsed.holdToken,
@@ -865,10 +876,19 @@ export default function BookingForm() {
     const tick = () => {
       const diff = expiresAtMs - Date.now();
       if (diff <= 0) {
-        hasActiveHoldRef.current = false;
-        setHoldCountdownMs(0);
         const paymentPending =
           String(myHold.phase || "").trim().toLowerCase() === "payment_pending";
+        if (isHoldProtectedFromExpiry(myHold, { paymentInOtherTab })) {
+          setHoldCountdownMs(0);
+          if (paymentPending) {
+            setErrorStep2(paymentInOtherTab
+              ? "This reservation expired. Use Check again to choose a slot again."
+              : PAYMENT_PENDING_EXPIRY_ERROR);
+          }
+          return true;
+        }
+        hasActiveHoldRef.current = false;
+        setHoldCountdownMs(0);
         if (paymentPending) {
           setErrorStep2(paymentInOtherTab
             ? "This reservation expired. Use Check again to choose a slot again."
@@ -891,7 +911,7 @@ export default function BookingForm() {
     }, 1000);
 
     return () => clearInterval(id);
-  }, [myHold, paymentInOtherTab]);
+  }, [myHold, paymentInOtherTab, confirmationVersion]);
 
   const clearErrorIfResolved = (nextForm = form) => {
     if (!errorStep2) return;
@@ -1655,8 +1675,11 @@ export default function BookingForm() {
       }),
     [appliedCoupon, appliedReferral, reviewBaseAmount, reviewQuote]
   );
+  const reviewCurrency = normalizeCurrencyCode(reviewQuote?.currency || "USD");
+  const formatReviewMoney = (value) =>
+    formatCheckoutAmount(value, reviewCurrency, { includeCurrency: reviewCurrency !== "USD" });
   const reviewTotal =
-    reviewBaseAmount > 0 ? formatUsd(reviewDiscounts.finalAmount) : "";
+    reviewBaseAmount > 0 ? formatReviewMoney(reviewDiscounts.finalAmount) : "";
 
   const closeCodeEntry = () => {
     setCodeEntryOpen(false);
@@ -2007,32 +2030,12 @@ export default function BookingForm() {
   };
 
   const showCapturedPaymentResult = (data = {}) => {
-    const status = String(data.status || "").trim().toLowerCase();
-    const bookingId = String(data.bookingId || "").trim();
-    if (
-      !["booked", "email_partial"].includes(status) ||
-      !bookingId
-    ) {
-      returnToPayment();
-      return;
-    }
-
+    const status = String(data.status || "").trim().toLowerCase(), bookingId = String(data.bookingId || "").trim();
+    if (!["booked", "email_partial"].includes(status) || !bookingId) { returnToPayment(); return; }
     const bookingConfirmation = createBookingConfirmation(data);
-    try {
-      sessionStorage.removeItem(PAYMENT_SESSION_STORAGE_KEY);
-      sessionStorage.removeItem(CHECKOUT_BOOKING_STORAGE_KEY);
-    } catch {
-      console.error("Failed to persist booking confirmation");
-    }
     clearHoldState(true);
     const backgroundLocation = location.state?.backgroundLocation || null;
-    navigate("/payment-success", {
-      replace: true,
-      state: {
-        bookingConfirmation,
-        ...(backgroundLocation ? { backgroundLocation } : {}),
-      },
-    });
+    navigate("/payment-success", { replace: true, state: { bookingConfirmation, ...(backgroundLocation ? { backgroundLocation } : {}) } });
   };
 
   const releaseHold = async (resetStep = true, { suppressError = false } = {}) => {
@@ -2099,79 +2102,18 @@ export default function BookingForm() {
 
   const releasePaymentSession = async () => {
     if (!isPaymentPendingHold || releasingPayment) return;
-    setReleasingPayment(true);
-    setErrorStep2("");
-    setPaymentReleaseStatus("");
+    setReleasingPayment(true); setErrorStep2(""); setPaymentReleaseStatus("");
     try {
-      const stored = JSON.parse(
-        sessionStorage.getItem(PAYMENT_SESSION_STORAGE_KEY) || "null"
-      );
-      const paymentAccessToken = String(stored?.paymentAccessToken || "").trim();
-      if (!paymentAccessToken) {
-        throw new Error("Return to payment once so the active session can be checked.");
-      }
-      const response = await fetch("/api/payment/cancel", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${paymentAccessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: "{}",
-        signal: AbortSignal.timeout(BOOKING_FETCH_TIMEOUT_MS),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (data?.captured) {
-        showCapturedPaymentResult(data);
-        return;
-      }
-      if (!response.ok || data?.cancelled !== true) {
-        throw new Error(data?.error || "The payment session could not be released.");
-      }
-      const refreshed = data.refreshedHold;
-      if (!refreshed?.slotHoldId || !refreshed?.slotHoldToken) {
-        clearHoldState(true);
-        setErrorStep1("The reservation expired. Please choose the slot again.");
-        return;
-      }
-      const nextHold = {
-        ...myHold,
-        holdId: refreshed.slotHoldId,
-        holdToken: refreshed.slotHoldToken,
-        expiresAt: refreshed.slotHoldExpiresAt,
-        phase: "holding",
-      };
-      setMyHold(nextHold);
-      writeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY, JSON.stringify(nextHold));
-      const checkoutUpdated = updateStoredCheckoutHold(refreshed);
-      removeBrowserStorage("sessionStorage", PAYMENT_SESSION_STORAGE_KEY);
-      broadcastHold(nextHold);
-      setPaymentReleaseStatus(
-        checkoutUpdated
-          ? "Payment method released. You can choose another payment method."
-          : "Payment method released. Review your booking details and submit again."
-      );
-    } catch (error) {
+      const { runBookingPaymentRelease } = await import("../lib/paymentCheckoutHold");
+      await runBookingPaymentRelease({ hold: myHold, checkout: readStoredCheckoutBooking(), packageTitle: selectedPackage.title, holdKey: HOLD_STORAGE_KEY, sessKey: PAYMENT_SESSION_STORAGE_KEY, checkoutKey: CHECKOUT_BOOKING_STORAGE_KEY, timeoutMs: BOOKING_FETCH_TIMEOUT_MS, writeHold: (h) => { setMyHold(h); writeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY, JSON.stringify(h)); }, updateCheckout: updateStoredCheckoutHold, broadcast: broadcastHold, onCaptured: showCapturedPaymentResult, onExpired: (m) => { clearHoldState(true); setErrorStep1(m); }, onReleased: setPaymentReleaseStatus, onError: (m) => { setPaymentReleaseStatus(""); setErrorStep2(m); } });
+    } catch {
       setPaymentReleaseStatus("");
-      const timedOut =
-        error?.name === "AbortError" || error?.name === "TimeoutError";
-      setErrorStep2(
-        timedOut
-          ? "The payment session could not be released. Please try again."
-          : error.message || "The payment session could not be released."
-      );
-    } finally {
-      setReleasingPayment(false);
-    }
+      setErrorStep2("The payment session could not be released. Please try again.");
+    } finally { setReleasingPayment(false); }
   };
 
   const handleLockAndGoNext = async (recheckOtherTab = false) => {
     const recheckingPayment = recheckOtherTab === true && paymentInOtherTab;
-    if (recheckingPayment && new Date(myHold.expiresAt).getTime() <= Date.now()) {
-      clearHoldState(true);
-      setErrorStep2("");
-      setErrorStep1("The reservation expired. Please choose a slot again.");
-      return;
-    }
     if (isPaymentPendingHold && !recheckingPayment) {
       const message = "Your payment session is already in progress. Return to payment to finish it.";
       if (myHold.startTimeUTC === selectedSlot?.utcStart?.toISOString()) {
@@ -2362,6 +2304,7 @@ export default function BookingForm() {
 
       ...(finalReferralCode ? { referralCode: finalReferralCode } : {}),
       ...(finalCouponCode ? { couponCode: finalCouponCode } : {}),
+      acceptedQuoteCurrency: reviewCurrency,
     };
 
     try {
@@ -3111,7 +3054,7 @@ export default function BookingForm() {
                           <dd className="flex flex-wrap items-center gap-2 font-semibold text-ink sm:justify-end sm:text-right">
                             <span>
                               {appliedReferral.code} · −
-                              {formatUsd(
+                              {formatReviewMoney(
                                 reviewDiscounts.referralDiscountAmount
                               )}
                             </span>
@@ -3135,7 +3078,7 @@ export default function BookingForm() {
                           <dd className="flex flex-wrap items-center gap-2 font-semibold text-ink sm:justify-end sm:text-right">
                             <span>
                               {appliedCoupon.code} · −
-                              {formatUsd(reviewDiscounts.couponDiscountAmount)}
+                              {formatReviewMoney(reviewDiscounts.couponDiscountAmount)}
                             </span>
                             {!isPaymentPendingHold && (
                               <button

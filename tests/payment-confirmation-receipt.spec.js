@@ -258,7 +258,7 @@ async function openPendingPaidCheckout(page, flow) {
   await flow.payment();
   await page.getByRole("button", { name: "Pay your way", exact: true }).click();
   await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
-  await page.goto("/payment?dodo_return=1", { waitUntil: "domcontentloaded" });
+  await page.goto("/payment?dodo_return=1&dodo_session=fixture-dodo-tag", { waitUntil: "domcontentloaded" });
   await expect.poll(() => Boolean(finalizeRoute)).toBe(true);
   await expect(page.getByRole("heading", { level: 2, name: "Complete Payment", exact: true })).toBeVisible();
   await evaluateBrowserTask(page, () => document.fonts.ready);
@@ -326,7 +326,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         if (kind === "paid") {
           await page.getByRole("button", { name: "Pay your way", exact: true }).click();
           await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
-          await page.goto("/payment?dodo_return=1", { waitUntil: "domcontentloaded" });
+          await page.goto("/payment?dodo_return=1&dodo_session=fixture-dodo-tag", { waitUntil: "domcontentloaded" });
           await expect.poll(() => Boolean(finalizeRoute)).toBe(true);
           await expect(page.getByRole("heading", { level: 2, name: "Complete Payment", exact: true })).toBeVisible();
         }
@@ -601,7 +601,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         };
         await page.route("**/_next/static/chunks/**", interceptChunk);
         try {
-          await page.goto("/payment?dodo_return=1", { waitUntil: "domcontentloaded" });
+          await page.goto("/payment?dodo_return=1&dodo_session=fixture-dodo-tag", { waitUntil: "domcontentloaded" });
           await expect.poll(() => Boolean(finalizeRoute)).toBe(true);
           await expect(page.getByRole("heading", { level: 2, name: "Complete Payment", exact: true })).toBeVisible();
           await expect.poll(() => chunks.length).toBeGreaterThan(0);
@@ -710,7 +710,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
             await page.goto("/booking", { waitUntil: "networkidle" });
             await expect(page.getByRole("button", { name: "Release payment", exact: true })).toBeVisible();
           } else {
-            await page.goto("/payment?dodo_return=1", { waitUntil: "domcontentloaded" });
+            await page.goto("/payment?dodo_return=1&dodo_session=fixture-dodo-tag", { waitUntil: "domcontentloaded" });
             await expect.poll(() => Boolean(finalizeRoute)).toBe(true);
             await expect(page.getByRole("heading", { level: 2, name: "Complete Payment", exact: true })).toBeVisible();
           }
