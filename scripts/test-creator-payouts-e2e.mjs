@@ -446,7 +446,7 @@ const dispute = (status) => ({
   dispute_id: `dispute-${current.key}`,
   payment_id: current.payment.payment_id,
   currency: 'USD',
-  amount: current.payment.total_amount,
+  amount: (current.payment.total_amount / 100).toFixed(2),
   dispute_status: status,
   dispute_stage: 'dispute',
 });

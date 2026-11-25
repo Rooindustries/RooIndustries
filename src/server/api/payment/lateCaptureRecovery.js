@@ -163,6 +163,31 @@ export const isExhaustedCleanupWatchActive = (record = {}) =>
   ["failed", "abandoned"].includes(String(record.status || "").trim().toLowerCase()) &&
   hasActiveLateCaptureWatch(record);
 
+export const exhaustedPendingCleanupNeedsResume = (record = {}, { dodoEnabled = true } = {}) => {
+  if (
+    record?.provider !== "dodo" ||
+    record.reconciliationRecoveryTerminal !== true ||
+    record.resourceReleasePending !== true ||
+    record.providerRecoveryTerminal === true ||
+    hasPreservedOwnerReview(record)
+  ) {
+    return false;
+  }
+  const ps = String(record.providerPaymentState || "").trim().toLowerCase();
+  if (dodoEnabled || !ALL_PENDING_AND_PARTIAL_DODO_STATES.has(ps)) return true;
+  const deadline = new Date(record.lateCaptureWatchUntil || "").getTime();
+  return hasActiveLateCaptureWatch(record) && Number.isFinite(deadline) && deadline <= Date.now();
+};
+
+export const exhaustedLiveDodoStateNeedsResume = (record = {}, { dodoEnabled = true } = {}) =>
+  dodoEnabled === true &&
+  record?.provider === "dodo" &&
+  record.reconciliationRecoveryTerminal === true &&
+  record.resourceReleasePending !== true &&
+  record.providerRecoveryTerminal !== true &&
+  !hasPreservedOwnerReview(record) &&
+  ALL_PENDING_AND_PARTIAL_DODO_STATES.has(String(record.providerPaymentState || "").trim().toLowerCase());
+
 export const holdLostToPayment = (hold, record) =>
   ["paypal", "razorpay", "dodo"].includes(record.provider) && !!hold &&
   !record.bookingPayload?.originalOrderId &&
@@ -216,7 +241,7 @@ export const hasObservedCapture = (inspection) =>
   inspection.state === "captured" &&
   (!inspection.payment || settledDodoPaymentState(inspection.payment) === "succeeded");
 
-const buildCaptureLineageUpdates = (record = {}, priorStatus = "") => {
+export const buildCaptureLineageUpdates = (record = {}, priorStatus = "") => {
   const status = String(record.status || "").trim().toLowerCase();
   const prior = String(priorStatus || "").trim().toLowerCase();
   const target = String(record.resourceReleaseTargetStatus || "").trim().toLowerCase();

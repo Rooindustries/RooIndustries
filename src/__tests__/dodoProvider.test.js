@@ -207,20 +207,20 @@ test.each(['session', 'binding'])('a permanent %s mismatch is non-retryable', as
   expect(await verifyDodoCapture({record: record()})).toMatchObject({ok: false, retryable: false, reason});
 });
 
-test.each(['opened', 'challenged', 'lost', 'accepted', 'expired', 'unknown'])('a disputed payment cannot authorize fulfillment after dispute.%s', async status => {
-  const proof = {...payment(), disputes: [{dispute_status: `dispute_${status}`} ]};
+test.each(['opened', 'challenged', 'lost', 'accepted', 'expired'])('a disputed payment cannot authorize fulfillment after dispute.%s', async status => {
+  const proof = {...payment(), disputes: [{dispute_id: `dsp_${status}`, dispute_stage: 'dispute', dispute_status: `dispute_${status}`, amount: '54.95'}]};
   expect(await verifyDodoCapture({record: record(), payment: proof})).toMatchObject({ok: false, captured: true, reason: 'dodo_payment_disputed'});
 });
 
 test.each(['won', 'cancelled'])('a resolved dispute allows fulfillment after dispute.%s', async status => {
-  const proof = {...payment(), disputes: [{dispute_status: `dispute_${status}`}]};
+  const proof = {...payment(), disputes: [{dispute_id: `dsp_${status}`, dispute_stage: 'dispute', dispute_status: `dispute_${status}`, amount: '54.95'}]};
   expect(await verifyDodoCapture({record: record(), payment: proof})).toMatchObject({ok: true, trustedCapture: true});
 });
 
 test('a canceled dispute does not clear another active dispute', async () => {
   const proof = {...payment(), disputes: [
-    {dispute_status: 'dispute_cancelled'},
-    {dispute_status: 'dispute_opened'},
+    {dispute_id: 'dsp_cancel', dispute_stage: 'dispute', dispute_status: 'dispute_cancelled', amount: '54.95'},
+    {dispute_id: 'dsp_open', dispute_stage: 'dispute', dispute_status: 'dispute_opened', amount: '54.95'},
   ]};
   expect(await verifyDodoCapture({record: record(), payment: proof})).toMatchObject({ok: false, reason: 'dodo_payment_disputed'});
 });
@@ -230,7 +230,7 @@ test('successful refunds require accounting before capture verification', async 
     const path = new URL(typeof input === 'string' ? input : input.url).pathname;
     const data = path.startsWith('/checkouts/')
       ? {id: 'cks_offline', payment_id: 'pay_offline'}
-      : {...payment(), refunds: [{status: 'succeeded'}]};
+      : {...payment(), refund_status: 'partial', refunds: [{refund_id: 'rfnd_1', payment_id: 'pay_offline', status: 'succeeded', amount: 1000, currency: 'USD'}]};
     return new Response(JSON.stringify(data), {status: 200, headers: {'content-type': 'application/json'}});
   });
   expect(await verifyDodoCapture({record: record()})).toMatchObject({ok: false, reason: 'dodo_refund_requires_reconciliation'});

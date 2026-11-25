@@ -182,6 +182,18 @@ export const tryPrePricingRetryStart = async (ctx) => {
   }
   const paymentAccessToken = provider === "free" ? "" : ctx.issuePaymentAccessTokenForRecord(rec);
   if (status === "started") {
+    if (provider === "dodo" && typeof ctx.guardDodoCheckoutReuse === "function") {
+      return ctx.guardDodoCheckoutReuse({
+        client,
+        existing: rec,
+        inspectDodoCheckout: ctx.inspectDodoCheckout,
+        patchRecord: ctx.patchRecord,
+        buildProviderPayloadFromRecord: ctx.buildProviderPayloadFromRecord,
+        paymentAccessToken,
+        shared,
+        getHoldById: ctx.getHoldById,
+      });
+    }
     const providerPayload = ctx.buildProviderPayloadFromRecord(rec);
     const body = { ok: true, status: rec.status, checkoutCreated: false, providerPayload, paymentAccessToken };
     return { httpStatus: 200, body: { ...body, ...shared } };

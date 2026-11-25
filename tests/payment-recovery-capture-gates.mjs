@@ -110,7 +110,13 @@ const createInterceptingClient = (baseClient, hooks = {}) =>
         return () => {
           const tx = target.transaction();
           return new Proxy(tx, {
-            get(tTarget, tProp) {
+            get(tTarget, tProp, tReceiver) {
+              if (tProp === 'patch' || tProp === 'delete' || tProp === 'create' || tProp === 'createOrReplace') {
+                return (...args) => {
+                  tTarget[tProp](...args);
+                  return tReceiver;
+                };
+              }
               if (tProp === 'commit') {
                 return async options => {
                   if (hooks.beforeTxCommit) await hooks.beforeTxCommit({ baseClient });
@@ -258,6 +264,14 @@ for (const mode of ['failure', 'abandonment']) {
     const codeW2a = `${couponPrefix}W2A`;
     await seedCoupon(`coupon_${codeW2a}`, codeW2a);
     const w2a = await startCheckout({ couponCode: codeW2a });
+    await fixture.commerce.patch(w2a.record._id).set({
+      provider: 'paypal',
+      status: 'needs_recovery',
+      resourceReleasePending: true,
+      resourceReleaseTargetStatus: mode === 'failure' ? 'failed' : 'abandoned',
+      resourceReleaseReason: `w2a_${mode}_retry`,
+      nextRecoveryAt: new Date(Date.now() - 60_000).toISOString(),
+    }).commit();
     let injectedW2a = false;
     const w2aClient = createInterceptingClient(fixture.commerce, {
       afterPatch: async ({ id, set, baseClient }) => {
@@ -272,12 +286,9 @@ for (const mode of ['failure', 'abandonment']) {
         }
       },
     });
-    fixture.setPaymentAmountOverrides({ status: dodoStatus });
-    await runDirectDodoWebhook({
+    await reconcilePaymentSessions({
+      req: { headers: { authorization: 'Bearer fixture-only-cron' }, body: {} },
       client: w2aClient,
-      paymentId: `payment_${w2a.record.providerOrderId}`,
-      type: eventType,
-      eventId: `w2a_${mode}_${w2a.record._id}`,
     });
     assert.equal(injectedW2a, true);
     assert.equal((await holdFor(w2a.payload)).phase, 'payment_pending');
@@ -364,6 +375,7 @@ test('normal controls: abandonment, legacy failure completion, and verified unbo
   await seedCoupon('coupon_CTRLFAIL', 'CTRLFAIL');
   const fail = await startCheckout({ couponCode: 'CTRLFAIL' });
   await fixture.commerce.patch(fail.record._id).set({
+    provider: 'paypal',
     status: 'failed',
     resourceReleasePending: true,
     resourceReleaseTargetStatus: 'failed',
@@ -689,7 +701,11 @@ test('free checkout failure releases resources, Dodo processing->failed retries 
   const retriedDoc = await fixture.commerce.getDocument(procRetry.record._id);
   assert.equal(retriedDoc.status, 'failed');
   assert.equal(retriedDoc.resourceReleasePending, false);
-  assert.equal((await holdFor(procRetry.payload)).phase, 'released');
+  assert.equal(retriedDoc.holdRetained, true);
+  const retainedHold = await holdFor(procRetry.payload);
+  assert.equal(retainedHold.phase, 'active');
+  assert.equal(retainedHold.paymentRecordId || '', '');
+  assert.equal(retainedHold.paymentFailureCount, 1);
   assert.equal((await fixture.commerce.getDocument(procRetry.record.couponReservationId)).status, 'released');
 
   const blockedLock = await startCheckout();

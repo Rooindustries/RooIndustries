@@ -118,7 +118,10 @@ export async function createBookingHoldFixture() {
     const { createSupabaseDocumentClient } = await import("../../src/server/supabase/documentClient.js");
     const commerce = createSupabaseDocumentClient({ shadowClient: database.client, commerceOnly: true, cutoverGeneration: 0 });
     const content = createSupabaseDocumentClient({ shadowClient: database.client });
-    const dates = Array.from({ length: 24 }, (_, index) => new Date(Date.UTC(2099, 0, index + 5)).toISOString().slice(0, 10));
+    const dates = [
+      ...Array.from({ length: 24 }, (_, index) => new Date(Date.UTC(2099, 0, index + 5)).toISOString().slice(0, 10)),
+      ...Array.from({ length: 30 }, (_, index) => new Date(Date.UTC(2099, 2, index + 1)).toISOString().slice(0, 10)),
+    ];
     await content.create({ _id: "package.fixture.vertex", _type: "package", title: "Performance Vertex Overhaul", price: "$54.95" });
     await content.create({ _id: "6d8a3646-0ed2-44b5-ad45-c5c9d578126a", _type: "bookingSettings",
       dateSlots: dates.map(date => ({ date, times: ["10:00", "11:00"] })), ownerEmail: "owner@example.invalid" });
@@ -209,6 +212,7 @@ export async function createBookingHoldFixture() {
       "/api/payment/quote": "../../src/server/api/payment/quote.js",
       "/api/payment/start": "../../src/server/api/payment/start.js",
       "/api/payment/finalize": "../../src/server/api/payment/finalize.js",
+      "/api/payment/status": "../../src/server/api/payment/status.js",
       "/api/payment/cancel": "../../src/server/api/payment/cancel.js",
       "/api/releaseHold": "../../src/server/booking/releaseHold.js",
       "/api/bookingAvailability": "../../src/server/booking/availability.js",

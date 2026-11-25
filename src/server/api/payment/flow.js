@@ -2,16 +2,32 @@ import { buildBrowserCompletionBody } from "./bookingSummary.js";
 import { buildLockedSessionPayload as buildLockedSession, buildProviderPayloadForRecord as buildProviderPayloadFromRecord, buildStatusLockExtension, buildUpgradeLockConflictError } from "./lockedSession.js";
 import {
   ALL_PENDING_AND_PARTIAL_DODO_STATES,
-  PARTIAL_CAPTURE_DODO_STATES,
   computePaymentRecoveryFlags,
   hasExplicitOwnerReview,
   hasKnownCaptureRecord,
   hasPreservedOwnerReview,
   hasVerifiedReversal,
   isPendingDodoStateBlockingRelease,
+  isCleanupPending,
+  isCompletedTerminalOutcome,
+  isManualReviewRequired,
   isUpgradeCreditReviewRecord as isUpgradeCreditReview,
   isWebhookLateWatchRecovery,
 } from "./paymentRecoveryState.js";
+import { ACTIVE_OR_PARTIAL_DODO_STATES, normalizePaymentFailureCount, PARTIAL_CAPTURE_DODO_STATES } from "./paymentFailureReason.js";
+import {
+  escalateDodoMismatchToOwnerReview,
+  persistDodoInspectionEvidence,
+  resumeExhaustedDodoRecord,
+  vetoDodoPendingCleanup,
+} from "./dodoInspectionGuard.js";
+import {
+  commitDodoCancellationOutcome,
+  commitDodoFailureOutcome,
+  guardDodoCheckoutReuse,
+  handleDodoCancelInspection,
+  handleExhaustedCleanupWatchDeadline,
+} from "./dodoFailureOutcome.js";
 import { resolveCompatibleQuoteFingerprint, resolveQuoteRequestCurrency, validateUpgradeQuoteProvider } from "./quoteCompatibility.js";
 import { commitAtomicDodoRequiresPaymentMethodCancel } from "./dodoCancel.js";
 import envValue from "../../supabase/envValue.cjs";
@@ -25,6 +41,7 @@ import {
   retrieveDodoRefund,
   settledDodoPaymentState,
   validateDodoPayment,
+  validateDodoReversalDetails,
   verifyDodoCapture,
   unwrapDodoWebhook,
 } from "./dodoProvider.js";
@@ -110,7 +127,9 @@ import {
   dodoCleanupAllowedGroq,
   exhaustedCleanupWatchActiveGroq,
   exhaustedLiveDodoStateGroq,
+  exhaustedLiveDodoStateNeedsResume,
   exhaustedPendingCleanupGroq,
+  exhaustedPendingCleanupNeedsResume,
   exhaustedResumeDueGroq,
   exhaustedWatchQuery,
   hasActiveLateCaptureWatch,
@@ -119,7 +138,6 @@ import {
   holdLostToPayment,
   holdCapturedReleaseForReview,
   isCleanupPendingGroq,
-  isExhaustedResumableDodo,
   isExhaustedCleanupWatchActive,
   isExhaustedWatch,
   isTransientVerificationFailure,
@@ -522,29 +540,29 @@ const getPublicRecoveryMessage = (record = {}) => {
   if (isUpgradeCreditReview(record) && record.recoveryReason === "upgrade_credit_changed_after_quote") {
     return "Your payment was received. Roo Industries will contact you about your upgrade.";
   }
-  if (record.reconciliationRecoveryTerminal === true) {
+  if (hasPreservedOwnerReview(record) || (record.reconciliationRecoveryTerminal === true && isManualReviewRequired(record))) {
     return "This payment requires manual review. Please contact Roo Industries.";
   }
   if (status === PAYMENT_STATUS_REFUNDED) {
     return "This payment has been refunded.";
   }
-  if (record.provider === "dodo" && record.providerRecoveryTerminal === true && status === PAYMENT_STATUS_NEEDS_RECOVERY) {
-    return "This payment requires manual review. Please contact Roo Industries.";
-  }
   if (record.dodoDisputeActive === true) {
     return "This payment is under dispute. Please contact Roo Industries before proceeding.";
+  }
+  if (isManualReviewRequired(record)) {
+    return "This payment requires manual review. Please contact Roo Industries.";
   }
   if (record.requiresReschedule === true) {
     return "Your payment is safe, but the original time needs to be rescheduled. Roo Industries will contact you.";
   }
-  if (status === PAYMENT_STATUS_NEEDS_RECOVERY || status === PAYMENT_STATUS_FINALIZING) {
+  if (status === PAYMENT_STATUS_NEEDS_RECOVERY || status === PAYMENT_STATUS_FINALIZING || isCleanupPending(record)) {
     return "Payment confirmation is taking longer than expected. Please keep this session and try the status check again shortly.";
   }
   if (status === PAYMENT_STATUS_ABANDONED) {
     return "This payment session was released and is no longer payable.";
   }
   if (status === PAYMENT_STATUS_FAILED) {
-    return "Payment could not be completed.";
+    return String(record.paymentFailureMessage || "").trim() || "Payment could not be completed.";
   }
   return "";
 };
@@ -588,26 +606,41 @@ const buildPublicFailure = ({
   };
 };
 
-const buildPublicStatusBody = (record = {}) => ({
-  ok: true,
-  status: String(record.status || "").trim(),
-  provider: String(record.provider || "").trim(),
-  providerPaymentState: String(record.providerPaymentState || "").trim(),
-  bookingId: String(record.bookingId || "").trim(),
-  recoveryReason: getPublicRecoveryMessage(record),
-  nextRecoveryAt: record.reconciliationRecoveryTerminal === true
-    ? ""
-    : String(record.nextRecoveryAt || "").trim(),
-  sessionExpiresAt: String(
-    record?.holdSnapshot?.slotHoldExpiresAt || record.sessionExpiresAt || ""
-  ).trim(),
-  refundState: String(record.refundState || "").trim(),
-  refundRequiresBookingSync: record.refundRequiresBookingSync === true,
-  emailDispatch: buildPublicEmailDispatch(record.emailDispatch),
-  emailDispatchToken: String(record.emailDispatchToken || "").trim(),
-  analyticsReceipt: buildSalesReceipt(record),
-  ...computePaymentRecoveryFlags(record),
-});
+const buildPublicStatusBody = (record = {}, { includeRefreshedHold = false } = {}) => {
+  const status = String(record.status || "").trim();
+  const isDodoFailed = status.toLowerCase() === PAYMENT_STATUS_FAILED && record.provider === "dodo";
+  const snap = includeRefreshedHold
+    ? (record?.refreshedHoldSnapshot?.slotHoldId ? record.refreshedHoldSnapshot : record?.cancelledHoldSnapshot?.slotHoldId ? record.cancelledHoldSnapshot : null)
+    : null;
+  const refreshedHold = snap?.slotHoldId && snap?.slotHoldToken && isFutureIso(snap.slotHoldExpiresAt)
+    ? { refreshedHold: { slotHoldId: String(snap.slotHoldId), slotHoldToken: String(snap.slotHoldToken), slotHoldExpiresAt: String(snap.slotHoldExpiresAt), phase: String(snap.phase || "active") } }
+    : {};
+  return {
+    ok: true,
+    status,
+    provider: String(record.provider || "").trim(),
+    providerPaymentState: String(record.providerPaymentState || "").trim(),
+    bookingId: String(record.bookingId || "").trim(),
+    recoveryReason: getPublicRecoveryMessage(record),
+    nextRecoveryAt: record.reconciliationRecoveryTerminal === true ? "" : String(record.nextRecoveryAt || "").trim(),
+    sessionExpiresAt: String(record?.holdSnapshot?.slotHoldExpiresAt || record.sessionExpiresAt || "").trim(),
+    refundState: String(record.refundState || "").trim(),
+    refundRequiresBookingSync: record.refundRequiresBookingSync === true,
+    emailDispatch: buildPublicEmailDispatch(record.emailDispatch),
+    emailDispatchToken: String(record.emailDispatchToken || "").trim(),
+    analyticsReceipt: buildSalesReceipt(record),
+    ...computePaymentRecoveryFlags(record),
+    attemptStarted: Boolean(record.providerPaymentId || record.providerPaymentState || record.dodoAttemptObserved === true),
+    ...(isDodoFailed ? {
+      paymentFailureCode: String(record.paymentFailureCode || "").trim(),
+      paymentFailureMessage: String(record.paymentFailureMessage || "").trim(),
+      holdRetained: record.holdRetained === true,
+      slotReleased: record.slotReleased === true,
+      retriesRemaining: normalizePaymentFailureCount(record.retriesRemaining),
+    } : {}),
+    ...refreshedHold,
+  };
+};
 
 const buildUpgradeCreditReviewResult = (record) => {
   const unverified = record.recoveryReason === "upgrade_credit_unverified";
@@ -898,6 +931,7 @@ const resolveRecordFromAccessToken = async ({
   paymentAccessToken = "",
   allowRecoveryExtension = false,
   allowStatusReadExtension = false,
+  allowCompletedReplayExtension = false,
 }) => {
   const tokenResult = verifyPaymentAccessToken({ token: paymentAccessToken });
   if (!tokenResult.ok && !tokenResult.expired) {
@@ -940,7 +974,14 @@ const resolveRecordFromAccessToken = async ({
     const withinHardCap = isWithinPaymentAccessRecoveryWindow({ payload });
     const recoveryMutationAllowed =
       allowRecoveryExtension && status === PAYMENT_STATUS_NEEDS_RECOVERY;
-    if (!withinHardCap || (!allowStatusReadExtension && !recoveryMutationAllowed)) {
+    const completedReplayAllowed =
+      allowCompletedReplayExtension &&
+      [PAYMENT_STATUS_FAILED, PAYMENT_STATUS_ABANDONED].includes(status) &&
+      isCompletedTerminalOutcome(record);
+    if (
+      !withinHardCap ||
+      (!allowStatusReadExtension && !recoveryMutationAllowed && !completedReplayAllowed)
+    ) {
       const error = new Error("Payment session expired.");
       error.status = 401;
       error.code = tokenResult.reason || "payment_access_token_expired";
@@ -948,7 +989,7 @@ const resolveRecordFromAccessToken = async ({
     }
   }
 
-  return { payload, record, client: resolvedClient };
+  return { payload, record, client: resolvedClient, tokenExpired: tokenResult.expired === true };
 };
 
 const getSubmittedProviderIdentifiers = ({ record = {}, providerData = {} }) => {
@@ -3545,6 +3586,7 @@ export const startPaymentSession = async ({
       assertStartableHold, buildRefreshedHoldBody, buildProviderPayloadFromRecord, buildPublicStatusBody,
       buildBrowserCompletionBody, buildLockedSession: buildLockedSessionPayload,
       issuePaymentAccessTokenForRecord, finalizePaymentRecordInternal,
+      guardDodoCheckoutReuse, inspectDodoCheckout, patchRecord: patchPaymentRecord, getHoldById,
     });
     if (prePricingRetry) return prePricingRetry;
 
@@ -3717,6 +3759,18 @@ export const startPaymentSession = async ({
       };
     }
 
+    if (provider === "dodo" && !checkoutCreated && String(refreshed.providerOrderId || "").trim() && refreshedStatus === PAYMENT_STATUS_STARTED) {
+      return guardDodoCheckoutReuse({
+        client, existing: refreshed, inspectDodoCheckout, patchRecord: patchPaymentRecord,
+        buildProviderPayloadFromRecord, paymentAccessToken, getHoldById,
+        shared: {
+          bookingSummary: null, provider, currency: quoteCurrency, quote: buildQuotePayload(pricedQuote),
+          quoteFingerprint: currentQuoteFingerprint, providerOrderReady: true,
+          sessionExpiresAt: String(refreshed.sessionExpiresAt || "").trim(), refreshedHold: buildRefreshedHoldBody(refreshed),
+        },
+      });
+    }
+
     return {
       httpStatus: 200,
       body: {
@@ -3784,6 +3838,7 @@ export const finalizePaymentSession = async ({
           ""
       ).trim(),
       allowRecoveryExtension: true,
+      allowCompletedReplayExtension: true,
     });
     client = resolved.client;
   } catch (error) {
@@ -3797,12 +3852,23 @@ export const finalizePaymentSession = async ({
   const record = resolved?.record;
   const binding = validateImmutableProviderBinding({ record, providerData: flatProviderData });
   if (!binding.ok) return { httpStatus: 409, body: { ok: false, code: binding.reason } };
+  const terminalStatus = String(record?.status || "").trim().toLowerCase();
+  const activeLateCaptureWatch =
+    isFutureIso(record?.lateCaptureWatchUntil) && record?.providerRecoveryTerminal !== true;
+  if (
+    isCompletedTerminalOutcome(record) &&
+    [PAYMENT_STATUS_FAILED, PAYMENT_STATUS_ABANDONED].includes(terminalStatus) &&
+    !activeLateCaptureWatch
+  ) {
+    const isDodo = record.provider === "dodo";
+    const body = await buildBrowserCompletionBody({ client, record, body: buildPublicStatusBody(record, { includeRefreshedHold: isDodo }) });
+    return { httpStatus: isDodo ? 200 : 409, body: isDodo ? body : { ...body, ok: false, error: "Payment session is already terminal." } };
+  }
   if (record.provider === "dodo") {
-    const result = await refreshDodoPayment({ client, record, source: "reconcile" });
+    const result = await refreshDodoPayment({ client, record, source: "reconcile", includeRefreshedHold: true });
     return retryFlow.runBrowserCompletion({ client, record, body: result.body, result, buildBrowserCompletionBody });
   }
 
-  const terminalStatus = String(record?.status || "").trim().toLowerCase();
   if (
     isPaymentTerminalStatus(record?.status) &&
     terminalStatus !== PAYMENT_STATUS_NEEDS_RECOVERY &&
@@ -3848,6 +3914,7 @@ export const cancelPaymentSession = async ({
       client,
       paymentAccessToken: String(paymentAccessToken || "").trim(),
       allowRecoveryExtension: false,
+      allowCompletedReplayExtension: true,
     });
     client = resolved.client;
   } catch (error) {
@@ -3863,18 +3930,30 @@ export const cancelPaymentSession = async ({
     client, record, buildBrowserCompletionBody, buildPublicStatusBody,
   });
   const status = String(record.status || "").trim().toLowerCase();
-  if (status === PAYMENT_STATUS_ABANDONED) {
+  const storedDodoState = String(record.providerPaymentState || "").trim().toLowerCase();
+  const cancelBody = (includeRefreshedHold = false) =>
+    buildBrowserCompletionBody({ client, record, body: buildPublicStatusBody(record, { includeRefreshedHold }) });
+  if (status === PAYMENT_STATUS_BOOKED || status === PAYMENT_STATUS_EMAIL_PARTIAL) {
+    return { httpStatus: 200, body: { ...await cancelBody(), cancelled: false, captured: true } };
+  }
+  if (record.provider === "dodo" && ACTIVE_OR_PARTIAL_DODO_STATES.includes(storedDodoState)) {
+    return { httpStatus: 409, body: { ok: false, status, code: "provider_pending", error: "Payment is still processing. Check its status before changing methods." } };
+  }
+  if (status === PAYMENT_STATUS_ABANDONED && isCompletedTerminalOutcome(record)) {
+    if (record.provider !== "dodo" && resolved.tokenExpired) {
+      return { httpStatus: 409, body: { ...await cancelBody(), ok: false, cancelled: false, error: getPublicRecoveryMessage(record) || "This payment session can no longer be changed." } };
+    }
+    if (record.provider === "dodo") {
+      return { httpStatus: 200, body: { ...await cancelBody(true), ok: true, cancelled: true } };
+    }
     return abandonedReply();
   }
-  if (status === PAYMENT_STATUS_BOOKED || status === PAYMENT_STATUS_EMAIL_PARTIAL) {
-    return {
-      httpStatus: 200,
-      body: {
-        ...await buildBrowserCompletionBody({ client, record, body: buildPublicStatusBody(record) }),
-        cancelled: false,
-        captured: true,
-      },
-    };
+  if (status === PAYMENT_STATUS_FAILED && isCompletedTerminalOutcome(record)) {
+    if (record.provider === "dodo") return { httpStatus: 200, body: { ...await cancelBody(true), ok: true, cancelled: false } };
+    return { httpStatus: 409, body: { ...await cancelBody(), ok: false, error: getPublicRecoveryMessage(record) || "This payment session can no longer be changed." } };
+  }
+  if (record.provider === "dodo" && isCleanupPending(record) && [PAYMENT_STATUS_FAILED, PAYMENT_STATUS_ABANDONED, PAYMENT_STATUS_NEEDS_RECOVERY].includes(status)) {
+    return { httpStatus: 202, body: { ...await cancelBody(true), ok: false, cancelled: false } };
   }
   if (isPaymentTerminalStatus(status) || status !== PAYMENT_STATUS_STARTED) {
     return {
@@ -3896,6 +3975,14 @@ export const cancelPaymentSession = async ({
 
   const inspectedRev = record._rev;
   const inspection = await inspectProviderOrderForRecovery(record);
+  if (record.provider === "dodo") {
+    const dodoOutcome = await handleDodoCancelInspection({
+      client, record, status, inspection, prepareCouponRelease, appendCouponRelease, loadCouponReservationHandlers,
+      patchRecord: patchPaymentRecord, getNextPaymentRecoveryAt, buildPublicStatusBody, buildBrowserCompletionBody, refreshDodoPayment,
+    });
+    if (dodoOutcome.handled) return dodoOutcome.result;
+    record = dodoOutcome.record;
+  }
   if (inspection.state === "captured") {
     const finalized = await finalizePaymentRecordInternal({
       client,
@@ -3932,7 +4019,7 @@ export const cancelPaymentSession = async ({
 
   if (record.provider === "dodo" && String(inspection.payment?.status || "").trim().toLowerCase() === "requires_payment_method") {
     return commitAtomicDodoRequiresPaymentMethodCancel({
-      client, record, inspectedRev, inspection, getHoldById, getPaymentRecordById, getDocumentById,
+      client, record, inspectedRev: record._rev || inspectedRev, inspection, getHoldById, getPaymentRecordById, getDocumentById,
       loadCouponReservationHandlers, prepareCouponRelease, appendCouponRelease, isFutureIso,
       lateCaptureWatchUntil: getFutureIso(LATE_CAPTURE_WATCH_HOURS * 60 * 60),
       nextRecoveryAt: getFutureIso(60 * 60), now: nowIso(), hasKnownCapture, isConflictError, buildPublicStatusBody,
@@ -3977,7 +4064,24 @@ export const cancelPaymentSession = async ({
   for (let attempt = 0; attempt < 4; attempt += 1) {
     record = (await getPaymentRecordById(client, record._id)) || record;
     const currentStatus = String(record.status || "").trim().toLowerCase();
-    if (currentStatus === PAYMENT_STATUS_ABANDONED) return abandonedReply();
+    const rereadState = String(record.providerPaymentState || "").trim().toLowerCase();
+    if (hasKnownCaptureRecord(record) || hasPreservedOwnerReview(record) || ACTIVE_OR_PARTIAL_DODO_STATES.includes(rereadState)) {
+      return {
+        httpStatus: 409,
+        body: {
+          ok: false,
+          cancelled: false,
+          status: currentStatus,
+          code: ACTIVE_OR_PARTIAL_DODO_STATES.includes(rereadState) ? "provider_pending" : "payment_state_changed",
+          error: "Payment state changed before it could be released.",
+        },
+      };
+    }
+    if (currentStatus === PAYMENT_STATUS_ABANDONED && isCompletedTerminalOutcome(record)) {
+      return record.provider === "dodo"
+        ? { httpStatus: 200, body: { ...await cancelBody(true), ok: true, cancelled: true } }
+        : abandonedReply();
+    }
     if (currentStatus !== PAYMENT_STATUS_STARTED) {
       const captured = [
         PAYMENT_STATUS_BOOKED,
@@ -4112,6 +4216,7 @@ export const cancelPaymentSession = async ({
           paymentRecordId: "",
           paymentProvider: "",
           expiresAt,
+          paymentFailureCount: normalizePaymentFailureCount(hold.paymentFailureCount),
         })
     );
     if (couponReleasePlan?.redemption?._id) {
@@ -4126,7 +4231,7 @@ export const cancelPaymentSession = async ({
       claim?._id &&
       String(claim.paymentRecordId || "").trim() === String(record._id).trim()
     ) {
-      transaction = transaction.delete(claim._id);
+      transaction = transaction.delete(claim._id, { ifRevisionId: claim._rev });
     }
     try {
       await transaction.commit();
@@ -4721,7 +4826,8 @@ export const getPaymentStatus = async ({
   const claim = startClaimId ? await getDocumentById({ client, id: startClaimId, type: startClaimId.startsWith("paymentUpgradeLock.") ? PAYMENT_UPGRADE_LOCK_TYPE : PAYMENT_START_CLAIM_TYPE }) : null;
   const compat = resolveCompatibleQuoteFingerprint({ record: resolved.record, claim });
   return retryFlow.buildPaymentStatusResponse({
-    client, record: resolved.record, buildPublicStatusBody,
+    client, record: resolved.record,
+    buildPublicStatusBody: (rec) => buildPublicStatusBody(rec, { includeRefreshedHold: true }),
     buildProviderPayloadFromRecord, buildBrowserCompletionBody,
     statusExtra: {
       ...buildStatusLockExtension(resolved.record),
@@ -4853,16 +4959,34 @@ export const reconcilePaymentSessions = async ({
       if (inactiveConfirmation && isBookingEmailSuppressed(record.emailDispatch) &&
           record.emailDispatchRequired !== true && record.refundRequiresBookingSync !== true &&
           record.resourceReleasePending !== true) continue;
-      const localRecovery =
-        (record.refundRequiresBookingSync === true &&
-          (record.refundState !== "partial" || !!String(record.bookingId || "").trim())) ||
-        record.resourceReleasePending === true ||
+      const pendingRefundBookingSync =
+        record.refundRequiresBookingSync === true &&
+        (record.refundState !== "partial" || !!String(record.bookingId || "").trim());
+      const emailOnlyRecovery =
         (localStatus === PAYMENT_STATUS_EMAIL_PARTIAL && record.requiresReschedule === true) ||
-        inactiveConfirmation || shouldRetryEmailPartialDispatch({ record, source: "reconcile", booking: confirmationBooking });
-      if (record.provider === "dodo" && !localRecovery && (!dodoEnabled || record.providerRecoveryTerminal === true)) continue;
+        inactiveConfirmation ||
+        shouldRetryEmailPartialDispatch({ record, source: "reconcile", booking: confirmationBooking });
+      const exhaustedLiveResume = exhaustedLiveDodoStateNeedsResume(record, { dodoEnabled });
+      const exhaustedCleanupResume = exhaustedPendingCleanupNeedsResume(record, { dodoEnabled });
+      const localRecovery = pendingRefundBookingSync || isCleanupPending(record) || emailOnlyRecovery;
+      const dodoDeps = { client, loadCouponReservationHandlers, patchRecord: patchPaymentRecord, getNextPaymentRecoveryAt, buildPublicStatusBody };
+      const bumpOutcome = (rec) => {
+        if (String(rec?.status || "").trim().toLowerCase() === PAYMENT_STATUS_ABANDONED && rec?.resourceReleasePending !== true) summary.abandoned += 1;
+        else summary.recovery += 1;
+      };
+      if (record.provider === "dodo" && !localRecovery && !exhaustedLiveResume && !exhaustedCleanupResume && (!dodoEnabled || record.providerRecoveryTerminal === true)) {
+        continue;
+      }
       const exhaustedWatch = isExhaustedWatch(record);
-      const exhaustedDodo = !exhaustedWatch && isExhaustedResumableDodo(record, { dodoEnabled });
-      if (exhaustedWatch || exhaustedDodo) {
+      if (exhaustedLiveResume) {
+        const resumed = await resumeExhaustedDodoRecord({ client, record, mode: "live", dodoEnabled, patchRecord: patchPaymentRecord });
+        if (!resumed.ok) continue;
+        Object.assign(record, resumed.record);
+      } else if (exhaustedCleanupResume && !(hasActiveLateCaptureWatch(record) && !isFutureIso(record.lateCaptureWatchUntil))) {
+        const resumed = await resumeExhaustedDodoRecord({ client, record, mode: "cleanup", dodoEnabled, patchRecord: patchPaymentRecord });
+        if (!resumed.ok) continue;
+        Object.assign(record, resumed.record);
+      } else if (exhaustedWatch) {
         const operation = await currentPaymentOperation({ client, record });
         if (!operation.owned) continue;
         let resumed;
@@ -4887,7 +5011,10 @@ export const reconcilePaymentSessions = async ({
       summary.scanned += 1;
       const ageMinutes = getPaymentAgeMinutes(record);
       let dodoInspection = null;
-      if (record.provider === "dodo" && record.providerOrderId && !localRecovery) {
+      const isExhaustedDeadline = record.provider === "dodo" && isCleanupPending(record) &&
+        hasActiveLateCaptureWatch(record) && !isFutureIso(record.lateCaptureWatchUntil) &&
+        (record.reconciliationRecoveryTerminal === true || Number(record.recoveryFailureCount || 0) >= 12);
+      if (record.provider === "dodo" && record.providerOrderId && dodoEnabled && record.providerRecoveryTerminal !== true && !pendingRefundBookingSync && !emailOnlyRecovery) {
         if (runId && typeof client?.beginReconcileRecordInspection === "function") {
           const begun = await client.beginReconcileRecordInspection({ runId, paymentRecordId: record._id });
           if (!begun?.ok) throw Object.assign(new Error("Reconcile run is no longer active."), { code: "reconcile_run_not_active", status: 503 });
@@ -4895,23 +5022,82 @@ export const reconcilePaymentSessions = async ({
         dodoInspection = await inspectDodoCheckout({ record });
         if (dodoInspection.retryable === false) {
           const isExplicitMismatch = dodoInspection.reason === "dodo_session_mismatch" || dodoInspection.reason === "dodo_payment_binding_mismatch";
-          await patchPaymentRecord({ client, record, set: {
-            status: PAYMENT_STATUS_NEEDS_RECOVERY,
-            recoveryReason: dodoInspection.reason,
-            ...(isExplicitMismatch ? { recoveryOwnerReviewRequired: true } : {}),
-            providerRecoveryTerminal: true,
-            providerRecoveryTerminalReason: dodoInspection.reason,
-            nextRecoveryAt: "",
-            ...observedProviderState(record, dodoInspection.providerPaymentState),
-          } });
+          if (isExplicitMismatch) {
+            await escalateDodoMismatchToOwnerReview({ client, record, reason: dodoInspection.reason, source: "reconcile", providerPaymentState: dodoInspection.providerPaymentState || "", patchRecord: patchPaymentRecord });
+          } else {
+            await patchPaymentRecord({ client, record, set: {
+              status: PAYMENT_STATUS_NEEDS_RECOVERY, recoveryReason: dodoInspection.reason,
+              providerRecoveryTerminal: true, providerRecoveryTerminalReason: dodoInspection.reason,
+              nextRecoveryAt: "", ...observedProviderState(record, dodoInspection.providerPaymentState),
+            } });
+          }
           conclusiveProviderEvidence = isExplicitMismatch || (dodoInspection.coreValidated === true && dodoInspection.normalizedStatus === "succeeded");
           summary.recovery += 1;
           continue;
         }
+        if (isExhaustedDeadline) {
+          const deadlineRes = await handleExhaustedCleanupWatchDeadline({ ...dodoDeps, record, dodoEnabled, inspection: dodoInspection });
+          Object.assign(record, deadlineRes.paymentRecord || {});
+          conclusiveProviderEvidence = dodoInspection.noPaymentId === true || (dodoInspection.coreValidated === true && dodoInspection.recognizedStatus === true);
+          bumpOutcome(record);
+          continue;
+        }
+        const liveSt = String(dodoInspection.payment?.status || "").trim().toLowerCase();
+        Object.assign(record, await persistDodoInspectionEvidence({
+          client, record, inspection: dodoInspection, patchRecord: patchPaymentRecord,
+          recordState: Boolean(record.providerPaymentState) || PARTIAL_CAPTURE_DODO_STATES.includes(liveSt),
+        }));
         if (dodoInspection.noPaymentId === true) {
           conclusiveProviderEvidence = true;
         } else if (dodoInspection.payment) {
           if (dodoInspection.coreValidated && dodoInspection.normalizedStatus === "succeeded") expectedCaptureProtection = true;
+          if (liveSt === "succeeded" && dodoInspection.coreValidated && (!dodoInspection.reversalValidated || dodoInspection.hasUnresolvedDispute)) {
+            const capPatch = observedProviderState(record, "succeeded");
+            if (Object.keys(capPatch).length || record.providerReversalVerified !== false) {
+              Object.assign(record, await patchPaymentRecord({ client, record, set: { ...capPatch, providerReversalVerified: false } }));
+            }
+            await refreshDodoPayment({ client, record, payment: dodoInspection.payment, source: "reconcile", applyBookingRefund, deferFinalization: true });
+            Object.assign(record, await getPaymentRecordById(client, record._id));
+            conclusiveProviderEvidence = hasKnownCaptureRecord(record);
+            summary.recovery += 1;
+            continue;
+          }
+          if (ACTIVE_OR_PARTIAL_DODO_STATES.includes(liveSt) && record.resourceReleasePending === true) {
+            const vetoed = await vetoDodoPendingCleanup({
+              client, record, observedState: liveSt, providerPaymentId: dodoInspection.payment.payment_id,
+              targetStatus: String(record.resourceReleaseTargetStatus || "").trim().toLowerCase(), source: "reconcile",
+              reason: PARTIAL_CAPTURE_DODO_STATES.includes(liveSt) ? "dodo_partial_capture_requires_recovery" : "dodo_payment_still_live",
+              patchRecord: patchPaymentRecord,
+            });
+            Object.assign(record, vetoed.paymentRecord || {});
+            conclusiveProviderEvidence = dodoInspection.coreValidated === true;
+            summary.recovery += 1;
+            continue;
+          }
+          if (["failed", "cancelled"].includes(liveSt) && (record.resourceReleasePending === true || [PAYMENT_STATUS_STARTED, PAYMENT_STATUS_NEEDS_RECOVERY].includes(String(record.status || "").trim().toLowerCase()))) {
+            const outcomeFn = liveSt === "cancelled" ? commitDodoCancellationOutcome : commitDodoFailureOutcome;
+            const outcome = await outcomeFn({ ...dodoDeps, record, payment: dodoInspection.payment, source: "reconcile", reason: String(record.resourceReleaseReason || `dodo_payment_${liveSt}`).trim() });
+            Object.assign(record, outcome.paymentRecord || {});
+            conclusiveProviderEvidence = dodoInspection.coreValidated === true;
+            bumpOutcome(record);
+            continue;
+          }
+          if (
+            liveSt === "succeeded" &&
+            dodoInspection.coreValidated &&
+            dodoInspection.settledState === "succeeded" &&
+            record.dodoDisputeActive !== true &&
+            ![PAYMENT_STATUS_BOOKED, PAYMENT_STATUS_EMAIL_PARTIAL, PAYMENT_STATUS_REFUNDED].includes(String(record.status || "").trim().toLowerCase())
+          ) {
+            const gate = await recordCapturedProviderState({
+              client, record, currentOperation: currentPaymentOperation, patchRecord: patchPaymentRecord,
+              source: "reconcile", providerPaymentId: dodoInspection.payment.payment_id,
+              captureAmountUpdates: (cur) => getDodoCaptureAmountUpdates(cur, { totalAmount: dodoInspection.payment.total_amount, taxAmount: dodoInspection.payment.tax }),
+              validateBinding: (cur) => validateDodoPayment({ record: cur, payment: dodoInspection.payment }),
+            });
+            if (!gate.owned) { summary.recovery += 1; continue; }
+            Object.assign(record, gate.record);
+          }
           const result = await refreshDodoPayment({ client, record, payment: dodoInspection.payment,
             source: "reconcile", applyBookingRefund, deferFinalization: true });
           Object.assign(record, await getPaymentRecordById(client, record._id));
@@ -4932,6 +5118,11 @@ export const reconcilePaymentSessions = async ({
             conclusiveProviderEvidence = true;
           }
         }
+      } else if (isExhaustedDeadline) {
+        const deadlineRes = await handleExhaustedCleanupWatchDeadline({ ...dodoDeps, record, dodoEnabled: false, inspection: null });
+        Object.assign(record, deadlineRes.paymentRecord || {});
+        bumpOutcome(record);
+        continue;
       }
       const createdAgeMinutes = getPaymentCreatedAgeMinutes(record);
       const status = String(record.status || "").trim().toLowerCase();
@@ -5000,36 +5191,18 @@ export const reconcilePaymentSessions = async ({
       }
 
       if (record.resourceReleasePending === true) {
-        const targetStatus = String(record.resourceReleaseTargetStatus || "")
-          .trim()
-          .toLowerCase();
-        const reason = String(
-          record.resourceReleaseReason || "resource_release_retry"
-        ).trim();
-        const released = targetStatus === PAYMENT_STATUS_FAILED
-          ? await markTerminalFinalizeFailure({
-              client,
-              record,
-              source: "reconcile",
-              reason,
+        const targetStatus = String(record.resourceReleaseTargetStatus || "").trim().toLowerCase();
+        const reason = String(record.resourceReleaseReason || "resource_release_retry").trim();
+        const storedState = String(record.providerPaymentState || "").trim().toLowerCase();
+        const released = record.provider === "dodo"
+          ? await (targetStatus === PAYMENT_STATUS_FAILED ? commitDodoFailureOutcome : commitDodoCancellationOutcome)({
+              ...dodoDeps, record, payment: dodoInspection?.payment || null, source: "reconcile", reason,
+              allowStoredTerminalRelease: !dodoEnabled && ["failed", "cancelled"].includes(storedState),
             })
-          : await abandonStartedPaymentRecord({
-              client,
-              record,
-              reason,
-              releaseCouponReservation,
-            });
-        const releasedStatus = String(released?.paymentRecord?.status || "")
-          .trim()
-          .toLowerCase();
-        if (
-          releasedStatus !== PAYMENT_STATUS_ABANDONED ||
-          released?.paymentRecord?.resourceReleasePending === true
-        ) {
-          summary.recovery += 1;
-        } else {
-          summary.abandoned += 1;
-        }
+          : targetStatus === PAYMENT_STATUS_FAILED
+            ? await markTerminalFinalizeFailure({ client, record, source: "reconcile", reason })
+            : await abandonStartedPaymentRecord({ client, record, reason, releaseCouponReservation });
+        bumpOutcome(released?.paymentRecord);
         continue;
       }
 
@@ -6454,7 +6627,15 @@ export const handlePayPalWebhook = async ({
   return result;
 };
 
-export const refreshDodoPayment = async ({ client, record, payment = null, source = "reconcile", applyBookingRefund = null, deferFinalization = false }) => {
+export const refreshDodoPayment = async ({
+  client,
+  record,
+  payment = null,
+  source = "reconcile",
+  applyBookingRefund = null,
+  deferFinalization = false,
+  includeRefreshedHold = false,
+}) => {
   const inspection = payment ? { payment } : await inspectDodoCheckout({ record });
   payment = inspection.payment;
   if (!payment) {
@@ -6468,16 +6649,20 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
     }
     if (inspection.state === "unpaid" && !isFutureIso(record.sessionExpiresAt)) {
       const result = await abandonStartedPaymentRecord({ client, record, reason: "dodo_checkout_expired" });
-      return { httpStatus: 200, body: buildPublicStatusBody(result.paymentRecord || record) };
+      return { httpStatus: 200, body: buildPublicStatusBody(result.paymentRecord || record, { includeRefreshedHold }) };
     }
     return { httpStatus: inspection.state === "unavailable" ? 503 : 202,
-      body: { ...buildPublicStatusBody(record), ...(inspection.state === "unavailable" ? { ok: false, error: "Dodo payment status is temporarily unavailable." } : {}) } };
+      body: { ...buildPublicStatusBody(record, { includeRefreshedHold }), ...(inspection.state === "unavailable" ? { ok: false, error: "Dodo payment status is temporarily unavailable." } : {}) } };
   }
   const validation = validateDodoPayment({ record, payment });
   if (!validation.ok) {
     if (validation.reason !== "dodo_payment_binding_mismatch") {
       await recordProviderPaymentState({ client, record, patchRecord: patchPaymentRecord,
         providerPaymentState: payment.status === "succeeded" ? "succeeded" : String(payment.status || "").trim() });
+      if (payment.status === "succeeded" && record.providerReversalVerified !== false) {
+        const latest = (await getPaymentRecordById(client, record._id)) || record;
+        await patchPaymentRecord({ client, record: latest, set: { providerReversalVerified: false } }).catch(() => {});
+      }
     }
     return {
       httpStatus: 409,
@@ -6485,13 +6670,34 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
     };
   }
   requirePaymentRevision(record);
+  const persistCaptureBeforeReject = async () => {
+    if (payment.status !== "succeeded") return;
+    const capPatch = observedProviderState(record, "succeeded");
+    if (Object.keys(capPatch).length || record.providerReversalVerified !== false) {
+      try {
+        record = await patchPaymentRecord({
+          client,
+          record,
+          set: { ...capPatch, providerReversalVerified: false },
+        });
+      } catch (error) {
+        if (!isConflictError(error)) throw error;
+        record = (await getPaymentRecordById(client, record._id)) || record;
+      }
+    }
+  };
   const disputes = Array.isArray(payment.disputes) ? payment.disputes : [];
+  const seenDisputeIds = new Set();
   for (const dispute of disputes) {
-    if (!dispute.dispute_id || dispute.payment_id !== payment.payment_id || dispute.currency !== payment.currency ||
+    const disputeId = String(dispute?.dispute_id || "").trim();
+    const amountValid = typeof dispute?.amount === "string" && /^\d+(\.\d+)?$/.test(dispute.amount.trim()) && Number(dispute.amount.trim()) > 0;
+    if (!disputeId || seenDisputeIds.has(disputeId) || dispute.payment_id !== payment.payment_id || dispute.currency !== payment.currency ||
         !["dispute_opened", "dispute_expired", "dispute_accepted", "dispute_cancelled", "dispute_challenged", "dispute_won", "dispute_lost"].includes(dispute.dispute_status) ||
-        !["pre_dispute", "dispute", "pre_arbitration"].includes(dispute.dispute_stage)) {
+        !["pre_dispute", "dispute", "pre_arbitration"].includes(dispute.dispute_stage) || !amountValid) {
+      await persistCaptureBeforeReject();
       return { httpStatus: 409, body: { ok: false, code: "dodo_dispute_mismatch" } };
     }
+    seenDisputeIds.add(disputeId);
   }
   const dodoDisputes = disputes.length ? disputes.map(dispute => ({
     _key: getRefundArrayKey("dodo", dispute.dispute_id), disputeId: dispute.dispute_id,
@@ -6499,9 +6705,15 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
     amount: dispute.amount, currency: dispute.currency, businessId: dispute.business_id,
     createdAt: dispute.created_at, isResolvedByRdr: dispute.is_resolved_by_rdr ?? null, remarks: dispute.remarks ?? null,
   })) : record.dodoDisputes || [];
-  const terminalDispute = dodoDisputes.find(dispute => isTerminalDisputeStatus(dispute.status));
+  const hasUnresolvedDispute = dodoDisputes.some((entry) =>
+    ["dispute_opened", "dispute_challenged"].includes(entry?.status)
+  );
+  const terminalDispute = hasUnresolvedDispute ? null : dodoDisputes.find(dispute => isTerminalDisputeStatus(dispute.status));
   const disputed = disputes.some((dispute) => !["dispute_won", "dispute_cancelled"].includes(dispute.dispute_status)) ||
     (record.dodoDisputeActive === true && disputes.length === 0);
+  if (payment.status === "succeeded" && (hasUnresolvedDispute || disputed)) {
+    await validateDodoReversalDetails({ payment, hydrateRefund: retrieveDodoRefund });
+  }
   let disputeBooking;
   if ((disputed || record.dodoDisputeActive === true) && record.bookingId) {
     disputeBooking = await client.fetch(`*[_type == "booking" && _id == $id][0]{...}`, { id: record.bookingId });
@@ -6531,7 +6743,8 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
       : record.providerReversalVerified === true || record.providerPaymentState === "disputed");
     const unchanged = record.dodoDisputeActive === disputed && sameDisputes &&
       record.providerRecoveryTerminal === !!terminalDispute && !missingReferralAccounting &&
-      !disputeReversalNeedsUpdate;
+      !disputeReversalNeedsUpdate &&
+      (!hasUnresolvedDispute || (record.providerPaymentState === "succeeded" && record.providerReversalVerified === false));
     if (!unchanged) {
       const booking = disputeBooking || (record.bookingId
         ? await client.fetch(`*[_type == "booking" && _id == $id][0]{...}`, { id: record.bookingId })
@@ -6600,14 +6813,16 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
           dodoDisputeActive: disputed,
           dodoDisputes,
           ...(preserveOwnerReview ? { recoveryOwnerReviewRequired: true } : {}),
-          ...(!alreadyFullRefund && disputeVerified
-            ? { providerPaymentState: "disputed", providerReversalVerified: true }
-            : !alreadyFullRefund && (record.providerReversalVerified === true || record.providerPaymentState === "disputed")
-              ? {
-                  providerPaymentState: payment.status === "succeeded" ? "succeeded" : String(payment.status || "").trim() || "succeeded",
-                  providerReversalVerified: false,
-                }
-              : {}),
+          ...(hasUnresolvedDispute && !alreadyFullRefund
+            ? { providerPaymentState: "succeeded", providerReversalVerified: false }
+            : !alreadyFullRefund && disputeVerified
+              ? { providerPaymentState: "disputed", providerReversalVerified: true }
+              : !alreadyFullRefund && (record.providerReversalVerified === true || record.providerPaymentState === "disputed")
+                ? {
+                    providerPaymentState: payment.status === "succeeded" ? "succeeded" : String(payment.status || "").trim() || "succeeded",
+                    providerReversalVerified: false,
+                  }
+                : {}),
           ...(record.dodoDisputeActive === true && !disputed ? {
             recoveryAttemptCount: 0,
             recoveryFailureCount: 0,
@@ -6630,18 +6845,40 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
       if (!record) return { httpStatus: 503, body: { ok: false, code: "payment_record_unavailable", error: "Payment details are temporarily unavailable." } };
     }
   }
+  if (hasUnresolvedDispute) {
+    await persistCaptureBeforeReject();
+    const webhook = source === "webhook";
+    return {
+      httpStatus: webhook ? 200 : 409,
+      body: {
+        ...buildPublicStatusBody(record, { includeRefreshedHold }),
+        ok: webhook,
+        code: "dodo_payment_disputed",
+        error: getPublicRecoveryMessage(record),
+      },
+    };
+  }
   const succeededRefunds = [];
+  const seenRefundIds = new Set();
   for (const summary of payment.refunds) {
+    const rid = String(summary?.refund_id || "").trim();
+    if (!rid || seenRefundIds.has(rid)) {
+      await persistCaptureBeforeReject();
+      return { httpStatus: 409, body: { ok: false, code: "dodo_refund_mismatch" } };
+    }
+    seenRefundIds.add(rid);
     if (summary.status !== "succeeded") {
-      if (!["failed", "pending", "review"].includes(summary.status) || !summary.refund_id || summary.payment_id !== payment.payment_id ||
+      if (!["failed", "pending", "review"].includes(summary.status) || summary.payment_id !== payment.payment_id ||
           (summary.amount != null && (!Number.isSafeInteger(summary.amount) || summary.amount <= 0 || summary.amount > payment.total_amount)) ||
           (summary.currency != null && summary.currency !== payment.currency)) {
+        await persistCaptureBeforeReject();
         return { httpStatus: 409, body: { ok: false, code: "dodo_refund_mismatch" } };
       }
       const existing = (record.refunds || []).find(entry => entry.providerRefundId === summary.refund_id);
       if (existing && ((existing.providerPaymentId && existing.providerPaymentId !== summary.payment_id) ||
           (existing.amountInSubunits != null && summary.amount != null && existing.amountInSubunits !== summary.amount) ||
           (existing.currency && summary.currency && existing.currency !== summary.currency))) {
+        await persistCaptureBeforeReject();
         return { httpStatus: 409, body: { ok: false, code: "refund_identity_content_mismatch" } };
       }
       if (existing?.status === "processed") continue;
@@ -6662,8 +6899,12 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
     let refund = summary;
     if (refund.amount == null || !refund.currency) {
       try { refund = await retrieveDodoRefund(refund.refund_id); }
-      catch { return { httpStatus: 503, body: { ok: false, code: "dodo_refund_lookup_pending" } }; }
+      catch {
+        await persistCaptureBeforeReject();
+        return { httpStatus: 503, body: { ok: false, code: "dodo_refund_lookup_pending" } };
+      }
       if (refund.refund_id !== summary.refund_id || refund.payment_id !== payment.payment_id || refund.status !== "succeeded") {
+        await persistCaptureBeforeReject();
         return { httpStatus: 503, body: { ok: false, code: "dodo_refund_details_pending" } };
       }
       if (refund.amount == null || !refund.currency) {
@@ -6672,24 +6913,31 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
         record = await patchPaymentRecord({ client, record,
           set: { status: PAYMENT_STATUS_NEEDS_RECOVERY, providerRecoveryTerminal: true,
             providerRecoveryTerminalReason: reason, recoveryReason: reason, nextRecoveryAt: "",
+            ...observedProviderState(record, "succeeded"), providerReversalVerified: false,
             ...(preserveOwnerReview ? { recoveryOwnerReviewRequired: true } : {}) },
           event: buildPaymentRecordEvent({ status: PAYMENT_STATUS_NEEDS_RECOVERY, source, reason,
             data: { providerRefundId: refund.refund_id } }) });
         logSafeError("Dodo refund details require manual review", Object.assign(new Error(reason), { code: reason }));
-        return { httpStatus: 200, body: { ...buildPublicStatusBody(record), manualReviewRequired: true } };
+        return { httpStatus: 200, body: { ...buildPublicStatusBody(record, { includeRefreshedHold }), manualReviewRequired: true } };
       }
     }
     if (refund.payment_id !== payment.payment_id || !refund.refund_id ||
         !Number.isSafeInteger(refund.amount) || refund.amount <= 0 ||
         refund.amount > payment.total_amount || refund.currency !== payment.currency) {
+      await persistCaptureBeforeReject();
       return { httpStatus: 409, body: { ok: false, code: "dodo_refund_mismatch", error: "The refund does not match this payment." } };
     }
     succeededRefunds.push(refund);
   }
+  const rawRefundStatus = payment.refund_status === undefined ? null : payment.refund_status;
+  if (![null, "", "partial", "full"].includes(rawRefundStatus)) {
+    await persistCaptureBeforeReject();
+    return { httpStatus: 409, body: { ok: false, code: "dodo_refund_mismatch" } };
+  }
   const succeededRefundAmount = succeededRefunds.reduce((sum, refund) => sum + refund.amount, 0);
-  const rawRefundStatus = payment.refund_status == null ? "" : String(payment.refund_status).trim().toLowerCase();
   if ((rawRefundStatus === "full" && succeededRefundAmount < payment.total_amount) ||
       (rawRefundStatus === "partial" && succeededRefundAmount === 0)) {
+    await persistCaptureBeforeReject();
     return { httpStatus: 503, body: { ok: false, code: "dodo_refund_details_pending",
       error: "Refund details are temporarily unavailable." } };
   }
@@ -6701,12 +6949,13 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
       (rawRefundStatus === "partial" && (!(succeededRefundAmount > 0 && succeededRefundAmount < payment.total_amount) ||
         priorProcessedAmount + succeededRefundAmount >= payment.total_amount)) ||
       succeededRefundAmount > payment.total_amount ||
-      (rawRefundStatus !== "" && rawRefundStatus !== "full" && rawRefundStatus !== "partial")) {
-    if (payment.status === "succeeded") {
-      await recordProviderPaymentState({ client, record, patchRecord: patchPaymentRecord, providerPaymentState: "succeeded" });
-    }
+      ((rawRefundStatus === null || rawRefundStatus === "") && succeededRefundAmount !== 0)) {
+    await persistCaptureBeforeReject();
     return { httpStatus: 409, body: { ok: false, code: "dodo_refund_mismatch",
       error: "The refund status does not match the settled refunds." } };
+  }
+  if (payment.status !== "succeeded" && (rawRefundStatus === "full" || rawRefundStatus === "partial" || succeededRefunds.length > 0 || disputes.length > 0)) {
+    return { httpStatus: 409, body: { ok: false, code: "dodo_refund_mismatch" } };
   }
   let captureAmountUpdates =
     payment.status === "succeeded" && (succeededRefunds.length > 0 || disputed || hasKnownCaptureRecord(record))
@@ -6729,7 +6978,7 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
         captureAmountUpdates = getDodoCaptureAmountUpdates(record,
           { totalAmount: payment.total_amount, taxAmount: payment.tax });
         if (!Object.keys(captureAmountUpdates).length) break;
-        if (attempt === 2) return { httpStatus: 202, body: buildPublicStatusBody(record) };
+        if (attempt === 2) return { httpStatus: 202, body: buildPublicStatusBody(record, { includeRefreshedHold }) };
       }
     }
   }
@@ -6752,57 +7001,24 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
     if (!record) return { httpStatus: 503, body: { ok: false, code: "payment_record_unavailable", error: "Payment details are temporarily unavailable." } };
   }
   if (["failed", "cancelled"].includes(payment.status)) {
-    const reason = `dodo_payment_${payment.status}`;
-    if (hasKnownCaptureRecord(record)) {
-      const retained = await holdCapturedReleaseForReview({ client, record, patchRecord: patchPaymentRecord });
-      return { httpStatus: 202, body: buildPublicStatusBody(retained) };
-    }
-    const extraTerminalSet = {
-      providerPaymentState: payment.status,
-      providerPaymentId: payment.payment_id,
-      providerRecoveryTerminal: true,
-      providerRecoveryTerminalReason: reason,
-      nextRecoveryAt: "",
-      lateCaptureWatchUntil: "",
-    };
-    const priorState = String(record.providerPaymentState || "").trim().toLowerCase();
-    const verifiedPriorPendingState =
-      ALL_PENDING_AND_PARTIAL_DODO_STATES.has(priorState) && !PARTIAL_CAPTURE_DODO_STATES.has(priorState)
-        ? priorState
-        : "";
-    const result = record.dodoDisputeActive === true || [PAYMENT_STATUS_BOOKED, PAYMENT_STATUS_EMAIL_PARTIAL, PAYMENT_STATUS_REFUNDED].includes(record.status)
-      ? { paymentRecord: record, httpStatus: 200 }
-      : payment.status === "failed"
-        ? await markTerminalFinalizeFailure({
-            client,
-            record,
-            source,
-            reason,
-            extraTerminalSet,
-            verifiedPriorPendingState,
-          })
-        : await abandonStartedPaymentRecord({
-            client,
-            record,
-            reason,
-            extraTerminalSet,
-            verifiedPriorPendingState,
-          });
-    record = result.paymentRecord || record;
-    return { httpStatus: record.resourceReleasePending === true ? 202 : 200, body: buildPublicStatusBody(record) };
+    const outcome = await (payment.status === "cancelled" ? commitDodoCancellationOutcome : commitDodoFailureOutcome)({
+      client, record, payment, source, reason: `dodo_payment_${payment.status}`,
+      loadCouponReservationHandlers, patchRecord: patchPaymentRecord, getNextPaymentRecoveryAt, buildPublicStatusBody, includeRefreshedHold,
+    });
+    return { httpStatus: outcome.httpStatus, body: outcome.response };
   }
   if (record.status === PAYMENT_STATUS_REFUNDED) {
-    return { httpStatus: record.refundRequiresBookingSync ? 503 : 200, body: buildPublicStatusBody(record) };
+    return { httpStatus: record.refundRequiresBookingSync ? 503 : 200, body: buildPublicStatusBody(record, { includeRefreshedHold }) };
   }
   if (disputed) {
     const webhook = source === "webhook";
     return { httpStatus: webhook ? 200 : 409, body: {
-      ...buildPublicStatusBody(record), ok: webhook,
+      ...buildPublicStatusBody(record, { includeRefreshedHold }), ok: webhook,
       code: "dodo_payment_disputed", error: getPublicRecoveryMessage(record),
     } };
   }
   if (payment.status === "succeeded") {
-    if (deferFinalization) return { httpStatus: 200, body: buildPublicStatusBody(record) };
+    if (deferFinalization) return { httpStatus: 200, body: buildPublicStatusBody(record, { includeRefreshedHold }) };
     const finalized = await finalizePaymentRecordInternal({ client, record, source,
       providerCaptureObserved: settledDodoPaymentState(payment) === "succeeded",
       providerData: { dodoCheckoutSessionId: payment.checkout_session_id,
@@ -6810,7 +7026,7 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
     return { httpStatus: finalized.httpStatus, body: finalized.response };
   }
   if ([PAYMENT_STATUS_BOOKED, PAYMENT_STATUS_EMAIL_PARTIAL, PAYMENT_STATUS_REFUNDED].includes(record.status)) {
-    return { httpStatus: 200, body: buildPublicStatusBody(record) };
+    return { httpStatus: 200, body: buildPublicStatusBody(record, { includeRefreshedHold }) };
   }
   if (source !== "webhook" && ALL_PENDING_AND_PARTIAL_DODO_STATES.has(String(payment.status || "").trim())) {
     await recordProviderPaymentState({
@@ -6821,7 +7037,7 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
     });
     record = (await getPaymentRecordById(client, record._id)) || record;
   }
-  return { httpStatus: 202, body: { ...buildPublicStatusBody(record), providerPaymentState: payment.status } };
+  return { httpStatus: 202, body: { ...buildPublicStatusBody(record, { includeRefreshedHold }), providerPaymentState: payment.status } };
 };
 
 export const handleDodoWebhook = async ({ req, client = null, applyBookingRefund = null }) => {

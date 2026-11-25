@@ -163,8 +163,10 @@ export const validateDodoReversalDetails = async ({ payment, hydrateRefund = ret
     const id = String(d?.dispute_id || "").trim();
     const stage = typeof d?.dispute_stage === "string" ? d.dispute_stage.trim() : "";
     const status = String(d?.dispute_status || "").trim();
-    if (!id || seenDisputes.has(id) || d?.payment_id !== payment.payment_id || d?.currency !== payment.currency ||
-        !ALLOWED_DISPUTE_STAGES.has(stage) || !ALLOWED_DISPUTE_STATUSES.has(status) || !isPositiveSdkAmountString(d?.amount)) {
+    const paymentMismatch = d?.payment_id != null && String(d.payment_id).trim() !== String(payment.payment_id || "").trim();
+    const currencyMismatch = d?.currency != null && String(d.currency).trim() !== String(payment.currency || DODO_CURRENCY).trim();
+    if (!id || seenDisputes.has(id) || !ALLOWED_DISPUTE_STAGES.has(stage) || !ALLOWED_DISPUTE_STATUSES.has(status) ||
+        !isPositiveSdkAmountString(d?.amount) || paymentMismatch || currencyMismatch) {
       return { ok: false, reason: "dodo_refund_details_incomplete" };
     }
     seenDisputes.add(id);
@@ -206,12 +208,17 @@ export const validateDodoReversalDetails = async ({ payment, hydrateRefund = ret
 };
 
 export const settledDodoPaymentState = (payment) => {
-  if (payment?.refund_status === "full") return "refunded";
+  const status = String(payment?.status || "").trim().toLowerCase();
+  if (status !== "succeeded") return status;
   const disputes = Array.isArray(payment?.disputes) ? payment.disputes : [];
+  if (disputes.some((dispute) => UNRESOLVED_DISPUTE_STATUSES.has(String(dispute?.dispute_status || "").trim()))) {
+    return "succeeded";
+  }
+  if (payment?.refund_status === "full") return "refunded";
   if (disputes.some((dispute) => isTerminalDisputeStatus(dispute?.dispute_status))) {
     return "disputed";
   }
-  return String(payment?.status || "").trim();
+  return "succeeded";
 };
 
 export const inspectDodoCheckout = async ({ record, hydrateRefund = retrieveDodoRefund }) => {
@@ -298,11 +305,15 @@ export const verifyDodoCapture = async ({ record, payment: suppliedPayment }) =>
   const validation = validateDodoPayment({ record, payment });
   if (!validation.ok) return validation;
   if (payment.status !== "succeeded") return { ok: false, retryable: true, reason: `dodo_payment_${payment.status || "pending"}` };
+  const reversal = await validateDodoReversalDetails({ payment });
+  if (!reversal.ok) {
+    return { ok: false, captured: true, retryable: false, reason: reversal.reason };
+  }
+  if (reversal.hasUnresolvedDispute || reversal.hasTerminalDispute) {
+    return { ok: false, captured: true, retryable: false, reason: "dodo_payment_disputed" };
+  }
   if (payment.refund_status === "full" || (payment.refund_status === "partial" && !suppliedPayment)) {
     return { ok: false, captured: true, retryable: true, reason: "dodo_refund_requires_reconciliation" };
-  }
-  if ((payment.disputes || []).some((dispute) => !["dispute_won", "dispute_cancelled"].includes(dispute.dispute_status))) {
-    return { ok: false, captured: true, retryable: false, reason: "dodo_payment_disputed" };
   }
   if ((payment.refunds || []).some((r) => r.status === "succeeded") && !suppliedPayment) {
     return { ok: false, retryable: true, reason: "dodo_refund_requires_reconciliation" };

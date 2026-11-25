@@ -4367,7 +4367,7 @@ describe("payment session flow", () => {
 
 describe('Dodo checkout lifecycle',()=>{
   let latest;
-  const dispute = disputeStatus => ({ dispute_id: 'disp_dodo', payment_id: latest.payment_id, currency: latest.currency, dispute_stage: 'dispute', dispute_status: disputeStatus });
+  const dispute = disputeStatus => ({ dispute_id: 'disp_dodo', payment_id: latest.payment_id, currency: latest.currency, dispute_stage: 'dispute', dispute_status: disputeStatus, amount: (latest.total_amount / 100).toFixed(2) });
   const notify = (type='payment.succeeded',eventId='evt_dodo',applyBookingRefund=null) => {
     const body={type,data:{payment_id:latest.payment_id,metadata:latest.metadata}};
     return handleDodoWebhook({req:{method:'POST',headers:{'webhook-id':eventId},rawBody:JSON.stringify(body),body},client:mockClient,applyBookingRefund});
@@ -4655,22 +4655,23 @@ describe('Dodo checkout lifecycle',()=>{
     await startDodo(); await notify();
     Object.assign(store.bookings[0], { status: 'captured', netAmount: latest.total_amount / 100 });
     getOnlyPaymentRecord().requiresReschedule = requiresReschedule;
-    latest.disputes = [dispute('dispute_opened')];
-    await notify('dispute.opened', 'evt_before_refund');
+    latest.disputes = [dispute('dispute_lost')];
+    await notify('dispute.lost', 'evt_before_refund');
+    latest.refund_status = 'full';
     latest.refunds = [{ refund_id: 'ref_after_dispute', payment_id: latest.payment_id, status: 'succeeded', amount: latest.total_amount, currency: 'USD' }];
     const result = await notify('refund.succeeded', 'evt_refund_after_dispute', async () => ({ bookingId: store.bookings[0]._id }));
     expect(result.body.status).toBe('refunded');
     expect(result.body.recoveryReason).toBe('This payment has been refunded.');
   });
   test('a fully refunded payment arriving before success never creates a booking',async()=>{
-    await startDodo();latest.refunds=[{refund_id:'ref_dodo',payment_id:latest.payment_id,status:'succeeded',amount:latest.total_amount,currency:'USD'}];
+    await startDodo();latest.refund_status='full';latest.refunds=[{refund_id:'ref_dodo',payment_id:latest.payment_id,status:'succeeded',amount:latest.total_amount,currency:'USD'}];
     expect((await notify('refund.succeeded')).body.status).toBe('refunded');
     expect((await notify('payment.succeeded','evt_success_late')).body.status).toBe('refunded');
     expect(store.bookings).toHaveLength(0);
   });
   test('full refund side effects run once across duplicates and out-of-order refund failure',async()=>{
     await startDodo();await notify();
-    latest.refunds=[{refund_id:'ref_dodo',payment_id:latest.payment_id,status:'succeeded',amount:latest.total_amount,currency:'USD'}];
+    latest.refund_status='full';latest.refunds=[{refund_id:'ref_dodo',payment_id:latest.payment_id,status:'succeeded',amount:latest.total_amount,currency:'USD'}];
     const refund=jest.fn(async()=>({bookingId:store.bookings[0]._id}));
     expect((await notify('refund.succeeded','evt_refund',refund)).body.status).toBe('refunded');
     await notify('refund.succeeded','evt_refund',refund);await notify('refund.failed','evt_refund_old',refund);
@@ -4723,7 +4724,7 @@ describe('Dodo checkout lifecycle',()=>{
   });
   test('several partial refunds pass their cumulative full amount to booking accounting',async()=>{
     await startDodo();await notify();const total=latest.total_amount;
-    latest.refunds=[{refund_id:'ref_part_a',payment_id:latest.payment_id,status:'succeeded',amount:500,currency:'USD'},{refund_id:'ref_part_b',payment_id:latest.payment_id,status:'succeeded',amount:total-500,currency:'USD'}];
+    latest.refund_status='full';latest.refunds=[{refund_id:'ref_part_a',payment_id:latest.payment_id,status:'succeeded',amount:500,currency:'USD'},{refund_id:'ref_part_b',payment_id:latest.payment_id,status:'succeeded',amount:total-500,currency:'USD'}];
     const applyBookingRefund=jest.fn(async()=>({bookingId:store.bookings[0]._id}));
     await notify('refund.succeeded','evt_cumulative_refund',applyBookingRefund);
     const full=applyBookingRefund.mock.calls.find(([args])=>args.refund.full===true)?.[0];
@@ -4737,11 +4738,13 @@ describe('Dodo checkout lifecycle',()=>{
     latest.total_amount += latest.tax;
     await notify();
     expect(getOnlyPaymentRecord().providerPublicData.totalAmount).toBe(latest.total_amount);
+    latest.refund_status = 'partial';
     latest.refunds = [{ refund_id: 'ref_price', payment_id: latest.payment_id, status: 'succeeded', amount: price, currency: 'USD' }];
     const applyBookingRefund = jest.fn(async () => ({ bookingId: store.bookings[0]._id }));
     await notify('refund.succeeded', 'evt_price_refund', applyBookingRefund);
     expect(getOnlyPaymentRecord()).toMatchObject({ status: 'booked', refundState: 'partial' });
     expect(applyBookingRefund.mock.calls[0][0].refund.full).toBe(false);
+    latest.refund_status = 'full';
     latest.refunds.push({ refund_id: 'ref_tax', payment_id: latest.payment_id, status: 'succeeded', amount: latest.tax, currency: 'USD' });
     await notify('refund.succeeded', 'evt_tax_refund', applyBookingRefund);
     expect(getOnlyPaymentRecord()).toMatchObject({ status: 'refunded', refundProcessedAmountInSubunits: latest.total_amount });
@@ -4791,6 +4794,7 @@ describe('Dodo checkout lifecycle',()=>{
       const actualRefund = jest.requireActual('../server/api/ref/bookingRefunds').applyBookingRefund;
       const applyBookingRefund = jest.fn(actualRefund)
         .mockRejectedValueOnce(new Error('Booking storage temporarily unavailable'));
+      latest.refund_status = 'partial';
       latest.refunds = [{
         refund_id: 'ref_partial_sync', payment_id: latest.payment_id,
         status: 'succeeded', amount: 5000, currency: 'USD',
@@ -4862,7 +4866,10 @@ describe('Dodo checkout lifecycle',()=>{
     try {
       await startDodo();
       Object.assign(getOnlyPaymentRecord(), { createdAt: new Date(baseTime - 600000).toISOString(), updatedAt: new Date(baseTime - 600000).toISOString(), lastAttemptAt: '', nextRecoveryAt: '' });
-      if (refundAmount) latest.refunds = [{ refund_id: 'ref_prebooking_partial', payment_id: latest.payment_id, status: 'succeeded', amount: refundAmount, currency: 'USD' }];
+      if (refundAmount) {
+        latest.refund_status = 'partial';
+        latest.refunds = [{ refund_id: 'ref_prebooking_partial', payment_id: latest.payment_id, status: 'succeeded', amount: refundAmount, currency: 'USD' }];
+      }
       const states = [];
       for (let pass = 0; pass < 3; pass += 1) {
         jest.setSystemTime(baseTime + pass * 120000);

@@ -18,6 +18,7 @@ import { getClientAddress, requireRateLimit } from "../api/ref/rateLimit.js";
 import { logSafeError } from "../safeErrorLog.js";
 import { resolveSupabaseRuntimePolicy } from "../supabase/runtime.js";
 import { assertCommerceStartAllowed } from "../supabase/commerceControl.js";
+import { normalizePaymentFailureCount } from "../api/payment/paymentFailureReason.js";
 
 const createHoldClient = (backendOverride) =>
   createCommerceWriteClient({ backendOverride });
@@ -377,6 +378,9 @@ export default async function handler(req, res) {
             releasedAt: "",
             consumedAt: "",
             paymentRecordId: "",
+            paymentFailureCount: normalizePaymentFailureCount(
+              existingHold.paymentFailureCount
+            ),
             holdNonce,
             backendOwner: backend,
             cutoverGeneration,
@@ -418,6 +422,7 @@ export default async function handler(req, res) {
       releasedAt: "",
       consumedAt: "",
       paymentRecordId: "",
+      paymentFailureCount: 0,
     };
 
     let created;
