@@ -17,7 +17,6 @@ import { reportRequestError } from "./lib/clientRequest";
 import ReservationBanner from "./components/ReservationBanner";
 import RouteProgress, { RouteWaiting } from "./components/RouteProgress";
 import { BookingDialogReady } from "./lib/bookingDialogHold";
-import IntercomMessenger from "./components/IntercomMessenger";
 import { subscribePerfDebugChanges, syncPerfDebugFromEnvironment } from "./lib/perfDebug";
 import { initializePerformanceProfile } from "./lib/performanceProfile";
 import { getConfirmationPage, preloadConfirmationPage } from "./lib/confirmationPages";
@@ -74,6 +73,10 @@ const MeetTheTeam = lazy(() => import("./legacyPages/MeetTheTeam"));
 const NotFound = lazy(() => import("./legacyPages/NotFound"));
 
 const INTERCOM_DISABLED_ROUTES = ["/booking", "/payment"];
+const INTERCOM_APP_ID =
+  process.env.NEXT_PUBLIC_INTERCOM_APP_ID ||
+  process.env.REACT_APP_INTERCOM_APP_ID ||
+  "xvd1alq5";
 const BACKGROUND_READY_MAX_WAIT_MS = 3000;
 
 const isReferralVerificationHash = (hash) => {
@@ -141,9 +144,43 @@ const DeferredTelemetry = () => {
 };
 
 const IntercomRuntime = ({ disabledRoutes, disabled }) => {
-  return (
-    <IntercomMessenger disabledRoutes={disabledRoutes} disabled={disabled} />
-  );
+  const [Messenger, setMessenger] = useState(null);
+  const location = useLocation();
+  const pathname = location.pathname || "/";
+  const isDisabled =
+    Boolean(disabled) ||
+    disabledRoutes.some((route) => pathname === route || pathname.startsWith(`${route}/`));
+
+  useEffect(() => {
+    if (!isProductionBrowser()) return undefined;
+    if (isDisabled) {
+      const settings = {
+        app_id: INTERCOM_APP_ID,
+        alignment: "right",
+        horizontal_padding: 24,
+        vertical_padding: 24,
+        hide_default_launcher: true,
+      };
+      window.intercomSettings = settings;
+      if (typeof window.Intercom === "function") {
+        window.Intercom("update", settings);
+        window.Intercom("hide");
+      }
+      return undefined;
+    }
+    let active = true;
+    import("./components/IntercomMessenger")
+      .then((module) => {
+        if (active) setMessenger(() => module.default);
+      })
+      .catch(reportRequestError);
+    return () => {
+      active = false;
+    };
+  }, [isDisabled]);
+
+  if (!Messenger) return null;
+  return <Messenger disabledRoutes={disabledRoutes} disabled={isDisabled} />;
 };
 
 const RouteFallback = () => {

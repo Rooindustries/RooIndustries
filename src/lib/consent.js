@@ -1,20 +1,10 @@
-import { CONSENT_EVENT, CONSENT_KEY, CONSENT_RESET_EVENT, DECLINED_KEY, STORAGES } from "./consentSignals";
+import { CONSENT_EVENT, CONSENT_KEY, CONSENT_RESET_EVENT } from "./consentSignals";
 import { CHOICES, keepUnsaved, readConsent } from "./consentChoice";
+import { ensureAttributionSync, runConsentTransition } from "./attributionConsentLock";
 
 export { readConsent };
 
 let followingOtherTabs = false;
-
-const keep = (key, value) => STORAGES.find((storage) => {
-  try {
-    window[storage].setItem(key, value);
-    return true;
-  } catch {
-    return false;
-  }
-});
-
-const keepDecline = () => keep(DECLINED_KEY, String(Date.now()));
 
 const forgetChoice = (storage) => {
   try {
@@ -23,9 +13,11 @@ const forgetChoice = (storage) => {
 };
 
 const announce = (value) => {
-  window.dispatchEvent(CHOICES.has(value)
-    ? new CustomEvent(CONSENT_EVENT, { detail: value })
-    : new CustomEvent(CONSENT_RESET_EVENT));
+  window.dispatchEvent(
+    CHOICES.has(value)
+      ? new CustomEvent(CONSENT_EVENT, { detail: value })
+      : new CustomEvent(CONSENT_RESET_EVENT),
+  );
 };
 
 const followOtherTab = (event) => {
@@ -39,23 +31,17 @@ const followOtherTabs = () => {
   if (followingOtherTabs) return;
   followingOtherTabs = true;
   window.addEventListener("storage", followOtherTab);
+  ensureAttributionSync();
 };
 
 export const writeConsent = (value) => {
   if (!CHOICES.has(value) || typeof window === "undefined") return;
-  if (value !== "granted") keepDecline();
-  const kept = keep(CONSENT_KEY, value);
-  STORAGES.filter((storage) => storage !== kept).forEach(forgetChoice);
-  keepUnsaved(value);
-  announce(value);
+  return runConsentTransition(value, announce);
 };
 
 export const resetConsent = () => {
   if (typeof window === "undefined") return;
-  keepDecline();
-  STORAGES.forEach(forgetChoice);
-  keepUnsaved("unset");
-  announce("unset");
+  return runConsentTransition("unset", announce);
 };
 
 export const onConsentChange = (callback) => {

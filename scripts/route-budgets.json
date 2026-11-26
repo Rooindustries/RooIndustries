@@ -130,6 +130,10 @@
       "js": 43008,
       "css": 1024
     },
+    "src/App.jsx -> ./components/IntercomMessenger": {
+      "js": 3072,
+      "css": 1024
+    },
     "src/App.jsx -> ./components/PerfDebugOverlay": {
       "js": 3072,
       "css": 1024
@@ -235,7 +239,7 @@
       "css": 1024
     },
     "src/components/Footer.jsx -> ../lib/consent": {
-      "js": 1024,
+      "js": 5120,
       "css": 1024
     },
     "src/components/Packages.jsx -> ./PackageDetailsModal": {
@@ -255,7 +259,7 @@
       "css": 1024
     },
     "src/lib/analyticsModules.js -> ./metaPixel": {
-      "js": 3072,
+      "js": 6144,
       "css": 1024
     },
     "src/lib/analyticsModules.js -> ./postHogOutbox": {
@@ -263,7 +267,7 @@
       "css": 1024
     },
     "src/lib/analyticsModules.js -> ./salesTracking": {
-      "js": 6144,
+      "js": 9216,
       "css": 1024
     },
     "src/lib/checkoutAnalytics.js -> ./bookingAnalytics": {
@@ -295,7 +299,7 @@
       "css": 1024
     },
     "src/lib/posthog.js -> ./salesTracking": {
-      "js": 6144,
+      "js": 9216,
       "css": 1024
     },
     "src/next/AppClientRuntime.jsx -> ../lib/postHogOutbox": {
@@ -303,7 +307,7 @@
       "css": 1024
     },
     "src/next/AppClientRuntime.jsx -> ./ConsentRuntime": {
-      "js": 4096,
+      "js": 7168,
       "css": 1024
     },
     "src/next/NotFoundEntry.jsx -> ./LegacyRoutePage": {

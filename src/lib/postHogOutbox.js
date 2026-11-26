@@ -1,4 +1,4 @@
-import { readConsent } from "./consent";
+import { readConsent } from "./consentChoice";
 import { sanitizeAnalyticsEvent } from "./salesPaths";
 import { declinedSince, followChoices } from "./consentSignals";
 

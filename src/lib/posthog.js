@@ -1,4 +1,4 @@
-import { readConsent } from "./consent";
+import { readConsent } from "./consentChoice";
 import { cleanOutsideValue } from "./outsideValue.cjs";
 import { postHogQueued, takePostHogQueue } from "./postHogOutbox";
 
