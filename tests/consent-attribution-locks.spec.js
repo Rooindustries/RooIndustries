@@ -1133,6 +1133,76 @@ test("peer unsavedFallback captured under full sessionStorage is collected on Ac
   );
 });
 
+test("queued second Reset preserves journey across surviving peers when first Reset tab closes", async ({
+  page,
+  context,
+}) => {
+  await page.goto("/packages?utm_source=reset_close_retry&utm_campaign=delta");
+  await expect(banner(page)).toBeVisible();
+  await banner(page).getByRole("button", { name: "Accept", exact: true }).click();
+  await expect(banner(page)).toHaveCount(0);
+  await expect.poll(async () => (await readAttrCookies(context)).roo_attr?.firstTouch?.source).toBe(
+    "reset_close_retry",
+  );
+
+  const nextReset = await context.newPage();
+  await nextReset.goto("/referrals/login");
+  const witness = await context.newPage();
+  await witness.goto("/referrals/login");
+  await waitForTabPresence(witness, 3);
+
+  await witness.evaluate(() => {
+    void navigator.locks.request(
+      "roo_sales_attribution_cookie",
+      () =>
+        new Promise((resolve) => {
+          window.__releaseCookieHold = resolve;
+        }),
+    );
+  });
+  await expect.poll(() => witness.evaluate(() => typeof window.__releaseCookieHold)).toBe("function");
+  await page.evaluate(() => {
+    navigator.locks.query = () =>
+      new Promise(() => {
+        window.__resetDiscoveryEntered = true;
+      });
+  });
+
+  await openCookieSettings(page);
+  await expect
+    .poll(() =>
+      witness.evaluate(async () => {
+        const state = await navigator.locks.query();
+        return state.pending.filter(({ name }) => name === "roo_sales_attribution_cookie").length;
+      }),
+    )
+    .toBe(1);
+  await openCookieSettings(nextReset);
+  await expect
+    .poll(() =>
+      witness.evaluate(async () => {
+        const state = await navigator.locks.query();
+        return state.pending.filter(({ name }) => name === "roo_sales_attribution_cookie").length;
+      }),
+    )
+    .toBe(2);
+
+  await witness.evaluate(() => window.__releaseCookieHold());
+  await expect.poll(() => page.evaluate(() => Boolean(window.__resetDiscoveryEntered))).toBe(true);
+  await expect(banner(witness)).toBeVisible();
+  expect((await readAttrCookies(context)).roo_attr?.firstTouch?.source).toBe("reset_close_retry");
+
+  await page.close();
+  await witness.evaluate(() => navigator.locks.request("roo_sales_attribution_cookie", () => true));
+  const sources = await Promise.all(
+    [nextReset, witness].map((tab) =>
+      tab.evaluate(() => JSON.parse(sessionStorage.getItem("sales_attribution") || "null")?.firstTouch?.source || null),
+    ),
+  );
+  expect(sources).toEqual(["reset_close_retry", "reset_close_retry"]);
+  expect(await readAttrCookies(context)).toEqual({});
+});
+
 const productionTest = test.extend(productionHostFixtures);
 
 productionTest("Intercom chunk 404 never loads on booking and never breaks production pages", async ({

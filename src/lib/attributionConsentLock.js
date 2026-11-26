@@ -441,6 +441,20 @@ const handoffDeclinedToPeers = async (merged, targetConsent, epoch) => {
   await wait;
 };
 
+const handoffAndRemoveCookies = async (merged, live, epoch, forceHandoff = false) => {
+  if (forceHandoff || (merged && live !== "granted")) {
+    await handoffDeclinedToPeers(merged, live, epoch);
+  }
+  const clearRemaining = () => {
+    if (!cookiesAllowed()) {
+      removeCookies();
+    }
+  };
+  if (ALL_COOKIES.some((name) => readCookie(name))) {
+    await withLock(STATE_LOCK, clearRemaining, clearRemaining);
+  }
+};
+
 const readLocalSession = () => {
   const overlay =
     mergeAttributionMonotonic(pendingWrite, unsavedFallback) || pendingWrite || unsavedFallback;
@@ -704,17 +718,7 @@ export const storeAttributionForConsent = () => {
           fallbackIfNotStarted,
         );
         if (!state) return;
-        if (state.merged && state.live !== "granted") {
-          await handoffDeclinedToPeers(state.merged, state.live, state.epoch);
-        }
-        const clearRemaining = () => {
-          if (!cookiesAllowed()) {
-            removeCookies();
-          }
-        };
-        if (ALL_COOKIES.some((name) => readCookie(name))) {
-          await withLock(STATE_LOCK, clearRemaining, clearRemaining);
-        }
+        await handoffAndRemoveCookies(state.merged, state.live, state.epoch, false);
       },
       fallbackIfNotStarted,
     ).catch(() => {});
@@ -735,7 +739,7 @@ export const runConsentTransition = (target, announce) => {
       } catch {}
     }
   };
-  const localFallback = (merged = null) => {
+  const localFallback = (merged = null, deferCookieRemoval = false) => {
     if (target !== "granted") keepDecline();
     try {
       if (CHOICES.has(target)) {
@@ -749,9 +753,15 @@ export const runConsentTransition = (target, announce) => {
       if (merged) {
         saveSessionOrFallback(merged);
       }
-      removeCookies();
+      if (deferCookieRemoval) {
+        removeCookies(["_fbp", "_fbc"]);
+      } else {
+        removeCookies();
+      }
     }
-    announce(target);
+    if (!deferCookieRemoval) {
+      announce(target);
+    }
   };
   const clearLocalOverride = (targetChoice = "") => {
     try {
@@ -780,12 +790,20 @@ export const runConsentTransition = (target, announce) => {
     }
     return wrote;
   };
-  const applyDecline = () => {
-    const merged = mergeAttributionMonotonic(readCookiesRaw(), readLocalSession());
+  const applyDecline = (deferCookieRemoval = false) => {
+    const cookies = readCookiesRaw();
+    const merged = mergeAttributionMonotonic(cookies, readLocalSession());
     const stage = commitSharedTransition(target);
     if (!stage.ok) {
-      localFallback(merged);
-      return { ok: false, changed: false, epoch: stage.epoch, merged };
+      localFallback(merged, deferCookieRemoval);
+      return {
+        ok: false,
+        changed: false,
+        hadAttrCookies: Boolean(cookies),
+        live: readLiveSharedConsent(),
+        epoch: readEpoch(),
+        merged,
+      };
     }
     keepDecline();
     clearLocalOverride(target);
@@ -795,7 +813,12 @@ export const runConsentTransition = (target, announce) => {
     if (!cookiesAllowed()) {
       removeCookies(["_fbp", "_fbc"]);
     }
-    return { ...stage, merged };
+    return {
+      ...stage,
+      hadAttrCookies: Boolean(cookies),
+      live: readLiveSharedConsent(),
+      merged,
+    };
   };
   const runUnlocked = () => {
     if (target === "granted") {
@@ -913,22 +936,13 @@ export const runConsentTransition = (target, announce) => {
         STATE_LOCK,
         () => {
           started = true;
-          return applyDecline();
+          return applyDecline(true);
         },
         fallbackIfNotStarted,
       );
-      if (!stage || !stage.ok) return;
-      if (stage.changed) {
-        await handoffDeclinedToPeers(stage.merged, stage.goal, stage.epoch);
-      }
-      const clearRemaining = () => {
-        if (!cookiesAllowed()) {
-          removeCookies();
-        }
-      };
-      if (ALL_COOKIES.some((name) => readCookie(name))) {
-        await withLock(STATE_LOCK, clearRemaining, clearRemaining);
-      }
+      if (!stage) return;
+      const handoffValue = stage.changed || stage.hadAttrCookies ? stage.merged : null;
+      await handoffAndRemoveCookies(handoffValue, stage.live, stage.epoch, stage.changed);
       announce(target);
     },
     fallbackIfNotStarted,
