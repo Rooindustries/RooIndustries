@@ -1,10 +1,18 @@
+import {
+  campaignLabel, decodeFrozenPrior, mergeJourneyMonotonic, newJourneyId, resolveFrozenJourney, sanitizeJourney, sanitizeReferrerHost, touchFromSnap,
+} from "./campaignSanitizer";
 import { normalizeLinkReferral } from "./refShape.js";
 import { chooseFirstTouchRef, sanitizeRefEntry } from "./refEntry.js";
-import { SALES_PATHS, salesPath } from "./salesPaths";
+import { salesPath } from "./salesPaths";
+import { getCurrentArrivalSnapshot } from "./loadPostHog";
 import { isRecord, readStoredAttribution, writeStoredAttribution } from "./attributionStore";
 
-export type RefAttribution = { source: string; capturedAt: string };
+const PENDING_KEY = "roo_pending_arrival_touch";
+const C_FIELDS = ["source", "medium", "campaign", "content", "term"] as const;
+const TOUCH_KEYS = ["creatorCode", ...C_FIELDS, "fbclid", "gclid"] as const;
+export { campaignLabel, readStoredAttribution, writeStoredAttribution };
 
+export type RefAttribution = { source: string; capturedAt: string };
 export type SalesTouch = {
   capturedAt: string;
   landingPath: string;
@@ -18,273 +26,160 @@ export type SalesTouch = {
   fbclid?: string;
   gclid?: string;
 };
-
-type SalesLanding = { pathname: string; search: string };
-
-export type SalesAttribution =
-  | {
+type SalesLanding = {
+  pathname?: string; search?: string; landingPath?: string; capturedAt?: string;
+  referrerHost?: string; campaign?: Record<string, string>; referral?: string; ignoreUrlReferral?: boolean; revisit?: boolean;
+};
+export type SalesAttribution = {
   version: 2;
   journeyId: string;
   firstTouch: SalesTouch;
   lastTouch: SalesTouch;
   ref?: RefAttribution;
-}
-  | { ref: RefAttribution };
+} | { ref: RefAttribution };
 
-const JOURNEY_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
-const JOURNEY_ID_CHARS = 36;
-const LABEL_CODE_POINTS = 100;
-const SCAN_CODE_POINTS = 300;
-const REFERRER_HOST_CHARS = 100;
-const LANDING_PATH_CHARS = 100;
-const CAPTURED_AT_CHARS = 40;
-const PHONE_TEXT = /^[\d\s.()-]+$/;
-const DASH = String.raw`\p{Pd}\u2212`;
-const DATE_PART = String.raw`(\p{Nd}{4}|\p{Nd}{1,2})`;
-const DATE = new RegExp(
-  String.raw`(?<!\p{Nd})(?=${DATE_PART}([${DASH}./ ])(\p{Nd}{1,2})\2${DATE_PART}(?!\p{Nd}))`, "gu");
-const DIGIT = /\p{Nd}/u;
-const SEPARATOR = String.raw`[\s.()${DASH}]`;
-const DIGIT_RUN = new RegExp(String.raw`(?:\+${SEPARATOR}*)?\p{Nd}+(?:${SEPARATOR}+\p{Nd}+)*`, "gu");
-const DIGIT_GROUP = /\p{Nd}+/gu;
-const UNSAFE = /(?!\p{White_Space})\p{Cc}|[\p{Cs}<>"'`]/gu;
-const HOST_CHAR = String.raw`[\p{L}\p{M}\p{N}_-]`;
-const NAMED_HOST = String.raw`${HOST_CHAR}+(?:\.${HOST_CHAR}+)*\.\p{L}\p{M}*(?:\p{L}\p{M}*)+`;
-const NUMBERED_HOST = String.raw`(?<!${HOST_CHAR}|\.)\p{Nd}+(?:\.\p{Nd}+){3}(?!\.?\p{Nd})`;
-const DOTTED_HOST = String.raw`(?:${NAMED_HOST}|${NUMBERED_HOST})`;
-const EMAIL = new RegExp(String.raw`[^\s@]+@${DOTTED_HOST}`, "u");
-const URL_SCHEME = /[a-z][a-z\d+.-]*:\/\//i;
-const WWW_TOKEN = new RegExp(String.raw`(?<!${HOST_CHAR}|\.)www\.`, "iu");
-const PROTOCOL_RELATIVE = new RegExp(String.raw`//${DOTTED_HOST}(?!\.?${HOST_CHAR})`, "u");
-const HOST_WITH_PATH = new RegExp(String.raw`${DOTTED_HOST}(?:[/?#]|:\d)`, "u");
-const PRIVATE_TEXT = [EMAIL, URL_SCHEME, WWW_TOKEN, PROTOCOL_RELATIVE, HOST_WITH_PATH];
-const CLICK_ID_CHARS = 200;
-const CLICK_ID = /^[A-Za-z0-9_.-]+$/;
-const HOST = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
-const CAPTURED_AT = /^\d{4}-\d{2}-\d{2}T/;
-
-const bounded = (value: unknown, chars: number): value is string =>
-  typeof value === "string" && value.length <= chars;
-const head = (text: string, codePoints: number) => {
-  let end = 0;
-  for (let count = 0; count < codePoints && end < text.length; count += 1) {
-    end += (text.codePointAt(end) ?? 0) > 0xffff ? 2 : 1;
-  }
-  return text.slice(0, end);
-};
-const realDate = (year: number, month: number, day: number) => {
-  const date = new Date(Date.UTC(year, month - 1, day));
-  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
-};
-const digitValue = (digit: string) => {
-  const point = digit.codePointAt(0) ?? 0;
-  let zero = point;
-  while (DIGIT.test(String.fromCodePoint(zero - 1))) zero -= 1;
-  return (point - zero) % 10;
-};
-const numberValue = (digits: string) => [...digits].reduce((total, digit) => total * 10 + digitValue(digit), 0);
-const calendarDate = (start: string, middle: string, end: string) => {
-  const [a, b, c] = [start, middle, end].map(numberValue);
-  const [startDigits, endDigits] = [start, end].map((part) => [...part].length);
-  if (startDigits === 4 && endDigits <= 2) return realDate(a, b, c);
-  return startDigits <= 2 && endDigits === 4 && (realDate(c, b, a) || realDate(c, a, b));
-};
-const withoutDates = (text: string) => {
-  let undated = "";
-  let next = 0;
-  for (const { index = 0, 1: start, 2: separator, 3: middle, 4: end } of text.matchAll(DATE)) {
-    if (index < next || !calendarDate(start, middle, end)) continue;
-    undated += `${text.slice(next, index)}x`;
-    next = index + start.length + middle.length + end.length + 2 * separator.length;
-  }
-  return undated + text.slice(next);
-};
-const phoneDigits = (total: number) => total >= 7 && total <= 15;
-const phoneRun = (run: string) => {
-  const groups = [...run.matchAll(DIGIT_GROUP)].map(([group]) => [...group].length);
-  return groups.some((_, first) => {
-    let total = 0;
-    return groups.slice(first).some((digits, joined) => {
-      total += digits;
-      return phoneDigits(total) && (joined > 0 || (first === 0 && run.startsWith("+")));
-    });
-  });
-};
-const containsPhone = (text: string) => [...withoutDates(text).matchAll(DIGIT_RUN)].some(([run]) => phoneRun(run));
-
-const privateText = (text: string) => PRIVATE_TEXT.some((rule) => rule.test(text)) || containsPhone(text);
-const trimSpace = (text: string) => text.replace(/^ | $/g, "");
-export const campaignLabel = (value: unknown) => {
-  if (typeof value !== "string") return "";
-  const text = trimSpace(value.replace(UNSAFE, "").replace(/\p{White_Space}+/gu, " "));
-  const kept = trimSpace(head(text, LABEL_CODE_POINTS));
-  return privateText(head(text, SCAN_CODE_POINTS)) || privateText(kept) ? "" : kept;
-};
-const referralCode = (value: unknown) => normalizeLinkReferral(value);
-const clickId = (value: unknown) =>
-  bounded(value, CLICK_ID_CHARS) && CLICK_ID.test(value) && !(PHONE_TEXT.test(value) && containsPhone(value))
-    ? value
-    : "";
-
-const FIELDS = {
-  creatorCode: ["ref", referralCode],
-  source: ["utm_source", campaignLabel],
-  medium: ["utm_medium", campaignLabel],
-  campaign: ["utm_campaign", campaignLabel],
-  content: ["utm_content", campaignLabel],
-  term: ["utm_term", campaignLabel],
-  fbclid: ["fbclid", clickId],
-  gclid: ["gclid", clickId],
-} as const;
-type Field = keyof typeof FIELDS;
-const FIELD_KEYS = Object.keys(FIELDS) as Field[];
-
-const newJourneyId = () => {
-  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
-  if (!window.crypto?.getRandomValues) return "";
-  const bytes = window.crypto.getRandomValues(new Uint8Array(16));
-  bytes[6] = (bytes[6] & 15) | 64;
-  bytes[8] = (bytes[8] & 63) | 128;
-  const hex = [...bytes].map(byte => byte.toString(16).padStart(2, "0")).join("");
-  return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
-};
-
-const sanitizeTouch = (value: unknown): SalesTouch | null => {
-  if (!isRecord(value)) return null;
-  const { capturedAt, landingPath, referrerHost } = value;
-  if (!bounded(capturedAt, CAPTURED_AT_CHARS) || !CAPTURED_AT.test(capturedAt)) return null;
-  if (!Number.isFinite(Date.parse(capturedAt))) return null;
-  const knownPath =
-    bounded(landingPath, LANDING_PATH_CHARS) && (SALES_PATHS.has(landingPath) || landingPath === "/upgrade");
-  const touch: SalesTouch = {
-    capturedAt: new Date(capturedAt).toISOString(),
-    landingPath: knownPath ? landingPath : "/",
-  };
-  if (bounded(referrerHost, REFERRER_HOST_CHARS) && HOST.test(referrerHost)) {
-    touch.referrerHost = referrerHost.toLowerCase();
-  }
-  for (const key of FIELD_KEYS) {
-    const safe = FIELDS[key][1](value[key]);
-    if (safe) touch[key] = safe;
-  }
-  return touch;
-};
+type JourneyOnly = Exclude<SalesAttribution, { ref: RefAttribution }>;
+type PriorTouches = { journeyId?: string; firstTouch: SalesTouch; lastTouch: SalesTouch };
+type ParsedSnap = { touch: SalesTouch; tagged: boolean; revisit?: boolean };
 
 export function sanitizeSalesAttribution(value: unknown, now: number | null = Date.now()): SalesAttribution | null {
   if (!isRecord(value)) return null;
   const ref = sanitizeRefEntry(value.ref, now);
-  if (!bounded(value.journeyId, JOURNEY_ID_CHARS) || !JOURNEY_ID.test(value.journeyId)) return ref ? { ref } : null;
-  const journeyId = value.journeyId.toLowerCase();
-  if (value.version === 1) {
-    const touch = sanitizeTouch(value);
-    if (!touch) return ref ? { ref } : null;
-    return { version: 2, journeyId, firstTouch: touch, lastTouch: { ...touch }, ...(ref ? { ref } : {}) };
-  }
-  if (value.version !== 2) return ref ? { ref } : null;
-  const firstTouch = sanitizeTouch(value.firstTouch);
-  const lastTouch = sanitizeTouch(value.lastTouch);
-  if (!firstTouch && !lastTouch) return ref ? { ref } : null;
-  return {
-    version: 2,
-    journeyId,
-    firstTouch: firstTouch || { ...lastTouch! },
-    lastTouch: lastTouch || { ...firstTouch! },
-    ...(ref ? { ref } : {}),
-  };
+  const journey = sanitizeJourney(value) as JourneyOnly | null;
+  if (!journey) return ref ? { ref } : null;
+  return ref ? { ...journey, ref } : journey;
 }
 
-const landingCampaign = (search: string) => {
-  const params = new URLSearchParams(search);
-  const campaign: Partial<Record<Field, string>> = {};
-  for (const key of FIELD_KEYS) {
-    const safe = FIELDS[key][1](params.get(FIELDS[key][0]));
-    if (safe) campaign[key] = safe;
-  }
-  return campaign;
+const readStoredJourney = () =>
+  mergeJourneyMonotonic(sanitizeJourney(readStoredAttribution()), sanitizeJourney(typeof window !== "undefined" ? (window as Window & { __rooAttrOverlay?: unknown }).__rooAttrOverlay : null)) as JourneyOnly | null;
+const readPending = () => {
+  try { return JSON.parse(sessionStorage.getItem(PENDING_KEY) || "null"); } catch { return null; }
 };
-
-const sessionReferral = () => {
-  try {
-    return referralCode(sessionStorage.getItem("referral_session"));
-  } catch {
-    return "";
-  }
+const wrapTouch = (journeyId: string, touch: SalesTouch): JourneyOnly => ({ version: 2, journeyId, firstTouch: { ...touch }, lastTouch: { ...touch } });
+const mergeTouch = (base: JourneyOnly | null, touch: SalesTouch): JourneyOnly | null => {
+  const id = base?.journeyId || newJourneyId();
+  return id ? ((base ? mergeJourneyMonotonic(base, wrapTouch(id, touch)) : wrapTouch(id, touch)) as JourneyOnly) : null;
 };
-
-const newTouch = (landingPath: string, campaign: Partial<Record<Field, string>>) => {
-  let referrerHost = "";
+const clearPendingIfCurrent = (touch: SalesTouch) => {
   try {
-    const referrer = new URL(document.referrer);
-    if (referrer.origin !== window.location.origin) referrerHost = referrer.hostname;
+    const raw = readPending();
+    const p = raw ? (touchFromSnap(raw) as ParsedSnap | null) : null;
+    if (raw && (!p || (p.touch.capturedAt === touch.capturedAt && p.touch.landingPath === touch.landingPath && TOUCH_KEYS.every((k) => (p.touch[k] || "") === (touch[k] || ""))))) {
+      sessionStorage.removeItem(PENDING_KEY);
+    }
   } catch {}
-  return { capturedAt: new Date().toISOString(), landingPath, referrerHost, ...campaign };
 };
+
+export function attributionForLandingSnapshot(landing: unknown): SalesAttribution | null {
+  try {
+    if (typeof window === "undefined") return null;
+    const parsed = touchFromSnap(landing) as ParsedSnap | null;
+    if (!parsed) return captureSalesAttribution();
+    const [stored, ownId, snapMs] = [readStoredJourney(), newJourneyId(), Date.parse(parsed.touch.capturedAt)];
+    if (!stored && !ownId) return null;
+    const hasFrozenPrior = isRecord(landing) && Object.hasOwn(landing, "prior");
+    let prior = (hasFrozenPrior ? decodeFrozenPrior(landing.prior) : stored) as PriorTouches | null;
+    if (!hasFrozenPrior && prior && Number.isFinite(snapMs)) {
+      if (Date.parse(prior.firstTouch.capturedAt) > snapMs) prior = null;
+      else if (Date.parse(prior.lastTouch.capturedAt) > snapMs) prior = { ...prior, lastTouch: { ...prior.firstTouch } };
+    }
+    const [earlier, journeyId] = [Boolean(prior && snapMs < Date.parse(prior.firstTouch.capturedAt)), prior?.journeyId || stored?.journeyId || ownId];
+    const eventAttr: JourneyOnly = {
+      version: 2, journeyId,
+      firstTouch: prior && !earlier ? { ...prior.firstTouch } : { ...parsed.touch },
+      lastTouch: parsed.tagged && !parsed.revisit ? { ...parsed.touch } : prior?.lastTouch ? { ...prior.lastTouch } : { ...parsed.touch },
+    };
+    const storedEarlier = Boolean(stored && Date.parse(eventAttr.firstTouch.capturedAt) < Date.parse(stored.firstTouch.capturedAt));
+    const next = stored ? ((parsed.tagged && !parsed.revisit) || storedEarlier ? (mergeJourneyMonotonic(stored, eventAttr) as JourneyOnly) : stored) : eventAttr;
+    if (next) writeStoredAttribution(next, parsed.tagged ? () => clearPendingIfCurrent(parsed.touch) : undefined);
+    return eventAttr;
+  } catch { return null; }
+}
 
 export function captureSalesAttribution(landing?: SalesLanding): SalesAttribution | null {
   try {
     if (typeof window === "undefined") return null;
-    const { pathname, search } = landing || window.location;
-    if (pathname !== "/admin" && !pathname.startsWith("/admin/")) {
-      try {
-        const refWindow = window as Window & { __rooCaptureRef?: (s?: string, p?: string) => unknown };
-        refWindow.__rooCaptureRef?.(search, pathname);
-      } catch {}
+    const active = landing ?? (getCurrentArrivalSnapshot() as SalesLanding | null);
+    const snap = touchFromSnap(landing || active?.landingPath === salesPath(window.location.pathname) ? active : null) as ParsedSnap | null;
+    const [pathname, search] = [snap ? snap.touch.landingPath : landing?.pathname || window.location.pathname, snap ? "" : landing?.search ?? window.location.search];
+    if (!snap && !/^\/admin(?:\/|$)/.test(pathname)) {
+      try { (window as Window & { __rooCaptureRef?: (s?: string, p?: string) => unknown }).__rooCaptureRef?.(search, pathname); } catch {}
     }
     const landingPath = salesPath(pathname);
     if (!landingPath) return null;
-    const rawStored = sanitizeSalesAttribution(readStoredAttribution());
-    const stored = rawStored && "version" in rawStored ? (({ ref: _r, ...rest }) => rest)(rawStored) : null;
-    const campaign = landingCampaign(search);
-    const referral = campaign.creatorCode || sessionReferral();
-    const fields = referral ? { ...campaign, creatorCode: referral } : campaign;
-    const tagged = Object.keys(campaign).length > 0;
-    const changed = tagged && FIELD_KEYS.some((key) => fields[key] !== stored?.lastTouch[key]);
-    let current = stored;
-    if (!stored || changed) {
-      const journeyId = stored?.journeyId || newJourneyId();
-      if (!journeyId) return null;
-      const touch = newTouch(landingPath, fields);
-      const firstTouch = stored?.firstTouch || touch;
-      const next = sanitizeSalesAttribution({ version: 2, journeyId, firstTouch, lastTouch: touch });
-      current = next && "version" in next ? next : null;
+    let [stored, pendingMerged] = [readStoredJourney(), null as SalesTouch | null];
+    const pending = touchFromSnap(readPending()) as ParsedSnap | null;
+    if (pending?.tagged && !pending.revisit && (!snap || Date.parse(pending.touch.capturedAt) <= Date.parse(snap.touch.capturedAt))) {
+      const merged = mergeTouch(stored, pending.touch);
+      if (merged) [stored, pendingMerged] = [merged, pending.touch];
     }
-    if (current) writeStoredAttribution(current);
+    let built = snap;
+    if (!built) {
+      let [referrerHost, referral] = ["", ""];
+      try {
+        const r = new URL(document.referrer);
+        if (r.origin !== window.location.origin) referrerHost = sanitizeReferrerHost(r.hostname);
+      } catch {}
+      try { referral = normalizeLinkReferral(sessionStorage.getItem("referral_session")); } catch {}
+      built = touchFromSnap({ landingPath, capturedAt: new Date().toISOString(), referrerHost, search, referral }) as ParsedSnap | null;
+    }
+    const [touch, tagged] = [built?.touch || null, built?.tagged || false];
+    const changed = Boolean(touch) && tagged && !built?.revisit && TOUCH_KEYS.some((k) => touch![k] !== stored?.lastTouch[k]);
+    const earlier = Boolean(stored && touch && Date.parse(touch.capturedAt) < Date.parse(stored.firstTouch.capturedAt));
+    const current = (!stored || changed || earlier) && touch ? mergeTouch(stored, touch) : stored;
+    if (!current) return null;
+    writeStoredAttribution(current, () => {
+      if (pendingMerged) clearPendingIfCurrent(pendingMerged);
+      if (touch && (!snap || tagged)) clearPendingIfCurrent(touch);
+    });
     return current;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 export function salesEventProperties(attribution: unknown = captureSalesAttribution()) {
   const value = sanitizeSalesAttribution(attribution, null);
   if (!value) return {};
-  if (!("version" in value)) return value.ref?.source ? { ref_source: value.ref.source } : {};
-  const { firstTouch: first, lastTouch: last } = value;
-  const properties: Record<string, string | boolean> = { journey_id: value.journeyId, landing_path: last.landingPath };
-  const optional: [string, string | undefined][] = [
-    ["creator_code", last.creatorCode], ["campaign_source", last.source], ["campaign_medium", last.medium],
-    ["campaign", last.campaign], ["campaign_content", last.content], ["campaign_term", last.term],
-    ["referrer_host", last.referrerHost], ["first_source", first.source], ["first_campaign", first.campaign],
-    ["ref_source", value.ref?.source],
-  ];
-  for (const [key, text] of optional) if (text) properties[key] = text;
-  properties.has_fbclid = Boolean(last.fbclid || first.fbclid);
-  properties.has_gclid = Boolean(last.gclid || first.gclid);
-  return properties;
+  if (!("version" in value)) {
+    return value.ref?.source ? { ref_source: value.ref.source } : {};
+  }
+  const { firstTouch: f, lastTouch: l } = value;
+  const p: Record<string, string | boolean> = {
+    journey_id: value.journeyId,
+    landing_path: l.landingPath,
+    has_fbclid: Boolean(l.fbclid || f.fbclid),
+    has_gclid: Boolean(l.gclid || f.gclid),
+  };
+  for (const k of C_FIELDS) if (l[k]) p[k === "campaign" ? k : `campaign_${k}`] = l[k]!;
+  if (l.creatorCode) p.creator_code = l.creatorCode;
+  if (l.referrerHost) p.referrer_host = l.referrerHost;
+  if (f.source) p.first_source = f.source;
+  if (f.campaign) p.first_campaign = f.campaign;
+  if (value.ref?.source) p.ref_source = value.ref.source;
+  return p;
 }
 
 export const journeySalesAttribution = () =>
   captureSalesAttribution() || sanitizeSalesAttribution(readStoredAttribution());
 
-export const bookingSalesAttribution = (stored?: unknown) => {
-  try {
-    const clean = sanitizeSalesAttribution(stored);
-    const base = clean && "version" in clean ? clean : captureSalesAttribution();
-    let live: unknown = null;
-    try { live = typeof window !== "undefined" ? (window as any).__rooReadRef?.() : null; } catch {}
-    const ref = chooseFirstTouchRef([live, clean?.ref]);
-    if (!base || !("version" in base)) return ref ? { ref } : null;
-    const { ref: _r, ...rest } = base;
-    return ref ? { ...rest, ref } : rest;
-  } catch { return null; }
+export const captureVisit = (landing: SalesLanding, prior: unknown) => {
+  const saved = captureSalesAttribution(landing);
+  return attributionForLandingSnapshot({ ...landing, prior }) || saved;
 };
+
+export function resolveBookingAttribution(stored?: unknown, arrivalSnapshot?: unknown, frozenRaw?: unknown): SalesAttribution | null {
+  let ref = null;
+  try {
+    const liveRef = isRecord(frozenRaw) && Object.hasOwn(frozenRaw, "r") ? frozenRaw.r : typeof window !== "undefined" ? (window as Window & { __rooReadRef?: () => unknown }).__rooReadRef?.() ?? null : null;
+    ref = chooseFirstTouchRef([liveRef, isRecord(stored) ? stored.ref : null]);
+  } catch {}
+  try {
+    let [base, hadBase] = resolveFrozenJourney(stored, arrivalSnapshot, isRecord(frozenRaw) ? frozenRaw : null, readStoredJourney(), readPending()) as [JourneyOnly | null, boolean];
+    if (!hadBase && base) {
+      const id = readStoredJourney()?.journeyId;
+      if (id) base = { ...base, journeyId: id };
+      writeStoredAttribution(base);
+    }
+    if (!base && !arrivalSnapshot) base = sanitizeJourney(captureSalesAttribution()) as JourneyOnly | null;
+    return !base ? (ref ? { ref } : null) : ref ? { ...base, ref } : base;
+  } catch { return ref ? { ref } : null; }
+}

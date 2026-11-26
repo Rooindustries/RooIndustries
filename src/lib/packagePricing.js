@@ -135,8 +135,22 @@ const getPackageSlug = (title = "") => {
     .replace(/^-+|-+$/g, "");
 };
 
+const normalizePackageSlug = (slug = "") => {
+  const clean = String(slug || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  if (clean === "xoc" || clean === "performance-vertex-max") return "max";
+  return clean.replace(/^(?:performance-vertex|vertex)-/, "");
+};
+
+const KNOWN_PACKAGE_TITLES = new Map([
+  ["essentials", "Vertex Essentials"],
+  ["overhaul", "Performance Vertex Overhaul"],
+  ["max", TOP_PACKAGE_PUBLIC_TITLE],
+]);
+const resolveKnownPackageTitle = (slug = "") =>
+  KNOWN_PACKAGE_TITLES.get(normalizePackageSlug(slug)) || "";
+
 const findPackageBySlug = (packages, slug = "") => {
-  const wanted = String(slug || "").trim().toLowerCase();
+  const wanted = normalizePackageSlug(slug);
   if (!wanted || !Array.isArray(packages)) return null;
   return packages.find((pkg) => pkg?.title && getPackageSlug(pkg.title) === wanted) || null;
 };
@@ -157,6 +171,8 @@ const api = {
   findPackageBySlug,
   getPackagePricePresentation,
   getPackageSlug,
+  normalizePackageSlug,
+  resolveKnownPackageTitle,
   toMoney,
 };
 

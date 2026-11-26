@@ -62,8 +62,11 @@ test("a failed PayPal SDK can be retried without starting a payment or changing 
       </MemoryRouter>
     );
     await screen.findByText("$52.20 USD");
-    const script = document.querySelector('script[src^="https://www.paypal.com/sdk/js"]');
-    expect(script).not.toBeNull();
+    let script = null;
+    await waitFor(() => {
+      script = document.querySelector('script[src^="https://www.paypal.com/sdk/js"]');
+      expect(script).not.toBeNull();
+    });
     const initialUrl = script.src;
     const storedCheckout = sessionStorage.getItem("checkout_booking_state");
     const initialRequests = global.fetch.mock.calls.length;

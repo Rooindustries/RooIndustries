@@ -1,7 +1,7 @@
 import { isProductionBrowser } from "./productionBrowser";
 import { withMetaPixel, withSalesAttribution } from "./analyticsModules";
 import packagePricing from "./packagePricing";
-import { keepPostHogEvent } from "./loadPostHog";
+import { getCurrentArrivalSnapshot, keepPostHogEvent, snapRawAttr } from "./loadPostHog";
 
 const { getPackageSlug, toMoney } = packagePricing;
 export const DEFAULT_CURRENCY = "USD";
@@ -24,12 +24,21 @@ const ensureAnalyticsQueue = () => {
 export const trackEvent = (eventName, data = {}, options = {}) => {
   try {
     if (!isProductionBrowser()) return false;
-    if (options.postHog !== false) keepPostHogEvent(eventName, data, options);
-    ensureAnalyticsQueue();
     const attributed = Object.hasOwn(options, "attribution");
-    withSalesAttribution(({ salesEventProperties, track }) => {
-      const attribution = attributed ? salesEventProperties(options.attribution) : salesEventProperties();
-      track(eventName, { ...attribution, ...data });
+    const rawLanding = attributed ? null : options.landing || getCurrentArrivalSnapshot();
+    const prior = attributed ? null : snapRawAttr();
+    const landing = rawLanding ? { ...rawLanding, prior } : null;
+    if (options.postHog !== false) {
+      keepPostHogEvent(
+        eventName,
+        data,
+        attributed ? options : { ...options, prior, ...(rawLanding ? { landing: rawLanding } : {}) },
+      );
+    }
+    ensureAnalyticsQueue();
+    withSalesAttribution(({ attributionForLandingSnapshot, salesEventProperties, track }) => {
+      const attr = attributed ? (options.attribution ?? null) : landing ? attributionForLandingSnapshot(landing) : undefined;
+      track(eventName, { ...salesEventProperties(attr), ...data });
     });
     return true;
   } catch {

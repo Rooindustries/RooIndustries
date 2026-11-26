@@ -97,7 +97,7 @@ const normalizeStoredJourney = (value) => {
   if (value.version !== undefined && value.version !== 2) return null;
   const first = cleanStoredTouch(value.firstTouch);
   const last = cleanStoredTouch(value.lastTouch);
-  if (!first && !last) return null;
+  if ((!first && !last) || (first && last && ms(first) > ms(last))) return null;
   return {
     version: 2,
     journeyId: value.journeyId,
@@ -572,23 +572,24 @@ const runWriteSync = (value, onMerged) => {
       unsavedFallback,
     );
     const merged = mergeAttributionMonotonic(value, existing);
-    if (!merged) return;
+    if (!merged) return false;
     onMerged?.(merged);
     if (writeCookiesRaw(merged)) {
       unsavedFallback = null;
       writeSessionRaw(null);
-    } else {
-      saveSessionOrFallback(merged);
+      return true;
     }
-    return;
+    saveSessionOrFallback(merged);
+    return unsavedFallback === null;
   }
   const merged = mergeAttributionMonotonic(
     value,
     mergeAttributionMonotonic(readSessionRaw(), unsavedFallback),
   );
-  if (!merged) return;
+  if (!merged) return false;
   onMerged?.(merged);
   saveSessionOrFallback(merged);
+  return unsavedFallback === null;
 };
 
 const runQueueThawPromotion = (onMerged) => {
@@ -599,7 +600,7 @@ const runQueueThawPromotion = (onMerged) => {
     if (!cookiesAllowed()) return;
     const session = mergeAttributionMonotonic(readSessionRaw(), unsavedFallback);
     const merged = session ? mergeAttributionMonotonic(readCookiesRaw(), session) : null;
-    if (!merged) return;
+    if (!merged) return false;
     onMerged?.(merged);
     if (!writeCookiesRaw(merged)) return;
     unsavedFallback = null;
@@ -649,23 +650,27 @@ export const readStoredAttribution = () => {
   return mergeAttributionMonotonic(stored, overlay) || stored || overlay || memory;
 };
 
-export const writeStoredAttribution = (value) => {
+export const writeStoredAttribution = (value, onCommitted) => {
   const normalized = normalizeStoredJourney(value) || value;
   rememberMerged(normalized);
   if (typeof window === "undefined") return;
   ensureAttributionSync();
   if (!hasLocks()) {
-    runWriteSync(normalized, rememberMerged);
+    if (runWriteSync(normalized, rememberMerged)) onCommitted?.();
     return;
   }
   pendingWriteSeq += 1;
   const seq = pendingWriteSeq;
   pendingWrite = mergeAttributionMonotonic(normalized, pendingWrite) || normalized;
-  withBothLocks(() => runWriteSync(normalized, rememberMerged))
+  window.__rooAttrOverlay = pendingWrite;
+  withBothLocks(() => {
+    if (runWriteSync(normalized, rememberMerged)) onCommitted?.();
+  })
     .catch(() => {})
     .finally(() => {
       if (pendingWriteSeq === seq) {
         pendingWrite = null;
+        window.__rooAttrOverlay = unsavedFallback || null;
       }
     });
 };

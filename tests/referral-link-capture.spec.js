@@ -1,6 +1,8 @@
 const fs = require("node:fs");
 const path = require("node:path");
-const { test, expect, cookieBanner, settleIdle } = require("./fixtures/booking-flow.cjs");
+const {
+  test, expect, cookieBanner, acceptCookies, declineCookies, settleIdle,
+} = require("./fixtures/booking-flow.cjs");
 const { inspectChunks, holdChunks } = require("./fixtures/held-routes.cjs");
 
 test.use({ javaScriptEnabled: true, timezoneId: "Asia/Kolkata", viewport: { width: 390, height: 844 } });
@@ -69,7 +71,7 @@ test("an ad landing keeps first and last touch through checkout, in a cookie onl
   expect(withoutTime(landing.lastTouch)).toEqual(firstTouch);
   expect(await adCookies(page)).toEqual([]);
 
-  await cookieBanner(page).getByRole("button", { name: "Accept", exact: true }).click();
+  await acceptCookies(page);
   await expect.poll(() => cookieAttribution(page)).not.toBeNull();
   for (const cookie of await adCookies(page)) {
     expect(Math.abs(cookie.expires - (Date.now() / 1000 + 90 * 86400))).toBeLessThan(300);
@@ -234,7 +236,7 @@ test("ten labels of 100 four-byte characters and the longest ids stay whole in b
   const last = longestLanding(6, lastCode);
   const referer = `http://${longestHost}/`;
   await page.goto(`/?${new URLSearchParams(first)}`, { referer });
-  await cookieBanner(page).getByRole("button", { name: "Accept", exact: true }).click();
+  await acceptCookies(page);
   await expect.poll(() => cookieAttribution(page)).not.toBeNull();
   await page.goto(`/packages?${new URLSearchParams(last)}`, { referer });
   await expect.poll(async () => (await cookieAttribution(page))?.lastTouch.source).toBe(last.utm_source);
@@ -244,7 +246,7 @@ test("ten labels of 100 four-byte characters and the longest ids stay whole in b
   expect(sizes).toHaveLength(2);
   for (const size of sizes) expect(size).toBeLessThanOrEqual(3840);
   expect(withoutTime(stored.firstTouch)).toEqual(longestTouch("/", first));
-  expect(withoutTime(stored.lastTouch)).toEqual(longestTouch("/packages", last));
+  expect(withoutTime(stored.lastTouch)).toEqual(longestTouch("/packages", { ...last, ref: firstCode }));
   expect(await page.evaluate(() => sessionStorage.getItem("sales_attribution"))).toBeNull();
   const sent = await checkoutAttribution(page, flow);
   const { ref, ...sentWithoutRef } = sent;
@@ -439,7 +441,7 @@ test("non-sales routes capture roo_ref under both declined and accepted consent 
   await expect(cookieBanner(page)).toBeHidden();
   expect((await readRefCookie(page))?.entry?.source).toBe("chatgpt-ads");
 
-  const isSalesAttrChunk = (body) => body.includes("roo_attr_last") && body.includes("sales_attribution");
+  const isSalesAttrChunk = (body) => body.includes("roo_attr_last") && body.includes("has_fbclid");
   let blockedAttrChunks = 0;
   await page.goto("/robots.txt");
   await page.context().clearCookies();
@@ -677,7 +679,7 @@ test("paymentStartBody produces identical snapshot-vs-live ref ranking across lo
   const runMode = async (mode, liveTs, snapTs) => {
     await page.unrouteAll({ behavior: "ignoreErrors" });
     await flow.restoreRoutes();
-    const isSalesAttrChunk = (body) => body.includes("roo_attr_last") && body.includes("sales_attribution");
+    const isSalesAttrChunk = (body) => body.includes("roo_attr_last") && body.includes("has_fbclid");
     let held = null;
     if (mode === "404") {
       await inspectChunks(page, { origin: baseURL }, () => undefined, (route, response, body) =>
@@ -824,7 +826,7 @@ test("legacy promo-2026-11-24 is rejected on links, migrates from pre-PR stores,
   await expect(page.getByText("$76.49")).toBeVisible();
 
   await page.goto("/payment?ref=friend");
-  await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
+  await expect(page.locator("#payment-referral-code")).toHaveValue("promo-2026-11-24");
   await page.locator("#payment-referral-code").fill("");
   await page.locator("#payment-referral-code").locator("..").getByRole("button", { name: "Apply", exact: true }).click();
   await expect(page).toHaveURL(/\/payment$/);
@@ -832,6 +834,871 @@ test("legacy promo-2026-11-24 is rejected on links, migrates from pre-PR stores,
   await expect(page.locator("#payment-referral-code")).toHaveValue("");
   await expect(page.getByText("$84.99").first()).toBeVisible();
   await expect(page.getByText("$76.49")).toHaveCount(0);
+});
+
+test("known ad ref tags never trigger code validation across routes and keep existing holds intact", async ({
+  page, flow,
+}) => {
+  for (const route of ["/?ref=gads-max", "/reviews?ref=chatgpt-ads", "/packages?ref=gads-max", "/booking?ref=chatgpt-ads"]) {
+    await page.goto(route);
+    await expect(page.evaluate(() => sessionStorage.getItem("referral_session"))).resolves.toBeNull();
+  }
+  await flow.review("/booking?package=overhaul&ref=gads-max");
+  await flow.payment();
+  await page.goto("/payment?ref=chatgpt-ads");
+  await expect(page.getByRole("heading", { name: "Complete Payment", exact: true })).toBeVisible();
+  await expect(page.locator("#payment-referral-code")).toHaveValue("");
+  const validationCalls = flow.state.calls.filter(
+    (c) => (c.path === "/api/ref/validateReferral" || c.path === "/api/ref/validateCoupon") &&
+      /gads-max|chatgpt-ads/i.test(c.query)
+  );
+  expect(validationCalls).toEqual([]);
+});
+
+test("booking draft referral takes precedence over URL ref, stays isolated per package, and blank ref keeps session", async ({
+  page, flow,
+}) => {
+  await page.goto("/robots.txt");
+  await page.evaluate(() => {
+    sessionStorage.clear();
+    sessionStorage.setItem(
+      "booking_draft",
+      JSON.stringify({
+        lastTitle: "Performance Vertex Overhaul",
+        packages: {
+          "Performance Vertex Overhaul": {
+            selectedPackage: { title: "Performance Vertex Overhaul", price: "$84.99", tag: "Popular" },
+            checkoutCodes: { referral: { code: "friend" }, coupon: null, dismissedReferralCode: "" },
+          },
+        },
+      }),
+    );
+  });
+  await page.goto("/booking?package=overhaul&ref=otherref");
+  await expect(page.evaluate(() => sessionStorage.getItem("referral_session"))).resolves.toBeNull();
+  await expect(page).not.toHaveURL(/ref=otherref/);
+
+  const beforeEssentials = flow.state.calls.length;
+  await flow.review("/booking?package=essentials");
+  await expect(page.locator("#booking-review-code")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Remove referral code/i })).toHaveCount(0);
+  await expect(page.evaluate(() => sessionStorage.getItem("referral_session"))).resolves.toBeNull();
+  const friendChecks = flow.state.calls.slice(beforeEssentials).filter(
+    (c) => (c.path === "/api/ref/validateReferral" || c.path === "/api/ref/validateCoupon") && /friend/i.test(c.query),
+  );
+  expect(friendChecks).toEqual([]);
+
+  await page.evaluate(() => sessionStorage.setItem("referral_session", "friend"));
+  await page.goto("/booking?package=overhaul&ref=");
+  await expect(page.evaluate(() => sessionStorage.getItem("referral_session"))).resolves.toBe("friend");
+});
+
+test("unavailable referral lookup keeps code for retry across arrival and manual apply, expired coupon drops, and stacking uses resolved referral", async ({
+  page, flow,
+}) => {
+  const futureExpiry = new Date(Date.now() + 20 * 60 * 1000).toISOString();
+  const baseCheckout = {
+    packageTitle: "Performance Vertex Overhaul", packagePrice: "$84.99",
+    email: "visitor@example.invalid", discord: "fixture_visitor", specs: "pc", mainGame: "CS2",
+    localTimeZone: "Asia/Kolkata", startTimeUTC: `${flow.state.slots[0].date}T04:30:00.000Z`,
+    displayDate: flow.state.slots[0].date, displayTime: "10:00 AM",
+    slotHoldId: "fixture-hold-hyd", slotHoldToken: "fixture-token-hyd", slotHoldExpiresAt: futureExpiry,
+  };
+  let refMode = "unavailable";
+  let holdReferral = false;
+  let releaseReferral = null;
+  const quoteBodies = [];
+  await page.route("**/api/ref/validateReferral*", async (route) => {
+    const code = new URL(route.request().url()).searchParams.get("code") || "";
+    if (holdReferral && code.toLowerCase() === "friend") {
+      await new Promise((resolve) => {
+        releaseReferral = resolve;
+      });
+    }
+    if (refMode === "unavailable") {
+      return route.fulfill({ status: 503, json: { ok: false, reason: "unavailable" } });
+    }
+    if (refMode === "valid" && code.toLowerCase() === "friend") {
+      return route.fulfill({
+        json: { ok: true, active: true, eligible: true, referral: { code: "friend", currentDiscountPercent: 10 } },
+      });
+    }
+    return route.fulfill({ json: { ok: false, reason: "not_found" } });
+  });
+  await page.route("**/api/ref/validateCoupon*", (route) => {
+    const code = (new URL(route.request().url()).searchParams.get("code") || "").toLowerCase();
+    if (code === "expired") {
+      return route.fulfill({ status: 400, json: { ok: false, error: "This coupon has expired." } });
+    }
+    if (code === "nostack") {
+      return route.fulfill({
+        json: { ok: true, coupon: { code: "nostack", discountType: "fixed", discountAmount: 10, canCombineWithReferral: false } },
+      });
+    }
+    return route.fulfill({ json: { ok: false, reason: "not_found" } });
+  });
+  await page.route("**/api/payment/quote", (route) => {
+    const body = route.request().postDataJSON() || {};
+    quoteBodies.push(body);
+    const netAmount = body.referralCode === "friend" ? 76.49 : 84.99;
+    return route.fulfill({
+      json: {
+        ok: true, quoteFingerprint: "fp-hyd",
+        providers: { dodo: { enabled: true, mode: "test" }, razorpay: { enabled: false }, paypal: { enabled: false } },
+        quote: {
+          grossAmount: 84.99, netAmount, isFree: false,
+          couponDiscountAmount: 0, referralDiscountAmount: body.referralCode === "friend" ? 8.5 : 0,
+        },
+      },
+    });
+  });
+
+  for (const entry of ["arrival", "manual"]) {
+    refMode = entry === "arrival" ? "unavailable" : "valid";
+    await page.goto("/robots.txt");
+    await page.evaluate((state) => {
+      sessionStorage.clear();
+      sessionStorage.setItem("checkout_booking_state", JSON.stringify({ ...state, referralCode: "friend" }));
+      sessionStorage.setItem("referral_session", "friend");
+      sessionStorage.setItem("my_slot_hold", JSON.stringify({
+        holdId: state.slotHoldId, holdToken: state.slotHoldToken, expiresAt: state.slotHoldExpiresAt,
+        startTimeUTC: state.startTimeUTC, packageTitle: state.packageTitle, phase: "holding",
+      }));
+    }, baseCheckout);
+    await page.goto("/payment");
+    if (entry === "manual") {
+      await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
+      await expect(page.getByText("$76.49")).toBeVisible();
+      refMode = "unavailable";
+      await page.locator("#payment-referral-code").locator("..").getByRole("button", { name: "Apply", exact: true }).click();
+    }
+    await expect(
+      page.getByText("Code validation is temporarily unavailable. Try again or continue without this code."),
+    ).toBeVisible();
+    await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
+    await expect(page.evaluate(() => sessionStorage.getItem("referral_session"))).resolves.toBe("friend");
+    refMode = "invalid";
+    await page.locator("#payment-referral-code").locator("..").getByRole("button", { name: "Apply", exact: true }).click();
+    await expect(page.getByText("Invalid or inactive referral code.")).toBeVisible();
+    await expect(page.evaluate(() => sessionStorage.getItem("referral_session"))).resolves.toBeNull();
+  }
+
+  quoteBodies.length = 0;
+  refMode = "valid";
+  await page.goto("/robots.txt");
+  await page.evaluate((state) => {
+    sessionStorage.clear();
+    sessionStorage.setItem("checkout_booking_state", JSON.stringify({ ...state, couponCode: "expired" }));
+    sessionStorage.setItem("my_slot_hold", JSON.stringify({
+      holdId: state.slotHoldId, holdToken: state.slotHoldToken, expiresAt: state.slotHoldExpiresAt,
+      startTimeUTC: state.startTimeUTC, packageTitle: state.packageTitle, phase: "holding",
+    }));
+  }, baseCheckout);
+  await page.goto("/payment");
+  await expect(page.getByText("This coupon has expired.")).toBeVisible();
+  await expect(page.locator("#payment-coupon-code")).toHaveValue("");
+  await expect.poll(() => quoteBodies.length).toBe(1);
+  expect(quoteBodies[0]).toMatchObject({ referralCode: "", couponCode: "" });
+
+  quoteBodies.length = 0;
+  holdReferral = true;
+  releaseReferral = null;
+  await page.goto("/robots.txt");
+  await page.evaluate((state) => {
+    sessionStorage.clear();
+    sessionStorage.setItem("checkout_booking_state", JSON.stringify({ ...state, referralCode: "friend", couponCode: "nostack" }));
+    sessionStorage.setItem("my_slot_hold", JSON.stringify({
+      holdId: state.slotHoldId, holdToken: state.slotHoldToken, expiresAt: state.slotHoldExpiresAt,
+      startTimeUTC: state.startTimeUTC, packageTitle: state.packageTitle, phase: "holding",
+    }));
+  }, baseCheckout);
+  await page.goto("/payment");
+  await expect.poll(() => typeof releaseReferral).toBe("function");
+  expect(quoteBodies).toEqual([]);
+  releaseReferral();
+  holdReferral = false;
+  await expect(page.getByText("This coupon can't be used together with a referral discount.")).toBeVisible();
+  await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
+  await expect(page.locator("#payment-coupon-code")).toHaveValue("");
+  await expect.poll(() => quoteBodies.length).toBe(1);
+  expect(quoteBodies[0]).toMatchObject({ referralCode: "friend", couponCode: "" });
+});
+
+test("passive coupon lookup from earlier reservation leaves replacement reservation untouched", async ({
+  page, flow,
+}) => {
+  const futureExpiry = new Date(Date.now() + 20 * 60 * 1000).toISOString();
+  const baseA = {
+    packageTitle: "Performance Vertex Overhaul", packagePrice: "$84.99",
+    email: "a@example.invalid", discord: "user_a", specs: "pc", mainGame: "CS2",
+    localTimeZone: "Asia/Kolkata", startTimeUTC: `${flow.state.slots[0].date}T04:30:00.000Z`,
+    displayDate: flow.state.slots[0].date, displayTime: "10:00 AM",
+    slotHoldId: "hold-passive-a", slotHoldToken: "tok-passive-a", slotHoldExpiresAt: futureExpiry,
+    couponCode: "save20",
+  };
+  const baseB = {
+    ...baseA, email: "b@example.invalid", slotHoldId: "hold-passive-b", slotHoldToken: "tok-passive-b",
+    couponCode: "save20",
+  };
+  let releasePassiveA;
+  let passiveADone;
+  const passiveACompleted = new Promise((resolve) => {
+    passiveADone = resolve;
+  });
+  const passiveASeen = new Promise((resolve) => {
+    page.route("**/api/ref/validateCoupon*", async (route) => {
+      const code = (new URL(route.request().url()).searchParams.get("code") || "").toLowerCase();
+      if (code === "passivea") {
+        resolve();
+        await new Promise((r) => { releasePassiveA = r; });
+        await route.fulfill({ json: { ok: true, coupon: { code: "passivea", discountType: "percent", discountPercent: 10, canCombineWithReferral: true } } });
+        passiveADone();
+        return;
+      }
+      if (code === "save20") {
+        return route.fulfill({ json: { ok: true, coupon: { code: "save20", discountType: "percent", discountPercent: 20, canCombineWithReferral: true } } });
+      }
+      return route.fulfill({ json: { ok: false, reason: "not_found" } });
+    });
+  });
+  await page.route("**/api/ref/validateReferral*", (route) => {
+    const code = (new URL(route.request().url()).searchParams.get("code") || "").toLowerCase();
+    return route.fulfill({
+      json: code === "friend"
+        ? { ok: true, active: true, eligible: true, referral: { code: "friend", currentDiscountPercent: 10 } }
+        : { ok: false, reason: "not_found" },
+    });
+  });
+
+  await page.goto("/robots.txt");
+  await page.evaluate((state) => {
+    sessionStorage.clear();
+    sessionStorage.setItem("checkout_booking_state", JSON.stringify(state));
+    sessionStorage.setItem("referral_session", "passivea");
+  }, baseA);
+  await page.goto("/payment?ref=passivea");
+  await passiveASeen;
+
+  await page.evaluate(({ stateA, stateB }) => {
+    sessionStorage.setItem("checkout_booking_state", JSON.stringify(stateB));
+    sessionStorage.setItem("referral_session", "friend");
+    window.history.replaceState({ ...(window.history.state || {}), __rooLegacy: true, usr: { bookingData: stateB } }, "", "/payment?ref=friend");
+    window.history.pushState({ ...(window.history.state || {}), __rooLegacy: true, usr: { bookingData: stateA } }, "", "/payment?ref=passivea");
+  }, { stateA: baseA, stateB: baseB });
+  await page.goBack();
+  await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
+  await expect(page.locator("#payment-coupon-code")).toHaveValue("save20");
+
+  const passiveAResponse = page.waitForResponse(
+    (res) => res.url().includes("/api/ref/validateCoupon") && res.url().toLowerCase().includes("code=passivea"),
+  );
+  releasePassiveA();
+  await passiveACompleted;
+  await passiveAResponse;
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
+  await expect(page.locator("#payment-coupon-code")).toHaveValue("save20");
+  await expect(page).toHaveURL(/ref=friend/);
+  await expect(page.evaluate(() => sessionStorage.getItem("referral_session"))).resolves.toBe("friend");
+  const storedAfter = await page.evaluate(() => JSON.parse(sessionStorage.getItem("checkout_booking_state") || "null"));
+  expect(storedAfter?.slotHoldId).toBe("hold-passive-b");
+  expect(storedAfter?.couponCode).toBe("save20");
+});
+
+test("temporary passive lookup 503 preserves passive retry code with non-stackable coupon and keeps resolved coupon-field referral", async ({
+  page, flow,
+}) => {
+  const futureExpiry = new Date(Date.now() + 20 * 60 * 1000).toISOString();
+  const baseCheckout = {
+    packageTitle: "Performance Vertex Overhaul", packagePrice: "$84.99",
+    email: "visitor@example.invalid", discord: "fixture_visitor", specs: "pc", mainGame: "CS2",
+    localTimeZone: "Asia/Kolkata", startTimeUTC: `${flow.state.slots[0].date}T04:30:00.000Z`,
+    displayDate: flow.state.slots[0].date, displayTime: "10:00 AM",
+    slotHoldId: "hold-503-passive", slotHoldToken: "tok-503-passive", slotHoldExpiresAt: futureExpiry,
+  };
+  let failCode = "friend";
+  const quoteBodies = [];
+  await page.route("**/api/payment/quote", async (route) => {
+    quoteBodies.push(route.request().postDataJSON());
+    return route.fallback();
+  });
+  await page.route("**/api/ref/validateCoupon*", (route) => {
+    const code = (new URL(route.request().url()).searchParams.get("code") || "").toLowerCase();
+    if (code === "nostack") {
+      return route.fulfill({ json: { ok: true, coupon: { code: "nostack", discountType: "percent", discountPercent: 15, canCombineWithReferral: false } } });
+    }
+    return route.fallback();
+  });
+  await page.route("**/api/ref/validateReferral*", (route) => {
+    const code = (new URL(route.request().url()).searchParams.get("code") || "").toLowerCase();
+    if (code === failCode) return route.fulfill({ status: 503, json: { error: "unavailable" } });
+    return route.fallback();
+  });
+
+  await page.goto("/robots.txt");
+  await page.evaluate((checkout) => {
+    sessionStorage.clear();
+    sessionStorage.setItem("checkout_booking_state", JSON.stringify(checkout));
+    sessionStorage.setItem("referral_session", "friend");
+  }, { ...baseCheckout, couponCode: "nostack", referralCode: "" });
+  await page.goto("/payment?ref=friend");
+  await expect(page.locator("#payment-coupon-code")).toHaveValue("nostack");
+  await expect(page).toHaveURL(/ref=friend/);
+  expect(await storedReferral(page)).toBe("friend");
+  await expect.poll(() => quoteBodies.at(-1)?.couponCode).toBe("nostack");
+
+  failCode = "creator-two";
+  quoteBodies.length = 0;
+  await page.goto("/robots.txt");
+  await page.evaluate((checkout) => {
+    sessionStorage.clear();
+    sessionStorage.setItem("checkout_booking_state", JSON.stringify(checkout));
+    sessionStorage.setItem("referral_session", "creator-two");
+  }, { ...baseCheckout, couponCode: "friend", referralCode: "" });
+  await page.goto("/payment?ref=creator-two");
+  await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
+  await expect.poll(() => quoteBodies.at(-1)?.referralCode).toBe("friend");
+});
+
+test("payment start attribution merges stored, live, pending, and frozen arrival with numeric campaign IDs preserved", async ({
+  page, flow, baseURL,
+}) => {
+  const futureExpiry = new Date(Date.now() + 20 * 60 * 1000).toISOString();
+  const baseCheckout = {
+    packageTitle: "Performance Vertex Overhaul", packagePrice: "$84.99",
+    email: "visitor@example.invalid", discord: "fixture_visitor", specs: "pc", mainGame: "CS2",
+    localTimeZone: "Asia/Kolkata", startTimeUTC: `${flow.state.slots[0].date}T04:30:00.000Z`,
+    displayDate: flow.state.slots[0].date, displayTime: "10:00 AM",
+    slotHoldId: "fixture-hold-attr", slotHoldToken: "fixture-token-attr", slotHoldExpiresAt: futureExpiry,
+  };
+  const startBodies = [];
+  await page.route("**/api/payment/start", (route) => {
+    startBodies.push(route.request().postDataJSON());
+    return route.fulfill({
+      json: {
+        ok: true, status: "started", paymentAccessToken: "tok-attr", checkoutCreated: true,
+        providerPayload: { checkoutUrl: `${baseURL}/__test/checkout-handoff`, orderId: "ord-attr" },
+      },
+    });
+  });
+  await page.goto("/robots.txt");
+  await page.evaluate((state) => {
+    sessionStorage.clear();
+    localStorage.setItem("roo-consent", "denied");
+    sessionStorage.setItem("checkout_booking_state", JSON.stringify({
+      ...state,
+      salesAttribution: {
+        version: 2, journeyId: "77777777-7777-4777-8777-777777777777",
+        firstTouch: { capturedAt: "2026-11-20T10:00:00.000Z", landingPath: "/upgrade", source: "oldSrc", campaign: "1202101234" },
+        lastTouch: { capturedAt: "2026-11-20T10:00:00.000Z", landingPath: "/upgrade", source: "oldSrc", campaign: "1202101234" },
+      },
+    }));
+    sessionStorage.setItem("roo_pending_arrival_touch", JSON.stringify({
+      landingPath: "/upgrade", capturedAt: "2026-11-25T10:00:00.000Z", referrerHost: "",
+      campaign: { source: "meta", campaign: "1202101234", medium: "buyer@example.com" }, referral: "", ignoreUrlReferral: false,
+    }));
+    sessionStorage.setItem("my_slot_hold", JSON.stringify({
+      holdId: state.slotHoldId, holdToken: state.slotHoldToken, expiresAt: state.slotHoldExpiresAt,
+      startTimeUTC: state.startTimeUTC, packageTitle: state.packageTitle, phase: "holding",
+    }));
+  }, baseCheckout);
+  await page.goto("/payment");
+  await expect(page.getByRole("button", { name: "Pay your way", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
+  const attr = startBodies.at(-1)?.bookingPayload?.salesAttribution;
+  expect(attr?.firstTouch?.landingPath).toBe("/upgrade");
+  expect(attr?.lastTouch?.source).toBe("meta");
+  expect(attr?.lastTouch?.campaign).toBe("1202101234");
+  expect(attr?.lastTouch?.medium).toBeUndefined();
+});
+
+test("blocked analytics chunk never stalls payment start and still sends frozen attribution", async ({
+  page, flow, baseURL,
+}) => {
+  const futureExpiry = new Date(Date.now() + 20 * 60 * 1000).toISOString();
+  const baseCheckout = {
+    packageTitle: "Performance Vertex Overhaul", packagePrice: "$84.99",
+    email: "visitor@example.invalid", discord: "fixture_visitor", specs: "pc", mainGame: "CS2",
+    localTimeZone: "Asia/Kolkata", startTimeUTC: `${flow.state.slots[0].date}T04:30:00.000Z`,
+    displayDate: flow.state.slots[0].date, displayTime: "10:00 AM",
+    slotHoldId: "fixture-hold-404", slotHoldToken: "fixture-token-404", slotHoldExpiresAt: futureExpiry,
+  };
+  let blockedChunks = 0;
+  await inspectChunks(page, { origin: baseURL }, () => undefined, (route, response, body) => {
+    if (body.includes("roo_attr_last") && body.includes("has_fbclid")) {
+      blockedChunks += 1;
+      return route.fulfill({ status: 404, body: "" });
+    }
+    return route.fulfill({ response, body });
+  });
+  const startBodies = [];
+  await page.route("**/api/payment/start", (route) => {
+    startBodies.push(route.request().postDataJSON());
+    return route.fulfill({
+      json: {
+        ok: true, status: "started", paymentAccessToken: "tok-404", checkoutCreated: true,
+        providerPayload: { checkoutUrl: `${baseURL}/__test/checkout-handoff`, orderId: "ord-404" },
+      },
+    });
+  });
+  await page.goto("/robots.txt");
+  await page.evaluate((state) => {
+    sessionStorage.clear();
+    localStorage.setItem("roo-consent", "denied");
+    sessionStorage.setItem("checkout_booking_state", JSON.stringify(state));
+    sessionStorage.setItem("my_slot_hold", JSON.stringify({
+      holdId: state.slotHoldId, holdToken: state.slotHoldToken, expiresAt: state.slotHoldExpiresAt,
+      startTimeUTC: state.startTimeUTC, packageTitle: state.packageTitle, phase: "holding",
+    }));
+  }, baseCheckout);
+  await page.goto("/payment?utm_source=frozen_start&utm_campaign=1202101234");
+  await expect(page.getByRole("button", { name: "Pay your way", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
+  expect(blockedChunks).toBeGreaterThan(0);
+  expect(startBodies.at(-1)?.bookingPayload?.salesAttribution?.lastTouch?.source).toBe("frozen_start");
+  expect(startBodies.at(-1)?.bookingPayload?.salesAttribution?.lastTouch?.campaign).toBe("1202101234");
+});
+
+test("Back/Forward over booking keeps cleared referral empty, saved coupon keeps session referral, legacy drafts restore, and passive payment preserves tab referral", async ({
+  page, flow, baseURL,
+}) => {
+  await flow.review("/booking?package=overhaul&ref=friend");
+  await expect(page.getByRole("button", { name: "Remove referral code friend", exact: true })).toBeVisible();
+  await flow.payment();
+  await page.locator("#payment-referral-code").fill("invalid-fixture-code");
+  await page.locator("#payment-referral-code").locator("..").getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(page.getByText("Invalid or inactive referral code.")).toBeVisible();
+  await expect(page.evaluate(() => sessionStorage.getItem("referral_session"))).resolves.toBeNull();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/booking\?package=overhaul&ref=friend/);
+  await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Remove referral code friend", exact: true })).toHaveCount(0);
+  await expect(page.evaluate(() => sessionStorage.getItem("referral_session"))).resolves.toBeNull();
+  await page.waitForTimeout(2500);
+  await expect(page.getByRole("button", { name: "Remove referral code friend", exact: true })).toHaveCount(0);
+  await expect(page.evaluate(() => sessionStorage.getItem("referral_session"))).resolves.toBeNull();
+
+  await page.goto("/packages");
+  await page.evaluate(() => sessionStorage.clear());
+  await page.goto("/booking?package=overhaul&ref=friend");
+  await expect.poll(() => storedReferral(page)).toBe("friend");
+  await page.goBack();
+  await page.evaluate(() => sessionStorage.removeItem("referral_session"));
+  await page.goForward();
+  await expect(page.getByRole("button", { name: /^Earliest available:/ })).toBeVisible();
+  expect(await storedReferral(page)).toBeNull();
+
+  flow.state.holds.clear();
+  await page.goto("/robots.txt");
+  await page.evaluate(() => {
+    sessionStorage.clear();
+    sessionStorage.setItem("referral_session", "friend");
+    sessionStorage.setItem("booking_draft", JSON.stringify({
+      lastTitle: "Performance Vertex Overhaul",
+      packages: {
+        "Performance Vertex Overhaul": {
+          selectedPackage: { title: "Performance Vertex Overhaul", price: "$84.99" },
+          checkoutCodes: { coupon: { code: "save20" } },
+        },
+      },
+    }));
+  });
+  await flow.review("/booking?package=overhaul");
+  await expect(page.getByRole("button", { name: /^Remove coupon code save20$/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Remove referral code friend", exact: true })).toBeVisible();
+
+  for (const legacyPatch of [
+    { referralCode: "friend" },
+    { appliedReferral: { code: "friend" } },
+    { checkoutCodes: { referral: { code: "gads-max" } }, referralCode: "friend" },
+  ]) {
+    flow.state.holds.clear();
+    await page.goto("/robots.txt");
+    await page.evaluate((patch) => {
+      sessionStorage.clear();
+      sessionStorage.setItem("booking_draft", JSON.stringify({
+        lastTitle: "Performance Vertex Overhaul",
+        packages: {
+          "Performance Vertex Overhaul": {
+            selectedPackage: { title: "Performance Vertex Overhaul", price: "$84.99" },
+            ...patch,
+          },
+        },
+      }));
+    }, legacyPatch);
+    await flow.review("/booking?package=overhaul");
+    await expect(page.getByRole("button", { name: "Remove referral code friend", exact: true })).toBeVisible();
+  }
+
+  flow.state.holds.clear();
+  flow.state.calls.length = 0;
+  await page.goto("/robots.txt");
+  await page.evaluate(() => {
+    sessionStorage.clear();
+    sessionStorage.setItem("booking_draft", JSON.stringify({
+      lastTitle: "Vertex Essentials",
+      packages: {
+        "Vertex Essentials": {
+          selectedPackage: { title: "Vertex Essentials", price: "$29.95" },
+          referralCode: "friend",
+        },
+      },
+    }));
+  });
+  await flow.review("/booking?package=overhaul");
+  await expect(page.getByRole("button", { name: /Remove referral code/ })).toHaveCount(0);
+  expect(
+    flow.state.calls.filter((c) => /validate(Referral|Coupon)/.test(c.path) && /friend/i.test(c.query)),
+  ).toEqual([]);
+
+  flow.state.holds.clear();
+  await page.goto("/robots.txt");
+  await page.evaluate(() => {
+    sessionStorage.clear();
+    sessionStorage.setItem("referral_session", "friend");
+    sessionStorage.setItem("checkout_booking_state", JSON.stringify({
+      packageTitle: "Performance Vertex Overhaul",
+      referralCode: "creator-two",
+    }));
+  });
+  await flow.review("/booking?package=overhaul");
+  await expect(page.getByRole("button", { name: "Remove referral code friend", exact: true })).toBeVisible();
+  expect(await storedReferral(page)).toBe("friend");
+
+  flow.state.holds.clear();
+  await page.goto("/robots.txt");
+  await page.evaluate(() => {
+    sessionStorage.clear();
+    sessionStorage.setItem("referral_session", "friend");
+    sessionStorage.setItem("booking_draft", JSON.stringify({
+      lastTitle: "Performance Vertex Overhaul",
+      packages: {
+        "Performance Vertex Overhaul": {
+          selectedPackage: { title: "Performance Vertex Overhaul", price: "$84.99" },
+          checkoutCodes: { referral: { code: "friend" } },
+        },
+      },
+    }));
+    sessionStorage.setItem("checkout_booking_state", JSON.stringify({
+      packageTitle: "Performance Vertex Overhaul",
+      referralCode: "creator-two",
+    }));
+  });
+  await flow.review("/booking?package=overhaul");
+  await expect(page.getByRole("button", { name: "Remove referral code friend", exact: true })).toBeVisible();
+  expect(await storedReferral(page)).toBe("friend");
+
+  await page.goto("/robots.txt");
+  await page.evaluate(() => {
+    sessionStorage.clear();
+    sessionStorage.setItem("booking_draft", JSON.stringify({
+      lastTitle: "Performance Vertex Overhaul",
+      packages: {
+        "Performance Vertex Overhaul": {
+          selectedPackage: { title: "Performance Vertex Overhaul", price: "$84.99" },
+          checkoutCodes: { referral: { code: "friend" } },
+        },
+      },
+    }));
+    sessionStorage.setItem("checkout_booking_state", JSON.stringify({
+      packageTitle: "Performance Vertex Overhaul",
+      referralCode: "",
+    }));
+  });
+  await page.goto("/reviews?ref=creator-two");
+  await expect(page.getByRole("heading").first()).toBeVisible();
+  await page.waitForTimeout(300);
+  expect(await storedReferral(page)).toBeNull();
+
+  const futureExpiry = new Date(Date.now() + 20 * 60 * 1000).toISOString();
+  await page.goto("/robots.txt");
+  await page.evaluate(({ slotDate, expiry }) => {
+    sessionStorage.clear();
+    sessionStorage.setItem("referral_session", "existing-tab-ref");
+    const checkout = {
+      packageTitle: "Performance Vertex Overhaul", packagePrice: "$84.99",
+      email: "visitor@example.invalid", discord: "fixture_visitor", specs: "pc", mainGame: "CS2",
+      localTimeZone: "Asia/Kolkata", startTimeUTC: `${slotDate}T04:30:00.000Z`,
+      displayDate: slotDate, displayTime: "10:00 AM", referralCode: "friend",
+      slotHoldId: "hold-passive-tab", slotHoldToken: "tok-passive-tab", slotHoldExpiresAt: expiry,
+    };
+    sessionStorage.setItem("checkout_booking_state", JSON.stringify(checkout));
+    sessionStorage.setItem("my_slot_hold", JSON.stringify({
+      holdId: checkout.slotHoldId, holdToken: checkout.slotHoldToken, expiresAt: expiry,
+      startTimeUTC: checkout.startTimeUTC, packageTitle: checkout.packageTitle, phase: "holding",
+    }));
+  }, { slotDate: flow.state.slots[0].date, expiry: futureExpiry });
+  await page.goto("/payment?ref=incoming-ref");
+  await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
+  await expect(page.getByText("$76.49")).toBeVisible();
+  expect(await storedReferral(page)).toBe("existing-tab-ref");
+
+  const now = Date.now();
+  const cookieJourney = "77777777-7777-4777-8777-777777777777";
+  const storedJourney = "88888888-8888-4888-8888-888888888888";
+  const cookieFirst = { capturedAt: new Date(now - 60_000).toISOString(), landingPath: "/", source: "cookie-first" };
+  const cookieLast = { capturedAt: new Date(now - 10_000).toISOString(), landingPath: "/", source: "cookie-last" };
+  const storedFirst = { capturedAt: new Date(now - 50_000).toISOString(), landingPath: "/packages", source: "stored-first" };
+  const storedLast = { capturedAt: new Date(now - 30_000).toISOString(), landingPath: "/packages", source: "stored-last" };
+  const startBodies = [];
+  await inspectChunks(page, { origin: baseURL }, () => undefined, (route, response, body) =>
+    body.includes("roo_attr_last") && body.includes("has_fbclid")
+      ? route.fulfill({ status: 404, body: "" })
+      : route.fulfill({ response, body }));
+  await page.route("**/api/payment/start", (route) => {
+    startBodies.push(route.request().postDataJSON());
+    return route.fulfill({
+      json: {
+        ok: true, status: "started", paymentAccessToken: "tok-ck-404", checkoutCreated: true,
+        providerPayload: { checkoutUrl: `${baseURL}/__test/checkout-handoff`, orderId: "ord-ck-404" },
+      },
+    });
+  });
+  await page.goto("/robots.txt");
+  await page.context().addCookies([
+    { name: "roo_attr", value: encodeCookie({ version: 2, journeyId: cookieJourney, firstTouch: cookieFirst }), url: baseURL },
+    { name: "roo_attr_last", value: encodeCookie({ journeyId: cookieJourney, lastTouch: cookieLast }), url: baseURL },
+  ]);
+  await page.evaluate(({ slotDate, expiry, sJourney, sFirst, sLast, nowMs }) => {
+    sessionStorage.clear();
+    localStorage.setItem("roo-consent", "granted");
+    const liveRef = { source: "gads-max", capturedAt: new Date(nowMs - 70_000).toISOString() };
+    document.cookie = `roo_ref=${encodeURIComponent(JSON.stringify(liveRef))}; Path=/; Max-Age=2592000; SameSite=Lax`;
+    localStorage.setItem("roo_ref", encodeURIComponent(JSON.stringify(liveRef)));
+    const checkout = {
+      packageTitle: "Performance Vertex Overhaul", packagePrice: "$84.99",
+      email: "visitor@example.invalid", discord: "fixture_visitor", specs: "pc", mainGame: "CS2",
+      localTimeZone: "Asia/Kolkata", startTimeUTC: `${slotDate}T04:30:00.000Z`,
+      displayDate: slotDate, displayTime: "10:00 AM",
+      slotHoldId: "hold-ck-404", slotHoldToken: "tok-ck-404", slotHoldExpiresAt: expiry,
+      salesAttribution: {
+        version: 2, journeyId: sJourney, firstTouch: sFirst, lastTouch: sLast,
+        ref: { source: "chatgpt-ads", capturedAt: new Date(nowMs - 40_000).toISOString() },
+      },
+    };
+    sessionStorage.setItem("checkout_booking_state", JSON.stringify(checkout));
+    sessionStorage.setItem("my_slot_hold", JSON.stringify({
+      holdId: checkout.slotHoldId, holdToken: checkout.slotHoldToken, expiresAt: expiry,
+      startTimeUTC: checkout.startTimeUTC, packageTitle: checkout.packageTitle, phase: "holding",
+    }));
+  }, { slotDate: flow.state.slots[0].date, expiry: futureExpiry, sJourney: storedJourney, sFirst: storedFirst, sLast: storedLast, nowMs: now });
+  await page.goto("/payment?utm_source=payment-arrival&utm_campaign=1202101234");
+  await expect(page.getByRole("button", { name: "Pay your way", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
+  const attr = startBodies.at(-1)?.bookingPayload?.salesAttribution;
+  expect(attr?.journeyId).toBe(cookieJourney);
+  expect(attr?.firstTouch?.source).toBe("cookie-first");
+  expect(attr?.lastTouch?.source).toBe("payment-arrival");
+  expect(attr?.lastTouch?.campaign).toBe("1202101234");
+  expect(attr?.ref?.source).toBe("gads-max");
+
+  startBodies.length = 0;
+  await page.context().clearCookies({ name: "roo_attr" });
+  await page.context().clearCookies({ name: "roo_attr_last" });
+  await page.goto("/robots.txt");
+  await page.evaluate(({ slotDate, expiry, sJourney, sFirst, sLast }) => {
+    sessionStorage.clear();
+    localStorage.setItem("roo-consent", "denied");
+    sessionStorage.setItem("roo-consent", "granted");
+    const checkout = {
+      packageTitle: "Performance Vertex Overhaul", packagePrice: "$84.99",
+      email: "visitor@example.invalid", discord: "fixture_visitor", specs: "pc", mainGame: "CS2",
+      localTimeZone: "Asia/Kolkata", startTimeUTC: `${slotDate}T04:30:00.000Z`,
+      displayDate: slotDate, displayTime: "10:00 AM",
+      slotHoldId: "hold-ck-declined", slotHoldToken: "tok-ck-declined", slotHoldExpiresAt: expiry,
+      salesAttribution: { version: 2, journeyId: sJourney, firstTouch: sFirst, lastTouch: sLast },
+    };
+    sessionStorage.setItem("checkout_booking_state", JSON.stringify(checkout));
+    sessionStorage.setItem("my_slot_hold", JSON.stringify({
+      holdId: checkout.slotHoldId, holdToken: checkout.slotHoldToken, expiresAt: expiry,
+      startTimeUTC: checkout.startTimeUTC, packageTitle: checkout.packageTitle, phase: "holding",
+    }));
+  }, { slotDate: flow.state.slots[0].date, expiry: futureExpiry, sJourney: storedJourney, sFirst: storedFirst, sLast: storedLast });
+  await page.goto("/payment?utm_source=payment-arrival&utm_campaign=1202101234");
+  await expect(page.getByRole("button", { name: "Pay your way", exact: true })).toBeEnabled();
+  await page.context().addCookies([
+    { name: "roo_attr", value: encodeCookie({ version: 2, journeyId: cookieJourney, firstTouch: cookieFirst }), url: baseURL },
+    { name: "roo_attr_last", value: encodeCookie({ journeyId: cookieJourney, lastTouch: cookieLast }), url: baseURL },
+  ]);
+  expect(await page.evaluate(() => sessionStorage.getItem("sales_attribution"))).toBeNull();
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
+  const declinedAttr = startBodies.at(-1)?.bookingPayload?.salesAttribution;
+  expect(declinedAttr?.journeyId).toBe(storedJourney);
+  expect(declinedAttr?.firstTouch?.source).toBe("stored-first");
+  expect(declinedAttr?.lastTouch?.source).toBe("payment-arrival");
+});
+
+test("second creator link keeps first session referral, unknown package slug restores last draft, and fallback matches shared sanitizer", async ({
+  page, flow, baseURL,
+}) => {
+  await page.goto("/reviews?ref=friend");
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem("referral_session"))).toBe("friend");
+  await page.goto("/packages?ref=another-link");
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => sessionStorage.getItem("referral_session"))).toBe("friend");
+
+  const refRequests = [];
+  await page.route("**/api/ref/validateReferral*", (route) => {
+    refRequests.push(new URL(route.request().url()).searchParams.get("code"));
+    return route.fallback();
+  });
+  await flow.review("/booking?package=overhaul");
+  await expect(page.getByRole("button", { name: "Remove referral code friend", exact: true })).toBeVisible();
+  expect(refRequests).not.toContain("another-link");
+
+  for (const url of ["/booking?ref=another-link", "/booking?package=retired-package&ref=another-link", "/booking?package=constructor&ref=another-link"]) {
+    flow.state.holds.clear();
+    refRequests.length = 0;
+    await page.goto("/robots.txt");
+    await page.evaluate(({ slotDate, expiry }) => {
+      sessionStorage.clear();
+      sessionStorage.setItem("booking_draft", JSON.stringify({
+        lastTitle: "Vertex Essentials",
+        packages: {
+          "Vertex Essentials": {
+            selectedPackage: { title: "Vertex Essentials", price: "$29.95" },
+            form: { discord: "essentials_fixture", email: "essentials@example.invalid", specs: "pc", mainGame: "CS2", notes: "" },
+            referralCode: "friend",
+          },
+          "Performance Vertex Overhaul": {
+            selectedPackage: { title: "Performance Vertex Overhaul", price: "$54.95" },
+            form: { discord: "overhaul_fixture", email: "overhaul@example.invalid", specs: "pc", mainGame: "CS2", notes: "" },
+            referralCode: "other-draft",
+          },
+        },
+      }));
+      sessionStorage.setItem("my_slot_hold", JSON.stringify({
+        holdId: "hold-ess-keep", holdToken: "tok-ess-keep", expiresAt: expiry,
+        startTimeUTC: `${slotDate}T04:30:00.000Z`, packageTitle: "Vertex Essentials", phase: "holding",
+      }));
+    }, { slotDate: flow.state.slots[0].date, expiry: new Date(Date.now() + 20 * 60 * 1000).toISOString() });
+    await page.goto(url);
+    await expect.poll(() => new URL(page.url()).searchParams.has("ref")).toBe(false);
+    const snap = await page.evaluate(() => ({
+      ref: sessionStorage.getItem("referral_session"),
+      draft: JSON.parse(sessionStorage.getItem("booking_draft") || "null"),
+    }));
+    expect(snap.ref).toBeNull();
+    expect(snap.draft?.lastTitle).toBe("Vertex Essentials");
+    expect(snap.draft?.packages?.["Performance Vertex Overhaul"]?.form?.discord).toBe("overhaul_fixture");
+    expect(snap.draft?.packages?.["Performance Vertex Overhaul"]?.form?.email).toBe("overhaul@example.invalid");
+    await page.getByRole("button", { name: "Review before payment", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByText("Vertex Essentials", { exact: true })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Remove referral code friend", exact: true })).toBeVisible();
+    expect(refRequests).not.toContain("other-draft");
+    expect(refRequests).not.toContain("another-link");
+  }
+
+  await page.goto("/robots.txt");
+  await page.evaluate(() => {
+    sessionStorage.clear();
+    localStorage.setItem("roo-consent", "denied");
+    sessionStorage.setItem("booking_draft", JSON.stringify({
+      lastTitle: "Vertex Essentials",
+      packages: {
+        "Vertex Essentials": {
+          selectedPackage: { title: "Vertex Essentials", price: "$29.95" },
+          referralCode: "friend",
+        },
+      },
+    }));
+  });
+  await page.goto("/packages?package=essentials&ref=another-link");
+  await expect.poll(
+    () => page.evaluate(() => JSON.parse(sessionStorage.getItem("sales_attribution") || "null")?.lastTouch?.creatorCode),
+  ).toBe("friend");
+  await page.waitForTimeout(200);
+  expect(await page.evaluate(() => sessionStorage.getItem("referral_session"))).toBeNull();
+
+  let banner503 = 0;
+  await inspectChunks(page, { origin: baseURL }, () => undefined, (route, response, body) => {
+    if (body.includes("Continue booking") && body.includes("Failed to restore reservation banner")) {
+      banner503 += 1;
+      if (banner503 === 1) return route.fulfill({ status: 503, body: "" });
+    }
+    return route.fulfill({ response, body });
+  });
+  await page.goto("/robots.txt");
+  await page.evaluate(({ slotDate, expiry }) => {
+    sessionStorage.clear();
+    sessionStorage.setItem("my_slot_hold", JSON.stringify({
+      holdId: "hold-banner-retry", holdToken: "tok-banner-retry", expiresAt: expiry,
+      startTimeUTC: `${slotDate}T04:30:00.000Z`, packageTitle: "Performance Vertex Overhaul", phase: "holding",
+    }));
+  }, { slotDate: flow.state.slots[0].date, expiry: new Date(Date.now() + 20 * 60 * 1000).toISOString() });
+  await page.goto("/reviews");
+  await expect(page.getByRole("button", { name: /Continue booking/i })).toBeVisible({ timeout: 10000 });
+  await expect(page.getByRole("button", { name: /^Release$/i })).toBeVisible();
+  expect(banner503).toBeGreaterThanOrEqual(2);
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await flow.restoreRoutes();
+
+  const futureExpiry = new Date(Date.now() + 20 * 60 * 1000).toISOString();
+  const startBodies = [];
+  let blockedSales = 0;
+  let blockedPending = 0;
+  await inspectChunks(page, { origin: baseURL }, () => undefined, (route, response, body) => {
+    if (body.includes("roo_attr_last") && body.includes("has_fbclid")) {
+      blockedSales += 1;
+      return route.fulfill({ status: 404, body: "" });
+    }
+    if (body.includes("roo_pending_arrival_touch") && !body.includes("Complete Payment") && !body.includes("sales_attribution")) {
+      blockedPending += 1;
+      return route.fulfill({ status: 404, body: "" });
+    }
+    return route.fulfill({ response, body });
+  });
+  await page.route("**/api/payment/start", (route) => {
+    startBodies.push(route.request().postDataJSON());
+    return route.fulfill({
+      json: {
+        ok: true, status: "started", paymentAccessToken: "tok-san-404", checkoutCreated: true,
+        providerPayload: { checkoutUrl: `${baseURL}/__test/checkout-handoff`, orderId: "ord-san-404" },
+      },
+    });
+  });
+  await page.goto("/robots.txt");
+  await page.evaluate(({ slotDate, expiry }) => {
+    sessionStorage.clear();
+    localStorage.setItem("roo-consent", "denied");
+    const checkout = {
+      packageTitle: "Performance Vertex Overhaul", packagePrice: "$84.99",
+      email: "visitor@example.invalid", discord: "fixture_visitor", specs: "pc", mainGame: "CS2",
+      localTimeZone: "Asia/Kolkata", startTimeUTC: `${slotDate}T04:30:00.000Z`,
+      displayDate: slotDate, displayTime: "10:00 AM",
+      slotHoldId: "hold-san-404", slotHoldToken: "tok-san-404", slotHoldExpiresAt: expiry,
+    };
+    sessionStorage.setItem("checkout_booking_state", JSON.stringify(checkout));
+    sessionStorage.setItem("my_slot_hold", JSON.stringify({
+      holdId: checkout.slotHoldId, holdToken: checkout.slotHoldToken, expiresAt: expiry,
+      startTimeUTC: checkout.startTimeUTC, packageTitle: checkout.packageTitle, phase: "holding",
+    }));
+  }, { slotDate: flow.state.slots[0].date, expiry: futureExpiry });
+  const longGclid = "a".repeat(150);
+  const query = new URLSearchParams({
+    utm_source: "partner",
+    utm_campaign: "1202101234",
+    utm_medium: "campaign.example/private-name",
+    utm_content: "١٢٣-٤٥٦-٧٨٩٠",
+    gclid: longGclid,
+  }).toString();
+  await page.goto(`/payment?${query}`);
+  await expect(page.getByRole("button", { name: "Pay your way", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
+  expect(blockedSales).toBeGreaterThan(0);
+  expect(blockedPending).toBeGreaterThan(0);
+  const touch = startBodies.at(-1)?.bookingPayload?.salesAttribution?.lastTouch;
+  expect(touch?.source).toBe("partner");
+  expect(touch?.campaign).toBe("1202101234");
+  expect(touch?.gclid).toBe(longGclid);
+  expect(touch?.medium).toBeUndefined();
+  expect(touch?.content).toBeUndefined();
 });
 
 test("applying a referral after changing payment method keeps the refreshed hold token across reload", async ({

@@ -22,6 +22,7 @@ jest.mock(
     },
     useLocation: () => mockLocation,
   useNavigate: () => mockNavigate,
+  useNavigationType: () => "PUSH",
   Link: ({ to, children, ...rest }) => {
     const href = typeof to === "string" ? to : to?.pathname || "#";
     return (

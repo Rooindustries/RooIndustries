@@ -14,7 +14,6 @@ import { isProductionBrowser } from "./lib/productionBrowser";
 import SalesTelemetry from "./components/SalesTelemetry";
 import { loadPostHog } from "./lib/loadPostHog";
 import { reportRequestError } from "./lib/clientRequest";
-import ReservationBanner from "./components/ReservationBanner";
 import RouteProgress, { RouteWaiting } from "./components/RouteProgress";
 import { BookingDialogReady } from "./lib/bookingDialogHold";
 import { subscribePerfDebugChanges, syncPerfDebugFromEnvironment } from "./lib/perfDebug";
@@ -67,6 +66,43 @@ const LazyThankyou = lazy(() => preloadConfirmationPage("free"));
 const UpgradeXoc = lazy(() => import("./legacyPages/UpgradeXoc"));
 const Upgrade = lazy(() => import("./legacyPages/Upgrade"));
 const Download = lazy(() => import("./legacyPages/Download"));
+let cachedBanner = null;
+function ReservationBannerSlot({ routeKey, ...props }) {
+  const [Banner, setBanner] = useState(() => cachedBanner);
+  useEffect(() => {
+    if (Banner) return undefined;
+    let active = true, loading = false, retries = 0, timer = 0;
+    const hasHold = () => { try { return Boolean(sessionStorage.getItem("my_slot_hold")); } catch { return false; } };
+    const load = () => {
+      if (loading || !active) return;
+      loading = true;
+      import("./components/ReservationBanner").then((m) => {
+        cachedBanner = m.default;
+        if (active) setBanner(() => m.default);
+      }).catch((err) => {
+        loading = false;
+        reportRequestError(err);
+        if (active && retries < 2 && hasHold()) {
+          retries += 1;
+          timer = setTimeout(load, 500);
+        }
+      });
+    };
+    const tryLoad = () => hasHold() && load();
+    const onHold = (e) => e?.detail && load();
+    tryLoad();
+    window.addEventListener("hold-state", onHold);
+    window.addEventListener("online", tryLoad);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+      window.removeEventListener("hold-state", onHold);
+      window.removeEventListener("online", tryLoad);
+    };
+  }, [Banner, routeKey]);
+  return Banner ? <Banner {...props} /> : null;
+}
+
 const BookingModal = lazy(() => import("./components/BookingModal"));
 
 const MeetTheTeam = lazy(() => import("./legacyPages/MeetTheTeam"));
@@ -757,7 +793,7 @@ export function AppContent({
         <div className="app-bg-radial-layer absolute inset-0"></div>
 
         <Navbar />
-        <ReservationBanner hidden={isFlowRoute && !isPaymentRoute} inline={isPaymentRoute} inlineContainer={paymentHoldContainer} />
+        <ReservationBannerSlot routeKey={location.key} hidden={isFlowRoute && !isPaymentRoute} inline={isPaymentRoute} inlineContainer={paymentHoldContainer} />
 
         <main
           id="main-content"

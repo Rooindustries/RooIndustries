@@ -6,7 +6,6 @@ import { isProductionBrowser } from "../lib/productionBrowser";
 import { Analytics } from "@vercel/analytics/react";
 import { sanitizeAnalyticsEvent } from "../lib/salesPaths";
 import { initializePerformanceProfile } from "../lib/performanceProfile";
-import { rememberReferralFromSearch } from "../lib/checkoutStorage";
 import { reportRequestError } from "../lib/clientRequest";
 
 const CHECKOUT_PATHS = ["/booking", "/payment", "/payment-success", "/thank-you"];
@@ -17,10 +16,7 @@ const STAFF_PREFIXES = ["/admin"];
 // Keep that third-party loop and production analytics off preview/local hosts.
 const SEORCE_BLOCKED_PREFIXES = [
   "/tourney",
-  "/booking",
-  "/payment",
-  "/payment-success",
-  "/thank-you",
+  ...CHECKOUT_PATHS,
   "/referrals",
   ...STAFF_PREFIXES,
 ];
@@ -72,6 +68,9 @@ export const loadSeorceScript = ({
   return true;
 };
 
+let navSeq = 0;
+let poppedHref = "";
+
 export default function AppClientRuntime() {
   const [analyticsEnabled, setAnalyticsEnabled] = useState(false);
   const [ConsentRuntime, setConsentRuntime] = useState(null);
@@ -79,18 +78,26 @@ export default function AppClientRuntime() {
   const staffPage = onRoutes(pathname, STAFF_PREFIXES);
 
   useEffect(() => {
+    const onPop = () => { poppedHref = window.location.href; };
+    window.addEventListener("popstate", onPop);
     const production = isProductionBrowser();
     setAnalyticsEnabled(production);
     if (production) import("../lib/postHogOutbox").catch(reportRequestError);
-  }, []);
-  useEffect(() => {
     initializePerformanceProfile();
+    return () => {
+      navSeq = 0;
+      poppedHref = "";
+      window.removeEventListener("popstate", onPop);
+    };
   }, []);
   useEffect(() => {
-    if (!CHECKOUT_PATHS.includes(window.location.pathname)) rememberReferralFromSearch(window.location.search);
-  }, []);
-  useEffect(() => {
-    if (!staffPage) window.__rooCaptureRef?.(window.location.search, pathname || window.location.pathname);
+    const { search, pathname: locPath, href } = window.location;
+    const seq = ++navSeq, initial = seq === 1, fromPop = !initial && poppedHref === href;
+    poppedHref = "";
+    if (!staffPage) window.__rooCaptureRef?.(search, pathname || locPath);
+    if (!fromPop && !CHECKOUT_PATHS.includes(locPath) && /[?&]ref=/i.test(search)) {
+      import("../lib/rememberReferral").then((m) => seq === navSeq && m.default(search, initial, locPath, href)).catch(reportRequestError);
+    }
   }, [pathname, staffPage]);
 
   useEffect(() => {

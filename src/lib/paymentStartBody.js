@@ -1,66 +1,46 @@
 import { lazyModule, loadSalesAttribution } from "./analyticsModules";
 import { reportRequestError } from "./clientRequest";
-import { normalizeLinkReferral } from "./refShape.js";
-
-const ANALYTICS_WAIT_LIMIT_MS = 300;
+import { chooseFirstTouchRef } from "./refEntry.js";
+import { getCurrentArrivalSnapshot, snapRawAttr } from "./loadPostHog";
+import { mergeJourneyMonotonic, resolveFrozenJourney } from "./campaignSanitizer";
 
 const checkoutStartCount = lazyModule(() => import("./checkoutStartCount"));
-
-const withinAnalyticsWait = (pending, fallback) => Promise.race([
-  pending,
-  new Promise((resolve) => { setTimeout(resolve, ANALYTICS_WAIT_LIMIT_MS, fallback); }),
-]);
-
+export const snapPaymentStart = () => {
+  const raw = snapRawAttr();
+  try { raw.r = window.__rooReadRef?.() ?? null; } catch { raw.r = null; }
+  return [getCurrentArrivalSnapshot(), raw];
+};
+const wait = (p, fb) => Promise.race([p, new Promise((r) => setTimeout(r, 300, fb))]);
+const fallback = (stored, arrival, raw, attrPromise, op) => {
+  let ref = null;
+  try { ref = chooseFirstTouchRef([raw?.r, stored?.ref]); } catch {}
+  const res = resolveFrozenJourney(stored, arrival, raw, null, null, snapRawAttr());
+  const base = res[0];
+  if (!res[1] && base) {
+    window.__rooAttrOverlay = mergeJourneyMonotonic(base, window.__rooAttrOverlay) || base;
+    attrPromise.then((m) => op.current() && m?.writeStoredAttribution?.(base)).catch(() => {});
+  }
+  return !base ? (ref ? { ref } : null) : ref ? { ...base, ref } : base;
+};
 export const preloadCheckoutStart = () => {
   checkoutStartCount.load().catch(reportRequestError);
   loadSalesAttribution();
 };
-
-const cleanTouch = (t) => {
-  if (!t || typeof t !== "object" || Array.isArray(t) || !Object.hasOwn(t, "creatorCode")) return t;
-  const safe = normalizeLinkReferral(t.creatorCode);
-  const { creatorCode: _i, ...rest } = t;
-  return safe ? { ...rest, creatorCode: safe } : rest;
-};
-const fallbackBookingAttribution = (stored) => {
-  const obj = stored && typeof stored === "object" && !Array.isArray(stored) ? stored : null;
-  let ref = null;
-  try {
-    ref = window.__rooChooseRef?.(obj?.ref) || null;
-  } catch {}
-  if (!obj?.journeyId) return ref ? { ref } : null;
-  const { ref: _i, ...rest } = obj;
-  const cleaned = cleanTouch({
-    ...rest, ...(rest.firstTouch ? { firstTouch: cleanTouch(rest.firstTouch) } : {}),
-    ...(rest.lastTouch ? { lastTouch: cleanTouch(rest.lastTouch) } : {}),
-  });
-  return ref ? { ...cleaned, ref } : cleaned;
-};
-const bookingSalesAttribution = async (stored) => {
-  try {
-    const module = await withinAnalyticsWait(loadSalesAttribution(), null);
-    if (module) {
-      const fromMod = await Promise.resolve().then(() => module.bookingSalesAttribution(stored)).catch(() => undefined);
-      if (fromMod !== undefined) return fromMod;
-    }
-    return fallbackBookingAttribution(stored);
-  } catch {
-    return null;
-  }
-};
-
-export const paymentStartBody = async ({ operation, provider, quoteFingerprint, salesAttribution, buildPayload }) => {
-  const attribution = await bookingSalesAttribution(salesAttribution);
+export const paymentStartBody = async ({ operation, provider, quoteFingerprint, salesAttribution, startSnap, buildPayload }) => {
+  const snap = startSnap || snapPaymentStart();
+  const attrPromise = loadSalesAttribution();
+  let mod = null;
+  try { mod = await wait(attrPromise, null); } catch {}
   if (!operation.current()) return "";
-  return JSON.stringify({ provider, quoteFingerprint, bookingPayload: buildPayload(attribution) });
+  const attr = mod?.resolveBookingAttribution
+    ? mod.resolveBookingAttribution(salesAttribution, snap[0], snap[1])
+    : fallback(salesAttribution, snap[0], snap[1], attrPromise, operation);
+  return JSON.stringify({ provider, quoteFingerprint, bookingPayload: buildPayload(attr) });
 };
-
-export const countCheckoutStartOnce = (data, provider, track) => withinAnalyticsWait(checkoutStartCount.load()
-  .then(({ countCheckoutStart }) => countCheckoutStart(data, provider))
-  .catch((error) => {
-    reportRequestError(error);
-    return data?.checkoutCreated === true;
-  })
-  .then((counted) => {
-    if (counted) track();
-  }));
+export const countCheckoutStartOnce = (data, provider, track) =>
+  wait(
+    checkoutStartCount.load()
+      .then(({ countCheckoutStart }) => countCheckoutStart(data, provider))
+      .catch((error) => { reportRequestError(error); return data?.checkoutCreated === true; })
+      .then((counted) => { if (counted) track(); }),
+  );
