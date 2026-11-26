@@ -426,11 +426,18 @@ const waitPeers = (expectedPeers, type, reqId) => {
   });
 };
 
+const readLocalSession = () => {
+  const overlay =
+    mergeAttributionMonotonic(pendingWrite, unsavedFallback) || pendingWrite || unsavedFallback;
+  const session = readSessionRaw();
+  return mergeAttributionMonotonic(session, overlay) || session || overlay;
+};
+
 const handlePeerMessage = (msg) => {
   const type = String(msg.type || "");
   if (type === "collect_session_attribution" && msg.requestId) {
     withLock(STATE_LOCK, () => {
-      const own = readSessionRaw();
+      const own = readLocalSession();
       const capturedAt = typeof own?.lastTouch?.capturedAt === "string" ? own.lastTouch.capturedAt : "";
       contributed.set(String(msg.requestId), capturedAt);
       postMsg({
@@ -459,7 +466,7 @@ const handlePeerMessage = (msg) => {
         return;
       }
       if (reqId && !contributed.has(reqId)) return;
-      const own = readSessionRaw();
+      const own = readLocalSession();
       const curMs = touchMs(own);
       const byPeer = isRecord(msg.collectedCapturedAtByPeer) ? msg.collectedCapturedAtByPeer : null;
       const refCap =
@@ -469,7 +476,8 @@ const handlePeerMessage = (msg) => {
       const refMs = refCap ? Date.parse(refCap) : NaN;
       if (Number.isFinite(curMs) && (!Number.isFinite(refMs) || curMs > refMs)) return;
       if (reqId) contributed.delete(reqId);
-      if (own) writeSessionRaw(null);
+      unsavedFallback = null;
+      if (readSessionRaw()) writeSessionRaw(null);
       postMsg({
         type: "session_attribution_promoted_ack",
         requestId: reqId,
@@ -485,7 +493,7 @@ const handlePeerMessage = (msg) => {
       const epoch = readEpoch();
       if (live === "granted" || msg.targetConsent !== live || msg.consentEpoch !== epoch) return;
       const incoming = isRecord(msg.attribution) ? msg.attribution : null;
-      const merged = mergeAttributionMonotonic(readSessionRaw(), incoming);
+      const merged = mergeAttributionMonotonic(readLocalSession(), incoming);
       if (merged) {
         rememberMerged(merged);
         if (!writeSessionRaw(merged)) {
@@ -716,10 +724,7 @@ export const runConsentTransition = (target, announce) => {
     return wrote;
   };
   const applyDecline = () => {
-    const merged = mergeAttributionMonotonic(
-      mergeAttributionMonotonic(readCookiesRaw(), readSessionRaw()),
-      mergeAttributionMonotonic(pendingWrite, unsavedFallback),
-    );
+    const merged = mergeAttributionMonotonic(readCookiesRaw(), readLocalSession());
     const stage = commitSharedTransition(target);
     if (!stage.ok) {
       localFallback(merged);
@@ -731,7 +736,7 @@ export const runConsentTransition = (target, announce) => {
       saveSessionOrFallback(merged);
     }
     if (!cookiesAllowed()) {
-      removeCookies();
+      removeCookies(["_fbp", "_fbc"]);
     }
     return { ...stage, merged };
   };
@@ -754,6 +759,9 @@ export const runConsentTransition = (target, announce) => {
     }
     const stage = applyDecline();
     if (!stage.ok) return;
+    if (!cookiesAllowed()) {
+      removeCookies();
+    }
     announce(target);
   };
 
@@ -867,6 +875,13 @@ export const runConsentTransition = (target, announce) => {
           });
           await wait;
         }
+      }
+      if (ALL_COOKIES.some((name) => readCookie(name))) {
+        await withLock(STATE_LOCK, () => {
+          if (!cookiesAllowed()) {
+            removeCookies();
+          }
+        });
       }
       announce(target);
     },

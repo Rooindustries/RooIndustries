@@ -472,9 +472,20 @@ test("failed epoch write never rolls back committed epoch or lets an old Reset r
   await peer.addInitScript(() => {
     const OrigBC = window.BroadcastChannel;
     window.__peerSent = [];
+    window.__peerReceived = [];
     window.BroadcastChannel = class SpyBC extends OrigBC {
+      constructor(name) {
+        super(name);
+        if (name === "roo_sales_attribution_sync") {
+          this.addEventListener("message", (event) => {
+            if (event?.data?.type === "sync_declined_attribution") {
+              window.__peerReceived.push(event.data.consentEpoch);
+            }
+          });
+        }
+      }
       postMessage(msg) {
-        window.__peerSent.push(msg?.type || "");
+        window.__peerSent.push({ type: msg?.type || "", epoch: msg?.consentEpoch ?? null });
         return super.postMessage(msg);
       }
     };
@@ -516,16 +527,21 @@ test("failed epoch write never rolls back committed epoch or lets an old Reset r
     page.evaluate(() => JSON.parse(localStorage.getItem("roo-consent-epoch") || "{}").nextEpoch),
   ).toBe(4);
   expect(await page.evaluate(() => localStorage.getItem("roo-consent"))).toBeNull();
+  await expect.poll(() =>
+    peer.evaluate(() => window.__peerSent.some((entry) => entry.type === "sync_declined_ack" && entry.epoch === 4)),
+  ).toBe(true);
 
   await peer.evaluate(() => {
     sessionStorage.removeItem("sales_attribution");
     window.__peerSent = [];
+    window.__peerReceived = [];
   });
   await page.evaluate(() => window.__releaseHeldReset());
-  await peer.waitForTimeout(300);
+  await expect.poll(() => peer.evaluate(() => window.__peerReceived.includes(2))).toBe(true);
+  await peer.evaluate(() => navigator.locks.request("roo_consent_state_lock", () => true));
 
   expect(await peer.evaluate(() => sessionStorage.getItem("sales_attribution"))).toBeNull();
-  expect(await peer.evaluate(() => window.__peerSent)).not.toContain("sync_declined_ack");
+  expect(await peer.evaluate(() => window.__peerSent.map((entry) => entry.type))).not.toContain("sync_declined_ack");
 });
 
 test("choice-only Decline write failure keeps shared grant intact and leaves peer banner closed", async ({
@@ -805,6 +821,97 @@ test("memory-only journey captured when sessionStorage rejects writes is promote
   await banner(page).getByRole("button", { name: "Accept", exact: true }).click();
   await expect(banner(page)).toHaveCount(0);
   await expect.poll(async () => (await readAttrCookies(context)).roo_attr?.firstTouch?.source).toBe("mem_only");
+});
+
+test("closing the Reset tab before peer handoff lets the surviving peer keep the journey", async ({
+  page,
+  context,
+}) => {
+  await page.goto("/packages?utm_source=reset_close_seed&utm_campaign=delta");
+  await expect(banner(page)).toBeVisible();
+  await banner(page).getByRole("button", { name: "Accept", exact: true }).click();
+  await expect(banner(page)).toHaveCount(0);
+  await expect.poll(async () => (await readAttrCookies(context)).roo_attr?.firstTouch?.source).toBe("reset_close_seed");
+
+  const peer = await context.newPage();
+  await peer.goto("/referrals/login");
+  await expect(banner(peer)).toHaveCount(0);
+  await waitForTabPresence(page, 2);
+
+  await page.evaluate(() => {
+    document.cookie = "_fbp=fb.1.1700000000000.423456; Path=/; Max-Age=3600; SameSite=Lax";
+    navigator.locks.query = () =>
+      new Promise(() => {
+        window.__resetDiscoveryEntered = true;
+      });
+  });
+
+  await openCookieSettings(page);
+  await expect.poll(() => page.evaluate(() => Boolean(window.__resetDiscoveryEntered))).toBe(true);
+  await expect(banner(peer)).toBeVisible();
+  expect((await readAttrCookies(context)).roo_attr?.firstTouch?.source).toBe("reset_close_seed");
+  expect((await context.cookies()).map((c) => c.name)).not.toContain("_fbp");
+
+  await page.close();
+  await peer.evaluate(() => navigator.locks.request("roo_sales_attribution_cookie", () => true));
+  const peerSession = await peer.evaluate(() =>
+    JSON.parse(sessionStorage.getItem("sales_attribution") || "null"),
+  );
+  expect(peerSession?.firstTouch?.source).toBe("reset_close_seed");
+  expect(await readAttrCookies(context)).toEqual({});
+});
+
+test("Decline handoff after peer sessionStorage quota recovery keeps peer's newer touch", async ({
+  page,
+  context,
+}) => {
+  await page.goto("/packages?utm_source=older_actor&utm_campaign=delta");
+  await expect(banner(page)).toBeVisible();
+  await expect.poll(() =>
+    page.evaluate(() => JSON.parse(sessionStorage.getItem("sales_attribution") || "null")?.firstTouch?.source || null),
+  ).toBe("older_actor");
+
+  const peer = await context.newPage();
+  await peer.addInitScript(() => {
+    if (sessionStorage.getItem("roo_quota_done")) return;
+    let low = 0;
+    let high = 10 * 1024 * 1024;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      try {
+        sessionStorage.setItem("roo_session_pad", "x".repeat(mid));
+        low = mid;
+      } catch {
+        high = mid - 1;
+      }
+    }
+    sessionStorage.setItem("roo_session_pad", "x".repeat(low));
+  });
+  await peer.goto("/packages?utm_source=newer_peer&utm_campaign=delta");
+  await expect(banner(peer)).toBeVisible();
+  expect(await peer.evaluate(() => sessionStorage.getItem("sales_attribution"))).toBeNull();
+  await waitForTabPresence(page, 2);
+
+  await peer.evaluate(() => {
+    sessionStorage.removeItem("roo_session_pad");
+    sessionStorage.setItem("roo_quota_done", "1");
+  });
+  await declineCookies(page);
+  await expect(banner(page)).toHaveCount(0);
+
+  await expect.poll(() =>
+    peer.evaluate(() => JSON.parse(sessionStorage.getItem("sales_attribution") || "null")),
+  ).toMatchObject({
+    firstTouch: { source: "older_actor" },
+    lastTouch: { source: "newer_peer" },
+  });
+
+  await peer.goto("/referrals/login");
+  const persisted = await peer.evaluate(() =>
+    JSON.parse(sessionStorage.getItem("sales_attribution") || "null"),
+  );
+  expect(persisted?.firstTouch?.source).toBe("older_actor");
+  expect(persisted?.lastTouch?.source).toBe("newer_peer");
 });
 
 const productionTest = test.extend(productionHostFixtures);
