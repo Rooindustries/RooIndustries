@@ -30,7 +30,8 @@ try {
   result.migrations = fixture.manifest.length;
   const documents = [
     { _id: 'native-ram-hero', _type: 'hero', _rev: 'seed', headingLine1: 'Editor heading' },
-    { _id: 'native-ram-package', _type: 'package', title: 'Performance Vertex Max', price: '$149.95' },
+    { _id: 'native-ram-package', _type: 'package', title: 'Performance Vertex Overhaul', price: '$84.99' },
+    { _id: 'native-ram-max', _type: 'package', title: 'Performance Vertex Max', price: '$149.95' },
   ];
   const source = createRamPriceFixture({ documents });
   sourceServer = http.createServer(async (request, response) => {

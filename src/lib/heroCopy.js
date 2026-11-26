@@ -1,11 +1,14 @@
 const { heroDescription, resolveHeroCopy: resolveBaseHeroCopy } = require('./homeCopy');
 const { isVerifiedRamPrice, formatRamPrice, ramPriceSourceLabel } = require('./ramPrice');
-const { isTopPackageTitle, getPackagePricePresentation, toMoney } = require('./packagePricing');
+const { getPackagePricePresentation, toMoney } = require('./packagePricing');
+const { OVERHAUL_TITLE_PATTERN } = require('./packageContent');
 
 const getHeroTunePrice = (packages) => {
-  const max = Array.isArray(packages) ? packages.find(pkg => isTopPackageTitle(pkg?.title)) : null;
-  if (!max || !['string', 'number'].includes(typeof max.price) || toMoney(max.price) <= 0) return '';
-  const price = getPackagePricePresentation(max.title, max.price).price;
+  const overhaul = Array.isArray(packages)
+    ? packages.find(pkg => OVERHAUL_TITLE_PATTERN.test(String(pkg?.title || '').trim()))
+    : null;
+  if (!overhaul || !['string', 'number'].includes(typeof overhaul.price) || toMoney(overhaul.price) <= 0) return '';
+  const price = getPackagePricePresentation(overhaul.title, overhaul.price).price;
   return toMoney(price) > 0 ? price : '';
 };
 

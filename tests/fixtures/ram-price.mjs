@@ -9,9 +9,9 @@ export function createRamPriceFixture({ documents, cronSecret = 'fixture-only-ra
   const hero = () => documents.find(document => document._type === 'hero');
   Object.assign(hero(), homeCopy.HOME_COPY.hero);
   const initialHero = structuredClone(hero());
-  const maxPackageId = documents.find(document => document._type === 'package' && /max|xoc/i.test(document.title))?._id;
-  const maxPackage = () => documents.find(document => document._id === maxPackageId);
-  const initialPackagePrice = maxPackage()?.price;
+  const overhaulPackageId = documents.find(document => document._type === 'package' && /overhaul/i.test(document.title))?._id;
+  const overhaulPackage = () => documents.find(document => document._id === overhaulPackageId);
+  const initialPackagePrice = overhaulPackage()?.price;
   const quote = (priceCents, checkedAt = new Date(Date.now() - 7 * 3600000).toISOString()) => ({
     priceCents, checkedAt, currency: 'USD', source: 'v-color',
     sourceUrl: 'https://v-color.net/products/ddr5-manta-xfinity-rgb-gaming-memory-copy?variant=46736066052263',
@@ -23,7 +23,7 @@ export function createRamPriceFixture({ documents, cronSecret = 'fixture-only-ra
     const currentHero = hero();
     for (const key of Object.keys(currentHero)) delete currentHero[key];
     Object.assign(currentHero, structuredClone(initialHero));
-    if (maxPackage()) maxPackage().price = initialPackagePrice;
+    if (overhaulPackage()) overhaulPackage().price = initialPackagePrice;
   };
   reset();
   const json = (res, status, value, headers = {}) => {

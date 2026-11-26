@@ -280,6 +280,7 @@ const normalizeFaqQuestions = (items = []) =>
 
 const api = {
   WINDOWS_REOPTIMIZATION_LABEL,
+  OVERHAUL_TITLE_PATTERN,
   PACKAGE_CONTENT_OVERRIDES,
   buildPackageOffer,
   buildPackageOffers,

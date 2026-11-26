@@ -51,7 +51,8 @@ test('source price reaches the rendered hero through the CMS command', async ({ 
     await page.setViewportSize({ width, height: 900 });
     await page.goto('/');
     await expect(page.locator('#top h1')).toContainText('Why Pay $500 For RAM?');
-    await expect(page.locator('#top h1')).toContainText('Tune Yours For $99.95.');
+    await expect(page.locator('#top h1')).toContainText('Tune Yours For $84.99.');
+    await expect(page.locator('#top h1')).not.toContainText('$99.95');
     await expect(page.locator('#top a[data-ram-price-source]')).toContainText('v-color, checked');
     await expect(page.locator('#top a[data-ram-price-source]')).toHaveAttribute('href', after.hero.ramPrice.sourceUrl);
     expect(await page.locator('#top').evaluate(element => element.scrollWidth <= window.innerWidth)).toBe(true);
@@ -76,10 +77,10 @@ test('source price reaches the rendered hero through the CMS command', async ({ 
   await expect(secondTab.locator('#top a[data-ram-price-source]')).toContainText('v-color, checked');
   await secondTab.close();
   const editing = await state(request, { reset: true, previousPrice: 50000, price: '515.00' });
-  const maxPackage = editing.packages.find(pkg => /max|xoc/i.test(pkg.title));
+  const overhaul = editing.packages.find(pkg => /overhaul/i.test(pkg.title));
   const published = await request.post('/api/admin/content/publish', {
     headers: { 'x-admin-key': 'fixture-only-ram-price-admin' },
-    data: { operation: 'replace', type: 'package', documentId: maxPackage._id, expectedRevision: maxPackage._rev, document: { ...maxPackage, price: '$123.45' } },
+    data: { operation: 'replace', type: 'package', documentId: overhaul._id, expectedRevision: overhaul._rev, document: { ...overhaul, price: '$123.45' } },
   });
   expect(published.status(), await published.text()).toBe(200);
   await page.goto('/packages');
@@ -305,10 +306,10 @@ test('an invalid stored date cannot authorize a replacement quote', async ({ req
 
 test('a failed package read never substitutes a fixed tune price and recovers from the source', async ({ page, request }, testInfo) => {
   const editing = await state(request);
-  const max = editing.packages.find(pkg => /max|xoc/i.test(pkg.title));
+  const overhaul = editing.packages.find(pkg => /overhaul/i.test(pkg.title));
   const published = await request.post('/api/admin/content/publish', {
     headers: { 'x-admin-key': 'fixture-only-ram-price-admin' },
-    data: { operation: 'replace', type: 'package', documentId: max._id, expectedRevision: max._rev, document: { ...max, price: '$123.45' } },
+    data: { operation: 'replace', type: 'package', documentId: overhaul._id, expectedRevision: overhaul._rev, document: { ...overhaul, price: '$123.45' } },
   });
   expect(published.status(), await published.text()).toBe(200);
   expect((await refresh(request)).status()).toBe(200);
@@ -337,10 +338,10 @@ test('missing package data keeps HTML and Markdown honest and the hydrated hero 
   const url = `${fixture}/__content`;
   try {
     const editing = await state(request);
-    const max = editing.packages.find(pkg => /max|xoc/i.test(pkg.title));
+    const overhaul = editing.packages.find(pkg => /overhaul/i.test(pkg.title));
     const packagePublished = await request.post('/api/admin/content/publish', {
       headers: { 'x-admin-key': 'fixture-only-ram-price-admin' },
-      data: { operation: 'replace', type: 'package', documentId: max._id, expectedRevision: max._rev, document: { ...max, price: '$123.45' } },
+      data: { operation: 'replace', type: 'package', documentId: overhaul._id, expectedRevision: overhaul._rev, document: { ...overhaul, price: '$123.45' } },
     });
     expect(packagePublished.status(), await packagePublished.text()).toBe(200);
     expect((await refresh(request)).status()).toBe(200);
@@ -443,23 +444,23 @@ const cachedHero = async (request, expected) => {
   return html.match(/<h1\b[^>]*>[\s\S]*?<\/h1>/)?.[0] || '';
 };
 
-test.describe('unusable Max sources', () => {
+test.describe('unusable Overhaul sources', () => {
 test.afterEach(async ({ request }) => {
   expect((await request.post(`${fixture}/__content`, { data: { reset: true } })).ok()).toBe(true);
 });
 
-test('unusable Max source prices never manufacture a tune price in SSR SPA or Markdown', async ({ page, request }, testInfo) => {
+test('unusable Overhaul source prices never manufacture a tune price in SSR SPA or Markdown', async ({ page, request }, testInfo) => {
   expect((await refresh(request)).status()).toBe(200);
   const { packages } = await state(request);
-  const max = packages.find(pkg => /max|xoc/i.test(pkg.title));
+  const overhaul = packages.find(pkg => /overhaul/i.test(pkg.title));
   const observations = [];
   for (const price of [null, '', 0, '0', 'invalid', '$123.45']) {
-    await patchPackageSource(request, { _id: max._id, price });
+    await patchPackageSource(request, { _id: overhaul._id, price });
     const valid = price === '$123.45';
     const expected = valid ? 'Tune Yours For $123.45.' : 'Tune Yours.';
     const ssr = await cachedHero(request, valid ? expected : 'Why Pay $500 For RAM?');
     const api = await (await request.get('/api/content/packages-list')).json();
-    expect(api.data.find(pkg => pkg._id === max._id).price).toBe(price);
+    expect(api.data.find(pkg => pkg._id === overhaul._id).price).toBe(price);
     const markdown = (await (await request.get('/markdown?path=/')).text()).replaceAll('\\', '');
     await page.goto('/about');
     await page.locator('footer a[href="/"]').first().click();
@@ -473,22 +474,22 @@ test('unusable Max source prices never manufacture a tune price in SSR SPA or Ma
     await page.goto('/');
     await expect(page.locator('#top h1')).toContainText('Why Pay $500 For RAM?');
     expect.soft(await page.locator('#top h1').innerText(), `hydrated source price=${JSON.stringify(price)}`).toContain(expected);
-    if (price === null) await page.locator('#top').screenshot({ path: testInfo.outputPath('null-Max-source-price.png') });
+    if (price === null) await page.locator('#top').screenshot({ path: testInfo.outputPath('null-Overhaul-source-price.png') });
     observations.push({ price, ssr, spa, markdown });
   }
   await testInfo.attach('raw-price-surfaces', { body: JSON.stringify(observations, null, 2), contentType: 'application/json' });
 });
 
-for (const missing of ['empty list', 'missing Max', 'invalid Max price']) {
+for (const missing of ['empty list', 'missing Overhaul', 'invalid Overhaul price']) {
   test(`successful ${missing} recovers the actual package price on the same page`, async ({ page, request }, testInfo) => {
     expect((await refresh(request)).status()).toBe(200);
     const { packages } = await state(request);
-    const max = packages.find(pkg => /max|xoc/i.test(pkg.title));
+    const overhaul = packages.find(pkg => /overhaul/i.test(pkg.title));
     if (missing === 'empty list') {
       expect((await request.post(`${fixture}/__content`, { data: { missing: ['package'] } })).ok()).toBe(true);
       await publishHero(request);
     } else {
-      await patchPackageSource(request, { _id: max._id, ...(missing === 'missing Max' ? { title: 'Other package' } : { price: null }) });
+      await patchPackageSource(request, { _id: overhaul._id, ...(missing === 'missing Overhaul' ? { title: 'Other package' } : { price: null }) });
     }
     await cachedHero(request, 'Why Pay $500 For RAM?');
     let reads = 0;
@@ -499,7 +500,7 @@ for (const missing of ['empty list', 'missing Max', 'invalid Max price']) {
     await expect(page.locator('#top h1')).toContainText('Tune Yours.');
     const beforeRepair = await page.locator('#top h1').innerText();
     expect((await request.post(`${fixture}/__content`, { data: { missing: [] } })).ok()).toBe(true);
-    await patchPackageSource(request, { _id: max._id, title: max.title, price: '$123.45' });
+    await patchPackageSource(request, { _id: overhaul._id, title: overhaul.title, price: '$123.45' });
     await expect(page.locator('#top h1')).toContainText('Tune Yours For $123.45.');
     expect(await page.evaluate(() => window.__ramRecoveryDocument)).toBe(true);
     expect(reads).toBeGreaterThan(0);
@@ -508,7 +509,7 @@ for (const missing of ['empty list', 'missing Max', 'invalid Max price']) {
   });
 }
 
-for (const scenario of ['empty list', 'missing Max', 'invalid Max price', 'failed']) {
+for (const scenario of ['empty list', 'missing Overhaul', 'invalid Overhaul price', 'failed']) {
 test(`${scenario} package reads report once after the retry budget`, async ({ page, request }, testInfo) => {
   await page.clock.install();
   await page.clock.pauseAt(new Date(Date.now() + 1000));
@@ -517,7 +518,7 @@ test(`${scenario} package reads report once after the retry budget`, async ({ pa
   let prefetching = true;
   const reports = [];
   page.on('console', message => {
-    if (message.type() === 'error' && /Synthetic package source outage|Unable to find a valid Max package price/.test(message.text())) {
+    if (message.type() === 'error' && /Synthetic package source outage|Unable to find a valid Overhaul package price/.test(message.text())) {
       reports.push(message.text());
     }
   });
@@ -525,8 +526,8 @@ test(`${scenario} package reads report once after the retry budget`, async ({ pa
     reads++;
     const failed = !prefetching && scenario === 'failed';
     const data = prefetching || scenario === 'empty list' ? [] :
-      scenario === 'missing Max' ? [{ title: 'Other package', price: '$10' }] :
-        [{ title: 'Max', price: null }];
+      scenario === 'missing Overhaul' ? [{ title: 'Performance Vertex Max', price: '$149.95' }] :
+        [{ title: 'Performance Vertex Overhaul', price: null }];
     return route.fulfill({
       status: failed ? 503 : 200,
       json: failed ? { ok: false, error: 'Synthetic package source outage' } : { ok: true, data },

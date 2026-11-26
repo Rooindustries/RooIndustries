@@ -61,7 +61,7 @@ export async function createToolingContentFixture({ origin, artifact, apiRoutes 
       ctaNoteIcon: 'X',
       bullets: ['Fixture bullet'],
     }),
-    ...content('packages-list').map((pkg, index) => document('package', { ...pkg, price: index === 1 ? '$149.95' : pkg.price, order: index }, `tooling-package-${index}`)),
+    ...content('packages-list').map((pkg, index) => document('package', { ...pkg, price: index === 1 ? '$149.95' : pkg.price, order: index + 1 }, `tooling-package-${index}`)),
     document('proReviewsCarousel', reviews),
     document('supportedGames', content('supported-games')),
     document('faqSettings', content('faq-settings')),
