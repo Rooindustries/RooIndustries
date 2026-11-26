@@ -1,4 +1,8 @@
 const { createHash } = require("node:crypto");
+const { RAM_PRICE_SOURCE, isVerifiedRamPrice } = require("../../src/lib/ramPrice");
+
+const ramQuoteFields = ["priceCents", "currency", "checkedAt", "source", "sourceUrl", "sku", "variantId"];
+const publicRamQuotePaths = ramQuoteFields.map(field => `ramPrice.${field}`);
 
 const unused = {
   about: ["recordImage", "recordNote", "recordDetails[].sub"],
@@ -28,7 +32,7 @@ const rendered = {
   faqSection: ["questions", "questions[].question", "questions[].answer"],
   faqSettings: [],
   footer: [],
-  hero: ["headingLine1", "headingLine2", "description", "subtext", "ctaPrimaryText", "ctaSecondaryText", "ctaNote"],
+  hero: ["ramPrice", ...publicRamQuotePaths, "headingLine1", "headingLine2", "description", "subtext", "ctaPrimaryText", "ctaSecondaryText", "ctaNote"],
   howItWorks: ["title", "subtitle", "steps", "steps[].badge", "steps[].title", "steps[].text"],
   meetTheTeam: ["heroTitle", "heroSubtitle", "showFounder", "founder", "founder.badgeText", "founder.name", "founder.title", "founder.bio", "founder.avatar", "founder.stats", "founder.stats[].value", "founder.stats[].label", "founder.tags", "founder.socialLinks", "founder.socialLinks[].label", "founder.socialLinks[].url", "founder.socialLinks[].icon", "sections", "sections[].title", "sections[].variant", "sections[].cards", "sections[].cards[].name", "sections[].cards[].title", "sections[].cards[].bio", "sections[].cards[].avatar", "sections[].cards[].initials", "sections[].cards[].tags", "sections[].cards[].platformBadge", "sections[].cards[].ctaLabel", "sections[].cards[].ctaUrl", "footer", "footer.note", "footer.buttonText", "footer.buttonUrl", "footer.showDiscordIcon"],
   package: ["title", "price", "description", "order", "tag", "tagGoldGlow", "checkedBullets", "uncheckedBullets", "features", "buttonText", "detailsButtonText", "isHighlighted"],
@@ -48,6 +52,10 @@ const rendered = {
 const internal = {
   bookingSettings: { ownerEmail: { kind: "ownerNotification", consumer: "src/server/api/ref/bookingEmails.js:222" } },
   coupon: { title: { kind: "documentTitle", consumer: "src/components/admin/content/ContentAdmin.jsx:834" } },
+  hero: Object.fromEntries(
+    ["ramPriceCandidate", ...ramQuoteFields.map(field => `ramPriceCandidate.${field}`)]
+      .map(path => [path, { kind: "ramPriceCandidate", consumer: "src/server/content/refreshRamPrice.js:165" }]),
+  ),
   review: { title: { kind: "documentTitle", consumer: "src/components/admin/content/ContentAdmin.jsx:834" } },
 };
 
@@ -82,7 +90,7 @@ const bindings = {
   faqSection: { resource: "faq-questions", page: "/faq" },
   faqSettings: {},
   footer: {},
-  hero: { resource: "hero", page: "/" },
+  hero: { resource: "hero", page: "/", api: publicRamQuotePaths },
   howItWorks: { resource: "how-it-works", page: "/" },
   meetTheTeam: { resource: "team", page: "/meet-the-team", api: ["sections[].variant", "founder.socialLinks[].icon", "sections[].cards[].initials", "sections[].cards[].platformBadge", "sections[].cards[].ctaLabel", "sections[].cards[].ctaUrl", "sections[].cards[].tags"] },
   package: { resource: "packages-list", page: "/packages", api: ["features[]"] },
@@ -104,6 +112,8 @@ const patternPath = path => path.replace(/\[\d+\]/g, "[]");
 const unusedField = (type, field, parent = {}, context = {}) => {
   if (internalField(type, field)) return false;
   if ((unused[type] || []).includes(patternPath(field))) return true;
+  if (type === "hero" && ["headingLine1", "headingLine2", "description"].includes(field))
+    return isVerifiedRamPrice(parent.ramPrice);
   if (type === "about" && /\.value$/.test(field)) return /^(cpu|gpu)$/i.test(String(parent.label || "").trim());
   if (type === "package" && /^(?:checkedBullets|uncheckedBullets)$/.test(field)) return /^(?:vertex essentials|performance vertex overhaul|performance vertex max|xoc(?:\s*\/\s*extreme overclocking)?)$/i.test(parent.title || "");
   if (type === "package" && field === "description") return /^(?:performance vertex max|xoc(?:\s*\/\s*extreme overclocking)?)$/i.test(parent.title || "");
@@ -166,6 +176,16 @@ async function buildDocument({ schema, current, marker, origin, upload, referenc
         next = option ? [option.value ?? option] : [token];
         cases.push({ field: item, path: `${path}[0]`, value: next[0], token: next[0], bare: true, listed: Boolean(field.options?.list) });
       }
+    } else if (schema.name === "hero" && /^(?:ramPrice|ramPriceCandidate)\./.test(path)) {
+      const quote = {
+        priceCents: path.startsWith("ramPriceCandidate.")
+          ? (preserveUnused ? 80000 : 70000)
+          : (preserveUnused ? 59000 : 49000),
+        currency: "USD", checkedAt: preserveUnused ? "2025-02-03T12:00:00.000Z" : "2024-01-02T12:00:00.000Z",
+        source: RAM_PRICE_SOURCE.name, sourceUrl: RAM_PRICE_SOURCE.url,
+        sku: RAM_PRICE_SOURCE.sku, variantId: RAM_PRICE_SOURCE.variantId,
+      };
+      next = quote[field.name];
     } else if (["image", "file"].includes(field.type)) next = { _type: field.type, asset: { _type: "reference", _ref: await upload(field.type, token) } };
     else if (field.type === "reference") next = { _type: "reference", _ref: await reference(token) };
     else if (field.type === "slug") next = { _type: "slug", current: token.toLowerCase().slice(0, 80) };
@@ -198,9 +218,34 @@ async function buildDocument({ schema, current, marker, origin, upload, referenc
 
 const get = (document, path) => path.replace(/\[(\d+)\]/g, ".$1").split(".").filter(Boolean).reduce((value, key) => value?.[key], document);
 
+const removeFields = (document, paths) => {
+  for (const path of paths) {
+    const keys = path.replace(/\[(\d+)\]/g, ".$1").split(".");
+    const last = keys.pop();
+    const parent = keys.reduce((value, key) => value?.[key], document);
+    if (parent) delete parent[last];
+  }
+};
+
+const verifyRamCandidate = async ({ candidates, stored, pending, original, request, expect }) => {
+  if (!candidates.length) return [];
+  expect(stored.document.ramPriceCandidate).toEqual(pending.document.ramPriceCandidate);
+  expect(stored.document.ramPriceCandidate).not.toEqual(original.document.ramPriceCandidate);
+  const response = await request.get("/api/content/hero");
+  expect(response.ok()).toBe(true);
+  expect((await response.json()).data).not.toHaveProperty("ramPriceCandidate");
+  return candidates.map(item => ({ path: item.path, ...internalField("hero", item.path) }));
+};
+
+const verifyHeroQuote = async (page, document, expect) => {
+  await expect(page.locator("#top h1")).toContainText("Why Pay $590 For RAM?");
+  await expect(page.locator("#top a[data-ram-price-source]")).toHaveText("v-color, checked 3 Feb 2025");
+  await expect(page.locator("#top a[data-ram-price-source]")).toHaveAttribute("href", document.ramPrice.sourceUrl);
+};
+
 const contextFor = (document, path) => {
   const match = path.match(/^sections\[(\d+)\]\.cards/);
   return match ? { variant: document.sections?.[Number(match[1])]?.variant || "standard" } : {};
 };
 
-module.exports = { contextFor, unused, rendered, internal, overrideKeys, operationalReadOnly, bindings, internalField, classify, unusedField, schemaFields, buildDocument, patternPath, get };
+module.exports = { contextFor, unused, rendered, internal, overrideKeys, operationalReadOnly, bindings, internalField, classify, unusedField, schemaFields, buildDocument, patternPath, get, removeFields, verifyRamCandidate, verifyHeroQuote };

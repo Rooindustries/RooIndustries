@@ -46,7 +46,10 @@ export function startServerMonitoring(value) {
         }
       } catch {}
       report.stack = [`${report.name}: ${message}`, ...frames].join("\n");
-      captureException(report, { tags: { error_code: metadata.code, error_status: String(metadata.status) } });
+      captureException(report, {
+        ...(metadata.level === "warning" ? { level: "warning" } : {}),
+        tags: { error_code: metadata.code, error_status: String(metadata.status) },
+      });
     } catch {}
   };
 }

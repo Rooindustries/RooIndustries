@@ -344,12 +344,7 @@ for (const schema of CONTENT_TYPES.filter(type => !["footer", "siteSettings"].in
       await evidence(page, testInfo, { type: schema.name, unused: unusedResults });
       return;
     }
-    for (const path of unusedResults) {
-      const keys = path.replace(/\[(\d+)\]/g, ".$1").split(".");
-      const last = keys.pop();
-      const parent = keys.reduce((value, key) => value?.[key], pending.document);
-      if (parent) delete parent[last];
-    }
+    fieldContract.removeFields(pending.document, unusedResults);
     if (schema.fields.some(field => field.name === "sortOrder")) await prepareFieldFixture(request, baseURL, { ...pending.document, _id: `${entry._id}-order-peer`, title: `${marker}-order-peer`, sortOrder: pending.document.sortOrder - 1 });
     await publishDraft(page, schema, original, pending.document, async () => {
       await expandEditor(page);
@@ -360,8 +355,10 @@ for (const schema of CONTENT_TYPES.filter(type => !["footer", "siteSettings"].in
     const internalCases = pending.cases.filter(item => !item.bare && usage(item) === "INTERNAL");
     for (const item of internalCases.filter(item => !["object", "array"].includes(item.field.type))) expect(fieldContract.get(stored.document, item.path), `${schema.name}.${item.path} must remain publishable`).toEqual(item.value);
     const verifyInternal = async () => {
-      const checked = [];
-      for (const item of internalCases) {
+      const isCandidate = item => fieldContract.internalField(schema.name, item.path).kind === "ramPriceCandidate";
+      const candidates = internalCases.filter(isCandidate);
+      const checked = await fieldContract.verifyRamCandidate({ candidates, stored, pending, original, request, expect });
+      for (const item of internalCases.filter(item => !isCandidate(item))) {
         const consumer = fieldContract.internalField(schema.name, item.path);
         const current = await cms(request, `/api/admin/content/documents/${entry._id}`);
         await page.goto("/admin/content");
@@ -389,7 +386,9 @@ for (const schema of CONTENT_TYPES.filter(type => !["footer", "siteSettings"].in
     }
     const endpoint = binding.resource ? `/api/content/${binding.resource}${schema.name === "upgradeLink" ? `?slug=${pending.document.slug.current}` : ""}` : `${binding.endpoint}${schema.name === "coupon" ? `?code=${pending.document.code}&packageTitle=${encodeURIComponent((await cms(request, `/api/admin/content/documents/${pending.document.eligiblePackages[0]._ref}`)).document.title)}` : ""}`;
     let body, publicData;
-    const anchor = pending.cases.find(item => typeof item.value === "string" && usage(item) === "RENDERED");
+    const renderedString = item => typeof item.value === "string" && usage(item) === "RENDERED";
+    const anchor = pending.cases.find(item => renderedString(item) && fieldContract.get(original.document, item.path) !== item.value)
+      || pending.cases.find(renderedString);
     await expect.poll(async () => {
       const publicResponse = await request.get(endpoint);
       expect(publicResponse.ok(), await publicResponse.text()).toBe(true);
@@ -407,6 +406,7 @@ for (const schema of CONTENT_TYPES.filter(type => !["footer", "siteSettings"].in
       if (schema.name === "faqSection") await page.getByRole("button").filter({ hasText: pending.document.questions[0].question }).first().click();
       if (["proReviewsCarousel", "services", "howItWorks", "supportedGames"].includes(schema.name)) await page.locator(schema.name === "proReviewsCarousel" ? ".ri-reviews-heading" : schema.name === "services" ? "#services" : schema.name === "howItWorks" ? "#how-it-works" : "#supported-games").scrollIntoViewIfNeeded();
       if (schema.name === "supportedGames") await page.getByRole("button", { name: "View All Games", exact: true }).click();
+      if (schema.name === "hero") await fieldContract.verifyHeroQuote(page, pending.document, expect);
     }
     const renderedBody = () => page.evaluate(() => document.body.innerText + [...document.querySelectorAll("body [href],body [src],body [alt],body [placeholder]")].map(node => ["href", "src", "alt", "placeholder"].map(name => node.getAttribute(name) || "").join(" ")).join(" "));
     let renderedPages = "";

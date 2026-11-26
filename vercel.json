@@ -63,6 +63,10 @@
   ],
   "crons": [
     {
+      "path": "/api/content/ram-price/refresh",
+      "schedule": "17 */6 * * *"
+    },
+    {
       "path": "/api/payment/reconcile",
       "schedule": "*/5 * * * *"
     },

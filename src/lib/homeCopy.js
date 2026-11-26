@@ -1,10 +1,14 @@
+const heroDescription = amount =>
+  `A 32GB DDR5 kit that was around $100 in early 2025 costs ${amount} now. ` +
+  "You probably don't need a new one. We'll tune the RAM you have, and the rest of your PC, " +
+  'for more FPS and steadier 1% lows.';
+
 const HOME_COPY = {
   hero: {
     tagline: "",
     headingLine1: "Why Pay $400 For RAM?",
     headingLine2: "Tune Yours For $99.95.",
-    description:
-      "A 32GB DDR5 kit that was around $100 in early 2025 costs $400 now. You probably don't need a new one. We'll tune the RAM you have, and the rest of your PC, for more FPS and steadier 1% lows.",
+    description: heroDescription('$400'),
     subtext:
       "One remote session. Before-and-after benchmarks so you see exactly what changed.",
     ctaPrimaryText: "Tune My PC",
@@ -246,6 +250,7 @@ const applyHomePageCopyOverrides = (homeData = {}) => ({
 });
 
 module.exports = {
+  heroDescription,
   HOME_COPY,
   OVERWATCH_CREATOR_BENCHMARK,
   resolveHeroCopy,

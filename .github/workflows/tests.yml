@@ -354,6 +354,12 @@ jobs:
           assert.equal(stats.unexpected, 0);
           assert.equal(stats.flaky, 0);
           NODE
+      - name: Run RAM quote refresh
+        env:
+          NEXT_DIST_DIR: .next-e2e-native-ram-price
+          PW_SERVER_ID: native-ram-price
+          TOOLING_API_ROUTES: "0"
+        run: xvfb-run -a npm run test:ram-price
       - name: Run booking-contact PostgreSQL 17 suite
         run: npm run test:booking-contact
       - name: Run booking hold API suite
@@ -367,7 +373,7 @@ jobs:
             booking-hold upgrade-credit upgrade-credit:ownership emails:postgres17 referral:postgres17
             referral-social:postgres17 backend-integrity:postgres17 referral-authority:postgres17
             referral-email:postgres17 referral-integrity:postgres17 account-domain:postgres17
-            account-check:postgres17 commerce-readiness:postgres17 referral-email:origins tooling:safety
+            account-check:postgres17 commerce-readiness:postgres17 referral-email:origins tooling:safety ram-price:native
       - uses: ./.github/actions/save-caches
         with:
           build-dirs: |
