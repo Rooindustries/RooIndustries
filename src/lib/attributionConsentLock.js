@@ -426,13 +426,13 @@ const waitPeers = (expectedPeers, type, reqId) => {
   });
 };
 
-const handoffToPeers = async (type, ackType, merged, targetConsent, epoch) => {
+const handoffDeclinedToPeers = async (merged, targetConsent, epoch) => {
   const peers = await discoverPeers();
   if (!peers.size) return;
   const reqId = makeId();
-  const wait = waitPeers(peers, ackType, reqId);
+  const wait = waitPeers(peers, "sync_declined_ack", reqId);
   postMsg({
-    type,
+    type: "sync_declined_attribution",
     consentEpoch: epoch,
     targetConsent,
     requestId: reqId,
@@ -441,11 +441,9 @@ const handoffToPeers = async (type, ackType, merged, targetConsent, epoch) => {
   await wait;
 };
 
-const handoffAndRemoveCookies = async (merged, live, epoch, forceHandoff = false) => {
-  if (forceHandoff || (merged && live !== "granted")) {
-    await handoffToPeers("sync_declined_attribution", "sync_declined_ack", merged, live, epoch);
-  } else if (merged && live === "granted") {
-    await handoffToPeers("sync_local_attribution", "sync_local_ack", merged, "granted", epoch);
+const handoffAndRemoveCookies = async (handoffValue, live, epoch, forceHandoff = false) => {
+  if (forceHandoff || (handoffValue && live !== "granted")) {
+    await handoffDeclinedToPeers(handoffValue, live, epoch);
   }
   const clearRemaining = () => {
     if (!cookiesAllowed()) {
@@ -535,30 +533,6 @@ const handlePeerMessage = (msg) => {
       }
       postMsg({
         type: "sync_declined_ack",
-        requestId: String(msg.requestId || ""),
-        tabId: getTabId(),
-        consentEpoch: epoch,
-      });
-    }).catch(() => {});
-    return;
-  }
-  if (type === "sync_local_attribution") {
-    withLock(STATE_LOCK, () => {
-      const live = readLiveSharedConsent();
-      const epoch = readEpoch();
-      if (live !== "granted" || msg.targetConsent !== "granted" || msg.consentEpoch !== epoch) return;
-      const incoming = isRecord(msg.attribution) ? msg.attribution : null;
-      const merged = mergeAttributionMonotonic(readLocalSession(), incoming);
-      if (merged) {
-        rememberMerged(merged);
-        if (!writeSessionRaw(merged)) {
-          unsavedFallback = mergeAttributionMonotonic(merged, unsavedFallback) || merged;
-          return;
-        }
-        unsavedFallback = null;
-      }
-      postMsg({
-        type: "sync_local_ack",
         requestId: String(msg.requestId || ""),
         tabId: getTabId(),
         consentEpoch: epoch,
@@ -736,7 +710,7 @@ export const storeAttributionForConsent = () => {
             }
             removeCookies(["_fbp", "_fbc"]);
             return {
-              merged,
+              cookies,
               live: readLiveSharedConsent(),
               epoch: readEpoch(),
             };
@@ -744,7 +718,7 @@ export const storeAttributionForConsent = () => {
           fallbackIfNotStarted,
         );
         if (!state) return;
-        await handoffAndRemoveCookies(state.merged, state.live, state.epoch, false);
+        await handoffAndRemoveCookies(state.cookies, state.live, state.epoch, false);
       },
       fallbackIfNotStarted,
     ).catch(() => {});
@@ -825,7 +799,7 @@ export const runConsentTransition = (target, announce) => {
       return {
         ok: false,
         changed: false,
-        hadAttrCookies: Boolean(cookies),
+        cookies,
         live: readLiveSharedConsent(),
         epoch: readEpoch(),
         merged,
@@ -841,7 +815,7 @@ export const runConsentTransition = (target, announce) => {
     }
     return {
       ...stage,
-      hadAttrCookies: Boolean(cookies),
+      cookies,
       live: readLiveSharedConsent(),
       merged,
     };
@@ -967,7 +941,7 @@ export const runConsentTransition = (target, announce) => {
         fallbackIfNotStarted,
       );
       if (!stage) return;
-      const handoffValue = stage.changed || stage.hadAttrCookies ? stage.merged : null;
+      const handoffValue = stage.changed ? stage.merged : stage.cookies;
       await handoffAndRemoveCookies(handoffValue, stage.live, stage.epoch, stage.changed);
       announce(target);
     },

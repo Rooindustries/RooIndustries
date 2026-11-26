@@ -1100,6 +1100,7 @@ test("Decline handoff skips ack while peer sessionStorage stays full and promote
   await expect(banner(page)).toHaveCount(0);
   await expect(banner(peer)).toHaveCount(0);
   await expect.poll(() => peer.evaluate(() => window.__peerReceivedDecline.length)).toBeGreaterThan(0);
+  await peer.evaluate(() => navigator.locks.request("roo_consent_state_lock", () => true));
   expect(await peer.evaluate(() => window.__peerSentAcks)).toEqual([]);
   expect(await peer.evaluate(() => sessionStorage.getItem("sales_attribution"))).toBeNull();
 
@@ -1117,7 +1118,7 @@ test("Decline handoff skips ack while peer sessionStorage stays full and promote
   });
 });
 
-test("local Decline fallback under full localStorage hands off journey to surviving granted peer", async ({
+test("local Decline fallback under full localStorage publishes no shared handoff or post-Decline cookie leak", async ({
   page,
   context,
 }) => {
@@ -1148,15 +1149,35 @@ test("local Decline fallback under full localStorage hands off journey to surviv
   await expect(banner(page)).toBeVisible();
   await banner(page).getByRole("button", { name: "Decline", exact: true }).click();
   await expect(banner(page)).toHaveCount(0);
-  expect(await page.evaluate(() => localStorage.getItem("roo-consent"))).toBe("granted");
+  const fallbackState = await page.evaluate(() => [
+    localStorage.getItem("roo-consent"),
+    sessionStorage.getItem("roo-consent"),
+  ]);
+  expect(fallbackState).toEqual(["granted", "denied"]);
   expect(await readAttrCookies(context)).toEqual({});
 
-  await page.close();
+  await page.goto("/packages?utm_source=after_decline&utm_campaign=delta");
+  await expect(banner(page)).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(() => JSON.parse(sessionStorage.getItem("sales_attribution") || "null")?.lastTouch?.source || null),
+    )
+    .toBe("after_decline");
+  expect(await readAttrCookies(context)).toEqual({});
+
+  await peer.reload();
   await expect(banner(peer)).toHaveCount(0);
-  const peerSession = await peer.evaluate(() =>
-    JSON.parse(sessionStorage.getItem("sales_attribution") || "null"),
-  );
-  expect(peerSession?.firstTouch?.source).toBe("local_fallback_seed");
+  await peer.evaluate(() => navigator.locks.request("roo_sales_attribution_cookie", () => true));
+  await page.goto("/referrals/login");
+  await expect(banner(page)).toHaveCount(0);
+  await page.evaluate(() => navigator.locks.request("roo_sales_attribution_cookie", () => true));
+  await peer.reload();
+  await expect(banner(peer)).toHaveCount(0);
+  await peer.evaluate(() => navigator.locks.request("roo_sales_attribution_cookie", () => true));
+
+  expect(await peer.evaluate(() => sessionStorage.getItem("sales_attribution"))).toBeNull();
+  expect(await readAttrCookies(context)).toEqual({});
+  expect(await page.evaluate(() => sessionStorage.getItem("roo-consent"))).toBe("denied");
 });
 
 test("peer unsavedFallback captured under full sessionStorage is collected on Accept in another tab", async ({
