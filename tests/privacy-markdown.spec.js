@@ -56,12 +56,18 @@ test("privacy Markdown preserves PortableText line breaks", async ({ page, reque
 
 test("privacy HTML and Markdown share the same cookie notice", async ({ page, request }) => {
   const { COOKIE_NOTICE } = require("../src/lib/cookieNotice.js");
-  const markdown = await (await request.get("/markdown?path=/privacy")).text();
   const unescape = (text) => text.replace(/\\([!-/:-@[-`{-~])/g, "$1");
-  const markdownSection = markdown.split("## Cookies and browser storage\n\n")[1].split("\n\nLast updated")[0]
-    .split("\n\n[Contact")[0].split("\n\n").map(unescape);
+  const extractSection = (markdown) => markdown.split("## Cookies and browser storage\n\n")[1]
+    .split("\n\nLast updated")[0].split("\n\n[Contact")[0].split("\n\n").map(unescape);
+  const markdown = await (await request.get("/markdown?path=/privacy")).text();
+  const markdownSection = extractSection(markdown);
   expect(markdownSection).toEqual(COOKIE_NOTICE.paragraphs);
+  expect(markdownSection.join(" ")).toContain("roo_ref");
   expect(markdown.split(`## ${COOKIE_NOTICE.heading}\n`)).toHaveLength(2);
+
+  const negotiated = await request.get("/privacy", { headers: { accept: "text/markdown" } });
+  expect(negotiated.status()).toBe(200);
+  expect(extractSection(await negotiated.text())).toEqual(COOKIE_NOTICE.paragraphs);
 
   await page.goto("/privacy");
   const sections = page.locator("main section");

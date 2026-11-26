@@ -242,6 +242,10 @@
       "js": 41984,
       "css": 1024
     },
+    "src/components/PayPalMethodPanel.jsx -> @paypal/react-paypal-js": {
+      "js": 8192,
+      "css": 1024
+    },
     "src/components/SupabaseSocialLogin.jsx -> ../lib/supabaseBrowser": {
       "js": 68608,
       "css": 1024

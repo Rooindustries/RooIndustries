@@ -1,7 +1,7 @@
 import envValue from "../../supabase/envValue.cjs";
 const { resolveStoreBackend } = envValue;
 import { createDataClient as createClient } from "../../data/documentClient.js";
-import { sanitizeSalesAttribution } from "../../../lib/salesAttribution.ts";
+import * as refAttr from "./validateRefAttribution.js";
 import { validateBookingContact } from "../../../lib/bookingContactValidation.js";
 import { verifyHoldToken } from "../../booking/holdToken.js";
 import { resolveBookingPricing, resolveCapturedUpgradeFunding, resolveUpgradeContext } from "./pricing.js";
@@ -588,11 +588,9 @@ export default async function handler(req, res) {
       const resolvedCouponDiscountValue = Number(
         bookingDoc.couponDiscountValue || 0
       );
-      const resolvedReferralCode = String(
-        bookingDoc.referralCode || referralCode || ""
-      ).trim();
+      const resolvedReferralCode = String(bookingDoc.referralCode || "").trim();
       const resolvedReferralId = String(
-        bookingDoc.referralId || referralId || ""
+        bookingDoc.referral?._ref || bookingDoc.referralId || ""
       ).trim();
       const pricingFingerprint = buildPricingFingerprint({
         provider: normalizedProvider,
@@ -653,7 +651,7 @@ export default async function handler(req, res) {
           specs: String(bookingDoc.specs || resolvedSpecs || "").trim(),
           mainGame: String(bookingDoc.mainGame || resolvedMainGame || "").trim(),
           message: String(bookingDoc.message || resolvedMessage || "").trim(),
-          salesAttribution: sanitizeSalesAttribution(bookingDoc.salesAttribution),
+          ...refAttr.optionalAttributionField(bookingDoc.salesAttribution),
           packageTitle: String(
             bookingDoc.packageTitle || packageTitle || ""
           ).trim(),
@@ -930,6 +928,9 @@ export default async function handler(req, res) {
         if (!storedBooking?._id) {
           return res.status(409).json({ error: "Stored booking is no longer available." });
         }
+        const replayReferralFields = await refAttr.resolveReplayReferralFields({
+          client: writeClient, referralCode, referralId, isInternalPaymentFinalization,
+        });
         assertBookingReplayMatches({
           booking: storedBooking,
           partial: true,
@@ -953,8 +954,7 @@ export default async function handler(req, res) {
             razorpayPaymentId,
             dodoCheckoutSessionId,
             dodoPaymentId,
-            ...(referralCode ? { referralCode } : {}),
-            ...(referralId ? { referral: { _ref: referralId } } : {}),
+            ...replayReferralFields,
           },
         });
       }
@@ -1587,6 +1587,9 @@ export default async function handler(req, res) {
       }
     }
 
+    const bookingAttributionField = await refAttr.resolveBookingAttributionField({
+      isInternalPaymentFinalization, internalPaymentRecord, req, client: writeClient,
+    });
     const dodoTotalAmount = Number(internalPaymentRecord?.providerPublicData?.totalAmount || effectiveNetAmount * 100) / 100;
     const bookingDocument = {
       _id: bookingDocId,
@@ -1594,7 +1597,7 @@ export default async function handler(req, res) {
       backendOwner,
       cutoverGeneration,
       paymentRecordId,
-      salesAttribution: sanitizeSalesAttribution(internalPaymentRecord?.bookingPayload?.salesAttribution || req.body?.salesAttribution),
+      ...bookingAttributionField,
       paymentProofClaimId,
       paymentFinalizationLeaseId,
       date: bookingDate,
@@ -1707,10 +1710,7 @@ export default async function handler(req, res) {
     const message = err?.message || "Server error";
     const status = Number(err?.status) || 500;
     logSafeError("Booking creation failed", err);
-    return res
-      .status(status)
-      .json({ error: status < 500 ? message : "Booking could not be completed.", ...(status === 409 &&
-        ["payment_currency_mismatch", "upgrade_credit_changed_after_quote", "upgrade_credit_unverified"].includes(err?.code)
-        ? { code: err.code } : {}) });
+    const codeField = refAttr.isExposedBookingErrorCode(status, err?.code) ? { code: err.code } : {};
+    return res.status(status).json({ error: status < 500 ? message : "Booking could not be completed.", ...codeField });
   }
 }

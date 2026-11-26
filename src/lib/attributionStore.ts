@@ -24,14 +24,16 @@ const decode = (text: string): unknown => {
 
 const readCookie = (name: string) => {
   const prefix = `${name}=`;
-  const entry = document.cookie.split(/;\s*/).find((part) => part.startsWith(prefix));
-  return entry ? entry.slice(prefix.length) : "";
+  try {
+    const entry = document.cookie.split(/;\s*/).find((part) => part.startsWith(prefix));
+    return entry ? entry.slice(prefix.length) : "";
+  } catch { return ""; }
 };
 
 const setCookie = (name: string, value: string, maxAge: number, domain = "") => {
   const secure = window.location.protocol === "https:" ? "; Secure" : "";
   const scope = domain ? `; Domain=${domain}` : "";
-  document.cookie = `${name}=${value}; Path=/; Max-Age=${maxAge}${scope}; SameSite=Lax${secure}`;
+  try { document.cookie = `${name}=${value}; Path=/; Max-Age=${maxAge}${scope}; SameSite=Lax${secure}`; } catch {}
 };
 
 const readSession = (): unknown => {
@@ -106,5 +108,5 @@ export function writeStoredAttribution(value: StoredAttribution) {
 export function storeAttributionForConsent() {
   const stored = readStoredAttribution();
   if (isRecord(stored)) writeStoredAttribution(stored);
-  if (readConsent() !== "granted") removeCookies(META_COOKIES);
+  try { if (readConsent() !== "granted") removeCookies(META_COOKIES); } catch {}
 }

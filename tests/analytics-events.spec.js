@@ -330,9 +330,10 @@ test("booking_completed fires once for a paid receipt, with no personal data", a
   const completed = await sentOnce(page, vercel, "booking_completed");
   expect(completed.payload.data).toEqual({
     event_id: paidEventId, package: overhaul, payment_type: "paid", payment_provider: "dodo", amount: 84.99,
-    currency: "USD", referral_code: "", journey_id: journeyId, landing_path: "/", campaign_source: "meta",
+    currency: "USD", journey_id: journeyId, landing_path: "/", campaign_source: "meta",
     first_source: "meta", has_fbclid: true, has_gclid: true,
   });
+  expect(Object.hasOwn(completed.payload.data, "referral_code")).toBe(false);
   await page.reload();
   await settle(page);
   flow.state.holds.clear();
@@ -342,6 +343,28 @@ test("booking_completed fires once for a paid receipt, with no personal data", a
   expect(events(vercel, "booking_completed")).toHaveLength(1);
   expect(events(vercel, "free_booking_completed")).toEqual([]);
   expect(JSON.stringify(vercel.calls)).not.toMatch(personalData);
+});
+
+test("a ref-only paid receipt emits ref_source and omits empty referral_code and journey fields", async ({
+  page, flow, vercel, baseURL,
+}) => {
+  const refOnlyEventId = bookingEventId("fixture-analytics-ref-only-record");
+  const refOnlyReceipt = {
+    eventId: refOnlyEventId, paymentType: "paid", provider: "dodo", amount: 84.99, currency: "USD",
+    packageTitle: overhaul, referralCode: "",
+    attribution: { ref: { source: "gads-max", capturedAt: new Date(Date.now() - 60_000).toISOString() } },
+  };
+  await routeStart(page, baseURL);
+  await routeFinalize(page, refOnlyReceipt);
+  await payAndReturn(page, flow);
+  const completed = await sentOnce(page, vercel, "booking_completed");
+  expect(completed.payload.data).toEqual({
+    event_id: refOnlyEventId, package: overhaul, payment_type: "paid", payment_provider: "dodo", amount: 84.99,
+    currency: "USD", ref_source: "gads-max",
+  });
+  for (const omitted of ["referral_code", "journey_id", "landing_path", "campaign_source", "has_fbclid", "has_gclid"]) {
+    expect(Object.hasOwn(completed.payload.data, omitted)).toBe(false);
+  }
 });
 
 test("a free receipt sends free_booking_completed and no booking_completed", async ({

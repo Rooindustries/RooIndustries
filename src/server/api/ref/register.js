@@ -9,7 +9,8 @@ import crypto from "crypto";
 import { isValidNewPassword, NEW_PASSWORD_REQUIREMENT } from "../../../lib/passwordPolicy.js";
 import { setReferralSessionCookie } from "./auth.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
-import { CREATOR_CODE } from "./creatorCode.js";
+import { isSafeCreatorCode } from "./creatorCode.js";
+import { isKnownAdRefTag } from "../../../lib/refShape.js";
 import { logSafeError } from "../../safeErrorLog.js";
 import {
   buildReferralIdentityClaim,
@@ -187,12 +188,16 @@ export default async function handler(req, res) {
 
     const emailRegex = /\S+@\S+\.\S+/;
 
+    if (isKnownAdRefTag(trimmedSlug)) {
+      return res.status(409).json({ ok: false, error: "Referral code already taken", reason: "reserved" });
+    }
+
     if (
       trimmedDiscordUsername.length < 2 ||
       trimmedDiscordUsername.length > 80 ||
       trimmedEmail.length > 254 ||
       trimmedPaypalEmail.length > 254 ||
-      !CREATOR_CODE.test(trimmedSlug)
+      !isSafeCreatorCode(trimmedSlug)
     ) {
       return res.status(400).json({ ok: false, error: "Invalid registration details" });
     }

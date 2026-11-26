@@ -170,7 +170,7 @@ try{
       assert.ok(onApprove&&finalize.includes('fetchJson'));
       const html=`<!doctype html><html><head><title>Roo Industries local PayPal continuation</title></head><body><h1>Local PayPal capture continuation</h1><p id="state">Ready</p><button id="run">Capture, then close checkout</button><pre id="proof"></pre><script>
       let current=true;const uiUpdates=[];const session=${JSON.stringify(a1Ui.session)};
-      const getActivePaymentSession=()=>session,createPaymentOperation=()=>({current:()=>current}),ensureSlotBeforeAction=()=>true;
+      const getActivePaymentSession=()=>session,createPaymentOperation=()=>({current:()=>current}),ensureSlotBeforeAction=()=>true,manualCodeAllowedRef={current:true},scrubPaymentPayload=()=>{},isNonResumablePaymentData=()=>false,releaseAbandonedHold=()=>false,paymentActionRef={current:{seq:0,cancelling:false}};
       const setPaymentStatusBusy=value=>uiUpdates.push({busy:value}),navigate=(...args)=>uiUpdates.push({navigate:args}),showBanner=(...args)=>uiUpdates.push({banner:args});
       const fetchJson=async(url,init)=>{const parsed=JSON.parse(init.body);const response=await fetch('/flow/finalize',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({paymentAccessToken:session.paymentAccessToken,body:parsed})});return{response,data:await response.json()};};
       ${finalize}
@@ -192,10 +192,41 @@ try{
       await handler({ method: 'POST', headers: req.headers, body: JSON.parse(raw) }, response);
       return;
     }
+    const wrapRes = () => ({
+      status(code) { this.statusCode = code; return this; },
+      setHeader(name, value) { res.setHeader(name, value); },
+      json(body) { res.writeHead(this.statusCode || 200, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); return this; },
+    });
     if (req.url === '/start-route') {
       const { default: handler } = await import('../src/server/api/payment/start.js');
-      const response = { status(code) { this.statusCode = code; return this; }, setHeader(name, value) { res.setHeader(name, value); }, json(body) { res.writeHead(this.statusCode || 200, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); return this; } };
-      await handler({ method: 'POST', headers: {}, body: JSON.parse(raw) }, response);
+      await handler({ method: 'POST', headers: req.headers, body: JSON.parse(raw) }, wrapRes());
+      return;
+    }
+    if (req.url === '/finalize-route') {
+      const { default: handler } = await import('../src/server/api/payment/finalize.js');
+      await handler({ method: 'POST', headers: req.headers, body: JSON.parse(raw) }, wrapRes());
+      return;
+    }
+    if (req.url === '/quote-route') {
+      const { default: handler } = await import('../src/server/api/payment/quote.js');
+      await handler({ method: 'POST', headers: req.headers, body: JSON.parse(raw) }, wrapRes());
+      return;
+    }
+    if (req.url.startsWith('/validate-referral')) {
+      const { default: handler } = await import('../src/server/api/ref/validateReferral.js');
+      const query = Object.fromEntries(new URL(req.url, origin).searchParams.entries());
+      await handler({ method: 'GET', headers: req.headers, query }, wrapRes());
+      return;
+    }
+    if (req.url.startsWith('/validate-coupon')) {
+      const { default: handler } = await import('../src/server/api/ref/validateCoupon.js');
+      const query = Object.fromEntries(new URL(req.url, origin).searchParams.entries());
+      await handler({ method: 'GET', headers: req.headers, query }, wrapRes());
+      return;
+    }
+    if (req.url === '/register-route') {
+      const { default: handler } = await import('../src/server/api/ref/register.js');
+      await handler({ method: 'POST', headers: req.headers, body: JSON.parse(raw) }, wrapRes());
       return;
     }
     if(req.url.startsWith('/flow/')){const input=raw?JSON.parse(raw):{};
@@ -212,7 +243,7 @@ try{
       } }) : commerce;
       const args={...input,client:summaryClient};const action=req.url.slice(6);let result;
       if(action==='paypal')result=await flow.handlePayPalWebhook(args);else if(action==='razorpay')result=await flow.handleRazorpayWebhook(args);else if(action==='dodo')result=await flow.handleDodoWebhook(args);else if(action==='finalize')result=await flow.finalizePaymentSession(args);else if(action==='cancel')result=await flow.cancelPaymentSession(args);else if(action==='reconcile')result=await flow.reconcilePaymentSessions({client:commerce,req:{headers:{authorization:'Bearer fixture-cron'}}});else if(action==='start')result=await flow.startPaymentSession(args);else if(action==='status')result=await flow.getPaymentStatus(args);else throw new Error(`Unknown action ${action}`);res.writeHead(result.httpStatus,{'content-type':'application/json'});res.end(JSON.stringify(result.body));return;}
-    if(req.url==='/booking'){const {default:handler}=await import('../src/server/api/ref/createBooking.js');const input=JSON.parse(raw),response={status(code){this.statusCode=code;return this;},json(body){res.writeHead(this.statusCode||200,{'content-type':'application/json'});res.end(JSON.stringify(body));return this;},setHeader(){}};await handler({method:'POST',headers:{},body:input.body,internalContext:input.internal?{documentClient:commerce,backendOwner:'supabase',cutoverGeneration:0,paymentFinalizeSource:'reconcile'}:undefined},response);return;}
+    if(req.url==='/booking'){const {default:handler}=await import('../src/server/api/ref/createBooking.js');const input=JSON.parse(raw),response={status(code){this.statusCode=code;return this;},json(body){res.writeHead(this.statusCode||200,{'content-type':'application/json'});res.end(JSON.stringify(body));return this;},setHeader(){}};await handler({method:'POST',headers:req.headers,body:input.body,internalContext:input.internal?{documentClient:commerce,backendOwner:'supabase',cutoverGeneration:0,paymentFinalizeSource:'reconcile'}:undefined},response);return;}
     if(req.url==='/reconcile-route'){const {default:handler}=await import('../src/server/api/payment/reconcile.js');const response={status(code){this.statusCode=code;return this;},json(body){res.writeHead(this.statusCode||200,{'content-type':'application/json'});res.end(JSON.stringify(body));return this;},setHeader(){}};await handler({method:'POST',headers:{authorization:req.headers.authorization||'Bearer fixture-cron'}},response);return;}
     if(req.url==='/identities'){const {POST}=await import('../app/api/auth/identities/route.js');const result=await POST(new Request(`${origin}/identities`,{method:req.method,headers:req.headers,body:raw}));res.writeHead(result.status,Object.fromEntries(result.headers));res.end(await result.text());return;}
     const request={method:req.method,path:req.url,body:raw?(String(req.headers['content-type']||'').includes('application/json')?JSON.parse(raw):raw):null};providerRequests.push({method:req.method,path:req.url});
@@ -2763,7 +2794,7 @@ try{
     assert.equal(finalized.body.bookingSummary.bookingId, (await row(finalizing.id)).payload.bookingId);
     return { paymentRecord: payment, booking, cancelled, webhook, finalized };
   });
-  const ctx={run,seed,requestFlow,paypalReq,razorReq,dodoReq,sql,record,row,flow,commerce,fixture,origin,
+  const ctx={run,seed,reset,tokenFor,requestFlow,paypalReq,razorReq,dodoReq,sql,record,row,flow,commerce,documents,fixture,origin,
     a1Start,a1Hook};
   for(const register of [registerEnvScenarios,registerBookingPaidScenarios,registerAttributionScenarios])
     await register(ctx);

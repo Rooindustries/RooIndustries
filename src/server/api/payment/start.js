@@ -56,6 +56,7 @@ export default async function handler(req, res) {
     body,
     backend,
     cutoverGeneration: commerceControl.generation,
+    cookieHeader: String(req.headers?.cookie || ""),
     ...(client ? { client } : {}),
   });
   return res.status(result.httpStatus).json(result.body);

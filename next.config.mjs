@@ -135,6 +135,7 @@ const nextConfig = {
   distDir: validateDistDir(process.env.NEXT_DIST_DIR || ".next"),
   outputFileTracingRoot: process.cwd(),
   outputFileTracingIncludes: {
+    "/*": ["./public/ref-capture.js"],
     "/api/downloads/file": ["./downloads/**/*"],
   },
   htmlLimitedBots: /.*/,

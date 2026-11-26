@@ -6,7 +6,8 @@ import {
   normalizeStartTimeUTC,
 } from "../../booking/slotIdentity.js";
 import { normalizeBookingStatus } from "../../booking/bookingStatus.js";
-import { sanitizeSalesAttribution } from "../../../lib/salesAttribution.ts";
+import { resolveValidatedServerSalesAttribution } from "./validateRefAttribution.js";
+import { isKnownAdRefTag } from "../../../lib/refShape.js";
 import { appendCouponConsumption } from "./couponReservations.js";
 import { dispatchRescheduleNotifications } from "./bookingEmails.js";
 import { getSafeErrorCode } from "../../safeErrorLog.js";
@@ -256,6 +257,7 @@ export const commitBookingTransaction = async ({
       (patch) => patch.set({
         ...paymentRecordMutation.set,
         ...(upgradeLockToCreate ? { startClaimId: upgradeLockToCreate._id } : {}),
+        committedSalesAttribution: doc.salesAttribution ?? null,
         bookingId: doc._id,
         updatedAt: now,
       })
@@ -310,12 +312,15 @@ export const createRequiresRescheduleBooking = async ({
   const resolvedReferralId = preserveHistoricalAccounting
     ? ""
     : normalize(referralId || pricing.effectiveReferralId || "");
+  const resolvedSalesAttribution = await resolveValidatedServerSalesAttribution({
+    salesAttribution: payload.salesAttribution, cookieHeader: "", client,
+  });
   const booking = prepareDeterministicBooking({
     booking: {
       paymentRecordId: paymentRecord._id,
       ...(payload.originalOrderId ? { originalOrderId: payload.originalOrderId } : {}),
       cutoverGeneration: Math.max(0, Number(paymentRecord.cutoverGeneration) || 0),
-      salesAttribution: sanitizeSalesAttribution(payload.salesAttribution),
+      ...(resolvedSalesAttribution ? { salesAttribution: resolvedSalesAttribution } : {}),
       backendOwner:
         resolveStoreBackend(paymentRecord.backendOwner),
       paymentProvider: paymentRecord.provider,
@@ -354,7 +359,8 @@ export const createRequiresRescheduleBooking = async ({
       netAmount: Number(pricing.netAmount || 0),
       discountPercent: Number(pricing.discountPercent || 0),
       discountAmount: Number(pricing.discountAmount || 0),
-      referralCode: pricing.effectiveReferralCode || payload.referralCode || "",
+      referralCode:
+        pricing.effectiveReferralCode || (isKnownAdRefTag(payload.referralCode) ? "" : payload.referralCode) || "",
       ...(resolvedReferralId
         ? {
             referral: { _type: "reference", _ref: resolvedReferralId },
@@ -464,6 +470,7 @@ export const createRequiresRescheduleBooking = async ({
         (patch) => patch.set({
           ...paymentRecordMutation.set,
           ...(upgradeLockToCreate ? { startClaimId: upgradeLockToCreate._id } : {}),
+          committedSalesAttribution: booking.salesAttribution ?? null,
           bookingId: booking._id,
           updatedAt: now,
         })

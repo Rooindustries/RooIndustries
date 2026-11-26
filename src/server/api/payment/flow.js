@@ -21,6 +21,8 @@ import {
 } from "./providerPaymentState.js";
 import crypto from "crypto";
 import { sanitizeSalesAttribution } from "../../../lib/salesAttribution.ts";
+import * as refAttr from "../ref/validateRefAttribution.js";
+import * as retryFlow from "./startPrePricingRetry.js";
 import { validateBookingContact } from "../../../lib/bookingContactValidation.js";
 import { buildSalesReceipt } from "./salesReceipt.ts";
 import { getSafeErrorCode, logSafeError } from "../../safeErrorLog.js";
@@ -296,9 +298,9 @@ const invokeCreateBooking = async (payload, internalContext = {}) => {
 
 const sanitizeBookingPayload = (payload = {}) => {
   const normalized = normalizeObject(payload);
-  return {
+  const cleanAttribution = sanitizeSalesAttribution(normalized.salesAttribution);
+  const sanitized = {
     ...normalized,
-    salesAttribution: sanitizeSalesAttribution(normalized.salesAttribution),
     packageTitle: String(normalized.packageTitle || "").trim(),
     originalOrderId: String(normalized.originalOrderId || "").trim(),
     startTimeUTC: String(normalized.startTimeUTC || "").trim(),
@@ -313,6 +315,9 @@ const sanitizeBookingPayload = (payload = {}) => {
     slotHoldToken: String(normalized.slotHoldToken || "").trim(),
     slotHoldExpiresAt: String(normalized.slotHoldExpiresAt || "").trim(),
   };
+  if (cleanAttribution) sanitized.salesAttribution = cleanAttribution;
+  else delete sanitized.salesAttribution;
+  return sanitized;
 };
 
 const sanitizeProviderFinalizeData = (payload = {}) => {
@@ -554,6 +559,7 @@ const buildPublicFailure = ({
       ...((clientError || publicServerCode) && normalizedCode
         ? { code: normalizedCode }
         : {}),
+      ...(clientError && error?.claimedSession ? { claimedSession: error.claimedSession } : {}),
     },
   };
 };
@@ -623,25 +629,6 @@ const isTrustedRecoverySource = (source = "") =>
 const canFinalizeAbandonedRecord = ({ status = "", source = "" }) =>
   String(status || "").trim().toLowerCase() === PAYMENT_STATUS_ABANDONED &&
   isTrustedRecoverySource(String(source || "").trim().toLowerCase());
-
-const buildQuotePayload = (quote = {}) => ({
-  grossAmount: Number(quote.effectiveGrossAmount || 0),
-  discountAmount: Number(quote.effectiveDiscountAmount || 0),
-  discountPercent: Number(quote.effectiveDiscountPercent || 0),
-  netAmount:
-    String(quote.paymentProvider || "").trim().toLowerCase() === "free"
-      ? 0
-      : Number(quote.effectiveNetAmount || 0),
-  isFree: String(quote.paymentProvider || "").trim().toLowerCase() === "free",
-  referralDiscountPercent: Number(quote.referralDiscountPercent || 0),
-  referralDiscountAmount: Number(quote.referralDiscountAmount || 0),
-  commissionPercent: Number(quote.effectiveCommissionPercent || 0),
-  couponDiscountPercent: Number(quote.couponDiscountPercent || 0),
-  couponDiscountAmount: Number(quote.couponDiscountAmount || 0),
-  couponDiscountType: String(quote.couponDiscountType || "").trim(),
-  couponDiscountValue: Number(quote.couponDiscountValue || 0),
-  canCombineWithReferral: quote.canCombineWithReferral === true,
-});
 
 const buildProviderPayloadFromRecord = (record = {}) => {
   const provider = String(record.provider || "").trim().toLowerCase();
@@ -826,7 +813,7 @@ const mirrorLegacyBookingToPaymentRecord = async ({
         : `razorpay-order:${providerOrderId || booking.razorpayOrderId || ""}`,
     bookingPayload: {
       packageTitle: String(booking.packageTitle || "").trim(),
-      salesAttribution: sanitizeSalesAttribution(booking.salesAttribution),
+      ...refAttr.optionalAttributionField(booking.salesAttribution),
       originalOrderId: String(booking.originalOrderId || "").trim(),
       startTimeUTC: String(booking.startTimeUTC || "").trim(),
       email: String(booking.email || booking.payerEmail || "").trim(),
@@ -3090,21 +3077,10 @@ const createOrReusePaymentRecordForStart = async ({
     });
   }
 
-  if (String(record.provider || "").trim().toLowerCase() !== provider) {
-    const error = new Error("This reservation already has a payment provider selected.");
-    error.status = 409;
-    error.code = "payment_provider_already_claimed";
-    throw error;
-  }
-  if (
-    record.quoteFingerprint &&
-    String(record.quoteFingerprint) !== String(quoteFingerprint)
-  ) {
-    const error = new Error("This reservation is already bound to a different quote.");
-    error.status = 409;
-    error.code = "payment_quote_already_claimed";
-    throw error;
-  }
+  retryFlow.assertMatchingClaimedSession({
+    record, provider, quoteFingerprint,
+    buildProviderPayloadFromRecord, buildRefreshedHoldBody, issuePaymentAccessTokenForRecord,
+  });
   if (provider === "free" || String(record.providerOrderId || "").trim()) {
     return { record, checkoutCreated: false };
   }
@@ -3171,6 +3147,7 @@ export const startPaymentSession = async ({
   prepareCouponReservation = null,
   appendCouponReservation = null,
   authorizedFreeCheckout = false,
+  cookieHeader = "",
 }) => {
   const serverSessionsEnabled = resolveServerPaymentSessionsEnabled();
   if (!serverSessionsEnabled) {
@@ -3203,10 +3180,11 @@ export const startPaymentSession = async ({
 
   try {
     let contact = {};
+    let hold = null, scope = "", existing = null;
     if (!String(rawBookingPayload.originalOrderId || "").trim()) {
       const holdId = String(rawBookingPayload.slotHoldId || "").trim();
-      const hold = holdId ? await getHoldById(client, holdId) : null;
-      const scope = buildPaymentSessionScope({
+      hold = holdId ? await getHoldById(client, holdId) : null;
+      scope = buildPaymentSessionScope({
         bookingPayload: rawBookingPayload,
         holdNonce: hold?.holdNonce || "",
       });
@@ -3215,7 +3193,7 @@ export const startPaymentSession = async ({
         id: buildPaymentStartClaimId(scope),
         type: PAYMENT_START_CLAIM_TYPE,
       });
-      const existing = claim?.paymentRecordId
+      existing = claim?.paymentRecordId
         ? await getPaymentRecordById(client, claim.paymentRecordId)
         : null;
       if (!existing?._id) contact = validateBookingContact(rawBookingPayload);
@@ -3254,7 +3232,19 @@ export const startPaymentSession = async ({
       upgradeIntentSnapshot = freezeUpgradeIntent({
         payload: verifiedUpgradeIntent,
       });
+      const baseScope = buildPaymentSessionScope({ bookingPayload, holdNonce: "" });
+      scope = `${baseScope}:${String(upgradeIntentSnapshot.intentId || "").trim()}`;
+      existing = await getPaymentRecordById(client, buildPaymentSessionRecordId(scope));
     }
+
+    const submittedQuoteFingerprint = String(requestBody.quoteFingerprint || "").trim();
+    const providers = resolvePaymentProviders();
+    const prePricingRetry = await retryFlow.tryPrePricingRetryStart({
+      client, existing, scope, submittedQuoteFingerprint, requestedProvider, bookingPayload, hold, providers,
+      assertStartableHold, buildRefreshedHoldBody, buildProviderPayloadFromRecord, buildPublicStatusBody,
+      buildBrowserCompletionBody, issuePaymentAccessTokenForRecord, finalizePaymentRecordInternal,
+    });
+    if (prePricingRetry) return prePricingRetry;
 
     const quote = authorizedFreeCheckout
       ? {
@@ -3287,9 +3277,6 @@ export const startPaymentSession = async ({
       bookingPayload,
       quote,
     });
-    const submittedQuoteFingerprint = String(
-      requestBody.quoteFingerprint || ""
-    ).trim();
     if (
       !authorizedFreeCheckout &&
       ((!submittedQuoteFingerprint && !isLegacyCheckoutCompatibilityOpen()) ||
@@ -3304,12 +3291,11 @@ export const startPaymentSession = async ({
           code: submittedQuoteFingerprint
             ? "quote_fingerprint_mismatch"
             : "quote_fingerprint_required",
-          quote: buildQuotePayload(quote),
+          quote: retryFlow.buildQuotePayload(quote),
           quoteFingerprint: currentQuoteFingerprint,
         },
       };
     }
-    const providers = resolvePaymentProviders();
     const quoteProvider = String(quote.paymentProvider || "").trim().toLowerCase();
     let provider = "";
 
@@ -3377,6 +3363,11 @@ export const startPaymentSession = async ({
     }
 
     const { holdDoc } = await assertStartableHold({ client, bookingPayload });
+    const validatedAttribution = await refAttr.resolveValidatedServerSalesAttribution({
+      salesAttribution: rawBookingPayload.salesAttribution, cookieHeader, client,
+    });
+    if (validatedAttribution) bookingPayload.salesAttribution = validatedAttribution;
+    else delete bookingPayload.salesAttribution;
     const { record, checkoutCreated } = await createOrReusePaymentRecordForStart({
       client,
       provider,
@@ -3411,7 +3402,7 @@ export const startPaymentSession = async ({
         body: {
           ...await buildBrowserCompletionBody({ client, record: refreshed, body: buildPublicStatusBody(refreshed) }),
           provider,
-          quote: buildQuotePayload(quote),
+          quote: retryFlow.buildQuotePayload(quote),
           quoteFingerprint: currentQuoteFingerprint,
           providerPayload: {},
           paymentAccessToken,
@@ -3419,6 +3410,12 @@ export const startPaymentSession = async ({
           refreshedHold: buildRefreshedHoldBody(refreshed),
         },
       };
+    }
+    if (provider !== "free" && refreshedStatus !== PAYMENT_STATUS_STARTED) {
+      return retryFlow.buildNotPayableStartResponse({
+        client, record: refreshed, buildBrowserCompletionBody, buildPublicStatusBody, getPublicRecoveryMessage,
+        buildProviderPayloadFromRecord, buildRefreshedHoldBody, issuePaymentAccessTokenForRecord,
+      });
     }
     if (provider === "free") {
       const finalized = await finalizePaymentRecordInternal({
@@ -3432,7 +3429,7 @@ export const startPaymentSession = async ({
         body: {
           ...await buildBrowserCompletionBody({ client, record: refreshed, body: finalized.response }),
           provider,
-          quote: buildQuotePayload(quote),
+          quote: retryFlow.buildQuotePayload(quote),
           quoteFingerprint: currentQuoteFingerprint,
           sessionExpiresAt: String(refreshed.sessionExpiresAt || "").trim(),
           refreshedHold: buildRefreshedHoldBody(refreshed),
@@ -3449,7 +3446,7 @@ export const startPaymentSession = async ({
         checkoutCreated,
         bookingSummary: null,
         provider,
-        quote: buildQuotePayload(quote),
+        quote: retryFlow.buildQuotePayload(quote),
         quoteFingerprint: currentQuoteFingerprint,
         providerPayload: buildProviderPayloadFromRecord(refreshed),
         paymentAccessToken,
@@ -3521,7 +3518,7 @@ export const finalizePaymentSession = async ({
   if (!binding.ok) return { httpStatus: 409, body: { ok: false, code: binding.reason } };
   if (record.provider === "dodo") {
     const result = await refreshDodoPayment({ client, record, source: "reconcile" });
-    return { ...result, body: await buildBrowserCompletionBody({ client, record, body: result.body }) };
+    return retryFlow.runBrowserCompletion({ client, record, body: result.body, result, buildBrowserCompletionBody });
   }
 
   const terminalStatus = String(record?.status || "").trim().toLowerCase();
@@ -3552,10 +3549,9 @@ export const finalizePaymentSession = async ({
     providerData: flatProviderData,
   });
 
-  return {
-    httpStatus: finalized.httpStatus,
-    body: await buildBrowserCompletionBody({ client, record, body: finalized.response }),
-  };
+  return retryFlow.runBrowserCompletion({
+    client, record, body: finalized.response, httpStatus: finalized.httpStatus, buildBrowserCompletionBody,
+  });
 };
 
 export const cancelPaymentSession = async ({
@@ -3582,17 +3578,12 @@ export const cancelPaymentSession = async ({
   }
 
   let record = resolved.record;
+  const abandonedReply = () => retryFlow.buildAbandonedCancelResponse({
+    client, record, buildBrowserCompletionBody, buildPublicStatusBody,
+  });
   const status = String(record.status || "").trim().toLowerCase();
   if (status === PAYMENT_STATUS_ABANDONED) {
-    return {
-      httpStatus: 200,
-      body: {
-        ...await buildBrowserCompletionBody({ client, record, body: buildPublicStatusBody(record) }),
-        ok: true,
-        cancelled: true,
-        refreshedHold: normalizeObject(record.cancelledHoldSnapshot),
-      },
-    };
+    return abandonedReply();
   }
   if (status === PAYMENT_STATUS_BOOKED || status === PAYMENT_STATUS_EMAIL_PARTIAL) {
     return {
@@ -3695,6 +3686,7 @@ export const cancelPaymentSession = async ({
   for (let attempt = 0; attempt < 4; attempt += 1) {
     record = (await getPaymentRecordById(client, record._id)) || record;
     const currentStatus = String(record.status || "").trim().toLowerCase();
+    if (currentStatus === PAYMENT_STATUS_ABANDONED) return abandonedReply();
     if (currentStatus !== PAYMENT_STATUS_STARTED) {
       const captured = [
         PAYMENT_STATUS_BOOKED,
@@ -3720,6 +3712,10 @@ export const cancelPaymentSession = async ({
       !hold?._id ||
       String(hold.paymentRecordId || "").trim() !== String(record._id).trim()
     ) {
+      record = (await getPaymentRecordById(client, record._id)) || record;
+      const latestStatus = String(record.status || "").trim().toLowerCase();
+      if (latestStatus === PAYMENT_STATUS_ABANDONED) return abandonedReply();
+      if (latestStatus !== PAYMENT_STATUS_STARTED && attempt < 3) continue;
       return {
         httpStatus: 409,
         body: { ok: false, error: "The slot reservation is no longer owned by this payment." },
@@ -3886,21 +3882,19 @@ const isRecoveryAttemptDue = (record = {}) => {
 };
 
 const scheduleProviderRecoveryCheck = async ({
-  client,
-  record,
-  reason,
-  failed = false,
-  lastSeenState = "",
+  client, record, reason, failed = false, lastSeenState = "", nextStatus = "",
 }) => {
   const operation = await currentPaymentOperation({ client, record });
   if (!operation.owned) return operation.record;
   await requirePaymentResourceRevisions({ client, record });
   const recoveryAttemptCount = Number(record.recoveryAttemptCount || 0) + 1;
+  const targetStatus = String(nextStatus || record.status || PAYMENT_STATUS_STARTED).trim().toLowerCase();
   try {
     return await patchPaymentRecord({
       client,
       record,
       set: {
+        ...(nextStatus ? { status: targetStatus } : {}),
         recoveryReason: String(reason || "provider_status_pending").trim(),
         ...(lastSeenState ? { providerOrderLastSeenState: lastSeenState } : {}),
         recoveryAttemptCount,
@@ -3914,7 +3908,7 @@ const scheduleProviderRecoveryCheck = async ({
         source: "reconcile",
       },
       event: buildPaymentRecordEvent({
-        status: String(record.status || PAYMENT_STATUS_STARTED).trim().toLowerCase(),
+        status: targetStatus,
         source: "reconcile",
         reason,
       }),
@@ -4408,10 +4402,10 @@ export const getPaymentStatus = async ({
       fallbackMessage: "Payment status is temporarily unavailable.",
     });
   }
-  return {
-    httpStatus: 200,
-    body: await buildBrowserCompletionBody({ client, record: resolved.record, body: buildPublicStatusBody(resolved.record) }),
-  };
+  return retryFlow.buildPaymentStatusResponse({
+    client, record: resolved.record, buildPublicStatusBody,
+    buildProviderPayloadFromRecord, buildBrowserCompletionBody,
+  });
 };
 
 export const reconcilePaymentSessions = async ({
@@ -4988,11 +4982,15 @@ export const reconcilePaymentSessions = async ({
               summary.recovery += 1;
             }
           } else {
+            const restoredStatus = status === PAYMENT_STATUS_NEEDS_RECOVERY &&
+              hasRecoverableBookingPayload(record) && retryFlow.canRestoreUnpaidRecovery(record, inspection)
+              ? PAYMENT_STATUS_STARTED : "";
             await scheduleProviderRecoveryCheck({
               client,
               record,
               reason: "provider_confirmed_unpaid_before_expiry",
               lastSeenState: "unpaid",
+              nextStatus: restoredStatus,
             });
             summary.pending += 1;
           }
