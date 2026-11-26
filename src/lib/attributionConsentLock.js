@@ -426,13 +426,13 @@ const waitPeers = (expectedPeers, type, reqId) => {
   });
 };
 
-const handoffDeclinedToPeers = async (merged, targetConsent, epoch) => {
+const handoffToPeers = async (type, ackType, merged, targetConsent, epoch) => {
   const peers = await discoverPeers();
   if (!peers.size) return;
   const reqId = makeId();
-  const wait = waitPeers(peers, "sync_declined_ack", reqId);
+  const wait = waitPeers(peers, ackType, reqId);
   postMsg({
-    type: "sync_declined_attribution",
+    type,
     consentEpoch: epoch,
     targetConsent,
     requestId: reqId,
@@ -443,7 +443,9 @@ const handoffDeclinedToPeers = async (merged, targetConsent, epoch) => {
 
 const handoffAndRemoveCookies = async (merged, live, epoch, forceHandoff = false) => {
   if (forceHandoff || (merged && live !== "granted")) {
-    await handoffDeclinedToPeers(merged, live, epoch);
+    await handoffToPeers("sync_declined_attribution", "sync_declined_ack", merged, live, epoch);
+  } else if (merged && live === "granted") {
+    await handoffToPeers("sync_local_attribution", "sync_local_ack", merged, "granted", epoch);
   }
   const clearRemaining = () => {
     if (!cookiesAllowed()) {
@@ -533,6 +535,30 @@ const handlePeerMessage = (msg) => {
       }
       postMsg({
         type: "sync_declined_ack",
+        requestId: String(msg.requestId || ""),
+        tabId: getTabId(),
+        consentEpoch: epoch,
+      });
+    }).catch(() => {});
+    return;
+  }
+  if (type === "sync_local_attribution") {
+    withLock(STATE_LOCK, () => {
+      const live = readLiveSharedConsent();
+      const epoch = readEpoch();
+      if (live !== "granted" || msg.targetConsent !== "granted" || msg.consentEpoch !== epoch) return;
+      const incoming = isRecord(msg.attribution) ? msg.attribution : null;
+      const merged = mergeAttributionMonotonic(readLocalSession(), incoming);
+      if (merged) {
+        rememberMerged(merged);
+        if (!writeSessionRaw(merged)) {
+          unsavedFallback = mergeAttributionMonotonic(merged, unsavedFallback) || merged;
+          return;
+        }
+        unsavedFallback = null;
+      }
+      postMsg({
+        type: "sync_local_ack",
         requestId: String(msg.requestId || ""),
         tabId: getTabId(),
         consentEpoch: epoch,

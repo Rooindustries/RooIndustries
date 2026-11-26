@@ -665,14 +665,6 @@ test("legacy grant Reset under full localStorage quota hands off attribution to 
     localStorage.removeItem("roo-consent-epoch");
     document.cookie = "_fbp=fb.1.1700000000000.323456; Path=/; Max-Age=3600; SameSite=Lax";
     document.cookie = "_fbc=fb.1.1700000000000.cbcdef; Path=/; Max-Age=3600; SameSite=Lax";
-  });
-
-  const peer = await context.newPage();
-  await peer.goto("/referrals/login");
-  await expect(banner(peer)).toHaveCount(0);
-  await waitForTabPresence(page, 2);
-
-  await page.evaluate(() => {
     let low = 0;
     let high = 10 * 1024 * 1024;
     while (low < high) {
@@ -686,6 +678,11 @@ test("legacy grant Reset under full localStorage quota hands off attribution to 
     }
     localStorage.setItem("roo_quota_pad", "x".repeat(low));
   });
+
+  const peer = await context.newPage();
+  await peer.goto("/referrals/login");
+  await expect(banner(peer)).toHaveCount(0);
+  await waitForTabPresence(page, 2);
 
   await openCookieSettings(page);
   await expect(banner(page)).toBeVisible();
@@ -738,7 +735,14 @@ test("queued campaign write under Level 1 contention is visible immediately to s
     window.history.pushState(state, "", "/packages?utm_source=second_camp&utm_campaign=newer");
     window.dispatchEvent(new PopStateEvent("popstate", { state }));
   });
-  await page.waitForTimeout(200);
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const { pending } = await navigator.locks.query();
+        return (pending || []).some((lock) => lock.name === "roo_sales_attribution_cookie");
+      }),
+    )
+    .toBe(true);
   expect((await readAttrCookies(context)).roo_attr_last?.lastTouch?.source).toBe("first_camp");
 
   await page.locator('a[href^="/booking"]').first().click();
@@ -1019,6 +1023,7 @@ test("closing Reset tab before handoff still saves journey in healthy peer when 
 
   await page.close();
   await fullPeer.evaluate(() => navigator.locks.request("roo_sales_attribution_cookie", () => true));
+  await expect.poll(() => healthyPeer.evaluate(() => window.__gateHealthyLock)).toBe(false);
   await healthyPeer.evaluate(() => window.__releaseHealthyLock());
   await healthyPeer.evaluate(() => navigator.locks.request("roo_sales_attribution_cookie", () => true));
 
@@ -1054,7 +1059,18 @@ test("Decline handoff skips ack while peer sessionStorage stays full and promote
   await peer.addInitScript(() => {
     const OrigBC = window.BroadcastChannel;
     window.__peerSentAcks = [];
+    window.__peerReceivedDecline = [];
     window.BroadcastChannel = class SpyAckBC extends OrigBC {
+      constructor(name) {
+        super(name);
+        if (name === "roo_sales_attribution_sync") {
+          this.addEventListener("message", (event) => {
+            if (event?.data?.type === "sync_declined_attribution") {
+              window.__peerReceivedDecline.push(event.data.consentEpoch);
+            }
+          });
+        }
+      }
       postMessage(msg) {
         if (msg?.type === "sync_declined_ack") {
           window.__peerSentAcks.push(msg.consentEpoch);
@@ -1083,9 +1099,11 @@ test("Decline handoff skips ack while peer sessionStorage stays full and promote
   await declineCookies(page);
   await expect(banner(page)).toHaveCount(0);
   await expect(banner(peer)).toHaveCount(0);
+  await expect.poll(() => peer.evaluate(() => window.__peerReceivedDecline.length)).toBeGreaterThan(0);
   expect(await peer.evaluate(() => window.__peerSentAcks)).toEqual([]);
   expect(await peer.evaluate(() => sessionStorage.getItem("sales_attribution"))).toBeNull();
 
+  await page.close();
   await peer.evaluate(() => {
     sessionStorage.removeItem("roo_session_pad");
   });
@@ -1097,6 +1115,48 @@ test("Decline handoff skips ack while peer sessionStorage stays full and promote
     roo_attr: { firstTouch: { source: "decline_full_actor" } },
     roo_attr_last: { lastTouch: { source: "decline_full_peer" } },
   });
+});
+
+test("local Decline fallback under full localStorage hands off journey to surviving granted peer", async ({
+  page,
+  context,
+}) => {
+  await page.goto("/packages?utm_source=local_fallback_seed&utm_campaign=delta");
+  await expect(banner(page)).toBeVisible();
+  await banner(page).getByRole("button", { name: "Accept", exact: true }).click();
+  await expect(banner(page)).toHaveCount(0);
+  await expect.poll(async () => (await readAttrCookies(context)).roo_attr?.firstTouch?.source).toBe(
+    "local_fallback_seed",
+  );
+
+  const peer = await context.newPage();
+  await peer.goto("/referrals/login");
+  await expect(banner(peer)).toHaveCount(0);
+  expect(await peer.evaluate(() => sessionStorage.getItem("sales_attribution"))).toBeNull();
+  await waitForTabPresence(page, 2);
+
+  await page.evaluate(() => {
+    const orig = Storage.prototype.setItem;
+    Storage.prototype.setItem = function blockLocalConsent(key, value) {
+      if (this === window.localStorage && (key === "roo-consent" || key === "roo-consent-epoch")) {
+        throw new DOMException("Local storage full", "QuotaExceededError");
+      }
+      return orig.call(this, key, value);
+    };
+  });
+  await openCookieSettings(page);
+  await expect(banner(page)).toBeVisible();
+  await banner(page).getByRole("button", { name: "Decline", exact: true }).click();
+  await expect(banner(page)).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem("roo-consent"))).toBe("granted");
+  expect(await readAttrCookies(context)).toEqual({});
+
+  await page.close();
+  await expect(banner(peer)).toHaveCount(0);
+  const peerSession = await peer.evaluate(() =>
+    JSON.parse(sessionStorage.getItem("sales_attribution") || "null"),
+  );
+  expect(peerSession?.firstTouch?.source).toBe("local_fallback_seed");
 });
 
 test("peer unsavedFallback captured under full sessionStorage is collected on Accept in another tab", async ({
