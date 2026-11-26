@@ -245,3 +245,31 @@ test("a quote without line amounts never shows browser-estimated discounts", asy
   await expect(page.getByText(`−${usd(overhaulPrice * 0.2)}`)).toHaveCount(0);
   await expect(line(page, "Coupon")).toHaveCount(0);
 });
+
+test("rejected coupon replacement stays cleared across reload", async ({ page, flow }) => {
+  await flow.review();
+  await flow.payment();
+  const ui = fields(page);
+  const remove = page.getByRole("button", { name: "Remove coupon", exact: true });
+  const quoteCoupon = () => lastQuote(flow)?.couponCode;
+  await expect(ui.coupon).toBeEnabled();
+  await expect(ui.coupon).toHaveValue("");
+  await ui.coupon.fill("save20");
+  await ui.couponApply.click();
+  await expect(remove).toBeVisible();
+  await expect.poll(quoteCoupon).toBe("save20");
+
+  await ui.coupon.fill("expired");
+  await ui.couponApply.click();
+  await expect(page.getByRole("alert").filter({ hasText: "This coupon has expired." })).toBeVisible();
+  await expect(remove).toHaveCount(0);
+  await expect.poll(quoteCoupon).toBe("");
+
+  const callCount = flow.state.calls.length;
+  await page.reload();
+  await expect(ui.coupon).toBeEnabled();
+  await expect.poll(() => flow.state.calls.slice(callCount).some(c => c.path === "/api/payment/quote")).toBe(true);
+  await expect(ui.coupon).toHaveValue("");
+  await expect(remove).toHaveCount(0);
+  expect(quoteCoupon()).toBe("");
+});

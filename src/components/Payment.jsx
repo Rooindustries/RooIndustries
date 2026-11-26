@@ -1611,7 +1611,6 @@ export default function Payment({ hideFooter = false }) {
 
       setCoupon(safeCoupon);
       setCouponInput(safeCoupon.code);
-      checkoutFlow.persistCodes({ referralCode: referral?.code || "", couponCode: safeCoupon.code });
       showBanner("success", `Coupon applied: ${formatCouponValue(safeCoupon)}`);
     } catch {
       if (!manualCodeAllowedRef.current) return;
@@ -2081,7 +2080,6 @@ export default function Payment({ hideFooter = false }) {
                       setCoupon(null);
                       setCouponInput("");
                       setCouponError("");
-                      checkoutFlow.persistCodes({ referralCode: referral?.code || "", couponCode: "" });
                     }}
                     disabled={checkingCode || checkoutActionBusy}
                     className="text-xs text-ink-secondary underline underline-offset-2"
