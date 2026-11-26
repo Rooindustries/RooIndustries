@@ -914,6 +914,225 @@ test("Decline handoff after peer sessionStorage quota recovery keeps peer's newe
   expect(persisted?.lastTouch?.source).toBe("newer_peer");
 });
 
+test("closing the Reset tab before handoff preserves the journey across multiple surviving tabs", async ({
+  page,
+  context,
+}) => {
+  await page.goto("/packages?utm_source=reset_close_multi&utm_campaign=delta");
+  await expect(banner(page)).toBeVisible();
+  await banner(page).getByRole("button", { name: "Accept", exact: true }).click();
+  await expect(banner(page)).toHaveCount(0);
+  await expect.poll(async () => (await readAttrCookies(context)).roo_attr?.firstTouch?.source).toBe(
+    "reset_close_multi",
+  );
+
+  const peerOne = await context.newPage();
+  await peerOne.goto("/referrals/login");
+  const peerTwo = await context.newPage();
+  await peerTwo.goto("/referrals/login");
+  await waitForTabPresence(page, 3);
+
+  await page.evaluate(() => {
+    navigator.locks.query = () =>
+      new Promise(() => {
+        window.__resetDiscoveryEntered = true;
+      });
+  });
+
+  await openCookieSettings(page);
+  await expect.poll(() => page.evaluate(() => Boolean(window.__resetDiscoveryEntered))).toBe(true);
+  await expect(banner(peerOne)).toBeVisible();
+  await expect(banner(peerTwo)).toBeVisible();
+
+  await page.close();
+  await peerOne.evaluate(() => navigator.locks.request("roo_sales_attribution_cookie", () => true));
+  await peerTwo.evaluate(() => navigator.locks.request("roo_sales_attribution_cookie", () => true));
+  const sources = await Promise.all(
+    [peerOne, peerTwo].map((tab) =>
+      tab.evaluate(() => JSON.parse(sessionStorage.getItem("sales_attribution") || "null")?.firstTouch?.source || null),
+    ),
+  );
+  expect(sources).toEqual(["reset_close_multi", "reset_close_multi"]);
+  expect(await readAttrCookies(context)).toEqual({});
+});
+
+test("closing Reset tab before handoff still saves journey in healthy peer when first survivor is full", async ({
+  page,
+  context,
+}) => {
+  await page.goto("/packages?utm_source=reset_close_quota&utm_campaign=delta");
+  await expect(banner(page)).toBeVisible();
+  await banner(page).getByRole("button", { name: "Accept", exact: true }).click();
+  await expect(banner(page)).toHaveCount(0);
+  await expect.poll(async () => (await readAttrCookies(context)).roo_attr?.firstTouch?.source).toBe(
+    "reset_close_quota",
+  );
+
+  const fullPeer = await context.newPage();
+  await fullPeer.goto("/referrals/login");
+  const healthyPeer = await context.newPage();
+  await healthyPeer.addInitScript(() => {
+    const origRequest = navigator.locks.request.bind(navigator.locks);
+    window.__gateHealthyLock = false;
+    window.__releaseHealthyLock = () => {};
+    navigator.locks.request = (name, ...rest) => {
+      if (window.__gateHealthyLock && name === "roo_sales_attribution_cookie") {
+        window.__gateHealthyLock = false;
+        return new Promise((resolve) => {
+          window.__releaseHealthyLock = () => resolve(origRequest(name, ...rest));
+        });
+      }
+      return origRequest(name, ...rest);
+    };
+  });
+  await healthyPeer.goto("/referrals/login");
+  await waitForTabPresence(page, 3);
+
+  await fullPeer.evaluate(() => {
+    let low = 0;
+    let high = 10 * 1024 * 1024;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      try {
+        sessionStorage.setItem("roo_session_pad", "x".repeat(mid));
+        low = mid;
+      } catch {
+        high = mid - 1;
+      }
+    }
+    sessionStorage.setItem("roo_session_pad", "x".repeat(low));
+  });
+  await healthyPeer.evaluate(() => {
+    window.__gateHealthyLock = true;
+  });
+  await page.evaluate(() => {
+    navigator.locks.query = () =>
+      new Promise(() => {
+        window.__resetDiscoveryEntered = true;
+      });
+  });
+
+  await openCookieSettings(page);
+  await expect.poll(() => page.evaluate(() => Boolean(window.__resetDiscoveryEntered))).toBe(true);
+  await expect(banner(fullPeer)).toBeVisible();
+  await expect(banner(healthyPeer)).toBeVisible();
+
+  await page.close();
+  await fullPeer.evaluate(() => navigator.locks.request("roo_sales_attribution_cookie", () => true));
+  await healthyPeer.evaluate(() => window.__releaseHealthyLock());
+  await healthyPeer.evaluate(() => navigator.locks.request("roo_sales_attribution_cookie", () => true));
+
+  expect(
+    await healthyPeer.evaluate(
+      () => JSON.parse(sessionStorage.getItem("sales_attribution") || "null")?.firstTouch?.source || null,
+    ),
+  ).toBe("reset_close_quota");
+  expect(await readAttrCookies(context)).toEqual({});
+
+  await fullPeer.evaluate(() => {
+    sessionStorage.removeItem("roo_session_pad");
+  });
+  await fullPeer.goto("/packages");
+  expect(
+    await healthyPeer.evaluate(
+      () => JSON.parse(sessionStorage.getItem("sales_attribution") || "null")?.firstTouch?.source || null,
+    ),
+  ).toBe("reset_close_quota");
+});
+
+test("Decline handoff skips ack while peer sessionStorage stays full and promotes both touches on Accept", async ({
+  page,
+  context,
+}) => {
+  await page.goto("/packages?utm_source=decline_full_actor&utm_campaign=delta");
+  await expect(banner(page)).toBeVisible();
+  await expect.poll(() =>
+    page.evaluate(() => JSON.parse(sessionStorage.getItem("sales_attribution") || "null")?.firstTouch?.source || null),
+  ).toBe("decline_full_actor");
+
+  const peer = await context.newPage();
+  await peer.addInitScript(() => {
+    const OrigBC = window.BroadcastChannel;
+    window.__peerSentAcks = [];
+    window.BroadcastChannel = class SpyAckBC extends OrigBC {
+      postMessage(msg) {
+        if (msg?.type === "sync_declined_ack") {
+          window.__peerSentAcks.push(msg.consentEpoch);
+        }
+        return super.postMessage(msg);
+      }
+    };
+    let low = 0;
+    let high = 10 * 1024 * 1024;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      try {
+        sessionStorage.setItem("roo_session_pad", "x".repeat(mid));
+        low = mid;
+      } catch {
+        high = mid - 1;
+      }
+    }
+    sessionStorage.setItem("roo_session_pad", "x".repeat(low));
+  });
+  await peer.goto("/packages?utm_source=decline_full_peer&utm_campaign=delta");
+  await expect(banner(peer)).toBeVisible();
+  expect(await peer.evaluate(() => sessionStorage.getItem("sales_attribution"))).toBeNull();
+  await waitForTabPresence(page, 2);
+
+  await declineCookies(page);
+  await expect(banner(page)).toHaveCount(0);
+  await expect(banner(peer)).toHaveCount(0);
+  expect(await peer.evaluate(() => window.__peerSentAcks)).toEqual([]);
+  expect(await peer.evaluate(() => sessionStorage.getItem("sales_attribution"))).toBeNull();
+
+  await peer.evaluate(() => {
+    sessionStorage.removeItem("roo_session_pad");
+  });
+  await openCookieSettings(peer);
+  await expect(banner(peer)).toBeVisible();
+  await banner(peer).getByRole("button", { name: "Accept", exact: true }).click();
+  await expect(banner(peer)).toHaveCount(0);
+  await expect.poll(async () => await readAttrCookies(context)).toMatchObject({
+    roo_attr: { firstTouch: { source: "decline_full_actor" } },
+    roo_attr_last: { lastTouch: { source: "decline_full_peer" } },
+  });
+});
+
+test("peer unsavedFallback captured under full sessionStorage is collected on Accept in another tab", async ({
+  page,
+  context,
+}) => {
+  await page.addInitScript(() => {
+    let low = 0;
+    let high = 10 * 1024 * 1024;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      try {
+        sessionStorage.setItem("roo_session_pad", "x".repeat(mid));
+        low = mid;
+      } catch {
+        high = mid - 1;
+      }
+    }
+    sessionStorage.setItem("roo_session_pad", "x".repeat(low));
+  });
+  await page.goto("/packages?utm_source=peer_unsaved_collect&utm_campaign=delta");
+  await expect(banner(page)).toBeVisible();
+  expect(await page.evaluate(() => sessionStorage.getItem("sales_attribution"))).toBeNull();
+
+  const actor = await context.newPage();
+  await actor.goto("/referrals/login");
+  await expect(banner(actor)).toBeVisible();
+  await waitForTabPresence(actor, 2);
+
+  await banner(actor).getByRole("button", { name: "Accept", exact: true }).click();
+  await expect(banner(actor)).toHaveCount(0);
+  await expect.poll(async () => (await readAttrCookies(context)).roo_attr?.firstTouch?.source).toBe(
+    "peer_unsaved_collect",
+  );
+});
+
 const productionTest = test.extend(productionHostFixtures);
 
 productionTest("Intercom chunk 404 never loads on booking and never breaks production pages", async ({

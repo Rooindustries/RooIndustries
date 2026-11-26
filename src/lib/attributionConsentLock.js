@@ -426,6 +426,21 @@ const waitPeers = (expectedPeers, type, reqId) => {
   });
 };
 
+const handoffDeclinedToPeers = async (merged, targetConsent, epoch) => {
+  const peers = await discoverPeers();
+  if (!peers.size) return;
+  const reqId = makeId();
+  const wait = waitPeers(peers, "sync_declined_ack", reqId);
+  postMsg({
+    type: "sync_declined_attribution",
+    consentEpoch: epoch,
+    targetConsent,
+    requestId: reqId,
+    attribution: merged,
+  });
+  await wait;
+};
+
 const readLocalSession = () => {
   const overlay =
     mergeAttributionMonotonic(pendingWrite, unsavedFallback) || pendingWrite || unsavedFallback;
@@ -614,7 +629,7 @@ export const readStoredAttribution = () => {
   const stored = session
     ? mergeAttributionMonotonic(cookies, session) || cookies || session
     : cookies;
-  if (session) {
+  if (session || unsavedFallback) {
     runQueueThawPromotion(rememberMerged);
   }
   return mergeAttributionMonotonic(stored, overlay) || stored || overlay || memory;
@@ -646,24 +661,66 @@ export const storeAttributionForConsent = () => {
   ensureAttributionSync();
   if (!cookiesAllowed()) {
     if (!ALL_COOKIES.some((name) => readCookie(name))) return;
-    const clear = () => {
+    const runUnlockedClear = () => {
       if (cookiesAllowed()) return;
       const cookies = readCookiesRaw();
-      const merged = cookies ? mergeAttributionMonotonic(cookies, readSessionRaw()) : null;
+      const merged = cookies ? mergeAttributionMonotonic(cookies, readLocalSession()) : null;
       if (merged) {
-        rememberMerged(merged);
-        writeSessionRaw(merged);
+        saveSessionOrFallback(merged);
       }
       removeCookies();
     };
     if (!hasLocks()) {
-      clear();
+      runUnlockedClear();
       return;
     }
-    withBothLocks(clear).catch(() => {});
+    let started = false;
+    const fallbackIfNotStarted = () => {
+      if (started) return undefined;
+      started = true;
+      runUnlockedClear();
+      return undefined;
+    };
+    withLock(
+      COOKIE_LOCK,
+      async () => {
+        const state = await withLock(
+          STATE_LOCK,
+          () => {
+            started = true;
+            if (cookiesAllowed()) return null;
+            const cookies = readCookiesRaw();
+            const merged = cookies ? mergeAttributionMonotonic(cookies, readLocalSession()) : null;
+            if (merged) {
+              saveSessionOrFallback(merged);
+            }
+            removeCookies(["_fbp", "_fbc"]);
+            return {
+              merged,
+              live: readLiveSharedConsent(),
+              epoch: readEpoch(),
+            };
+          },
+          fallbackIfNotStarted,
+        );
+        if (!state) return;
+        if (state.merged && state.live !== "granted") {
+          await handoffDeclinedToPeers(state.merged, state.live, state.epoch);
+        }
+        const clearRemaining = () => {
+          if (!cookiesAllowed()) {
+            removeCookies();
+          }
+        };
+        if (ALL_COOKIES.some((name) => readCookie(name))) {
+          await withLock(STATE_LOCK, clearRemaining, clearRemaining);
+        }
+      },
+      fallbackIfNotStarted,
+    ).catch(() => {});
     return;
   }
-  if (readSessionRaw()) {
+  if (readSessionRaw() || unsavedFallback) {
     runQueueThawPromotion(rememberMerged);
   }
 };
@@ -862,26 +919,15 @@ export const runConsentTransition = (target, announce) => {
       );
       if (!stage || !stage.ok) return;
       if (stage.changed) {
-        const peers = await discoverPeers();
-        if (peers.size) {
-          const reqId = makeId();
-          const wait = waitPeers(peers, "sync_declined_ack", reqId);
-          postMsg({
-            type: "sync_declined_attribution",
-            consentEpoch: stage.epoch,
-            targetConsent: target,
-            requestId: reqId,
-            attribution: stage.merged,
-          });
-          await wait;
-        }
+        await handoffDeclinedToPeers(stage.merged, stage.goal, stage.epoch);
       }
+      const clearRemaining = () => {
+        if (!cookiesAllowed()) {
+          removeCookies();
+        }
+      };
       if (ALL_COOKIES.some((name) => readCookie(name))) {
-        await withLock(STATE_LOCK, () => {
-          if (!cookiesAllowed()) {
-            removeCookies();
-          }
-        });
+        await withLock(STATE_LOCK, clearRemaining, clearRemaining);
       }
       announce(target);
     },
