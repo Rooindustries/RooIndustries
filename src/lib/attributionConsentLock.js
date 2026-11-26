@@ -15,6 +15,9 @@ const COOKIE_MAX_AGE = 7776000;
 const ALL_COOKIES = [FIRST_COOKIE, LAST_COOKIE, "_fbp", "_fbc"];
 
 let memory = null;
+let pendingWrite = null;
+let pendingWriteSeq = 0;
+let unsavedFallback = null;
 let tabId = "";
 let presenceStarted = false;
 let hiding = false;
@@ -116,13 +119,16 @@ const writeSessionRaw = (value) => {
   try {
     if (!value) {
       sessionStorage.removeItem(SESSION_KEY);
-      return;
+      return true;
     }
     const serialized = JSON.stringify(value);
     if (sessionStorage.getItem(SESSION_KEY) !== serialized) {
       sessionStorage.setItem(SESSION_KEY, serialized);
     }
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
 };
 
 const readCookiesRaw = () => {
@@ -239,13 +245,36 @@ const ensurePresence = () => {
   } catch {}
 };
 
-const withLock = (name, fn) => {
+const withLock = (name, fn, onLockUnavailable = null) => {
   ensurePresence();
   if (!hasLocks()) return Promise.resolve().then(fn);
-  return navigator.locks.request(name, () => fn());
+  let started = false;
+  const invoke = () => {
+    started = true;
+    return fn();
+  };
+  try {
+    return navigator.locks.request(name, invoke).catch((error) => {
+      if (!started && onLockUnavailable) return onLockUnavailable(error);
+      throw error;
+    });
+  } catch (error) {
+    if (!started && onLockUnavailable) {
+      return Promise.resolve().then(() => onLockUnavailable(error));
+    }
+    return Promise.reject(error);
+  }
 };
 
-const withBothLocks = (fn) => withLock(COOKIE_LOCK, () => withLock(STATE_LOCK, fn));
+const withBothLocks = (fn) => {
+  let entered = false;
+  const runOnce = () => {
+    if (entered) return undefined;
+    entered = true;
+    return fn();
+  };
+  return withLock(COOKIE_LOCK, () => withLock(STATE_LOCK, runOnce, runOnce), runOnce);
+};
 
 const touchMs = (attribution) => {
   const normalized = normalizeStoredJourney(attribution);
@@ -457,7 +486,14 @@ const handlePeerMessage = (msg) => {
       if (live === "granted" || msg.targetConsent !== live || msg.consentEpoch !== epoch) return;
       const incoming = isRecord(msg.attribution) ? msg.attribution : null;
       const merged = mergeAttributionMonotonic(readSessionRaw(), incoming);
-      if (merged) writeSessionRaw(merged);
+      if (merged) {
+        rememberMerged(merged);
+        if (!writeSessionRaw(merged)) {
+          unsavedFallback = mergeAttributionMonotonic(merged, unsavedFallback) || merged;
+          return;
+        }
+        unsavedFallback = null;
+      }
       postMsg({
         type: "sync_declined_ack",
         requestId: String(msg.requestId || ""),
@@ -494,17 +530,28 @@ export const ensureAttributionSync = () => {
 const runWriteSync = (value, onMerged) => {
   ensureAttributionSync();
   if (cookiesAllowed()) {
-    const existing = mergeAttributionMonotonic(readCookiesRaw(), readSessionRaw());
+    const existing = mergeAttributionMonotonic(
+      mergeAttributionMonotonic(readCookiesRaw(), readSessionRaw()),
+      unsavedFallback,
+    );
     const merged = mergeAttributionMonotonic(value, existing);
     if (!merged) return;
     onMerged?.(merged);
-    writeSessionRaw(writeCookiesRaw(merged) ? null : merged);
+    if (writeCookiesRaw(merged)) {
+      unsavedFallback = null;
+      writeSessionRaw(null);
+    } else {
+      saveSessionOrFallback(merged);
+    }
     return;
   }
-  const merged = mergeAttributionMonotonic(value, readSessionRaw());
+  const merged = mergeAttributionMonotonic(
+    value,
+    mergeAttributionMonotonic(readSessionRaw(), unsavedFallback),
+  );
   if (!merged) return;
   onMerged?.(merged);
-  writeSessionRaw(merged);
+  saveSessionOrFallback(merged);
 };
 
 const runQueueThawPromotion = (onMerged) => {
@@ -513,11 +560,12 @@ const runQueueThawPromotion = (onMerged) => {
   thawQueued = true;
   return withBothLocks(() => {
     if (!cookiesAllowed()) return;
-    const session = readSessionRaw();
+    const session = mergeAttributionMonotonic(readSessionRaw(), unsavedFallback);
     const merged = session ? mergeAttributionMonotonic(readCookiesRaw(), session) : null;
     if (!merged) return;
     onMerged?.(merged);
     if (!writeCookiesRaw(merged)) return;
+    unsavedFallback = null;
     const currentMs = touchMs(readSessionRaw());
     const mergedMs = touchMs(merged);
     if (!Number.isFinite(currentMs) || !Number.isFinite(mergedMs) || currentMs <= mergedMs) {
@@ -530,43 +578,64 @@ const runQueueThawPromotion = (onMerged) => {
     });
 };
 
+const rememberMerged = (merged) => {
+  memory = mergeAttributionMonotonic(merged, memory) || merged;
+};
+
+const saveSessionOrFallback = (merged) => {
+  if (!merged) return true;
+  rememberMerged(merged);
+  if (writeSessionRaw(merged)) {
+    unsavedFallback = null;
+    return true;
+  }
+  unsavedFallback = mergeAttributionMonotonic(merged, unsavedFallback) || merged;
+  return false;
+};
+
 export const readStoredAttribution = () => {
   if (typeof window === "undefined") return memory;
+  const overlay =
+    mergeAttributionMonotonic(pendingWrite, unsavedFallback) || pendingWrite || unsavedFallback;
   if (!cookiesAllowed()) {
-    return readSessionRaw() || memory;
+    const session = readSessionRaw();
+    return mergeAttributionMonotonic(session, overlay) || session || overlay || memory;
   }
   const cookies = readCookiesRaw();
   const session = readSessionRaw();
+  const stored = session
+    ? mergeAttributionMonotonic(cookies, session) || cookies || session
+    : cookies;
   if (session) {
-    runQueueThawPromotion((merged) => {
-      memory = merged;
-    });
-    return mergeAttributionMonotonic(cookies, session) || cookies || session || memory;
+    runQueueThawPromotion(rememberMerged);
   }
-  return cookies || memory;
+  return mergeAttributionMonotonic(stored, overlay) || stored || overlay || memory;
 };
 
 export const writeStoredAttribution = (value) => {
   const normalized = normalizeStoredJourney(value) || value;
-  memory = mergeAttributionMonotonic(normalized, memory) || normalized;
+  rememberMerged(normalized);
   if (typeof window === "undefined") return;
   ensureAttributionSync();
-  const onMerged = (merged) => {
-    memory = merged;
-  };
   if (!hasLocks()) {
-    runWriteSync(normalized, onMerged);
+    runWriteSync(normalized, rememberMerged);
     return;
   }
-  withBothLocks(() => runWriteSync(normalized, onMerged)).catch(() => {});
+  pendingWriteSeq += 1;
+  const seq = pendingWriteSeq;
+  pendingWrite = mergeAttributionMonotonic(normalized, pendingWrite) || normalized;
+  withBothLocks(() => runWriteSync(normalized, rememberMerged))
+    .catch(() => {})
+    .finally(() => {
+      if (pendingWriteSeq === seq) {
+        pendingWrite = null;
+      }
+    });
 };
 
 export const storeAttributionForConsent = () => {
   if (typeof window === "undefined") return;
   ensureAttributionSync();
-  const onMerged = (merged) => {
-    memory = merged;
-  };
   if (!cookiesAllowed()) {
     if (!ALL_COOKIES.some((name) => readCookie(name))) return;
     const clear = () => {
@@ -574,7 +643,7 @@ export const storeAttributionForConsent = () => {
       const cookies = readCookiesRaw();
       const merged = cookies ? mergeAttributionMonotonic(cookies, readSessionRaw()) : null;
       if (merged) {
-        onMerged(merged);
+        rememberMerged(merged);
         writeSessionRaw(merged);
       }
       removeCookies();
@@ -587,7 +656,7 @@ export const storeAttributionForConsent = () => {
     return;
   }
   if (readSessionRaw()) {
-    runQueueThawPromotion(onMerged);
+    runQueueThawPromotion(rememberMerged);
   }
 };
 
@@ -613,57 +682,71 @@ export const runConsentTransition = (target, announce) => {
     keepUnsaved(target);
     if (target !== "granted") {
       if (merged) {
-        memory = merged;
-        writeSessionRaw(merged);
+        saveSessionOrFallback(merged);
       }
       removeCookies();
     }
     announce(target);
   };
-  const clearLocalOverride = () => {
+  const clearLocalOverride = (targetChoice = "") => {
     try {
       window.sessionStorage.removeItem(CONSENT_KEY);
     } catch {}
-    keepUnsaved("");
+    keepUnsaved(targetChoice);
   };
   const promoteGrantedAttribution = (replies = []) => {
     let merged = mergeAttributionMonotonic(readCookiesRaw(), readSessionRaw());
+    merged = mergeAttributionMonotonic(merged, pendingWrite);
+    merged = mergeAttributionMonotonic(merged, unsavedFallback);
+    merged = mergeAttributionMonotonic(merged, memory);
     for (const rep of replies) {
       if (rep.attribution) {
         merged = mergeAttributionMonotonic(merged, rep.attribution);
       }
     }
     if (!merged) return true;
-    memory = merged;
+    rememberMerged(merged);
     const wrote = writeCookiesRaw(merged);
-    writeSessionRaw(wrote ? null : merged);
+    if (wrote) {
+      unsavedFallback = null;
+      writeSessionRaw(null);
+    } else {
+      saveSessionOrFallback(merged);
+    }
     return wrote;
   };
   const applyDecline = () => {
-    const merged = mergeAttributionMonotonic(readCookiesRaw(), readSessionRaw());
+    const merged = mergeAttributionMonotonic(
+      mergeAttributionMonotonic(readCookiesRaw(), readSessionRaw()),
+      mergeAttributionMonotonic(pendingWrite, unsavedFallback),
+    );
     const stage = commitSharedTransition(target);
     if (!stage.ok) {
       localFallback(merged);
       return { ok: false, changed: false, epoch: stage.epoch, merged };
     }
     keepDecline();
-    clearLocalOverride();
+    clearLocalOverride(target);
     if (merged) {
-      memory = merged;
-      writeSessionRaw(merged);
+      saveSessionOrFallback(merged);
+    }
+    if (!cookiesAllowed()) {
+      removeCookies();
     }
     return { ...stage, merged };
   };
-
-  if (!hasLocks()) {
+  const runUnlocked = () => {
     if (target === "granted") {
       const stage = commitSharedTransition("granted");
       if (!stage.ok) {
         localFallback();
         return;
       }
-      clearLocalOverride();
-      if (stage.changed || readSessionRaw()) {
+      clearLocalOverride("granted");
+      if (
+        cookiesAllowed() &&
+        (stage.changed || readSessionRaw() || pendingWrite || unsavedFallback || memory)
+      ) {
         promoteGrantedAttribution();
       }
       announce("granted");
@@ -671,100 +754,122 @@ export const runConsentTransition = (target, announce) => {
     }
     const stage = applyDecline();
     if (!stage.ok) return;
-    if (!cookiesAllowed()) {
-      removeCookies();
-    }
     announce(target);
+  };
+
+  if (!hasLocks()) {
+    runUnlocked();
     return;
   }
 
+  let started = false;
+  const fallbackIfNotStarted = () => {
+    if (started) return undefined;
+    started = true;
+    runUnlocked();
+    return undefined;
+  };
+
   if (target === "granted") {
-    return withLock(COOKIE_LOCK, async () => {
-      const stage = await withLock(STATE_LOCK, () => {
-        const next = commitSharedTransition("granted");
-        if (!next.ok) {
-          localFallback();
-          return next;
+    return withLock(
+      COOKIE_LOCK,
+      async () => {
+        const stage = await withLock(
+          STATE_LOCK,
+          () => {
+            started = true;
+            const next = commitSharedTransition("granted");
+            if (!next.ok) {
+              localFallback();
+              return next;
+            }
+            clearLocalOverride("granted");
+            return next;
+          },
+          fallbackIfNotStarted,
+        );
+        if (!stage || !stage.ok) return;
+        if (!stage.changed) {
+          if (readSessionRaw() || pendingWrite || unsavedFallback || memory) {
+            await withLock(STATE_LOCK, () => {
+              if (cookiesAllowed()) promoteGrantedAttribution();
+            });
+          }
+          announce("granted");
+          return;
         }
-        clearLocalOverride();
-        return next;
-      });
-      if (!stage.ok) return;
-      if (!stage.changed) {
-        if (readSessionRaw()) {
-          await withLock(STATE_LOCK, () => {
-            if (cookiesAllowed()) promoteGrantedAttribution();
-          });
+        const peers = await discoverPeers();
+        const reqId = makeId();
+        let replies = [];
+        if (peers.size) {
+          const wait = waitPeers(peers, "session_attribution_reply", reqId);
+          postMsg({ type: "collect_session_attribution", requestId: reqId, peerIds: [...peers] });
+          replies = await wait;
         }
-        announce("granted");
-        return;
-      }
-      const peers = await discoverPeers();
-      const reqId = makeId();
-      let replies = [];
-      if (peers.size) {
-        const wait = waitPeers(peers, "session_attribution_reply", reqId);
-        postMsg({ type: "collect_session_attribution", requestId: reqId, peerIds: [...peers] });
-        replies = await wait;
-      }
-      const promotedCookies = await withLock(STATE_LOCK, () => {
-        if (!cookiesAllowed()) return false;
-        return promoteGrantedAttribution(replies);
-      });
-      if (promotedCookies) {
-        const responded = new Set();
-        const byPeer = {};
-        for (const rep of replies) {
-          if (!rep.tabId) continue;
-          const pid = String(rep.tabId);
-          responded.add(pid);
-          const capturedAt = normalizeStoredJourney(rep.attribution)?.lastTouch?.capturedAt;
-          if (typeof capturedAt === "string") {
-            byPeer[pid] = capturedAt;
+        const promotedCookies = await withLock(STATE_LOCK, () => {
+          if (!cookiesAllowed()) return false;
+          return promoteGrantedAttribution(replies);
+        });
+        if (promotedCookies) {
+          const responded = new Set();
+          const byPeer = {};
+          for (const rep of replies) {
+            if (!rep.tabId) continue;
+            const pid = String(rep.tabId);
+            responded.add(pid);
+            const capturedAt = normalizeStoredJourney(rep.attribution)?.lastTouch?.capturedAt;
+            if (typeof capturedAt === "string") {
+              byPeer[pid] = capturedAt;
+            }
+          }
+          if (responded.size) {
+            const waitAck = waitPeers(responded, "session_attribution_promoted_ack", reqId);
+            postMsg({
+              type: "session_attribution_promoted",
+              consentEpoch: stage.epoch,
+              targetConsent: "granted",
+              requestId: reqId,
+              peerIds: [...responded],
+              collectedCapturedAtByPeer: byPeer,
+            });
+            await waitAck;
           }
         }
-        if (responded.size) {
-          const waitAck = waitPeers(responded, "session_attribution_promoted_ack", reqId);
-          postMsg({
-            type: "session_attribution_promoted",
-            consentEpoch: stage.epoch,
-            targetConsent: "granted",
-            requestId: reqId,
-            peerIds: [...responded],
-            collectedCapturedAtByPeer: byPeer,
-          });
-          await waitAck;
-        }
-      }
-      announce("granted");
-    });
+        announce("granted");
+      },
+      fallbackIfNotStarted,
+    ).catch(() => {});
   }
 
-  return withLock(COOKIE_LOCK, async () => {
-    const stage = await withLock(STATE_LOCK, applyDecline);
-    if (!stage.ok) return;
-    if (stage.changed) {
-      const peers = await discoverPeers();
-      if (peers.size) {
-        const reqId = makeId();
-        const wait = waitPeers(peers, "sync_declined_ack", reqId);
-        postMsg({
-          type: "sync_declined_attribution",
-          consentEpoch: stage.epoch,
-          targetConsent: target,
-          requestId: reqId,
-          attribution: stage.merged,
-        });
-        await wait;
-      }
-    }
-    if (ALL_COOKIES.some((name) => readCookie(name))) {
-      await withLock(STATE_LOCK, () => {
-        if (!cookiesAllowed()) {
-          removeCookies();
+  return withLock(
+    COOKIE_LOCK,
+    async () => {
+      const stage = await withLock(
+        STATE_LOCK,
+        () => {
+          started = true;
+          return applyDecline();
+        },
+        fallbackIfNotStarted,
+      );
+      if (!stage || !stage.ok) return;
+      if (stage.changed) {
+        const peers = await discoverPeers();
+        if (peers.size) {
+          const reqId = makeId();
+          const wait = waitPeers(peers, "sync_declined_ack", reqId);
+          postMsg({
+            type: "sync_declined_attribution",
+            consentEpoch: stage.epoch,
+            targetConsent: target,
+            requestId: reqId,
+            attribution: stage.merged,
+          });
+          await wait;
         }
-      });
-    }
-    announce(target);
-  });
+      }
+      announce(target);
+    },
+    fallbackIfNotStarted,
+  ).catch(() => {});
 };

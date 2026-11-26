@@ -492,12 +492,12 @@ test("failed epoch write never rolls back committed epoch or lets an old Reset r
   expect(JSON.parse(epochAtGrant || "{}").nextEpoch).toBe(3);
 
   await page.evaluate(() => {
-    const orig = Storage.prototype.setItem;
+    window.__origSetItemEpoch = Storage.prototype.setItem;
     Storage.prototype.setItem = function rejectEpoch(key, value) {
       if (this === window.localStorage && key === "roo-consent-epoch") {
         throw new DOMException("Epoch write blocked", "QuotaExceededError");
       }
-      return orig.call(this, key, value);
+      return window.__origSetItemEpoch.call(this, key, value);
     };
   });
 
@@ -506,6 +506,16 @@ test("failed epoch write never rolls back committed epoch or lets an old Reset r
   expect(await page.evaluate(() => localStorage.getItem("roo-consent"))).toBe("granted");
   expect(await page.evaluate(() => localStorage.getItem("roo-consent-epoch"))).toBe(epochAtGrant);
   expect(await readAttrCookies(context)).toEqual({});
+
+  await page.evaluate(() => {
+    Storage.prototype.setItem = window.__origSetItemEpoch;
+  });
+  await openCookieSettings(page);
+  await expect(banner(peer)).toBeVisible();
+  await expect.poll(() =>
+    page.evaluate(() => JSON.parse(localStorage.getItem("roo-consent-epoch") || "{}").nextEpoch),
+  ).toBe(4);
+  expect(await page.evaluate(() => localStorage.getItem("roo-consent"))).toBeNull();
 
   await peer.evaluate(() => {
     sessionStorage.removeItem("sales_attribution");
@@ -677,6 +687,124 @@ test("legacy grant Reset under full localStorage quota hands off attribution to 
     JSON.parse(sessionStorage.getItem("sales_attribution") || "null"),
   );
   expect(peerSession?.firstTouch?.source).toBe("legacy_quota_handoff");
+});
+
+test("queued campaign write under Level 1 contention is visible immediately to same-tab reads", async ({
+  page,
+  context,
+  flow,
+}) => {
+  await page.goto("/packages?utm_source=first_camp&utm_campaign=initial");
+  await expect(banner(page)).toBeVisible();
+  await banner(page).getByRole("button", { name: "Accept", exact: true }).click();
+  await expect(banner(page)).toHaveCount(0);
+  await expect.poll(async () => (await readAttrCookies(context)).roo_attr?.firstTouch?.source).toBe("first_camp");
+
+  const holder = await context.newPage();
+  await holder.goto("/referrals/login");
+  await holder.evaluate(() => {
+    window.__l1Contend = false;
+    window.__releaseContend = null;
+    navigator.locks.request(
+      "roo_sales_attribution_cookie",
+      () =>
+        new Promise((resolve) => {
+          window.__l1Contend = true;
+          window.__releaseContend = resolve;
+        }),
+    );
+  });
+  await expect.poll(() => holder.evaluate(() => window.__l1Contend)).toBe(true);
+
+  await page.evaluate(() => {
+    window.__sameDocContend = 1;
+    const state = { ...(window.history.state || {}), __rooLegacy: true };
+    window.history.pushState(state, "", "/packages?utm_source=second_camp&utm_campaign=newer");
+    window.dispatchEvent(new PopStateEvent("popstate", { state }));
+  });
+  await page.waitForTimeout(200);
+  expect((await readAttrCookies(context)).roo_attr_last?.lastTouch?.source).toBe("first_camp");
+
+  await page.locator('a[href^="/booking"]').first().click();
+  await page.getByRole("button", { name: /^Earliest available:/ }).click();
+  await page.getByRole("button", { name: "10:00 AM", exact: true }).click();
+  await page.getByRole("button", { name: "Next", exact: true }).last().click();
+  await expect(page.getByRole("textbox", { name: "Booking email", exact: true })).toBeVisible();
+  await flow.details();
+  await page.getByRole("button", { name: "Review before payment", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Review your booking", exact: true })).toBeVisible();
+  let releaseStart = null;
+  await page.route("**/api/payment/start", async (route) => {
+    await new Promise((resolve) => {
+      releaseStart = resolve;
+    });
+    await route.fallback();
+  });
+
+  await flow.payment();
+  expect(await page.evaluate(() => window.__sameDocContend)).toBe(1);
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  await expect.poll(() => Boolean(releaseStart)).toBe(true);
+  await holder.evaluate(() => window.__releaseContend?.());
+  await expect.poll(async () => (await readAttrCookies(context)).roo_attr_last?.lastTouch?.source).toBe("second_camp");
+  releaseStart();
+  await expect(page.getByRole("heading", { name: "Checkout handoff", exact: true })).toBeVisible();
+  const [start] = flow.startBodies();
+  expect(start.bookingPayload.salesAttribution.firstTouch.source).toBe("first_camp");
+  expect(start.bookingPayload.salesAttribution.lastTouch.source).toBe("second_camp");
+});
+
+test("SecurityError from Web Locks still falls back for Accept, Reset, and Decline", async ({
+  page,
+  context,
+}) => {
+  const rejections = [];
+  page.on("pageerror", (err) => rejections.push(err.message));
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "locks", {
+      configurable: true,
+      value: {
+        request: () => Promise.reject(new DOMException("Locks unavailable", "SecurityError")),
+        query: () => Promise.reject(new DOMException("Locks unavailable", "SecurityError")),
+      },
+    });
+  });
+
+  await page.goto("/packages?utm_source=lock_sec_err&utm_campaign=fallback");
+  await expect(banner(page)).toBeVisible();
+  await banner(page).getByRole("button", { name: "Accept", exact: true }).click();
+  await expect(banner(page)).toHaveCount(0);
+  await expect.poll(async () => (await readAttrCookies(context)).roo_attr?.firstTouch?.source).toBe("lock_sec_err");
+
+  await openCookieSettings(page);
+  await expect(banner(page)).toBeVisible();
+  expect(await readAttrCookies(context)).toEqual({});
+  await declineCookies(page);
+  await expect(banner(page)).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem("roo-consent"))).toBe("denied");
+  expect(rejections).toEqual([]);
+});
+
+test("memory-only journey captured when sessionStorage rejects writes is promoted on Accept", async ({
+  page,
+  context,
+}) => {
+  await page.addInitScript(() => {
+    const orig = Storage.prototype.setItem;
+    Storage.prototype.setItem = function rejectSession(key, value) {
+      if (this === window.sessionStorage && key === "sales_attribution") {
+        throw new DOMException("Session storage blocked", "QuotaExceededError");
+      }
+      return orig.call(this, key, value);
+    };
+  });
+
+  await page.goto("/packages?utm_source=mem_only&utm_campaign=promote");
+  await expect(banner(page)).toBeVisible();
+  expect(await page.evaluate(() => sessionStorage.getItem("sales_attribution"))).toBeNull();
+  await banner(page).getByRole("button", { name: "Accept", exact: true }).click();
+  await expect(banner(page)).toHaveCount(0);
+  await expect.poll(async () => (await readAttrCookies(context)).roo_attr?.firstTouch?.source).toBe("mem_only");
 });
 
 const productionTest = test.extend(productionHostFixtures);
