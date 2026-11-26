@@ -194,6 +194,7 @@ test("labels keep up to 100 code points in every script, in both cookies and the
 }) => {
   await page.goto("/reviews");
   await cookieBanner(page).getByRole("button", { name: "Accept", exact: true }).click();
+  await expect(cookieBanner(page)).toBeHidden();
   const results = [];
   for (const [index, rows] of inFives(lengthRows).entries()) {
     const stored = await landLabels(page, rows.map(({ text }) => text), `length-${index}`, cookieAttribution);
@@ -333,6 +334,7 @@ test("a missing or damaged attribution cookie is read without errors or invented
   const lastCookie = encodeCookie({ journeyId, lastTouch: last });
   await page.goto("/reviews");
   await cookieBanner(page).getByRole("button", { name: "Accept", exact: true }).click();
+  await expect(cookieBanner(page)).toBeHidden();
   const land = async (cookies) => {
     await context.clearCookies();
     await page.evaluate(() => sessionStorage.clear());
@@ -426,6 +428,7 @@ test("non-sales routes capture roo_ref under both declined and accepted consent 
 }) => {
   await page.goto("/meet-the-team?ref=gads-max");
   await cookieBanner(page).getByRole("button", { name: "Decline", exact: true }).click();
+  await expect(cookieBanner(page)).toBeHidden();
   expect((await readRefCookie(page))?.entry?.source).toBe("gads-max");
   expect(await storedAttribution(page)).toBeNull();
 
@@ -433,6 +436,7 @@ test("non-sales routes capture roo_ref under both declined and accepted consent 
   await page.evaluate(() => localStorage.clear());
   await page.goto("/tourney?ref=chatgpt-ads");
   await cookieBanner(page).getByRole("button", { name: "Accept", exact: true }).click();
+  await expect(cookieBanner(page)).toBeHidden();
   expect((await readRefCookie(page))?.entry?.source).toBe("chatgpt-ads");
 
   const isSalesAttrChunk = (body) => body.includes("roo_attr_last") && body.includes("sales_attribution");

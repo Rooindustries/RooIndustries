@@ -1,5 +1,5 @@
 import posthog from "posthog-js";
-import { readConsent } from "./consent";
+import { readConsent } from "./consentChoice";
 import { sanitizeAnalyticsEvent } from "./salesPaths";
 import { lastPopstate } from "./loadPostHog";
 import { followChoices } from "./consentSignals";

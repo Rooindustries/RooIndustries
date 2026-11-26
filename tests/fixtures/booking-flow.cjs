@@ -231,7 +231,10 @@ const test = base.extend({
 
 const cookieBanner = (page) => page.getByRole("region", { name: "Cookie choice", exact: true });
 
-const cookieChoice = (name) => (page) => cookieBanner(page).getByRole("button", { name, exact: true }).click();
+const cookieChoice = (name) => async (page) => {
+  await cookieBanner(page).getByRole("button", { name, exact: true }).click();
+  await expect(cookieBanner(page)).toBeHidden();
+};
 const declineCookies = cookieChoice("Decline");
 const acceptCookies = cookieChoice("Accept");
 

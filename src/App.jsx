@@ -17,7 +17,6 @@ import { reportRequestError } from "./lib/clientRequest";
 import ReservationBanner from "./components/ReservationBanner";
 import RouteProgress, { RouteWaiting } from "./components/RouteProgress";
 import { BookingDialogReady } from "./lib/bookingDialogHold";
-import IntercomMessenger from "./components/IntercomMessenger";
 import { subscribePerfDebugChanges, syncPerfDebugFromEnvironment } from "./lib/perfDebug";
 import { initializePerformanceProfile } from "./lib/performanceProfile";
 import { getConfirmationPage, preloadConfirmationPage } from "./lib/confirmationPages";
@@ -141,9 +140,21 @@ const DeferredTelemetry = () => {
 };
 
 const IntercomRuntime = ({ disabledRoutes, disabled }) => {
-  return (
-    <IntercomMessenger disabledRoutes={disabledRoutes} disabled={disabled} />
-  );
+  const [Messenger, setMessenger] = useState(null);
+  useEffect(() => {
+    if (disabled || !isProductionBrowser()) return undefined;
+    let active = true;
+    import("./components/IntercomMessenger")
+      .then((module) => {
+        if (active) setMessenger(() => module.default);
+      })
+      .catch(reportRequestError);
+    return () => {
+      active = false;
+    };
+  }, [disabled]);
+  if (!Messenger) return null;
+  return <Messenger disabledRoutes={disabledRoutes} disabled={disabled} />;
 };
 
 const RouteFallback = () => {
