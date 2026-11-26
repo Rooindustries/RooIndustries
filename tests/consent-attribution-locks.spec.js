@@ -1180,6 +1180,47 @@ test("local Decline fallback under full localStorage publishes no shared handoff
   expect(await page.evaluate(() => sessionStorage.getItem("roo-consent"))).toBe("denied");
 });
 
+test("recovery of retained cookies under shared Decline hands peers only the cookie journey", async ({
+  page,
+  context,
+}) => {
+  const peer = await context.newPage();
+  await peer.goto("/referrals/login");
+  await expect(banner(peer)).toBeVisible();
+  await banner(peer).getByRole("button", { name: "Decline", exact: true }).click();
+  await expect(banner(peer)).toHaveCount(0);
+
+  await page.goto("/packages?utm_source=actor_local&utm_campaign=recovery_scope");
+  await expect(banner(page)).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(() => JSON.parse(sessionStorage.getItem("sales_attribution") || "null")?.lastTouch?.source || null),
+    )
+    .toBe("actor_local");
+  await waitForTabPresence(page, 2);
+
+  const stale = { capturedAt: "2026-01-01T00:00:00.000Z", landingPath: "/", source: "stale_seed" };
+  const enc = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  const url = new URL("/", page.url()).href;
+  await context.addCookies([
+    { name: "roo_attr", value: enc({ version: 2, journeyId: "stale-journey", firstTouch: stale }), url },
+    { name: "roo_attr_last", value: enc({ journeyId: "stale-journey", lastTouch: stale }), url },
+  ]);
+
+  await page.goto("/packages?utm_source=actor_local&utm_campaign=recovery_scope_second");
+  await expect(banner(page)).toHaveCount(0);
+  await expect.poll(async () => Object.keys(await readAttrCookies(context)).length).toBe(0);
+  await page.evaluate(() => navigator.locks.request("roo_sales_attribution_cookie", () => true));
+  await peer.evaluate(() => navigator.locks.request("roo_consent_state_lock", () => true));
+
+  const actorAfter = await page.evaluate(() => JSON.parse(sessionStorage.getItem("sales_attribution") || "null"));
+  const peerAfter = await peer.evaluate(() => JSON.parse(sessionStorage.getItem("sales_attribution") || "null"));
+  expect(actorAfter?.firstTouch?.source).toBe("stale_seed");
+  expect(actorAfter?.lastTouch?.source).toBe("actor_local");
+  expect(peerAfter?.firstTouch?.source).toBe("stale_seed");
+  expect(JSON.stringify(peerAfter)).not.toContain("actor_local");
+});
+
 test("peer unsavedFallback captured under full sessionStorage is collected on Accept in another tab", async ({
   page,
   context,
