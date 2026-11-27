@@ -32,7 +32,8 @@ const canReopenResumedSession = ({
   const storedRef = normalizeCode(storedFingerprint?.referralCode), storedCpn = normalizeCode(storedFingerprint?.couponCode);
   const authRef = normalizeCode(quote?.effectiveReferralCode ?? quote?.referralCode ?? storedFingerprint?.referralCode);
   const authCpn = normalizeCode(quote?.couponCode ?? storedFingerprint?.couponCode);
-  if (curRef !== storedRef || curCpn !== storedCpn || curRef !== authRef || curCpn !== authCpn) return { ok: false };
+  if (storedRef !== authRef || storedCpn !== authCpn) return { ok: false };
+  if ((curRef && curRef !== authRef) || (curCpn && curCpn !== authCpn)) return { ok: false };
   const livePayload = data?.providerPayload || null;
   const verified = verifyProviderLaunchPayload({ provider, payload: livePayload, expectedAmount: net, expectedCurrency: currency });
   if (!verified.ok) return { ok: false, reason: verified.reason };
@@ -51,7 +52,7 @@ export async function runResumePaymentSession(ctx) {
     provider, operation, storedActive, currentScopeKeyRef, fetchJson = fetchPaymentJson, showBanner,
     navigateToConfirmation, clearPaymentSession, parseCheckoutFingerprint,
     referral, coupon, persistPaymentSession, pendingStartsRef, setPendingStarts,
-    otherCheckoutStarting, paymentActionRef, flow,
+    otherCheckoutStarting, paymentActionRef, paymentMountedRef, paymentView, flow,
   } = ctx;
   if (otherCheckoutStarting(provider)) {
     throw new Error("Another payment method is still starting. Please wait a moment and try again.");
@@ -67,16 +68,23 @@ export async function runResumePaymentSession(ctx) {
       body: "{}",
     })
   );
-  markReservationTerminal(resumeScopeKey, data?.status);
   const resumedStatus = normalizeCode(data?.status);
   const act = paymentActionRef.current;
   const affirmativeRelease = ["refunded", "failed", "abandoned"].includes(resumedStatus) && isAffirmativeTerminalRelease(response.ok, data);
+  const completedBooking = response.ok && (resumedStatus === "booked" || resumedStatus === "email_partial") && data?.cleanupPending !== true && data?.manualReviewRequired !== true;
+  if (affirmativeRelease || completedBooking) markReservationTerminal(resumeScopeKey, resumedStatus);
   if (affirmativeRelease) {
     const wasCurrent = operation.current() && !act.cancelling && resumeSeq === act.seq;
     const owns = flow.ownsHold(storedActive);
     const restored = wasCurrent && resumedStatus === "abandoned" && owns ? flow.applyReleasedHold(data?.refreshedHold) : null;
     releasePaymentSessionLock({ token, scopeKey: resumeScopeKey, seq: statusSeq });
-    if (!wasCurrent) return { terminal: true, stale: true };
+    if (!wasCurrent) {
+      const liveViewToken = str(paymentView?.session?.paymentAccessToken);
+      if (paymentMountedRef?.current && !act.cancelling && resumeSeq === act.seq && liveViewToken && extractPaymentLockId(liveViewToken) === extractPaymentLockId(token)) {
+        clearPaymentSession("", token, { alreadyReleased: true });
+      }
+      return { terminal: true, stale: true };
+    }
     if (owns && !restored) {
       const handled = clearPaymentSession(resumedStatus, token, { alreadyReleased: true });
       operation.token = "";
@@ -132,11 +140,11 @@ export async function runResumePaymentSession(ctx) {
     return updated;
   }
 
-  const cleanedPayload = { ...(storedActive.providerPayload || {}), ...(livePayload || {}) };
-  if (provider === "dodo" && (!livePayload?.checkoutUrl || data?.providerOrderReady === false)) delete cleanedPayload.checkoutUrl;
+  const preservedPayload = { ...(storedActive.providerPayload || {}) };
+  if (provider === "dodo" && (!livePayload?.checkoutUrl || data?.providerOrderReady === false)) delete preservedPayload.checkoutUrl;
   const updated = commitPaymentSessionState({
     ...storedActive,
-    providerPayload: cleanedPayload,
+    providerPayload: preservedPayload,
     providerOrderReady: data?.providerOrderReady ?? storedActive.providerOrderReady,
     result: { ...(storedActive.result || {}), ...(data || {}) },
   }, { seq: statusSeq, scopeKey: resumeScopeKey });
@@ -167,9 +175,10 @@ export async function runCheckPaymentStatus(ctx) {
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: "{}",
     });
-    markReservationTerminal(scopeKey, data?.status);
     const status = normalizeCode(data?.status);
     const affirmative = ["failed", "abandoned", "refunded"].includes(status) && isAffirmativeTerminalRelease(response.ok, data);
+    const completedBooking = response.ok && (status === "booked" || status === "email_partial") && data?.cleanupPending !== true && data?.manualReviewRequired !== true;
+    if (affirmative || completedBooking) markReservationTerminal(scopeKey, status);
     if (affirmative) {
       const wasCurrent = operation.current();
       const owns = flow.ownsHold(activeSession);
@@ -203,6 +212,10 @@ export async function runCheckPaymentStatus(ctx) {
       return data;
     }
     if (!response.ok) throw new Error(data?.error || "Unable to load payment status. Please try again.");
+    if (isNonResumablePaymentData(data)) {
+      showBanner("info", data?.recoveryReason || "Checkout is being recovered. Check the payment status shortly.", { persistent: true });
+      return data;
+    }
     const next = commitPaymentSessionState({
       ...activeSession,
       providerPayload: { ...(activeSession.providerPayload || {}), ...(data?.providerPayload || {}) },
@@ -237,12 +250,13 @@ export async function runChangePaymentMethod(ctx) {
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: "{}",
     });
-    markReservationTerminal(scopeKey, data?.status);
     const liveBeforeRelease = readStoredPaymentSessionState();
     const stillActiveLock = tokenCurrent() && (!liveBeforeRelease?.paymentAccessToken || extractPaymentLockId(liveBeforeRelease.paymentAccessToken) === lockId);
     const status = normalizeCode(data?.status);
     const isTerminal409 = response.status === 409 && (status === "failed" || status === "refunded") && isAffirmativeTerminalRelease(true, data);
     const affirmative = isAffirmativeTerminalRelease(response.ok, data);
+    const completedBooking = Boolean(data?.captured && (status === "booked" || status === "email_partial") && data?.cleanupPending !== true && data?.manualReviewRequired !== true);
+    if (affirmative || isTerminal409 || completedBooking) markReservationTerminal(scopeKey, status);
     if (!stillActiveLock) {
       if ((affirmative && (data?.cancelled === true || ["failed", "abandoned", "refunded"].includes(status))) || isTerminal409) {
         releasePaymentSessionLock({ token, scopeKey, seq: cancelSeq });
@@ -306,15 +320,17 @@ export async function runChangePaymentMethod(ctx) {
 
 export async function runFinalizeSessionCheckout(ctx) {
   const {
-    paymentAccessToken, providerData, operation, captured, currentScopeKeyRef,
-    paymentActionRef, manualCodeAllowedRef, fetchJson = fetchPaymentJson, setPaymentStatusBusy,
-    showBanner, navigateToConfirmation, clearPaymentSession, fetchTimeoutMs,
+    paymentAccessToken, providerData, operation, captured, scopeKey: explicitScopeKey = "",
+    currentScopeKeyRef, paymentActionRef, manualCodeAllowedRef, fetchJson = fetchPaymentJson,
+    setPaymentStatusBusy, showBanner, navigateToConfirmation, clearPaymentSession, fetchTimeoutMs,
     pollTimeoutMs, pollIntervalMs, flow,
   } = ctx;
   if (!captured && !operation.current()) return null;
   paymentActionRef.current.seq += 1;
   manualCodeAllowedRef.current = false;
-  const scopeKey = currentScopeKeyRef.current;
+  const storedAtCall = readStoredPaymentSessionState();
+  const matchingStoredScope = storedAtCall?.paymentAccessToken && extractPaymentLockId(storedAtCall.paymentAccessToken) === extractPaymentLockId(paymentAccessToken) ? storedAtCall.scopeKey : "";
+  const scopeKey = str(explicitScopeKey) || str(matchingStoredScope) || (captured ? "" : currentScopeKeyRef.current);
   const finSeq = allocatePaymentSessionSeq();
   if (operation.current()) setPaymentStatusBusy(true);
 
@@ -370,10 +386,13 @@ export async function runFinalizeSessionCheckout(ctx) {
       headers: { Authorization: `Bearer ${paymentAccessToken}`, "Content-Type": "application/json" },
       body: JSON.stringify({ providerData }),
     });
-    markReservationTerminal(scopeKey, data?.status);
     const status = normalizeCode(data?.status);
     const isFinalizedStatus = status === "booked" || status === "email_partial";
-    if (!isFinalizedStatus && ["failed", "abandoned", "refunded"].includes(status) && isAffirmativeTerminalRelease(response.ok, data)) {
+    const affirmative = !isFinalizedStatus && ["failed", "abandoned", "refunded"].includes(status) && isAffirmativeTerminalRelease(response.ok, data);
+    if (scopeKey && (affirmative || (response.ok && isFinalizedStatus && data?.cleanupPending !== true && data?.manualReviewRequired !== true))) {
+      markReservationTerminal(scopeKey, status);
+    }
+    if (affirmative) {
       return finishTerminal(data, status, "Payment finalization failed.");
     }
     if (!operation.current()) return null;
@@ -400,10 +419,12 @@ export async function runFinalizeSessionCheckout(ctx) {
         return settled;
       }
       if (settledStatus === "booked" || settledStatus === "email_partial") {
+        if (scopeKey && settled?.cleanupPending !== true) markReservationTerminal(scopeKey, settledStatus);
         await navigateToConfirmation("paid", settled, operation);
         return settled;
       }
       if (isAffirmativeTerminalRelease(true, settled)) {
+        if (scopeKey) markReservationTerminal(scopeKey, settledStatus);
         return finishTerminal(settled, settledStatus, "Payment could not be finalized.");
       }
       throw new Error(settled?.recoveryReason || settled?.error || "Payment could not be finalized.");

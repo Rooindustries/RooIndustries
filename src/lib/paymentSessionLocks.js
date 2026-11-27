@@ -10,6 +10,8 @@ import { areSameLineageNonces, readScopeMap, recordHoldNonceRotation, reservatio
 const WATERMARK_KEY = "roo_payment_session_watermarks", RELEASED_KEY = "roo_released_payment_locks";
 let nextSessionSeq = 0;
 
+export const STORAGE_SAVE_ERROR = "Your browser could not save this payment session. Checkout has stayed here so you can check its status or change payment method. Allow browser storage and try again to open checkout.";
+
 export const fetchPaymentJson = async (url, options = {}, timeoutMs = 15_000) => {
   const controller = typeof AbortController === "function" ? new AbortController() : null;
   const timeoutId = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
@@ -39,7 +41,8 @@ export const verifyProviderLaunchPayload = ({ provider, payload, expectedAmount,
     if (!u) return { ok: false, reason: "Checkout is being recovered. Check the payment status shortly." };
     try {
       const parsed = new URL(u, typeof window !== "undefined" ? window.location.origin : "https://www.rooindustries.com");
-      const ok = parsed.protocol === "https:" || (parsed.protocol === "http:" && ["localhost", "127.0.0.1"].includes(parsed.hostname));
+      const sameOrigin = typeof window !== "undefined" && parsed.origin === window.location.origin;
+      const ok = parsed.protocol === "https:" || (parsed.protocol === "http:" && (sameOrigin || ["localhost", "127.0.0.1"].includes(parsed.hostname)));
       return ok ? { ok: true, checkoutUrl: parsed.href, orderId } : { ok: false, reason: "Checkout link is invalid." };
     } catch { return { ok: false, reason: "Checkout link is invalid." }; }
   }
@@ -95,12 +98,14 @@ export const commitPaymentSessionState = (session, { seq = 0, scopeKey = "" } = 
   if (seqNum > 0) {
     if ((sk && seqNum < Number(wm.byScope[sk] || 0)) || seqNum < Number(wm.byLock[lockId] || 0)) return null;
     if (cur?.paymentAccessToken && extractPaymentLockId(cur.paymentAccessToken) !== lockId && Number(cur.sessionSeq || 0) >= seqNum) return null;
+  }
+  const next = { ...session, ...(sk ? { scopeKey: sk } : {}), ...(seqNum > 0 ? { sessionSeq: seqNum } : {}) };
+  const wrote = writeStoredPaymentSessionState(next);
+  if (wrote && seqNum > 0) {
     if (sk) wm.byScope[sk] = Math.max(Number(wm.byScope[sk] || 0), seqNum);
     wm.byLock[lockId] = Math.max(Number(wm.byLock[lockId] || 0), seqNum);
     writeWatermarks(wm);
   }
-  const next = { ...session, ...(sk ? { scopeKey: sk } : {}), ...(seqNum > 0 ? { sessionSeq: seqNum } : {}) };
-  writeStoredPaymentSessionState(next);
   return next;
 };
 
@@ -137,10 +142,24 @@ export const doesLiveHoldMatchLineage = (initialHoldId, initialHoldNonce) => {
   return Boolean(liveN && (liveN === initN || areSameLineageNonces(id, initN, liveN)));
 };
 
+export const canWriteRefreshedHold = (refreshedHold, initialHoldId, initialHoldNonce) => {
+  const targetId = String(refreshedHold?.slotHoldId || "").trim();
+  if (!targetId || !String(refreshedHold?.slotHoldToken || "").trim()) return false;
+  if (initialHoldId) return doesLiveHoldMatchLineage(initialHoldId, initialHoldNonce);
+  const live = readLiveSlotHold();
+  if (!live?.holdId) return true;
+  if (String(live.holdId).trim() !== targetId) return false;
+  const liveN = extractTokenNonce(live.holdToken), targetN = extractTokenNonce(refreshedHold.slotHoldToken);
+  return !liveN || !targetN || liveN === targetN || areSameLineageNonces(targetId, liveN, targetN);
+};
+
 export const persistDetachedStartResult = ({ booking, data, provider, fingerprint, scopeKey, seq, initialHoldId, initialHoldNonce, readStoredCheckout, writeStoredCheckout }) => {
   if (!data?.paymentAccessToken || provider === "free") return null;
-  if (!booking?.originalOrderId && initialHoldId && !doesLiveHoldMatchLineage(initialHoldId, initialHoldNonce)) return null;
   const refreshedHold = data.refreshedHold || data.hold || null;
+  if (!booking?.originalOrderId) {
+    if (initialHoldId && !doesLiveHoldMatchLineage(initialHoldId, initialHoldNonce)) return null;
+    if (!initialHoldId && refreshedHold?.slotHoldId && !canWriteRefreshedHold(refreshedHold, "", "")) return null;
+  }
   const nextSession = {
     provider, fingerprint, scopeKey,
     paymentAccessToken: String(data.paymentAccessToken || "").trim(),
@@ -151,7 +170,7 @@ export const persistDetachedStartResult = ({ booking, data, provider, fingerprin
   };
   const committed = commitPaymentSessionState(nextSession, { seq, scopeKey });
   if (!committed) return null;
-  if (refreshedHold?.slotHoldId && refreshedHold?.slotHoldToken && (!initialHoldId || doesLiveHoldMatchLineage(initialHoldId, initialHoldNonce))) {
+  if (refreshedHold?.slotHoldId && refreshedHold?.slotHoldToken && canWriteRefreshedHold(refreshedHold, initialHoldId, initialHoldNonce)) {
     recordHoldNonceRotation({ slotHoldId: refreshedHold.slotHoldId, fromNonce: initialHoldNonce || booking?.slotHoldToken || "", toNonce: refreshedHold.slotHoldToken });
     const expiresAt = refreshedHold.slotHoldExpiresAt || refreshedHold.expiresAt || "";
     const latestCheckout = readStoredCheckout ? readStoredCheckout() : null;

@@ -64,7 +64,12 @@ test("ActiveUpgradeBlocker isolates blocking upgrade status and release actions 
   }, nextUpgrade);
 
   await expect(page.getByText(/Another upgrade checkout is already in progress/i)).toBeHidden();
+  const staleStatusResponse = page.waitForResponse("**/api/payment/status");
   releaseStatus();
+  expect((await staleStatusResponse).status()).toBe(200);
+  await page.waitForTimeout(50);
+  await expect(page).toHaveURL(/\/payment$/);
+  await expect(page.getByRole("button", { name: "Pay your way", exact: true })).toBeVisible();
   await expect(page.getByText(/already owns/i)).toHaveCount(0);
 });
 

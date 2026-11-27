@@ -95,44 +95,12 @@ export default function Payment({ hideFooter = false }) {
   const CHECKOUT_BOOKING_STORAGE_KEY = "checkout_booking_state";
   const INTERNAL_PAYMENTS_KEY = "roo_internal_payments";
 
-  const readStoredBackground = () => {
-    try {
-      const raw = sessionStorage.getItem(FLOW_BACKGROUND_KEY);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw);
-      if (parsed && parsed.pathname) {
-        return parsed;
-      }
-    } catch {}
-    return null;
-  };
-
-  const writeStoredBackground = (loc) => {
-    try {
-      if (!loc || !loc.pathname) return;
-      sessionStorage.setItem(
-        FLOW_BACKGROUND_KEY,
-        JSON.stringify({
-          pathname: loc.pathname,
-          search: loc.search || "",
-          hash: loc.hash || "",
-        })
-      );
-    } catch {}
-  };
+  const readStoredBackground = () => { try { const p = JSON.parse(sessionStorage.getItem(FLOW_BACKGROUND_KEY) || "null"); return p?.pathname ? p : null; } catch { return null; } };
+  const writeStoredBackground = (loc) => { try { if (loc?.pathname) sessionStorage.setItem(FLOW_BACKGROUND_KEY, JSON.stringify({ pathname: loc.pathname, search: loc.search || "", hash: loc.hash || "" })); } catch {} };
   const writeStoredReferral = writeLinkReferralToSession;
   const readStoredPaymentSession = readStoredPaymentSessionState, writeStoredPaymentSession = writeStoredPaymentSessionState, clearStoredPaymentSession = clearStoredPaymentSessionState;
   const readStoredCheckout = readStoredCheckoutBooking;
-
-  const writeStoredCheckout = (value) => {
-    try {
-      if (!value || typeof value !== "object") {
-        sessionStorage.removeItem(CHECKOUT_BOOKING_STORAGE_KEY);
-        return;
-      }
-      sessionStorage.setItem(CHECKOUT_BOOKING_STORAGE_KEY, JSON.stringify(value));
-    } catch {}
-  };
+  const writeStoredCheckout = (value) => { try { if (!value || typeof value !== "object") sessionStorage.removeItem(CHECKOUT_BOOKING_STORAGE_KEY); else sessionStorage.setItem(CHECKOUT_BOOKING_STORAGE_KEY, JSON.stringify(value)); } catch {} };
 
   const buildConfirmationNavigationState = (responseBody = {}) => {
     const baseState = getModalFlowState();
@@ -346,7 +314,11 @@ export default function Payment({ hideFooter = false }) {
   const quoteFingerprintRef = useRef(""); quoteFingerprintRef.current = quoteFingerprint;
   const lastQuoteKeyRef = useRef("");
 
+  const prevScopeKeyRef = useRef(currentScopeKey);
   useEffect(() => {
+    const prev = prevScopeKeyRef.current;
+    prevScopeKeyRef.current = currentScopeKey;
+    if (areSameLineageScopeKeys(prev, currentScopeKey)) return;
     validationGenRef.current += 1;
     referralCheckGenRef.current += 1;
     couponCheckGenRef.current += 1;
@@ -538,8 +510,10 @@ export default function Payment({ hideFooter = false }) {
   const paymentViewRef = useRef(null);
   if (paymentViewRef.current?.key !== location.key ||
       paymentViewRef.current?.fingerprint !== checkoutFingerprint ||
-      paymentViewRef.current?.scopeKey !== currentScopeKey) {
+      !areSameLineageScopeKeys(paymentViewRef.current?.scopeKey, currentScopeKey)) {
     paymentViewRef.current = { key: location.key, fingerprint: checkoutFingerprint, scopeKey: currentScopeKey, session: paymentSession };
+  } else if (paymentViewRef.current.scopeKey !== currentScopeKey) {
+    paymentViewRef.current.scopeKey = currentScopeKey;
   }
   const paymentView = paymentViewRef.current;
   paymentView.session = paymentSession;
@@ -679,9 +653,12 @@ export default function Payment({ hideFooter = false }) {
   ]);
 
   const activeReservationKey = `${bookingData.originalOrderId || ""}|${bookingData.slotHoldId || ""}|${bookingData.startTimeUTC || ""}|${packageTitle}`;
+  const codeScopeKey = `${activeReservationKey}|${bookingData.email || ""}`;
   const activeReservationKeyRef = useRef(activeReservationKey);
+  const codeScopeKeyRef = useRef(codeScopeKey);
   const referralResKeyRef = useRef("");
   activeReservationKeyRef.current = activeReservationKey;
+  codeScopeKeyRef.current = codeScopeKey;
   useEffect(() => {
     referralResKeyRef.current = referral ? activeReservationKeyRef.current : "";
   }, [referral]);
@@ -701,7 +678,7 @@ export default function Payment({ hideFooter = false }) {
     const refLower = referralCode.toLowerCase();
     const couponCode = stripReservedCode(bookingData.couponCode);
     const startedReservationKey = activeReservationKey;
-    const startedScopeKey = currentScopeKey;
+    const startedCodeScopeKey = codeScopeKey;
     let active = true;
     setReferralError("");
     setCouponError("");
@@ -711,7 +688,7 @@ export default function Payment({ hideFooter = false }) {
       setReferralInput("");
       setCouponInput("");
       Promise.resolve().then(() => {
-        if (active && currentScopeKeyRef.current === startedScopeKey) setPreApplyingCodes(false);
+        if (active && codeScopeKeyRef.current === startedCodeScopeKey) setPreApplyingCodes(false);
       });
       return () => { active = false; };
     }
@@ -720,23 +697,23 @@ export default function Payment({ hideFooter = false }) {
 
     loadCheckoutHold()
       .then((m) => {
-        if (!active || activeReservationKeyRef.current !== startedReservationKey || !codeApplicationAllowedRef.current) return;
+        if (!active || codeScopeKeyRef.current !== startedCodeScopeKey || !codeApplicationAllowedRef.current) return;
         return m.runPreApplyCheckoutCodes({
           couponCode, referralCode, refLower, persistedRef, packageTitle, referral,
           referralResKeyRef, startedReservationKey, preApplyPrefix, skipPreApplyKeyRef,
           location, navState, navigate, showBanner,
-          isCurrent: () => active && activeReservationKeyRef.current === startedReservationKey && codeApplicationAllowedRef.current,
+          isCurrent: () => active && codeScopeKeyRef.current === startedCodeScopeKey && codeApplicationAllowedRef.current,
           setReferral, setCoupon, setReferralInput, setCouponInput, setReferralError, setCouponError,
           readLinkReferralFromSession, writeLinkReferralToSession, normalizeLinkReferral, stripRefFromSearch,
         });
       })
       .catch(() => {})
       .finally(() => {
-        if (active && currentScopeKeyRef.current === startedScopeKey) setPreApplyingCodes(false);
+        if (active && codeScopeKeyRef.current === startedCodeScopeKey) setPreApplyingCodes(false);
       });
     return () => { active = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeReservationKey, bookingData.couponCode, bookingData.referralCode, hydrated, location.search, packageTitle]);
+  }, [codeScopeKey, bookingData.couponCode, bookingData.referralCode, hydrated, location.search, packageTitle]);
 
   useEffect(() => {
     if (!canUseRazorpay) {
@@ -995,12 +972,12 @@ export default function Payment({ hideFooter = false }) {
     });
   };
 
-  const finalizeSessionCheckout = async ({ paymentAccessToken, providerData, operation = createPaymentOperation(paymentAccessToken), captured = false }) => {
+  const finalizeSessionCheckout = async ({ paymentAccessToken, providerData, operation = createPaymentOperation(paymentAccessToken), captured = false, scopeKey = "" }) => {
     if (!captured && !operation.current()) return null;
     const m = await loadCheckoutHold();
     if (!captured && !operation.current()) return null;
     return m.runFinalizeSessionCheckout({
-      paymentAccessToken, providerData, operation, captured, currentScopeKeyRef,
+      paymentAccessToken, providerData, operation, captured, scopeKey, currentScopeKeyRef,
       paymentActionRef, manualCodeAllowedRef, setPaymentStatusBusy,
       showBanner, navigateToConfirmation, clearPaymentSession,
       fetchTimeoutMs: PAYMENT_FETCH_TIMEOUT_MS, pollTimeoutMs: PAYMENT_STATUS_POLL_TIMEOUT_MS,
@@ -1081,7 +1058,7 @@ export default function Payment({ hideFooter = false }) {
         createPaymentOperation, payingRzp, paymentBusy, paymentActionRef, otherCheckoutStarting,
         canUseRazorpay, rzpReady, ensureSlotBeforeAction, isFree, finalAmount, setPayingRzp,
         showBanner, startSessionCheckout, displayQuoteCurrency, packageTitle,
-        finalizeSessionCheckout, paymentSession,
+        finalizeSessionCheckout, paymentSession, writeStoredPaymentSession,
       }),
       "Payment could not be processed. Please try again."
     );
@@ -1641,51 +1618,27 @@ export default function Payment({ hideFooter = false }) {
                             if (blocked) return actions?.reject ? actions.reject() : false;
                             return actions?.resolve ? actions.resolve() : true;
                           }}
-                          createOrder={async () => {
-                            const releasing = "Payment method release is in progress.";
-                            if (paymentActionRef.current.cancelling) throw new Error(releasing);
-                            const session = await startSessionCheckout("paypal");
-                            if (session?.stale) throw new Error(releasing);
-                            if (session?.terminal) {
-                              throw new Error("This payment is already complete.");
-                            }
-                            const verified = (await loadCheckoutHold()).verifyProviderLaunchPayload({
-                              provider: "paypal", payload: session?.providerPayload,
-                              expectedAmount: session?.result?.quote?.netAmount ?? finalAmount,
-                              expectedCurrency: session?.result?.quote?.currency || displayQuoteCurrency,
-                            });
-                            if (!verified.ok) throw new Error(verified.reason);
-                            return verified.orderId;
-                          }}
+                          createOrder={async () => (await loadCheckoutHold()).runPayPalCreateOrder({
+                            paymentActionRef, startSessionCheckout, finalAmount, displayQuoteCurrency, writeStoredPaymentSession, showBanner,
+                          })}
                           onApprove={async (data, actions) => {
                             const activeSession = getActivePaymentSession("paypal");
+                            const tokenScopeKey = activeSession?.scopeKey || currentScopeKeyRef.current;
                             const operation = createPaymentOperation(activeSession?.paymentAccessToken);
-                            if (!activeSession?.paymentAccessToken || !operation.current()) return;
-                            if (!ensureSlotBeforeAction()) return;
+                            if (!activeSession?.paymentAccessToken || !operation.current() || !ensureSlotBeforeAction()) return;
                             paymentActionRef.current.seq += 1;
                             setPaymentStatusBusy(true);
                             try {
                               const details = await actions.order.capture();
                               await finalizeSessionCheckout({
-                                operation,
-                                captured: true,
-                                paymentAccessToken: String(
-                                  activeSession?.paymentAccessToken || ""
-                                ).trim(),
-                                providerData: {
-                                  paypalOrderId:
-                                    details?.id || data?.orderID || "",
-                                  payerEmail:
-                                    details?.payer?.email_address || "",
-                                },
+                                operation, captured: true, scopeKey: tokenScopeKey,
+                                paymentAccessToken: String(activeSession.paymentAccessToken).trim(),
+                                providerData: { paypalOrderId: details?.id || data?.orderID || "", payerEmail: details?.payer?.email_address || "" },
                               });
                             } catch {
                               if (!operation.current()) return;
                               console.error("PayPal booking finalization failed");
-                              showBanner(
-                                "error",
-                                "Payment succeeded but something went wrong saving your booking. Please contact support."
-                              );
+                              showBanner("error", "Payment succeeded but something went wrong saving your booking. Please contact support.");
                             } finally {
                               if (operation.current()) setPaymentStatusBusy(false);
                             }

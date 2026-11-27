@@ -1,8 +1,8 @@
 import { fetchJsonWithTimeout } from "./clientRequest";
 import { extractTokenNonce } from "./checkoutConfirmation";
 import { CODE_VALIDATION_UNAVAILABLE_MESSAGE, formatCouponValue, sanitizeCouponForCheckout, sanitizeReferralForCheckout } from "./checkoutCodes";
-import { clearDodoNavQuery, isNonResumablePaymentData, mergeLineageCheckout, ownsSessionHold, stripDodoReturnFromHistory, syncCheckoutRef, syncHistoryCheckoutBooking } from "./checkoutSessionGuard";
-import { fetchPaymentJson, verifyProviderLaunchPayload } from "./paymentSessionLocks";
+import { areSameLineageScopeKeys, clearDodoNavQuery, isNonResumablePaymentData, mergeLineageCheckout, ownsSessionHold, stripDodoReturnFromHistory, syncCheckoutRef, syncHistoryCheckoutBooking } from "./checkoutSessionGuard";
+import { fetchPaymentJson, STORAGE_SAVE_ERROR, verifyProviderLaunchPayload } from "./paymentSessionLocks";
 import { areSameLineageNonces, markReservationTerminal, recordHoldNonceRotation, reservationScopeKey } from "./reservationScope";
 
 export async function runPreApplyCheckoutCodes(c) {
@@ -148,7 +148,7 @@ export async function runBookingPaymentRelease({ hold, checkout, packageTitle, h
     onError((error?.name === "AbortError" || error?.name === "TimeoutError") ? "The payment session could not be released. Please try again." : error?.message || "The payment session could not be released.");
   }
 }
-export { fetchPaymentJson, isNonResumablePaymentData, stripDodoReturnFromHistory, syncCheckoutRef, syncHistoryCheckoutBooking, verifyProviderLaunchPayload };
+export { fetchPaymentJson, isNonResumablePaymentData, STORAGE_SAVE_ERROR, stripDodoReturnFromHistory, syncCheckoutRef, syncHistoryCheckoutBooking, verifyProviderLaunchPayload };
 export const runLegacyDodoStatusCheck = async ({ token, operation, fetchJson = fetchPaymentJson, setBusy, onBooked, onManualReview, onTerminalClear }) => {
   setBusy(true);
   try {
@@ -172,7 +172,7 @@ export const runDodoCheckout = async (c) => {
     const r = session.result?.refreshedHold || session.result?.hold || c.sessionHold;
     const ret = { ...(c.checkoutRef.current || c.bookingData), ...(r?.slotHoldId && r?.slotHoldToken ? { slotHoldId: r.slotHoldId, slotHoldToken: r.slotHoldToken, slotHoldExpiresAt: r.slotHoldExpiresAt || r.expiresAt || "" } : {}) };
     if (!c.writeBrowserStorage("sessionStorage", c.checkoutKey, JSON.stringify(ret)) || !c.writeStoredPaymentSession(session)) {
-      c.showBanner("error", "Your browser could not save this payment session. Checkout has stayed here so you can check its status or change payment method. Allow browser storage and try again to open checkout.", { persistent: true });
+      c.showBanner("error", STORAGE_SAVE_ERROR, { persistent: true });
       return;
     }
     stripDodoReturnFromHistory(); window.location.assign(verified.checkoutUrl);
@@ -182,7 +182,8 @@ export const runDodoCheckout = async (c) => {
   } finally { if (operation.current()) c.setPayingDodo(false); }
 };
 export const runValidateReferral = async (code, c, flow) => {
-  const stillHere = () => c.manualCodeAllowedRef.current && (!c.currentScopeKeyRef || c.currentScopeKeyRef.current === c.scopeKey);
+  const sameScope = () => !c.currentScopeKeyRef || areSameLineageScopeKeys(c.currentScopeKeyRef.current, c.scopeKey);
+  const stillHere = () => c.manualCodeAllowedRef.current && sameScope();
   if (!stillHere() || c.validating || c.validatingCoupon) return;
   const normalizedCode = str(code);
   if (!normalizedCode) {
@@ -216,10 +217,11 @@ export const runValidateReferral = async (code, c, flow) => {
     if (c.coupon?.canCombineWithReferral === false) { c.setCoupon(null); c.setCouponInput(""); c.showBanner("info", "Current coupon can't be combined with referrals and was removed."); }
     flow.persistCodes({ referralCode: safeReferral.code, couponCode: nextCouponCode, stripRef: true });
   } catch { if (c.referralCheckGenRef.current === myGen && stillHere()) { c.validationGenRef.current += 1; console.error("Referral validation failed"); c.setReferralError("We couldn't validate that referral code. Please try again."); } }
-  finally { if (c.referralCheckGenRef.current === myGen && c.currentScopeKeyRef.current === c.scopeKey) c.setValidating(false); }
+  finally { if (c.referralCheckGenRef.current === myGen && sameScope()) c.setValidating(false); }
 };
 export const runValidateCoupon = async (code, c, flow) => {
-  const stillHere = () => c.manualCodeAllowedRef.current && (!c.currentScopeKeyRef || c.currentScopeKeyRef.current === c.scopeKey);
+  const sameScope = () => !c.currentScopeKeyRef || areSameLineageScopeKeys(c.currentScopeKeyRef.current, c.scopeKey);
+  const stillHere = () => c.manualCodeAllowedRef.current && sameScope();
   if (!stillHere() || c.validating || c.validatingCoupon) return;
   const normalizedCode = str(code);
   if (!normalizedCode) {
@@ -234,7 +236,10 @@ export const runValidateCoupon = async (code, c, flow) => {
     const result = await resolveCheckoutCode(normalizedCode, c.packageTitle);
     if (c.couponCheckGenRef.current !== myGen || !stillHere()) return;
     c.validationGenRef.current += 1;
-    if (!result.ok) { c.setCoupon(null); c.setCouponError(result.error || "Invalid coupon code."); return; }
+    if (!result.ok) {
+      if (!result.unavailable) { c.setCoupon(null); flow.persistCodes({ referralCode: c.referral?.code || "", couponCode: "" }); }
+      c.setCouponError(result.error || "Invalid coupon code."); return;
+    }
     if (result.type === "referral") {
       const safeReferral = sanitizeReferralForCheckout(result.value);
       if (!safeReferral) { c.setCouponError("Invalid coupon code."); return; }
@@ -244,13 +249,13 @@ export const runValidateCoupon = async (code, c, flow) => {
       c.showBanner("info", "This code is a referral, so it was applied as a referral."); return;
     }
     const safeCoupon = sanitizeCouponForCheckout(result.value);
-    if (!safeCoupon) { c.setCouponError("Invalid coupon code."); return; }
-    if (safeCoupon.canCombineWithReferral === false && c.referral) { c.setCoupon(null); c.setCouponError("This coupon can't be used together with a referral discount. Remove the referral or use a different coupon."); return; }
+    if (!safeCoupon) { c.setCoupon(null); flow.persistCodes({ referralCode: c.referral?.code || "", couponCode: "" }); c.setCouponError("Invalid coupon code."); return; }
+    if (safeCoupon.canCombineWithReferral === false && c.referral) { c.setCoupon(null); flow.persistCodes({ referralCode: c.referral?.code || "", couponCode: "" }); c.setCouponError("This coupon can't be used together with a referral discount. Remove the referral or use a different coupon."); return; }
     c.setCoupon(safeCoupon); c.setCouponInput(safeCoupon.code);
     flow.persistCodes({ referralCode: c.referral?.code || "", couponCode: safeCoupon.code });
     c.showBanner("success", `Coupon applied: ${formatCouponValue(safeCoupon)}`);
-  } catch { if (c.couponCheckGenRef.current === myGen && stillHere()) { c.validationGenRef.current += 1; console.error("Coupon validation failed"); c.setCoupon(null); c.setCouponError("We couldn't validate that coupon code. Please try again."); } }
-  finally { if (c.couponCheckGenRef.current === myGen && c.currentScopeKeyRef.current === c.scopeKey) c.setValidatingCoupon(false); }
+  } catch { if (c.couponCheckGenRef.current === myGen && stillHere()) { c.validationGenRef.current += 1; console.error("Coupon validation failed"); c.setCouponError("We couldn't validate that coupon code. Please try again."); } }
+  finally { if (c.couponCheckGenRef.current === myGen && sameScope()) c.setValidatingCoupon(false); }
 };
 export const runFreeBookingCheckout = async (c) => {
   const operation = c.createPaymentOperation();
@@ -270,6 +275,24 @@ export const runFreeBookingCheckout = async (c) => {
     if (c.holdExpiresAt && new Date(c.holdExpiresAt).getTime() <= Date.now()) { c.holdExpiryHandledRef.current = true; c.navigate("/", { replace: true }); }
   } finally { endConfirmation(); if (operation.current()) c.setCreatingFree(false); }
 };
+export const runPayPalCreateOrder = async ({ paymentActionRef, startSessionCheckout, finalAmount, displayQuoteCurrency, writeStoredPaymentSession, showBanner }) => {
+  const releasing = "Payment method release is in progress.";
+  if (paymentActionRef.current.cancelling) throw new Error(releasing);
+  const session = await startSessionCheckout("paypal");
+  if (session?.stale) throw new Error(releasing);
+  if (session?.terminal) throw new Error("This payment is already complete.");
+  const verified = verifyProviderLaunchPayload({
+    provider: "paypal", payload: session?.providerPayload,
+    expectedAmount: session?.result?.quote?.netAmount ?? finalAmount,
+    expectedCurrency: session?.result?.quote?.currency || displayQuoteCurrency,
+  });
+  if (!verified.ok) throw new Error(verified.reason);
+  if (!writeStoredPaymentSession(session)) {
+    showBanner("error", STORAGE_SAVE_ERROR, { persistent: true });
+    throw new Error(STORAGE_SAVE_ERROR);
+  }
+  return verified.orderId;
+};
 export const runRazorpayCheckout = async (c) => {
   const operation = c.createPaymentOperation();
   if (!operation.current() || c.payingRzp || c.paymentBusy || c.paymentActionRef.current.cancelling || c.otherCheckoutStarting("razorpay")) return;
@@ -284,6 +307,10 @@ export const runRazorpayCheckout = async (c) => {
     if (!operation.current() || rzpSession?.terminal) return;
     const verified = verifyProviderLaunchPayload({ provider: "razorpay", payload: rzpSession.providerPayload, expectedAmount: rzpSession.result?.quote?.netAmount ?? c.finalAmount, expectedCurrency: rzpSession.result?.quote?.currency || c.displayQuoteCurrency });
     if (!verified.ok) { c.showBanner("error", verified.reason); return; }
+    if (c.writeStoredPaymentSession && !c.writeStoredPaymentSession(rzpSession)) {
+      c.showBanner("error", STORAGE_SAVE_ERROR, { persistent: true });
+      return;
+    }
     const paymentAccessToken = rzpSession.paymentAccessToken;
     new window.Razorpay({
       key: verified.key, amount: verified.amount, currency: verified.currency, name: "Roo Industries", description: `${c.packageTitle} booking`, order_id: verified.orderId,

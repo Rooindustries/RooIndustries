@@ -19,22 +19,30 @@ export default function ActiveUpgradeBlocker({
   const [busy, setBusy] = useState(false);
   const blockingIntentKey = `${currentScopeKey}|${blockingUpgradeSession?.paymentAccessToken || ""}|${blockingUpgradeSession?.upgradeIntentId || ""}`;
   const blockingIntentRef = useRef(blockingIntentKey);
-  blockingIntentRef.current = blockingIntentKey;
+  const mountedRef = useRef(false);
 
   useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    blockingIntentRef.current = blockingIntentKey;
     setBusy(false);
   }, [blockingIntentKey]);
 
   const runAction = async (mode) => {
     const token = String(blockingUpgradeSession?.paymentAccessToken || "").trim();
     if (!token || busy) return;
-    const capturedIntent = blockingIntentRef.current;
+    const capturedIntent = blockingIntentKey;
     const capturedScope = currentScopeKeyRef.current;
     const blockScope = reservationScopeKey(blockingUpgradeSession);
     const isRelease = mode === "release";
     const actionSeq = allocatePaymentSessionSeq();
     const stillCurrent = () =>
-      blockingIntentRef.current === capturedIntent && currentScopeKeyRef.current === capturedScope;
+      mountedRef.current && blockingIntentRef.current === capturedIntent && currentScopeKeyRef.current === capturedScope;
 
     setBusy(true);
     try {
@@ -47,13 +55,15 @@ export default function ActiveUpgradeBlocker({
         }
       );
       const status = String(data?.status || "").trim().toLowerCase();
-      markReservationTerminal(blockScope, status);
       const affirmative = isAffirmativeTerminalRelease(response.ok, data);
-      if (affirmative && (data?.cancelled === true || ["failed", "abandoned", "refunded"].includes(status))) {
+      const isTerminal409 = isRelease && response.status === 409 && (status === "failed" || status === "refunded") && isAffirmativeTerminalRelease(true, data);
+      const doneOk = isRelease ? data?.captured : response.ok;
+      const completedBooking = Boolean(doneOk && (status === "booked" || status === "email_partial") && data?.cleanupPending !== true && data?.manualReviewRequired !== true);
+      if (affirmative || isTerminal409 || completedBooking) markReservationTerminal(blockScope, status);
+      if ((affirmative && (data?.cancelled === true || ["failed", "abandoned", "refunded"].includes(status))) || isTerminal409) {
         releasePaymentSessionLock({ token, scopeKey: blockScope, seq: actionSeq });
       }
       if (!stillCurrent()) return;
-      const doneOk = isRelease ? data?.captured : response.ok;
       if (doneOk && (status === "booked" || status === "email_partial")) {
         onBooked({
           bookingId: data.bookingId || "",
@@ -62,6 +72,10 @@ export default function ActiveUpgradeBlocker({
         return;
       }
       if (isRelease) {
+        if (isTerminal409) {
+          onCleared("The previous upgrade session closed. You can continue now.");
+          return;
+        }
         if (!response.ok || data?.cancelled !== true || !affirmative) {
           throw new Error(data?.error || data?.recoveryReason || "Unable to release active upgrade.");
         }
