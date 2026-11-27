@@ -5091,7 +5091,14 @@ export const reconcilePaymentSessions = async ({
             }
             const refreshRes = await refreshDodoPayment({ client, record, payment: dodoInspection.payment, source: "reconcile", applyBookingRefund, deferFinalization: true });
             Object.assign(record, await getPaymentRecordById(client, record._id));
-            if (refreshRes.httpStatus >= 400 && !dodoInspection.hasUnresolvedDispute && !record.dodoDisputeActive && record.providerRecoveryTerminal !== true) {
+            const freshStatus = String(record?.status || "").trim().toLowerCase();
+            if (
+              refreshRes.httpStatus >= 400 &&
+              ![PAYMENT_STATUS_BOOKED, PAYMENT_STATUS_EMAIL_PARTIAL, PAYMENT_STATUS_REFUNDED].includes(freshStatus) &&
+              !dodoInspection.hasUnresolvedDispute &&
+              !record.dodoDisputeActive &&
+              record.providerRecoveryTerminal !== true
+            ) {
               const rawCode = String(refreshRes.body?.code || "").trim();
               const reason = !rawCode || rawCode === "dodo_refund_details_pending"
                 ? "dodo_refund_requires_reconciliation"
@@ -6778,6 +6785,18 @@ export const refreshDodoPayment = async ({
         httpStatus: reversalCheck.retryable ? 503 : 409,
         body: { ok: false, code: reversalCheck.reason || "dodo_refund_details_incomplete" },
       };
+    }
+    for (const r of [...(payment.refunds || []), ...(reversalCheck.settledRefunds || [])]) {
+      const existing = (record.refunds || []).find((entry) => entry.providerRefundId === r?.refund_id);
+      if (!existing) continue;
+      if (
+        (existing.providerPaymentId && r?.payment_id && existing.providerPaymentId !== r.payment_id) ||
+        (existing.amountInSubunits != null && r?.amount != null && existing.amountInSubunits !== r.amount) ||
+        (existing.currency && r?.currency && existing.currency !== r.currency)
+      ) {
+        await persistCaptureBeforeReject();
+        return { httpStatus: 409, body: { ok: false, code: "refund_identity_content_mismatch" } };
+      }
     }
   }
   let disputeBooking;

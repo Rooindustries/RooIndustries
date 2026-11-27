@@ -82,6 +82,10 @@ const stageCleanupFailure = async (args) => {
     const retained = await holdCapturedReleaseForReview({ client, record: current, patchRecord });
     return makeResponse(false, 202, retained, buildPublicStatusBody, includeRefreshedHold);
   }
+  const completedStatus = String(current.status || "").trim().toLowerCase();
+  if (completedStatus === targetStatus && !isCleanupPending(current) && current.resourceReleasePending !== true) {
+    return makeResponse(true, 200, current, buildPublicStatusBody, includeRefreshedHold);
+  }
   const storedState = String(current.providerPaymentState || "").trim().toLowerCase();
   const revisionUnchanged = !record?._rev || current._rev === record._rev;
   const partialCaptured = PARTIAL_CAPTURE_DODO_STATES.includes(storedState);
@@ -380,6 +384,7 @@ export const guardDodoCheckoutReuse = async ({
           isFutureIso(holdDoc.expiresAt)
       );
     }
+    latestExisting = (await getPaymentRecordById(client, existing._id)) || latestExisting;
     allowCheckoutUrl =
       inspected.state === "unpaid" && !inspected.payment && !inspected.providerPaymentId &&
       String(latestExisting.status || "").trim().toLowerCase() === PAYMENT_STATUS_STARTED &&

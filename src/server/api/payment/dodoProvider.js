@@ -174,6 +174,7 @@ export const validateDodoReversalDetails = async ({ payment, hydrateRefund = ret
     else if (isTerminalDisputeStatus(status)) hasTerminalDispute = true;
   }
   const seenRefunds = new Set();
+  const settledRefunds = [];
   let settledRefundTotal = 0;
   for (const r of payment.refunds) {
     const id = String(r?.refund_id || "").trim();
@@ -201,6 +202,7 @@ export const validateDodoReversalDetails = async ({ payment, hydrateRefund = ret
       }
       amount = hydrated.amount;
     }
+    settledRefunds.push({ refund_id: id, payment_id: payment.payment_id, amount, currency: DODO_CURRENCY });
     settledRefundTotal += amount;
   }
   const total = Number(payment.total_amount);
@@ -209,10 +211,10 @@ export const validateDodoReversalDetails = async ({ payment, hydrateRefund = ret
       ((rawRefundStatus === null || rawRefundStatus === "") && settledRefundTotal !== 0)) {
     return { ok: false, reason: "dodo_refund_details_incomplete" };
   }
-  if (hasUnresolvedDispute) return { ok: true, state: "succeeded", providerReversalVerified: false, hasUnresolvedDispute: true, hasTerminalDispute, settledRefundTotal };
-  if (rawRefundStatus === "full") return { ok: true, state: "refunded", providerReversalVerified: true, hasUnresolvedDispute: false, hasTerminalDispute, settledRefundTotal };
-  if (hasTerminalDispute) return { ok: true, state: "disputed", providerReversalVerified: true, hasUnresolvedDispute: false, hasTerminalDispute: true, settledRefundTotal };
-  return { ok: true, state: "succeeded", providerReversalVerified: false, hasUnresolvedDispute: false, hasTerminalDispute: false, settledRefundTotal };
+  if (hasUnresolvedDispute) return { ok: true, state: "succeeded", providerReversalVerified: false, hasUnresolvedDispute: true, hasTerminalDispute, settledRefundTotal, settledRefunds };
+  if (rawRefundStatus === "full") return { ok: true, state: "refunded", providerReversalVerified: true, hasUnresolvedDispute: false, hasTerminalDispute, settledRefundTotal, settledRefunds };
+  if (hasTerminalDispute) return { ok: true, state: "disputed", providerReversalVerified: true, hasUnresolvedDispute: false, hasTerminalDispute: true, settledRefundTotal, settledRefunds };
+  return { ok: true, state: "succeeded", providerReversalVerified: false, hasUnresolvedDispute: false, hasTerminalDispute: false, settledRefundTotal, settledRefunds };
 };
 
 export const settledDodoPaymentState = (payment) => {
@@ -325,6 +327,9 @@ export const verifyDodoCapture = async ({ record, payment: suppliedPayment }) =>
   }
   if (reversal.hasUnresolvedDispute || reversal.hasTerminalDispute) {
     return { ok: false, captured: true, retryable: false, reason: "dodo_payment_disputed" };
+  }
+  if (payment.refund_status === "full" || (payment.refund_status === "partial" && !suppliedPayment)) {
+    return { ok: false, captured: true, retryable: true, reason: "dodo_refund_requires_reconciliation" };
   }
   if ((payment.refunds || []).some((r) => r.status === "succeeded") && !suppliedPayment) {
     return { ok: false, retryable: true, reason: "dodo_refund_requires_reconciliation" };
