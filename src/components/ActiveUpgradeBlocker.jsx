@@ -55,7 +55,7 @@ export default function ActiveUpgradeBlocker({
         }
       );
       const status = String(data?.status || "").trim().toLowerCase();
-      const affirmative = isAffirmativeTerminalRelease(response.ok, data);
+      const affirmative = isAffirmativeTerminalRelease(response.status === 200, data);
       const isTerminal409 = isRelease && response.status === 409 && (status === "failed" || status === "refunded") && isAffirmativeTerminalRelease(true, data);
       const doneOk = isRelease ? data?.captured : response.ok;
       const completedBooking = Boolean(doneOk && (status === "booked" || status === "email_partial") && data?.cleanupPending !== true && data?.manualReviewRequired !== true);
@@ -76,10 +76,14 @@ export default function ActiveUpgradeBlocker({
           onCleared("The previous upgrade session closed. You can continue now.");
           return;
         }
-        if (!response.ok || data?.cancelled !== true || !affirmative) {
+        if (response.status !== 200 || !affirmative || (data?.cancelled !== true && status !== "failed" && status !== "abandoned")) {
           throw new Error(data?.error || data?.recoveryReason || "Unable to release active upgrade.");
         }
-        onCleared("Previous upgrade session released. You can continue now.");
+        onCleared(
+          data?.cancelled === true
+            ? "Previous upgrade session released. You can continue now."
+            : "The previous upgrade session closed. You can continue now."
+        );
         return;
       }
       if (!response.ok) throw new Error(data?.error || "Unable to check active upgrade.");

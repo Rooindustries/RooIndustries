@@ -2,7 +2,7 @@ import { fetchJsonWithTimeout } from "./clientRequest";
 import { extractTokenNonce } from "./checkoutConfirmation";
 import { CODE_VALIDATION_UNAVAILABLE_MESSAGE, formatCouponValue, sanitizeCouponForCheckout, sanitizeReferralForCheckout } from "./checkoutCodes";
 import { areSameLineageScopeKeys, clearDodoNavQuery, isNonResumablePaymentData, mergeLineageCheckout, ownsSessionHold, stripDodoReturnFromHistory, syncCheckoutRef, syncHistoryCheckoutBooking } from "./checkoutSessionGuard";
-import { fetchPaymentJson, STORAGE_SAVE_CHANGE_ONLY_ERROR, STORAGE_SAVE_ERROR, verifyProviderLaunchPayload } from "./paymentSessionLocks";
+import { allocatePaymentSessionSeq, fetchPaymentJson, isAffirmativeTerminalRelease, releasePaymentSessionLock, STORAGE_SAVE_CHANGE_ONLY_ERROR, STORAGE_SAVE_ERROR, verifyProviderLaunchPayload } from "./paymentSessionLocks";
 import { areSameLineageNonces, markReservationTerminal, recordHoldNonceRotation, reservationScopeKey } from "./reservationScope";
 
 export async function runPreApplyCheckoutCodes(c) {
@@ -128,19 +128,26 @@ export async function runBookingPaymentRelease({ hold, checkout, packageTitle, h
     const sk = reservationScopeKey({ ...(checkout || {}), slotHoldId: holdId, slotHoldToken: holdToken, packageTitle: hold?.packageTitle || checkout?.packageTitle || packageTitle, startTimeUTC: hold?.startTimeUTC || checkout?.startTimeUTC || "" });
     const res = await fetch("/api/payment/cancel", { method: "POST", headers: { Authorization: `Bearer ${tok}`, "Content-Type": "application/json" }, body: "{}", signal: AbortSignal.timeout(timeoutMs) });
     const data = await res.json().catch(() => ({}));
-    markReservationTerminal(sk, data?.status);
+    const status = str(data?.status).toLowerCase();
+    const affirmative = isAffirmativeTerminalRelease(res.status === 200, data);
+    if (affirmative || (data?.captured && (status === "booked" || status === "email_partial") && data?.cleanupPending !== true && data?.manualReviewRequired !== true)) {
+      markReservationTerminal(sk, status);
+    }
     if (!isCurrent()) return;
     if (data?.captured) {
-      const capStatus = str(data?.status).toLowerCase();
-      if (capStatus === "booked" || capStatus === "email_partial") {
+      if ((status === "booked" || status === "email_partial") && data?.cleanupPending !== true && data?.manualReviewRequired !== true) {
         clearMatchingSess();
         try { const cc = JSON.parse(sessionStorage.getItem(checkoutKey) || "null"); if (cc?.slotHoldId === holdId && (!holdNonce || extractTokenNonce(cc.slotHoldToken) === holdNonce)) sessionStorage.removeItem(checkoutKey); } catch {}
       }
       onCaptured(data); return;
     }
-    if (!res.ok || data?.cancelled !== true) throw new Error(data?.error || "The payment session could not be released.");
+    if (!affirmative) throw new Error(data?.error || data?.recoveryReason || "The payment session could not be released.");
     const r = data.refreshedHold;
-    if (!r?.slotHoldId || !r?.slotHoldToken) { clearMatchingSess(); onExpired("The reservation expired. Please choose the slot again."); return; }
+    if (!r?.slotHoldId || !r?.slotHoldToken) {
+      clearMatchingSess();
+      onExpired(status === "failed" ? "The previous payment attempt failed and the reservation expired. Please choose the slot again." : "The reservation expired. Please choose the slot again.");
+      return;
+    }
     recordHoldNonceRotation({ slotHoldId: r.slotHoldId, fromNonce: holdToken, toNonce: r.slotHoldToken });
     const nextHold = { ...hold, holdId: r.slotHoldId, holdToken: r.slotHoldToken, expiresAt: r.slotHoldExpiresAt, phase: "holding" };
     writeHold(nextHold); const updated = updateCheckout(r, { expectedHoldId: holdId, expectedHoldNonce: holdNonce }); clearMatchingSess(); broadcast(nextHold);
@@ -159,7 +166,10 @@ export const runLegacyDodoStatusCheck = async ({ token, operation, fetchJson = f
     const st = str(data?.status).toLowerCase();
     if (response.ok && (st === "booked" || st === "email_partial") && data?.cleanupPending !== true && data?.manualReviewRequired !== true) await onBooked(data, operation);
     else if (response.ok && (data?.manualReviewRequired === true || data?.cleanupPending === true)) onManualReview(data.recoveryReason || "Payment is still being verified.");
-    else if (response.ok && ["failed", "abandoned", "refunded"].includes(st) && data?.cleanupPending !== true && data?.manualReviewRequired !== true && (st === "refunded" ? data?.terminalOutcomeComplete !== false : data?.terminalOutcomeComplete === true)) onTerminalClear(st, token);
+    else if (["failed", "abandoned", "refunded"].includes(st) && isAffirmativeTerminalRelease(response.status === 200, data)) {
+      releasePaymentSessionLock({ token, scopeKey: "", seq: allocatePaymentSessionSeq() });
+      onTerminalClear(st, token);
+    }
   } finally { if (operation.current()) setBusy(false); }
 };
 export const runDodoCheckout = async (c) => {

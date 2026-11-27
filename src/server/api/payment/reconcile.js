@@ -81,8 +81,11 @@ export default async function handler(req, res) {
     return paymentResult.body?.summary || {};
   });
   if(paymentResult?.body?.summary)Object.assign(summary,paymentResult.body.summary);
+  const canRunHoldCleanup = paymentResult?.httpStatus === 200 && paymentResult?.body?.summary?.reconcileRunCompleted !== false;
   await Promise.all([
-    duty("expiredSupabaseHoldCleanup",() => cleanupExpiredSupabaseHolds({generation:policy.commerceFailoverGeneration})),
+    canRunHoldCleanup
+      ? duty("expiredSupabaseHoldCleanup",() => cleanupExpiredSupabaseHolds({generation:policy.commerceFailoverGeneration}))
+      : Promise.resolve().then(() => { summary.expiredSupabaseHoldCleanup = { skipped: true, reason: "reconcile_run_incomplete", expired_holds: 0, removed_slot_claims: 0 }; }),
     duty("referralEmailRecovery",() => reconcileReferralEmailDispatches({limit:10})),
     duty("credentialRecovery",() => reconcileCredentialOperations({limit:10})),
     duty("rateLimitBucketsCleaned",() => cleanupExpiredRateLimitBuckets()),

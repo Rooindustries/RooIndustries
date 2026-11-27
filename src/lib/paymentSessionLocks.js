@@ -85,8 +85,8 @@ export const allocatePaymentSessionSeq = () => {
   return nextSessionSeq;
 };
 
-export const isAffirmativeTerminalRelease = (responseOk, data = {}) => {
-  if (!responseOk) return false;
+export const isAffirmativeTerminalRelease = (http200, data = {}) => {
+  if (http200 !== true) return false;
   const st = String(data?.status || "").trim().toLowerCase();
   if (data?.cancelled === true || st === "failed" || st === "abandoned") {
     return data?.terminalOutcomeComplete === true && data?.cleanupPending !== true && data?.manualReviewRequired !== true;

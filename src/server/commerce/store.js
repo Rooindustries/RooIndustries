@@ -87,6 +87,13 @@ export class CommerceStore {
       : { projectId: this.backend, dataset: "commerce" };
   }
 
+  startReconcileCleanupRun(o) { return this.client.startReconcileCleanupRun?.(o); }
+  fetchOwnerReviewDodoDocuments(o) { return this.client.fetchOwnerReviewDodoDocuments?.(o); }
+  beginReconcileRecordInspection(o) { return this.client.beginReconcileRecordInspection?.(o); }
+  clearReconcileCleanupBlock(o) { return this.client.clearReconcileCleanupBlock?.(o); }
+  failReconcileCleanupRun(o) { return this.client.failReconcileCleanupRun?.(o); }
+  completeReconcileCleanupRun(o) { return this.client.completeReconcileCleanupRun?.(o); }
+
   get shadowClient() {
     return this.client.shadowClient || null;
   }

@@ -1,6 +1,6 @@
 import { buildBrowserCompletionBody } from "./bookingSummary.js";
 import { buildLockedSessionPayload as buildLockedSession, buildProviderPayloadForRecord as buildProviderPayloadFromRecord, buildStatusLockExtension, buildUpgradeLockConflictError } from "./lockedSession.js";
-import { computePaymentRecoveryFlags } from "./paymentRecoveryState.js";
+import { computePaymentRecoveryFlags, hasKnownCaptureRecord, hasVerifiedReversal } from "./paymentRecoveryState.js";
 import { resolveCompatibleQuoteFingerprint, resolveQuoteRequestCurrency, validateUpgradeQuoteProvider } from "./quoteCompatibility.js";
 import { commitAtomicDodoRequiresPaymentMethodCancel } from "./dodoCancel.js";
 import envValue from "../../supabase/envValue.cjs";
@@ -96,13 +96,20 @@ import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
 import {
   buildWatchFailureState,
   boundToWatchDeadline,
+  dodoCleanupAllowedGroq,
+  exhaustedCleanupWatchActiveGroq,
+  exhaustedLiveDodoStateGroq,
+  exhaustedPendingCleanupGroq,
+  exhaustedResumeDueGroq,
   exhaustedWatchQuery,
   hasKnownCapture,
   hasObservedCapture,
   holdLostToPayment,
   holdCapturedReleaseForReview,
+  isCleanupPendingGroq,
   isExhaustedWatch,
   isTransientVerificationFailure,
+  RECOVERY_RECORDS_GROQ,
   recordCapturedProviderState,
   RESUMABLE_WATCH_REASONS,
   webhookFinalizationResult,
@@ -4428,36 +4435,8 @@ export const reconcilePaymentSessions = async ({
   const primaryBackend =
     resolveStoreBackend(policy.commercePrimaryBackend);
   const dodoEnabled = resolvePaymentProviders()?.dodo?.enabled === true;
-  const fetchRecoveryRecords = () => client.fetch(
-    `*[_type == $type
-      && (coalesce(reconciliationRecoveryTerminal, false) == false || ${exhaustedWatchQuery})
-      && !(coalesce(providerRecoveryTerminal, false) == true
-        && providerRecoveryTerminalReason in $terminalCurrencyReasons)
-      && (
-        provider != "dodo" || ($dodoEnabled && coalesce(providerRecoveryTerminal, false) == false)
-        || refundRequiresBookingSync == true
-        || resourceReleasePending == true
-        || (lower(status) == $emailPartialStatus && requiresReschedule == true)
-        || (lower(status) in [$emailPartialStatus, $bookedStatus] && emailDispatchRequired == true)
-      )
-      && (
-        lower(status) in $statuses
-        || refundRequiresBookingSync == true
-        || (lower(status) == $bookedStatus && emailDispatchRequired == true)
-        || (lower(status) == $abandonedStatus && resourceReleasePending == true)
-        || (
-          lower(status) == $abandonedStatus
-          && defined(lateCaptureWatchUntil)
-          && lateCaptureWatchUntil != ""
-        )
-      )
-      && (
-        !defined(nextRecoveryAt)
-        || nextRecoveryAt == ""
-        || nextRecoveryAt <= $now
-        || ${exhaustedWatchQuery}
-      )
-    ] | order(updatedAt asc)[0...50]`,
+  const fetchRecoveryRecords = (runId = null) => client.fetch(
+    RECOVERY_RECORDS_GROQ,
     {
       type: PAYMENT_RECORD_TYPE,
       terminalCurrencyReasons: ["payment_currency_mismatch", "payment_currency_invalid"],
@@ -4479,12 +4458,13 @@ export const reconcilePaymentSessions = async ({
       bookedStatus: PAYMENT_STATUS_BOOKED,
       abandonedStatus: PAYMENT_STATUS_ABANDONED,
       now: nowIso(),
+      ...(runId ? { runId } : {}),
     }
   );
 
-  let records = await fetchRecoveryRecords();
+  const preRecords = await fetchRecoveryRecords(null);
   let normalizedEmailCompletions = 0;
-  for (const record of Array.isArray(records) ? records : []) {
+  for (const record of Array.isArray(preRecords) ? preRecords : []) {
     if (!isEmailDispatchComplete(record.emailDispatch)) continue;
     for (let attempt = 0; attempt < 5; attempt += 1) {
       try {
@@ -4510,8 +4490,6 @@ export const reconcilePaymentSessions = async ({
     }
   }
 
-  if (normalizedEmailCompletions > 0) records = await fetchRecoveryRecords();
-
   const summary = {
     scanned: 0,
     finalized: 0,
@@ -4522,9 +4500,22 @@ export const reconcilePaymentSessions = async ({
     refundsSynced: 0,
     failed: 0,
     normalizedEmailCompletions,
+    reconcileRunCompleted: true,
   };
 
+  let runId = null;
+  try {
+  if (typeof client?.startReconcileCleanupRun === "function") {
+    const startedRun = await client.startReconcileCleanupRun({ leaseSeconds: 180 });
+    runId = startedRun?.run_id || null;
+    if (!runId) throw Object.assign(new Error("Unable to start reconcile cleanup run."), { code: "reconcile_run_start_failed", status: 503 });
+  }
+  const records = await fetchRecoveryRecords(runId);
+
   for (const record of Array.isArray(records) ? records : []) {
+    let recordFailed = false;
+    let conclusiveProviderEvidence = false;
+    let expectedCaptureProtection = false;
     try {
       if (record.providerRecoveryTerminal === true &&
           ["payment_currency_mismatch", "payment_currency_invalid"].includes(record.providerRecoveryTerminalReason)) continue;
@@ -4567,30 +4558,44 @@ export const reconcilePaymentSessions = async ({
       const ageMinutes = getPaymentAgeMinutes(record);
       let dodoInspection = null;
       if (record.provider === "dodo" && record.providerOrderId && !localRecovery) {
+        if (runId && typeof client?.beginReconcileRecordInspection === "function") {
+          const begun = await client.beginReconcileRecordInspection({ runId, paymentRecordId: record._id });
+          if (!begun?.ok) throw Object.assign(new Error("Reconcile run is no longer active."), { code: "reconcile_run_not_active", status: 503 });
+        }
         dodoInspection = await inspectDodoCheckout({ record });
         if (dodoInspection.retryable === false) {
+          const isExplicitMismatch = dodoInspection.reason === "dodo_session_mismatch" || dodoInspection.reason === "dodo_payment_binding_mismatch";
           await patchPaymentRecord({ client, record, set: {
             status: PAYMENT_STATUS_NEEDS_RECOVERY,
             recoveryReason: dodoInspection.reason,
+            ...(isExplicitMismatch ? { recoveryOwnerReviewRequired: true } : {}),
             providerRecoveryTerminal: true,
             providerRecoveryTerminalReason: dodoInspection.reason,
             nextRecoveryAt: "",
             ...observedProviderState(record, dodoInspection.providerPaymentState),
           } });
+          conclusiveProviderEvidence = isExplicitMismatch || (dodoInspection.coreValidated === true && dodoInspection.normalizedStatus === "succeeded");
           summary.recovery += 1;
           continue;
         }
-        if (dodoInspection.payment) {
+        if (dodoInspection.noPaymentId === true) {
+          conclusiveProviderEvidence = true;
+        } else if (dodoInspection.payment) {
+          if (dodoInspection.coreValidated && dodoInspection.normalizedStatus === "succeeded") expectedCaptureProtection = true;
           const result = await refreshDodoPayment({ client, record, payment: dodoInspection.payment,
             source: "reconcile", applyBookingRefund, deferFinalization: true });
           Object.assign(record, await getPaymentRecordById(client, record._id));
+          if (result.httpStatus >= 500 && expectedCaptureProtection && !hasKnownCaptureRecord(record) && !hasVerifiedReversal(record)) {
+            throw Object.assign(new Error("Captured payment refresh failed."), { code: result.body?.code || "dodo_capture_refresh_failed", status: 503 });
+          }
           dodoInspection = result.httpStatus >= 400
-            ? { state: "unavailable", reason: result.body?.code || "dodo_refund_reconciliation_failed" }
+            ? { state: "unavailable", reason: result.body?.code || "dodo_refund_reconciliation_failed", coreValidated: false }
             : { ...dodoInspection, providerData: {
                 dodoCheckoutSessionId: record.providerOrderId,
                 dodoPaymentId: dodoInspection.payment.payment_id,
                 verifiedDodoPayment: dodoInspection.payment,
               } };
+          if (dodoInspection.coreValidated && dodoInspection.recognizedStatus && !expectedCaptureProtection) conclusiveProviderEvidence = true;
         }
       }
       const createdAgeMinutes = getPaymentCreatedAgeMinutes(record);
@@ -5074,7 +5079,19 @@ export const reconcilePaymentSessions = async ({
           summary.recovery += 1;
         }
       }
+      if (expectedCaptureProtection) {
+        const finalRec = result?.paymentRecord || (await getPaymentRecordById(client, record._id));
+        if (hasKnownCaptureRecord(finalRec) || hasVerifiedReversal(finalRec)) {
+          conclusiveProviderEvidence = true;
+        } else {
+          throw Object.assign(new Error("Captured payment protection was not durably recorded."), {
+            code: "capture_protection_not_recorded",
+            status: 503,
+          });
+        }
+      }
     } catch (error) {
+      recordFailed = true;
       summary.failed += 1;
       logSafeError("Payment record reconciliation failed", error);
       for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -5100,6 +5117,27 @@ export const reconcilePaymentSessions = async ({
           break;
         }
       }
+    } finally {
+      if (!recordFailed && runId && typeof client?.clearReconcileCleanupBlock === "function") {
+        let allowClear = true;
+        if (expectedCaptureProtection && !conclusiveProviderEvidence) {
+          const latest = await getPaymentRecordById(client, record._id).catch(() => null);
+          if (hasKnownCaptureRecord(latest) || hasVerifiedReversal(latest)) {
+            conclusiveProviderEvidence = true;
+          } else {
+            summary.failed += 1;
+            allowClear = false;
+          }
+        }
+        if (allowClear) {
+          const cleared = await client.clearReconcileCleanupBlock({
+            runId,
+            paymentRecordId: record._id,
+            conclusiveProviderEvidence,
+          });
+          if (!cleared?.ok) summary.failed += 1;
+        }
+      }
     }
   }
 
@@ -5108,10 +5146,33 @@ export const reconcilePaymentSessions = async ({
       summary.ownerReviewStatesChecked = await refreshOwnerReviewDodoStates({
         client,
         patchRecord: patchPaymentRecord,
+        runId,
       });
     } catch (error) {
+      summary.failed += 1;
       logSafeError("Owner review payment state check failed", error);
     }
+  }
+
+  if (runId) {
+    if (summary.failed > 0) {
+      if (typeof client?.failReconcileCleanupRun === "function") {
+        await client.failReconcileCleanupRun({ runId }).catch(() => {});
+      }
+      summary.reconcileRunCompleted = false;
+    } else if (typeof client?.completeReconcileCleanupRun === "function") {
+      const done = await client.completeReconcileCleanupRun({ runId });
+      summary.reconcileRunCompleted = done?.completed === true;
+      if (!summary.reconcileRunCompleted) summary.failed += 1;
+    }
+  }
+  } catch (fatalError) {
+    if (runId && typeof client?.failReconcileCleanupRun === "function") {
+      await client.failReconcileCleanupRun({ runId }).catch(() => {});
+    }
+    summary.failed += 1;
+    summary.reconcileRunCompleted = false;
+    logSafeError("Payment reconciliation failed", fatalError);
   }
 
   return {
@@ -5345,6 +5406,9 @@ const buildRefundMutation = ({
       ...(isFullRefund
         ? {
             status: PAYMENT_STATUS_REFUNDED,
+            ...(provider === "dodo"
+              ? { providerPaymentState: "refunded", providerReversalVerified: true }
+              : {}),
             ...(record.providerRefundDetailsMissing === true ? { providerRefundDetailsMissing: false,
               ...(record.providerRecoveryTerminalReason === "provider_partial_refund_details_missing_owner_review"
                 ? { providerRecoveryTerminal: false, providerRecoveryTerminalReason: "", reconciliationRecoveryTerminal: false } : {}) } : {}),
@@ -6011,7 +6075,7 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
   if (!validation.ok) {
     if (validation.reason !== "dodo_payment_binding_mismatch") {
       await recordProviderPaymentState({ client, record, patchRecord: patchPaymentRecord,
-        providerPaymentState: settledDodoPaymentState(payment) });
+        providerPaymentState: payment.status === "succeeded" ? "succeeded" : String(payment.status || "").trim() });
     }
     return {
       httpStatus: 409,
@@ -6118,9 +6182,15 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
       }
       transaction.patch(record._id, (patch) => {
         const guarded = guardPaymentRevision(patch, record);
+        const hasUnresolvedDispute = dodoDisputes.some((entry) =>
+          ["dispute_opened", "dispute_challenged"].includes(entry?.status)
+        );
         return guarded.set(boundToWatchDeadline(record, {
           dodoDisputeActive: disputed,
           dodoDisputes,
+          ...(terminalDispute && !hasUnresolvedDispute
+            ? { providerPaymentState: "disputed", providerReversalVerified: true }
+            : {}),
           ...(record.dodoDisputeActive === true && !disputed ? {
             recoveryAttemptCount: 0,
             recoveryFailureCount: 0,

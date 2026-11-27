@@ -306,6 +306,26 @@ export const readPublicContentRevision = async ({
     requireRpcData(await client.rpc("roo_read_public_content_revision"), "public content revision")
   );
 
+export const startReconcileCleanupRun = async ({ leaseSeconds = 180, client = createSupabaseAdminClient() } = {}) =>
+  requireRpcData(await client.rpc("roo_start_reconcile_cleanup_run", { p_lease_seconds: Math.max(1, Math.min(900, Number(leaseSeconds) || 180)) }), "start reconcile cleanup run");
+
+export const beginReconcileRecordInspection = async ({ runId, paymentRecordId, client = createSupabaseAdminClient() } = {}) =>
+  requireRpcData(await client.rpc("roo_begin_reconcile_record_inspection", { p_run_id: String(runId || ""), p_payment_record_id: String(paymentRecordId || "") }), "begin reconcile record inspection");
+
+export const clearReconcileCleanupBlock = async ({ runId, paymentRecordId, conclusiveProviderEvidence = false, client = createSupabaseAdminClient() } = {}) =>
+  requireRpcData(await client.rpc("roo_clear_reconcile_cleanup_block", { p_run_id: String(runId || ""), p_payment_record_id: String(paymentRecordId || ""), p_conclusive_provider_evidence: conclusiveProviderEvidence === true }), "clear reconcile cleanup block");
+
+export const failReconcileCleanupRun = async ({ runId, client = createSupabaseAdminClient() } = {}) =>
+  requireRpcData(await client.rpc("roo_fail_reconcile_cleanup_run", { p_run_id: String(runId || "") }), "fail reconcile cleanup run");
+
+export const completeReconcileCleanupRun = async ({ runId, client = createSupabaseAdminClient() } = {}) =>
+  requireRpcData(await client.rpc("roo_complete_reconcile_cleanup_run", { p_run_id: String(runId || "") }), "complete reconcile cleanup run");
+
+export const fetchOwnerReviewDodoDocuments = async ({ runId = null, now, limit = 20, client = createSupabaseAdminClient() } = {}) => {
+  const data = requireRpcData(await client.rpc("roo_fetch_owner_review_dodo_documents", { p_run_id: runId ? String(runId) : null, p_now: String(now || new Date().toISOString()), p_limit: Math.max(1, Math.min(100, Number(limit) || 20)) }), "owner review dodo fetch");
+  return Array.isArray(data) ? data : [];
+};
+
 export const fetchRecoveryPaymentDocuments = async ({
   backend,
   statuses,
@@ -315,6 +335,7 @@ export const fetchRecoveryPaymentDocuments = async ({
   dodoEnabled = true,
   now,
   limit = 50,
+  runId = null,
   client = createSupabaseAdminClient(),
 } = {}) => {
   const data = requireRpcData(
@@ -327,6 +348,7 @@ export const fetchRecoveryPaymentDocuments = async ({
       p_dodo_enabled: dodoEnabled === true,
       p_now: String(now || new Date().toISOString()),
       p_limit: Math.max(1, Math.min(100, Number(limit) || 50)),
+      p_run_id: runId ? String(runId) : null,
     }),
     "recovery payment fetch"
   );

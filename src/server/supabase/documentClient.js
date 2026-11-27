@@ -3,13 +3,19 @@ import { evaluate, parse } from "groq-js";
 import { isBookingBlockingStatus } from "../booking/bookingStatus.js";
 import {
   applyShadowMutations,
+  beginReconcileRecordInspection,
+  clearReconcileCleanupBlock,
+  completeReconcileCleanupRun,
+  failReconcileCleanupRun,
   fetchCommerceAvailability,
   fetchCommerceDerivedCount,
   fetchCommerceDocumentIds,
+  fetchOwnerReviewDodoDocuments,
   fetchReferralEarningsSummary,
   fetchRecoveryPaymentDocuments,
   fetchShadowDocuments,
   fetchUpgradeBookingChain,
+  startReconcileCleanupRun,
 } from "./shadowStore.js";
 import { WRITE_CONFLICT_CODE } from "./writeConflict.js";
 
@@ -529,6 +535,7 @@ export class SupabaseDocumentClient {
           dodoEnabled: params.dodoEnabled,
           now: params.now,
           limit: 50,
+          runId: params.runId || null,
         })
       : await this.dataset(scope);
     if (
@@ -558,6 +565,13 @@ export class SupabaseDocumentClient {
     }
     return fetchCommerceAvailability({ client: this.shadowClient });
   }
+
+  startReconcileCleanupRun(o = {}) { return startReconcileCleanupRun({ ...o, client: this.shadowClient }); }
+  fetchOwnerReviewDodoDocuments(o = {}) { return fetchOwnerReviewDodoDocuments({ ...o, client: this.shadowClient }); }
+  beginReconcileRecordInspection(o = {}) { return beginReconcileRecordInspection({ ...o, client: this.shadowClient }); }
+  clearReconcileCleanupBlock(o = {}) { return clearReconcileCleanupBlock({ ...o, client: this.shadowClient }); }
+  failReconcileCleanupRun(o = {}) { return failReconcileCleanupRun({ ...o, client: this.shadowClient }); }
+  completeReconcileCleanupRun(o = {}) { return completeReconcileCleanupRun({ ...o, client: this.shadowClient }); }
 
   referralEarnings({ referralId, referralCode } = {}) {
     return fetchReferralEarningsSummary({

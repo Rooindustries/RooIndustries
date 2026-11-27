@@ -100,8 +100,10 @@ const assertBookedOnHeldSlot = async ({ payload, record }) => {
 
 const holdMigration = '20261102000000_keep_payment_holds_until_resolved.sql';
 const shadowMigration = '20261111000000_keep_payment_hold_claims_in_shadow_refresh.sql';
+const hardenMigration = '20261118000000_harden_payment_recovery_and_hold_cleanup.sql';
 const migrationText = name => fs.readFileSync(path.join(process.cwd(), 'supabase/migrations', name), 'utf8');
-const rollbackText = () => fs.readFileSync(path.join(process.cwd(), 'supabase/rollbacks', shadowMigration), 'utf8');
+const rollbackText = () =>
+  `${fs.readFileSync(path.join(process.cwd(), 'supabase/rollbacks', hardenMigration), 'utf8')}\n${fs.readFileSync(path.join(process.cwd(), 'supabase/rollbacks', shadowMigration), 'utf8')}`;
 const originalDefinitions = {
   'migration.reconcile_slot_claims_for_times': 'b7c6c85622ee8eabfff784c8e4805b88',
   'migration.assert_slot_claim_integrity': 'd3bc74fa923444bbfda133ad0bcd32e0',
@@ -312,7 +314,7 @@ test('payment hold rollback restores and reapplies both migrations', async () =>
     await fixture.content.create({ _id: 'package.fixture.rollback', _type: 'package', title: 'Rollback' });
     assert.equal((await fixture.content.getDocument('package.fixture.rollback')).title, 'Rollback');
   } finally {
-    await fixture.database.apply(shadowMigration, `${migrationText(holdMigration)}\n${migrationText(shadowMigration)}`);
+    await fixture.database.apply(shadowMigration, `${migrationText(holdMigration)}\n${migrationText(shadowMigration)}\n${migrationText(hardenMigration)}`);
   }
   assert.deepEqual(await definitionHashes(), before);
   assert.equal(await expiryFunctions(), null);
@@ -645,16 +647,30 @@ test('payment holds are not tied to the original hold expiry', async () => {
 
 test('a verified payment refunded before booking frees its slot a day after the hold ran out', async () => {
   const checkout = await startCheckoutBeforeExpiry();
+  const paymentId = `payment_${checkout.record.providerOrderId}`;
   await stopRecovery(checkout, {
     status: 'needs_recovery',
     verificationState: 'server_verified',
     providerPaymentState: 'succeeded',
     providerStateCheckedAt: '2000-01-01T00:00:00.000Z',
   });
-  fixture.setPaymentAmountOverrides({ refund_status: 'full' });
+  fixture.setPaymentAmountOverrides({
+    refund_status: 'full',
+    refunds: [
+      {
+        refund_id: `window_full_ref_${checkout.record._id.slice(-12)}`,
+        payment_id: paymentId,
+        amount: Math.round(checkout.record.pricingSnapshot.netAmount * 100),
+        currency: 'USD',
+        status: 'succeeded',
+      },
+    ],
+  });
   clockShiftMs += 2 * 60 * 60_000;
   assert.equal((await cron()).status, 200);
-  assert.equal((await fixture.commerce.getDocument(checkout.record._id)).providerPaymentState, 'refunded');
+  const updated = await fixture.commerce.getDocument(checkout.record._id);
+  assert.equal(updated.providerPaymentState, 'refunded');
+  assert.equal(updated.providerReversalVerified, true);
   await holdRunsOut(checkout, 25 * 60 * 60_000);
   assert.equal((await cron()).status, 200);
   assert.equal((await holdFor(checkout.payload)).phase, 'expired');
@@ -757,28 +773,60 @@ for (const [status, recorded] of [
   });
 }
 
-test('a payment that failed our checks, then was fully refunded, frees its slot a day after expiry', async () => {
+test('a payment that failed our checks, then was fully refunded, keeps its slot when amount still mismatches and frees it when full capture and refund validate', async () => {
   fixture.setPaymentAmountOverrides({ total_amount: 1 });
-  const checkout = await startCheckoutBeforeExpiry();
-  await holdRunsOut(checkout);
+  const mismatchCheckout = await startCheckoutBeforeExpiry();
+  await holdRunsOut(mismatchCheckout);
   assert.equal((await cron()).status, 200);
-  assert.equal((await fixture.commerce.getDocument(checkout.record._id)).providerPaymentState, 'succeeded');
-  const paymentId = `payment_${checkout.record.providerOrderId}`;
-  const refunded = await fixture.refundPayment(
-    paymentId,
+  assert.equal((await fixture.commerce.getDocument(mismatchCheckout.record._id)).providerPaymentState, 'succeeded');
+  const mismatchPaymentId = `payment_${mismatchCheckout.record.providerOrderId}`;
+  const mismatchRefunded = await fixture.refundPayment(
+    mismatchPaymentId,
     [
       {
-        refund_id: `window_refund_${checkout.record._id.slice(-12)}`,
-        payment_id: paymentId,
-        amount: Math.round(checkout.record.pricingSnapshot.netAmount * 100),
+        refund_id: `window_mm_refund_${mismatchCheckout.record._id.slice(-12)}`,
+        payment_id: mismatchPaymentId,
+        amount: Math.round(mismatchCheckout.record.pricingSnapshot.netAmount * 100),
         currency: 'USD',
         status: 'succeeded',
       },
     ],
-    `window_refund_${checkout.record._id}`,
+    `window_mm_refund_${mismatchCheckout.record._id}`,
   );
-  assert.equal(refunded.status, 409, JSON.stringify(refunded));
-  assert.equal((await fixture.commerce.getDocument(checkout.record._id)).providerPaymentState, 'refunded');
+  assert.equal(mismatchRefunded.status, 409, JSON.stringify(mismatchRefunded));
+  assert.equal((await fixture.commerce.getDocument(mismatchCheckout.record._id)).providerPaymentState, 'succeeded');
+  await holdRunsOut(mismatchCheckout, 25 * 60 * 60_000);
+  assert.equal((await cron()).status, 200);
+  assert.equal((await holdFor(mismatchCheckout.payload)).phase, 'payment_pending');
+  assert.equal((await secondVisitor(mismatchCheckout.payload)).status, 409);
+
+  fixture.setPaymentAmountOverrides({});
+  const checkout = await startCheckoutBeforeExpiry();
+  await stopRecovery(checkout, {
+    status: 'needs_recovery',
+    providerPaymentState: 'succeeded',
+    providerStateCheckedAt: '2000-01-01T00:00:00.000Z',
+  });
+  const paymentId = `payment_${checkout.record.providerOrderId}`;
+  const fullSubunits = Math.round(checkout.record.pricingSnapshot.netAmount * 100);
+  fixture.setPaymentAmountOverrides({
+    total_amount: fullSubunits,
+    refund_status: 'full',
+    refunds: [
+      {
+        refund_id: `window_refund_${checkout.record._id.slice(-12)}`,
+        payment_id: paymentId,
+        amount: fullSubunits,
+        currency: 'USD',
+        status: 'succeeded',
+      },
+    ],
+  });
+  clockShiftMs += 2 * 60 * 60_000;
+  assert.equal((await cron()).status, 200);
+  const verifiedDoc = await fixture.commerce.getDocument(checkout.record._id);
+  assert.equal(verifiedDoc.providerPaymentState, 'refunded');
+  assert.equal(verifiedDoc.providerReversalVerified, true);
   await holdRunsOut(checkout, 25 * 60 * 60_000);
   assert.equal((await cron()).status, 200);
   assert.equal((await holdFor(checkout.payload)).phase, 'expired');
@@ -802,23 +850,45 @@ test('a customer back from a payment that failed our checks records Dodo success
   assert.equal((await secondVisitor(checkout.payload)).status, 409);
 });
 
-test('a payment that failed our checks, then lost its dispute by expiry, frees its slot a day later', async () => {
+test('a payment that lost its dispute by expiry keeps its slot when amount mismatches and frees it when full capture and terminal dispute validate', async () => {
   fixture.setPaymentAmountOverrides({ total_amount: 1 });
-  const checkout = await startCheckoutBeforeExpiry();
-  await holdRunsOut(checkout);
+  const mismatchCheckout = await startCheckoutBeforeExpiry();
+  await holdRunsOut(mismatchCheckout);
   assert.equal((await cron()).status, 200);
-  assert.equal((await fixture.commerce.getDocument(checkout.record._id)).providerPaymentState, 'succeeded');
+  assert.equal((await fixture.commerce.getDocument(mismatchCheckout.record._id)).providerPaymentState, 'succeeded');
   fixture.setPaymentAmountOverrides({
     total_amount: 1,
-    disputes: [{ dispute_id: 'window_dispute', dispute_status: 'dispute_expired' }],
+    disputes: [{ dispute_id: 'window_mm_dispute', dispute_stage: 'dispute', dispute_status: 'dispute_expired', amount: '84.99' }],
   });
-  const disputed = await fixture.dodoWebhook(
-    `payment_${checkout.record.providerOrderId}`,
+  const mismatchDisputed = await fixture.dodoWebhook(
+    `payment_${mismatchCheckout.record.providerOrderId}`,
     'dispute.expired',
-    `window_dispute_${checkout.record._id}`,
+    `window_mm_dispute_${mismatchCheckout.record._id}`,
   );
-  assert.equal(disputed.status, 409, JSON.stringify(disputed));
-  assert.equal((await fixture.commerce.getDocument(checkout.record._id)).providerPaymentState, 'disputed');
+  assert.equal(mismatchDisputed.status, 409, JSON.stringify(mismatchDisputed));
+  assert.equal((await fixture.commerce.getDocument(mismatchCheckout.record._id)).providerPaymentState, 'succeeded');
+  await holdRunsOut(mismatchCheckout, 25 * 60 * 60_000);
+  assert.equal((await cron()).status, 200);
+  assert.equal((await holdFor(mismatchCheckout.payload)).phase, 'payment_pending');
+  assert.equal((await secondVisitor(mismatchCheckout.payload)).status, 409);
+
+  fixture.setPaymentAmountOverrides({});
+  const checkout = await startCheckoutBeforeExpiry();
+  await stopRecovery(checkout, {
+    status: 'needs_recovery',
+    providerPaymentState: 'succeeded',
+    providerStateCheckedAt: '2000-01-01T00:00:00.000Z',
+  });
+  const fullSubunits = Math.round(checkout.record.pricingSnapshot.netAmount * 100);
+  fixture.setPaymentAmountOverrides({
+    total_amount: fullSubunits,
+    disputes: [{ dispute_id: 'window_dispute', dispute_stage: 'dispute', dispute_status: 'dispute_expired', amount: String(checkout.record.pricingSnapshot.netAmount) }],
+  });
+  clockShiftMs += 2 * 60 * 60_000;
+  assert.equal((await cron()).status, 200);
+  const disputedDoc = await fixture.commerce.getDocument(checkout.record._id);
+  assert.equal(disputedDoc.providerPaymentState, 'disputed');
+  assert.equal(disputedDoc.providerReversalVerified, true);
   await holdRunsOut(checkout, 25 * 60 * 60_000);
   assert.equal((await cron()).status, 200);
   assert.equal((await holdFor(checkout.payload)).phase, 'expired');
@@ -826,10 +896,14 @@ test('a payment that failed our checks, then lost its dispute by expiry, frees i
 });
 
 test('the cron learns of a refund on a payment in owner review when the refund webhook never arrives', async () => {
-  fixture.setPaymentAmountOverrides({ total_amount: 1 });
+  fixture.setPaymentAmountOverrides({});
   const checkout = await startCheckoutBeforeExpiry();
-  await holdRunsOut(checkout);
-  assert.equal((await cron()).status, 200);
+  await stopRecovery(checkout, {
+    status: 'needs_recovery',
+    providerRecoveryTerminal: true,
+    providerPaymentState: 'succeeded',
+    providerStateCheckedAt: '2000-01-01T00:00:00.000Z',
+  });
   const closed = await fixture.commerce.getDocument(checkout.record._id);
   assert.equal(closed.providerPaymentState, 'succeeded');
   const { _id, _rev, _createdAt, _updatedAt, ...fields } = closed;
@@ -851,10 +925,25 @@ test('the cron learns of a refund on a payment in owner review when the refund w
       nextRecoveryAt: '9999-12-31T23:59:59.999Z',
     });
   }
-  fixture.setPaymentAmountOverrides({ total_amount: 1, refund_status: 'full' });
+  const fullSubunits = Math.round(checkout.record.pricingSnapshot.netAmount * 100);
+  fixture.setPaymentAmountOverrides({
+    total_amount: fullSubunits,
+    refund_status: 'full',
+    refunds: [
+      {
+        refund_id: `window_cron_ref_${checkout.record._id.slice(-12)}`,
+        payment_id: `payment_${checkout.record.providerOrderId}`,
+        amount: fullSubunits,
+        currency: 'USD',
+        status: 'succeeded',
+      },
+    ],
+  });
   clockShiftMs += 2 * 60 * 60_000;
   assert.equal((await cron()).status, 200);
-  assert.equal((await fixture.commerce.getDocument(checkout.record._id)).providerPaymentState, 'refunded');
+  const updated = await fixture.commerce.getDocument(checkout.record._id);
+  assert.equal(updated.providerPaymentState, 'refunded');
+  assert.equal(updated.providerReversalVerified, true);
   await holdRunsOut(checkout, 25 * 60 * 60_000);
   assert.equal((await cron()).status, 200);
   assert.equal((await holdFor(checkout.payload)).phase, 'expired');
