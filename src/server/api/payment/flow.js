@@ -1954,6 +1954,7 @@ const markRetryableFinalizeFailure = async ({
   keepWatch = false,
   watchUntil = "",
   lastSeenState = "",
+  priorStatus = "",
 }) => {
   const operation = await currentPaymentOperation({ client, record });
   const current = operation.record;
@@ -1972,19 +1973,38 @@ const markRetryableFinalizeFailure = async ({
     };
   }
   await requirePaymentResourceRevisions({ client, record: current });
+  const normalizedPrior = String(priorStatus || "").trim().toLowerCase();
+  const preserveLateWatchReview = isWebhookLateWatchRecovery(current, source, normalizedPrior);
+  const restoreFailedStatus =
+    normalizedPrior === PAYMENT_STATUS_FAILED &&
+    !hasKnownCaptureRecord({ ...current, status: PAYMENT_STATUS_FAILED });
+  const targetStatus = preserveLateWatchReview
+    ? normalizedPrior === PAYMENT_STATUS_ABANDONED
+      ? PAYMENT_STATUS_ABANDONED
+      : PAYMENT_STATUS_NEEDS_RECOVERY
+    : restoreFailedStatus
+      ? PAYMENT_STATUS_FAILED
+      : PAYMENT_STATUS_NEEDS_RECOVERY;
   const watch = current.lateCaptureWatchUntil || watchUntil;
+  const failureScheduling = preserveLateWatchReview
+    ? {
+        reconciliationRecoveryTerminal: current.reconciliationRecoveryTerminal === true,
+        nextRecoveryAt: String(current.nextRecoveryAt || "").trim() || "9999-12-31T23:59:59.999Z",
+      }
+    : isFutureIso(watch) && (keepWatch || isTransientVerificationFailure(reason))
+      ? buildWatchFailureState(buildRecoveryFailureState(current))
+      : buildRecoveryFailureState(current);
   let nextRecord;
   try {
     nextRecord = await patchPaymentRecord({
       client,
       record: current,
       set: {
-        status: PAYMENT_STATUS_NEEDS_RECOVERY,
-        recoveryReason: reason,
+        status: targetStatus,
+        recoveryReason: preserveLateWatchReview ? current.recoveryReason : reason,
         ...(watchUntil && !current.lateCaptureWatchUntil ? { lateCaptureWatchUntil: watchUntil } : {}),
         ...(lastSeenState ? { providerOrderLastSeenState: lastSeenState } : {}),
-        ...(isFutureIso(watch) && (keepWatch || isTransientVerificationFailure(reason))
-          ? buildWatchFailureState(buildRecoveryFailureState(current)) : buildRecoveryFailureState(current)),
+        ...failureScheduling,
         finalizationLeaseId: "",
         finalizationLeaseExpiresAt: "",
         source,
@@ -1996,7 +2016,7 @@ const markRetryableFinalizeFailure = async ({
           : {}),
       },
       event: buildPaymentRecordEvent({
-        status: PAYMENT_STATUS_NEEDS_RECOVERY,
+        status: targetStatus,
         source,
         reason,
         data: details,
@@ -2011,6 +2031,11 @@ const markRetryableFinalizeFailure = async ({
     ok: false,
     httpStatus: 202,
     paymentRecord: nextRecord,
+    ...(preserveLateWatchReview &&
+    nextRecord?.reconciliationRecoveryTerminal === true &&
+    isTransientVerificationFailure(reason)
+      ? { retryWebhook: true }
+      : {}),
     response: {
       ...buildPublicStatusBody(nextRecord),
     },
@@ -2449,6 +2474,7 @@ const finalizePaymentRecordInternal = async ({
         reason: verification.reason,
         details: providerData,
         keepWatch: verification.retryable === true || verification.captured === true,
+        priorStatus: lease.previousStatus,
       });
     }
 
