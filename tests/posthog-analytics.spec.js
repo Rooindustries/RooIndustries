@@ -139,7 +139,7 @@ const confirmBooking = async (page, baseURL, { receipt, beforeReturn, afterFinal
   await expect(page).toHaveURL(`${baseURL}/payment-success`);
 };
 const storedMarks = (page) => page.evaluate(() => sessionStorage.getItem("roo-posthog-counted") || "");
-const sessionKeys = (page) => page.evaluate(() => Object.keys(sessionStorage));
+const sessionKeys = (page) => page.evaluate(() => Object.keys(sessionStorage).sort());
 const holdChunk = (page, { origin, loopback }, ...markers) =>
   holdChunks(page, { origin, fetchOrigin: loopback }, (body) => markers.some((marker) => body.includes(marker)));
 const holdPostHog = (page, productionHost) => holdChunk(page, productionHost, "[PostHog.js]");
