@@ -4463,34 +4463,6 @@ export const reconcilePaymentSessions = async ({
     }
   );
 
-  const preRecords = await fetchRecoveryRecords(null);
-  let normalizedEmailCompletions = 0;
-  for (const record of Array.isArray(preRecords) ? preRecords : []) {
-    if (!isEmailDispatchComplete(record.emailDispatch)) continue;
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      try {
-        const current = await getPaymentRecordById(client, record._id);
-        if (!current || String(current.status || "").trim().toLowerCase() !== PAYMENT_STATUS_BOOKED || current.emailDispatchRequired !== true ||
-            !isEmailDispatchComplete(current.emailDispatch) ||
-            selectPaymentAuthority({ backendOwner: current.backendOwner,
-              cutoverGeneration: current.cutoverGeneration, policy }) !== backend) break;
-        await patchPaymentRecord({ client, record: current, set: {
-          emailDispatchRequired: false,
-          recoveryAttemptCount: 0,
-          ...buildRecoveryCompletionState(current),
-          nextRecoveryAt: "",
-        }, event: buildPaymentRecordEvent({ status: PAYMENT_STATUS_BOOKED, source: "reconcile",
-          reason: "completed_email_recovery_normalized" }) });
-        normalizedEmailCompletions += 1;
-        break;
-      } catch (error) {
-        if (isConflictError(error) && attempt < 4) continue;
-        logSafeError("Completed payment email recovery normalization failed", error);
-        break;
-      }
-    }
-  }
-
   const summary = {
     scanned: 0,
     finalized: 0,
@@ -4500,7 +4472,7 @@ export const reconcilePaymentSessions = async ({
     providerUnavailable: 0,
     refundsSynced: 0,
     failed: 0,
-    normalizedEmailCompletions,
+    normalizedEmailCompletions: 0,
     reconcileRunCompleted: true,
   };
 
@@ -4518,6 +4490,35 @@ export const reconcilePaymentSessions = async ({
     let conclusiveProviderEvidence = false;
     let expectedCaptureProtection = false;
     try {
+      if (isEmailDispatchComplete(record.emailDispatch)) {
+        let normalized = null;
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+          try {
+            const current = await getPaymentRecordById(client, record._id);
+            if (!current || String(current.status || "").trim().toLowerCase() !== PAYMENT_STATUS_BOOKED || current.emailDispatchRequired !== true ||
+                !isEmailDispatchComplete(current.emailDispatch) ||
+                selectPaymentAuthority({ backendOwner: current.backendOwner,
+                  cutoverGeneration: current.cutoverGeneration, policy }) !== backend) break;
+            normalized = await patchPaymentRecord({ client, record: current, set: {
+              emailDispatchRequired: false,
+              recoveryAttemptCount: 0,
+              ...buildRecoveryCompletionState(current),
+              nextRecoveryAt: "",
+            }, event: buildPaymentRecordEvent({ status: PAYMENT_STATUS_BOOKED, source: "reconcile",
+              reason: "completed_email_recovery_normalized" }) });
+            summary.normalizedEmailCompletions += 1;
+            break;
+          } catch (error) {
+            if (isConflictError(error) && attempt < 4) continue;
+            logSafeError("Completed payment email recovery normalization failed", error);
+            break;
+          }
+        }
+        if (normalized) {
+          Object.assign(record, normalized);
+          if (record.refundRequiresBookingSync !== true && record.resourceReleasePending !== true) continue;
+        }
+      }
       if (record.providerRecoveryTerminal === true &&
           ["payment_currency_mismatch", "payment_currency_invalid"].includes(record.providerRecoveryTerminalReason)) continue;
       const localStatus = String(record.status || "").trim().toLowerCase();
