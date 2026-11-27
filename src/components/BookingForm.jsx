@@ -92,12 +92,6 @@ const CALENDAR_AVAILABILITY_LABELS = Object.freeze({
   red: "fully booked",
 });
 const BOOKING_STEPS = ["Pick a slot", "PC details", "Review & pay"];
-const STEP_PROGRESS_LABELS = {
-  1: "Step 1 of 3",
-  2: "Step 2 of 3",
-  3: "Step 3 of 3",
-};
-const STEP_PROGRESS_WIDTHS = { 1: "33%", 2: "67%", 3: "100%" };
 const STEP_PROGRESS_PERCENTS = { 1: 33, 2: 67, 3: 100 };
 const createFreshForm = () => ({
   discord: "",
@@ -259,6 +253,15 @@ const formatCalendarDateLabel = (date) => {
   }
 };
 
+const GlowLines = () => (
+  <>
+    <span className="glow-line glow-line-top" />
+    <span className="glow-line glow-line-right" />
+    <span className="glow-line glow-line-bottom" />
+    <span className="glow-line glow-line-left" />
+  </>
+);
+
 function BookingStepTracker({ step }) {
   return (
     <div className="ri-booking-progress mb-6" data-testid="booking-step-tracker">
@@ -296,24 +299,24 @@ function BookingStepTracker({ step }) {
         aria-valuenow={STEP_PROGRESS_PERCENTS[step]}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-valuetext={STEP_PROGRESS_LABELS[step]}
+        aria-valuetext={`Step ${step} of 3`}
         aria-label="Booking progress"
       >
         <div className="h-0.5 w-full rounded-full bg-surface-input">
           <div
             className="h-0.5 rounded-full bg-accent-strong transition-all duration-300"
-            style={{ width: STEP_PROGRESS_WIDTHS[step] }}
+            style={{ width: `${STEP_PROGRESS_PERCENTS[step]}%` }}
           />
         </div>
         <span
           aria-hidden="true"
           className="absolute top-2 whitespace-nowrap text-[11px] font-medium text-accent transition-all duration-300"
           style={{
-            left: STEP_PROGRESS_WIDTHS[step],
+            left: `${STEP_PROGRESS_PERCENTS[step]}%`,
             transform: step === 3 ? "translateX(-100%)" : "translateX(-50%)",
           }}
         >
-          {STEP_PROGRESS_WIDTHS[step]}
+          {`${STEP_PROGRESS_PERCENTS[step]}%`}
         </span>
       </div>
     </div>
@@ -559,6 +562,7 @@ export default function BookingForm() {
   const scrollLockRef = useRef(null);
   const [persistedPackage, setPersistedPackage] = useState(null);
   const [preventHoldAutoload, setPreventHoldAutoload] = useState(false);
+  const resumedHoldStepRef = useRef("");
   const [drafts, setDrafts] = useState({});
 
   const { navigationPackage, bookingPackage, pricesReady, pricesError, retryPrices } =
@@ -725,8 +729,10 @@ export default function BookingForm() {
 
   useEffect(() => {
     if (restoredSessionPackageTitle !== selectedPackage.title) return;
-    try {
-      const payload = {
+    writeBrowserStorage(
+      "sessionStorage",
+      SESSION_STATE_KEY,
+      JSON.stringify({
         packageTitle: selectedPackage.title,
         step,
         month: month?.toISOString?.() || null,
@@ -738,11 +744,8 @@ export default function BookingForm() {
               localLabel: selectedSlot.localLabel,
             }
           : null,
-      };
-      sessionStorage.setItem(SESSION_STATE_KEY, JSON.stringify(payload));
-    } catch {
-      console.error("Failed to persist session state");
-    }
+      })
+    );
   }, [
     step,
     month,
@@ -767,51 +770,43 @@ export default function BookingForm() {
     setSelectedSlot(null);
     setStep(1);
     clearedNoHoldRef.current = true;
-    try {
-      sessionStorage.removeItem(SESSION_STATE_KEY);
-    } catch {
-      console.error("Failed to clear session state");
-    }
+    removeBrowserStorage("sessionStorage", SESSION_STATE_KEY);
   }, [draftLoading, myHold, selectedPackage]);
 
   useEffect(() => {
     try {
-      const stored = sessionStorage.getItem(HOLD_STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (new Date(parsed.expiresAt) > new Date() || isHoldProtectedFromExpiry(parsed)) {
-          const normalizedHold = {
-            holdId: parsed.holdId,
-            holdToken: parsed.holdToken,
-            expiresAt: parsed.expiresAt,
-            startTimeUTC: parsed.startTimeUTC,
-            packageTitle: parsed.packageTitle,
-            packagePrice: parsed.packagePrice,
-            packageTag: parsed.packageTag,
-            phase: parsed.phase || "",
-            ...(parsed.paymentStartedElsewhere ? { paymentStartedElsewhere: true } : {}),
-          };
-          const utcDate = getUtcDateFromHold(normalizedHold);
-          if (!utcDate) {
-            sessionStorage.removeItem(HOLD_STORAGE_KEY);
-            return;
-          }
-          normalizedHold.startTimeUTC = utcDate.toISOString();
-          sessionStorage.setItem(HOLD_STORAGE_KEY, JSON.stringify(normalizedHold));
-          setMyHold(normalizedHold);
-          broadcastHold(normalizedHold);
-        } else {
-          sessionStorage.removeItem(HOLD_STORAGE_KEY);
+      const parsed = JSON.parse(sessionStorage.getItem(HOLD_STORAGE_KEY) || "null");
+      if (!parsed) return;
+      if (new Date(parsed.expiresAt) > new Date() || isHoldProtectedFromExpiry(parsed)) {
+        const utcDate = getUtcDateFromHold(parsed);
+        if (!utcDate) {
+          removeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY);
+          return;
         }
+        const normalizedHold = {
+          holdId: parsed.holdId,
+          holdToken: parsed.holdToken,
+          expiresAt: parsed.expiresAt,
+          startTimeUTC: utcDate.toISOString(),
+          packageTitle: parsed.packageTitle,
+          packagePrice: parsed.packagePrice,
+          packageTag: parsed.packageTag,
+          phase: parsed.phase || "",
+          ...(parsed.paymentStartedElsewhere ? { paymentStartedElsewhere: true } : {}),
+        };
+        writeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY, JSON.stringify(normalizedHold));
+        setMyHold(normalizedHold);
+        broadcastHold(normalizedHold);
+      } else {
+        removeBrowserStorage("sessionStorage", HOLD_STORAGE_KEY);
       }
-    } catch {
-      console.error("Failed to restore slot reservation");
-    }
+    } catch {}
   }, []);
 
   useEffect(() => {
     if (!myHold) return;
     if (restoredSessionPackageTitle !== selectedPackage.title) return;
+    if (draftLoading) return;
 
     if (preventHoldAutoload) {
       setSelectedSlot(null);
@@ -846,9 +841,14 @@ export default function BookingForm() {
       });
       const paymentPending =
         String(myHold.phase || "").trim().toLowerCase() === "payment_pending";
-      setStep((currentStep) =>
-        paymentPending ? 3 : currentStep === 3 ? 3 : 2
-      );
+      if (location.state?.resumeHoldStep === true && resumedHoldStepRef.current !== location.key) {
+        resumedHoldStepRef.current = location.key;
+        setStep(paymentPending || (REQUIRED_DETAIL_FIELDS.every((k) => form[k].trim()) && isValidEmail(form.email.trim())) ? 3 : 2);
+      } else {
+        setStep((currentStep) =>
+          paymentPending ? 3 : currentStep === 3 ? 3 : 2
+        );
+      }
     } else {
       setSelectedSlot(null);
       setStep(1);
@@ -858,6 +858,10 @@ export default function BookingForm() {
     selectedPackage.title,
     preventHoldAutoload,
     restoredSessionPackageTitle,
+    draftLoading,
+    form,
+    location.key,
+    location.state?.resumeHoldStep,
     localSlotFormatters,
   ]);
 
@@ -914,17 +918,7 @@ export default function BookingForm() {
   }, [myHold, paymentInOtherTab, confirmationVersion]);
 
   const clearErrorIfResolved = (nextForm = form) => {
-    if (!errorStep2) return;
-
-    const baseFilled =
-      nextForm.discord.trim() &&
-      nextForm.email.trim() &&
-      nextForm.specs.trim() &&
-      nextForm.mainGame.trim();
-
-    if (baseFilled) {
-      setErrorStep2("");
-    }
+    if (errorStep2 && REQUIRED_DETAIL_FIELDS.every((k) => nextForm[k].trim())) setErrorStep2("");
   };
 
   const normalizedPackageTitle = normalizePackageKey(selectedPackage.title);
@@ -940,19 +934,10 @@ export default function BookingForm() {
   const displayFeatureItems = getPackageFeatureItems(
     displayPackage || {}
   );
-  const isStep2Complete = useMemo(() => {
-    return Boolean(
-      form.discord.trim() &&
-      form.email.trim() &&
-      form.specs.trim() &&
-        form.mainGame.trim()
-    );
-  }, [
-    form.discord,
-    form.email,
-    form.specs,
-    form.mainGame,
-  ]);
+  const isStep2Complete = useMemo(
+    () => REQUIRED_DETAIL_FIELDS.every((k) => form[k].trim()),
+    [form]
+  );
 
   const detailMissing = (name) => errorStep2 === REQUIRED_DETAILS_ERROR && !form[name].trim();
   const detailInputRef = (name) => (element) => {
@@ -2757,10 +2742,7 @@ export default function BookingForm() {
                         className={`ri-booking-secondary glow-button w-full py-3 rounded-lg font-semibold text-lg transition-all duration-300 inline-flex items-center justify-center gap-2 disabled:cursor-wait disabled:opacity-60`}
                       >
                         View My Plan
-                        <span className="glow-line glow-line-top" />
-                        <span className="glow-line glow-line-right" />
-                        <span className="glow-line glow-line-bottom" />
-                        <span className="glow-line glow-line-left" />
+                        <GlowLines />
                       </button>
 
                       <button
@@ -2775,10 +2757,7 @@ export default function BookingForm() {
                         }`}
                       >
                         {lockingSlot ? "Reserving..." : "Next"}
-                        <span className="glow-line glow-line-top" />
-                        <span className="glow-line glow-line-right" />
-                        <span className="glow-line glow-line-bottom" />
-                        <span className="glow-line glow-line-left" />
+                        <GlowLines />
                       </button>
                     </div>
 
@@ -2930,10 +2909,7 @@ export default function BookingForm() {
                         }`}
                       >
                         Review before payment
-                        <span className="glow-line glow-line-top" />
-                        <span className="glow-line glow-line-right" />
-                        <span className="glow-line glow-line-bottom" />
-                        <span className="glow-line glow-line-left" />
+                        <GlowLines />
                       </button>
                     </div>
                   </div>
@@ -3198,10 +3174,7 @@ export default function BookingForm() {
                             className="ri-booking-primary glow-button inline-flex w-full min-w-0 items-center justify-center gap-2 rounded-lg py-3 font-semibold transition"
                           >
                             Return to payment
-                            <span className="glow-line glow-line-top" />
-                            <span className="glow-line glow-line-right" />
-                            <span className="glow-line glow-line-bottom" />
-                            <span className="glow-line glow-line-left" />
+                            <GlowLines />
                           </button>
                         </>
                         )
@@ -3232,10 +3205,7 @@ export default function BookingForm() {
                               : validatingCode || restoredCodeCandidates
                               ? "Checking code..."
                               : "Continue to payment"}
-                            <span className="glow-line glow-line-top" />
-                            <span className="glow-line glow-line-right" />
-                            <span className="glow-line glow-line-bottom" />
-                            <span className="glow-line glow-line-left" />
+                            <GlowLines />
                           </button>
                         </>
                       )}
@@ -3408,10 +3378,7 @@ export default function BookingForm() {
                         style={{ transition: "opacity 0.9s ease-in-out" }}
                       >
                         {displayPackage?.buttonText || "Book Now"}
-                        <span className="glow-line glow-line-top" />
-                        <span className="glow-line glow-line-right" />
-                        <span className="glow-line glow-line-bottom" />
-                        <span className="glow-line glow-line-left" />
+                        <GlowLines />
                       </button>
                     </motion.div>
                   )}

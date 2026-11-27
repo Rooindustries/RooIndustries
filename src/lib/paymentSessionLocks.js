@@ -166,12 +166,15 @@ export const persistDetachedStartResult = ({ booking, data, provider, fingerprin
   const latestScope = latestCheckout ? reservationScopeKey(latestCheckout) : "";
   if (latestScope && scopeKey && !areSameLineageScopeKeys(latestScope, scopeKey)) return null;
   const refreshedHold = data.refreshedHold || data.hold || null;
-  if (!booking?.originalOrderId) {
+  const isUpgrade = Boolean(String(booking?.originalOrderId || "").trim());
+  if (!isUpgrade) {
     if (initialHoldId && !doesLiveHoldMatchLineage(initialHoldId, initialHoldNonce)) return null;
     if (!initialHoldId && refreshedHold?.slotHoldId && !canWriteRefreshedHold(refreshedHold, "", "")) return null;
   }
+  const sessionHoldId = isUpgrade ? "" : String(refreshedHold?.slotHoldId || initialHoldId || booking?.slotHoldId || "").trim();
+  const sessionHoldNonce = isUpgrade ? "" : extractTokenNonce(refreshedHold?.slotHoldToken || initialHoldNonce || booking?.slotHoldToken || "");
   const nextSession = {
-    provider, fingerprint, scopeKey,
+    provider, fingerprint, scopeKey, sessionHoldId, sessionHoldNonce,
     paymentAccessToken: String(data.paymentAccessToken || "").trim(),
     providerPayload: data.providerPayload || {},
     providerOrderReady: data.providerOrderReady !== false,

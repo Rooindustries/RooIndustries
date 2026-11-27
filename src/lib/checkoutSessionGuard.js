@@ -121,3 +121,22 @@ export const endPendingPaymentStart = (id) => {
   syncPendingStarts(); announceCheckoutConfirmationChange();
 };
 export const mergeLineageCheckout = (latest, current, patch = {}) => ({ ...(latest && areSameLineageScopeKeys(reservationScopeKey(latest), reservationScopeKey(current)) ? latest : current), ...patch });
+
+export const buildBookingFromUnresolvedSession = (session) => {
+  const fp = parseCheckoutFingerprint(session?.fingerprint) || {};
+  const ref = session?.result?.refreshedHold || session?.result?.hold || null;
+  const parsedScope = (() => { try { return session?.scopeKey ? JSON.parse(session.scopeKey) : null; } catch { return null; } })();
+  const holdId = String(ref?.slotHoldId || session?.sessionHoldId || (parsedScope?.k === "b" ? parsedScope.h : "") || "").trim();
+  const holdToken = String(ref?.slotHoldToken || session?.sessionHoldNonce || (parsedScope?.k === "b" ? parsedScope.n : "") || "").trim();
+  return {
+    packageTitle: String(fp.packageTitle || "").trim(),
+    originalOrderId: String(fp.originalOrderId || "").trim(),
+    startTimeUTC: String(fp.startTimeUTC || "").trim(),
+    email: String(fp.email || "").trim(),
+    referralCode: String(fp.referralCode || "").trim(),
+    couponCode: String(fp.couponCode || "").trim(),
+    slotHoldId: fp.originalOrderId ? "" : holdId,
+    slotHoldToken: fp.originalOrderId ? "" : holdToken,
+    slotHoldExpiresAt: fp.originalOrderId ? "" : String(ref?.slotHoldExpiresAt || ref?.expiresAt || session?.sessionExpiresAt || "").trim(),
+  };
+};
