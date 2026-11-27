@@ -77,7 +77,8 @@ export async function runResumePaymentSession(ctx) {
     navigateToConfirmation, clearPaymentSession, parseCheckoutFingerprint,
     referral, coupon, persistPaymentSession, pendingStartsRef, setPendingStarts,
     otherCheckoutStarting, paymentActionRef, paymentMountedRef, paymentView, flow,
-    consentStateRef, quoteVersionRef, onAuthoritativeQuote, rawBookingData, bookingData, readStoredCheckout,
+    consentStateRef, quoteVersionRef, onAuthoritativeQuote, rawBookingData, bookingData,
+    readStoredCheckout, writeStoredCheckout, setSessionHold, packageTitle, packagePrice,
   } = ctx;
   if (otherCheckoutStarting(provider)) {
     throw new Error("Another payment method is still starting. Please wait a moment and try again.");
@@ -111,7 +112,14 @@ export async function runResumePaymentSession(ctx) {
         outcomeMod.sessionOwnsCheckoutBooking(storedActive, bookingData)
       )
     );
-    const restored = wasCurrent && resumedStatus === "abandoned" && owns ? flow.applyReleasedHold(data?.refreshedHold) : null;
+    const restored = wasCurrent && resumedStatus === "abandoned" && owns
+      ? outcomeMod.applyCancelRefreshedHold({
+          activeSession: storedActive, refreshedHold: data?.refreshedHold || null,
+          storedCheckout: readStoredCheckout?.(), liveHold: readLiveSlotHold(),
+          initialHoldId: "", initialHoldNonce: "", bookingData, packageTitle, packagePrice,
+          setSessionHold, writeStoredCheckout,
+        }).refreshedCheckout
+      : null;
     releasePaymentSessionLock({ token, scopeKey: resumeScopeKey, seq: statusSeq });
     if (!wasCurrent) {
       const liveViewToken = str(paymentView?.session?.paymentAccessToken);
@@ -219,6 +227,7 @@ export async function runCheckPaymentStatus(ctx) {
   const {
     activeSession, operation, currentScopeKeyRef, fetchJson = fetchPaymentJson, setPaymentStatusBusy,
     navigateToConfirmation, showBanner, clearPaymentSession, persistPaymentSession, flow,
+    bookingData, packageTitle, packagePrice, setSessionHold, readStoredCheckout, writeStoredCheckout,
   } = ctx;
   const token = str(activeSession?.paymentAccessToken);
   if (!token || !operation.current()) return null;
@@ -241,7 +250,14 @@ export async function runCheckPaymentStatus(ctx) {
     if (affirmative) {
       const wasCurrent = operation.current();
       const owns = flow.ownsHold(activeSession);
-      const nextCheckout = wasCurrent && status === "abandoned" && owns ? flow.applyReleasedHold(data?.refreshedHold) : null;
+      const nextCheckout = wasCurrent && status === "abandoned" && owns
+        ? outcomeMod.applyCancelRefreshedHold({
+            activeSession, refreshedHold: data?.refreshedHold || null,
+            storedCheckout: readStoredCheckout?.(), liveHold: readLiveSlotHold(),
+            initialHoldId: "", initialHoldNonce: "", bookingData, packageTitle, packagePrice,
+            setSessionHold, writeStoredCheckout,
+          }).refreshedCheckout
+        : null;
       releasePaymentSessionLock({ token, scopeKey, seq: statusSeq });
       if (!wasCurrent) return null;
       if (status === "abandoned" && (nextCheckout || (activeSession.provider !== "dodo" && !owns))) {
@@ -290,7 +306,15 @@ export async function runCheckPaymentStatus(ctx) {
       return data;
     }
     outcomeMod.persistStrippedSession({ session: activeSession, data, seq: statusSeq, scopeKey, persistPaymentSession });
-    showBanner("info", data?.providerOrderReady === false ? "Checkout is still preparing. Check again shortly." : "Your payment session is ready. Click 'Resume checkout' to continue.", { persistent: true });
+    showBanner(
+      "info",
+      data?.providerOrderReady === false
+        ? "Checkout is still preparing. Check again shortly."
+        : activeSession.provider === "dodo" && (data?.attemptStarted === true || !str(data?.providerPayload?.checkoutUrl))
+          ? "Your payment attempt is still being verified. Click 'Check payment status' again shortly."
+          : "Your payment session is ready. Click 'Resume checkout' to continue.",
+      { persistent: true }
+    );
     return data;
   } finally {
     if (operation.current()) setPaymentStatusBusy(false);
@@ -372,6 +396,7 @@ export async function runChangePaymentMethod(ctx) {
       operation.token = "";
       return;
     }
+    if (!cancelCurrent()) return;
     const { ownsCheckout, ownsLiveHold, refreshedCheckout } = outcomeMod.applyCancelRefreshedHold({
       activeSession, refreshedHold: data.refreshedHold || null, storedCheckout: readStoredCheckout(),
       liveHold: readLiveSlotHold(), initialHoldId, initialHoldNonce, bookingData, packageTitle,
@@ -404,6 +429,7 @@ export async function runFinalizeSessionCheckout(ctx) {
     currentScopeKeyRef, paymentActionRef, manualCodeAllowedRef, fetchJson = fetchPaymentJson,
     setPaymentStatusBusy, showBanner, navigateToConfirmation, clearPaymentSession,
     fetchTimeoutMs = 15_000, pollTimeoutMs = 90_000, pollIntervalMs = 2_500, flow,
+    bookingData, packageTitle, packagePrice, setSessionHold, readStoredCheckout, writeStoredCheckout,
   } = ctx;
   if (!captured && !operation.current()) return null;
   if (!(captured && paymentActionRef.current.cancelling)) paymentActionRef.current.seq += 1;
@@ -414,10 +440,18 @@ export async function runFinalizeSessionCheckout(ctx) {
   const finSeq = allocatePaymentSessionSeq();
   if (operation.current()) setPaymentStatusBusy(true);
 
-  const finishTerminal = (payload, st, fallbackMsg) => {
+  const finishTerminal = (outcomeMod, payload, st, fallbackMsg) => {
     const wasCurrent = operation.current();
-    const owns = flow.ownsHold(resolvedSession || readStoredPaymentSessionState());
-    const nextCheckout = wasCurrent && st === "abandoned" && owns ? flow.applyReleasedHold(payload?.refreshedHold) : null;
+    const targetSession = resolvedSession || readStoredPaymentSessionState();
+    const owns = flow.ownsHold(targetSession);
+    const nextCheckout = wasCurrent && st === "abandoned" && owns
+      ? outcomeMod.applyCancelRefreshedHold({
+          activeSession: targetSession, refreshedHold: payload?.refreshedHold || null,
+          storedCheckout: readStoredCheckout?.(), liveHold: readLiveSlotHold(),
+          initialHoldId: "", initialHoldNonce: "", bookingData, packageTitle, packagePrice,
+          setSessionHold, writeStoredCheckout,
+        }).refreshedCheckout
+      : null;
     releasePaymentSessionLock({ token: paymentAccessToken, scopeKey, seq: finSeq });
     if (!wasCurrent) return null;
     if (st === "abandoned" && (nextCheckout || (resolvedSession?.provider !== "dodo" && !owns))) {
@@ -488,7 +522,7 @@ export async function runFinalizeSessionCheckout(ctx) {
       markReservationTerminal(scopeKey, status);
     }
     if (affirmative) {
-      return finishTerminal(data, status, "Payment finalization failed.");
+      return finishTerminal(outcomeMod, data, status, "Payment finalization failed.");
     }
     if (!operation.current()) return null;
     if (isNonResumablePaymentData(data)) flow.scrubPayload(paymentAccessToken, data);
@@ -539,7 +573,7 @@ export async function runFinalizeSessionCheckout(ctx) {
       }
       if (isAffirmativeTerminalRelease(settled?._httpStatus === 200, settled)) {
         if (scopeKey) markReservationTerminal(scopeKey, settledStatus);
-        return finishTerminal(settled, settledStatus, "Payment could not be finalized.");
+        return finishTerminal(outcomeMod, settled, settledStatus, "Payment could not be finalized.");
       }
       throw new Error(settled?.paymentFailureMessage || settled?.recoveryReason || settled?.error || "Payment could not be finalized.");
     }

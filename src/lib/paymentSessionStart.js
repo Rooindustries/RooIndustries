@@ -265,7 +265,9 @@ export async function runStartSessionCheckout(ctx) {
       navigateToConfirmation, clearPaymentSession, parseCheckoutFingerprint,
       referral, coupon, persistPaymentSession, pendingStartsRef, setPendingStarts,
       otherCheckoutStarting, paymentActionRef, paymentMountedRef, paymentView, flow,
-      consentStateRef, quoteVersionRef, onAuthoritativeQuote, rawBookingData, bookingData, readStoredCheckout,
+      consentStateRef, quoteVersionRef, onAuthoritativeQuote, rawBookingData, bookingData,
+      readStoredCheckout, writeStoredCheckout: ctx.writeStoredCheckout, setSessionHold: ctx.setSessionHold,
+      packageTitle: ctx.packageTitle, packagePrice: ctx.packagePrice,
     });
     if (resumed) return resumed;
   }

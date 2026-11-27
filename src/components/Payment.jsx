@@ -352,7 +352,25 @@ export default function Payment({ hideFooter = false }) {
     return () => clearTimeout(timeoutId);
   }, [hydrated, holdExpiresAt, holdForGuard, holdGuarded, confirmationVersion, processingDodoReturn, creatingFree, navigate, navState, location]);
 
-  const sessionQuote = paymentSession?.paymentAccessToken ? paymentSession?.result?.quote : null;
+  const checkoutFingerprint = useMemo(
+    () =>
+      JSON.stringify({
+        packageTitle,
+        originalOrderId: bookingData.originalOrderId || "",
+        startTimeUTC: bookingData.startTimeUTC || "",
+        email: bookingData.email || "",
+        referralCode: referral?.code || "",
+        couponCode: coupon?.code || "",
+      }),
+    [packageTitle, bookingData.originalOrderId, bookingData.startTimeUTC, bookingData.email, referral?.code, coupon?.code]
+  );
+  const sessionMatchesVisibleBooking = Boolean(
+    paymentSession?.paymentAccessToken &&
+    !usingUnresolvedFallback &&
+    paymentSessionMatchesCheckout(paymentSession.fingerprint, checkoutFingerprint) &&
+    paymentSessionMatchesBookingLineage(paymentSession, bookingData)
+  );
+  const sessionQuote = (sessionMatchesVisibleBooking || usingUnresolvedFallback) ? paymentSession?.result?.quote : null;
   const net = sessionQuote?.netAmount;
   const quoteValid = (net != null && net !== "" && Number.isFinite(Number(net))) || sessionQuote?.isFree === true;
   const lockedSessionQuote = sessionQuote && quoteValid ? sessionQuote : null;
@@ -402,7 +420,7 @@ export default function Payment({ hideFooter = false }) {
   const selectedQuoteProvider = quoteProvState.scopeKey === currentScopeKey ? quoteProvState.provider : (hydrated ? readScopedQuoteProvider(currentScopeKey) : "");
   const selectedQuoteProviderRef = useRef(selectedQuoteProvider); selectedQuoteProviderRef.current = selectedQuoteProvider;
   const selectQuoteProvider = (p, scopeKey = currentScopeKeyRef.current) => { const n = String(p || "").trim().toLowerCase(); writeScopedQuoteProvider(scopeKey, n); setQuoteProvState({ scopeKey, provider: n }); };
-  const displayQuoteCurrency = normalizeCurrencyCode(paymentSession?.result?.quote?.currency || serverQuote?.currency || (lockedProvider && providerConfig?.[lockedProvider]?.currency) || (selectedQuoteProvider && providerConfig?.[selectedQuoteProvider]?.currency) || bookingData?.acceptedQuoteCurrency || "USD");
+  const displayQuoteCurrency = normalizeCurrencyCode(lockedSessionQuote?.currency || serverQuote?.currency || (lockedProvider && providerConfig?.[lockedProvider]?.currency) || (selectedQuoteProvider && providerConfig?.[selectedQuoteProvider]?.currency) || bookingData?.acceptedQuoteCurrency || "USD");
   const paymentBusy = paymentStatusBusy || cancellingPayment;
   const checkoutActionBusy = Boolean(
     creatingFree || payingDodo || payingRzp || pendingStartCount > 0 || lockedProvider || paymentBusy
@@ -438,26 +456,6 @@ export default function Payment({ hideFooter = false }) {
     slotHoldToken: checkoutRef.current?.slotHoldToken || sessionHold?.slotHoldToken || bookingData.slotHoldToken || "",
     slotHoldExpiresAt: checkoutRef.current?.slotHoldExpiresAt || holdExpiresAt || "",
   });
-
-  const checkoutFingerprint = useMemo(
-    () =>
-      JSON.stringify({
-        packageTitle,
-        originalOrderId: bookingData.originalOrderId || "",
-        startTimeUTC: bookingData.startTimeUTC || "",
-        email: bookingData.email || "",
-        referralCode: referral?.code || "",
-        couponCode: coupon?.code || "",
-      }),
-    [
-      packageTitle,
-      bookingData.originalOrderId,
-      bookingData.startTimeUTC,
-      bookingData.email,
-      referral?.code,
-      coupon?.code,
-    ]
-  );
 
   const isForeignFingerprint = Boolean(
     paymentSession?.paymentAccessToken &&
@@ -519,7 +517,7 @@ export default function Payment({ hideFooter = false }) {
   };
 
   useEffect(() => {
-    if (lockedSessionQuote) {
+    if (lockedSessionQuote && !usingUnresolvedFallback) {
       let active = true;
       lastQuoteKeyRef.current = "";
       const lockedFp = String(paymentSession?.result?.quoteFingerprint || "locked-session").trim();

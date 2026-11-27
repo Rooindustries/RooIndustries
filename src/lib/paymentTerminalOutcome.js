@@ -101,7 +101,7 @@ const isUnexpiredHold = (hold) => {
   return Number.isFinite(ts) && ts > Date.now();
 };
 
-const buildFailureBanner = ({ terminalStatus, data, isUpgrade, ownsCurrentHold, holdRetainedApplied }) => {
+const buildFailureBanner = ({ terminalStatus, data, isUpgrade, ownsCurrentHold, holdRetainedApplied, hasVerifiedNewerHold = false }) => {
   if (terminalStatus === "refunded") {
     return { text: "This payment was refunded. Go back to booking to choose a time.", persistent: true, chooseNewTime: !isUpgrade && ownsCurrentHold };
   }
@@ -111,7 +111,11 @@ const buildFailureBanner = ({ terminalStatus, data, isUpgrade, ownsCurrentHold, 
   const rawReason = String(data?.paymentFailureMessage || data?.recoveryReason || "").trim();
   const reason = rawReason || "Your payment could not be completed. Please try again or use another payment method.";
   if (isUpgrade) return { text: reason, persistent: true };
-  if (!ownsCurrentHold) return { text: reason, detail: "Your current slot reservation is still active and ready for checkout.", persistent: true };
+  if (!ownsCurrentHold) {
+    return hasVerifiedNewerHold
+      ? { text: reason, detail: "Your current slot reservation is still active and ready for checkout.", persistent: true }
+      : { text: reason, persistent: true };
+  }
   if (holdRetainedApplied) {
     const rem = Number(data?.retriesRemaining);
     const remText = Number.isFinite(rem) && rem > 0 ? ` (${rem === 1 ? "1 retry left" : `${rem} retries left`})` : "";
@@ -149,19 +153,23 @@ const applyDodoTerminalHoldOutcome = ({
     if (!hasStoredT2 && liveT2Hold) {
       return {
         nextCheckout: null, requote: false, returnToBookingWithHold: liveT2Hold,
-        banner: buildFailureBanner({ terminalStatus, data: responseData, isUpgrade: false, ownsCurrentHold: false, holdRetainedApplied: false }),
+        banner: buildFailureBanner({ terminalStatus, data: responseData, isUpgrade: false, ownsCurrentHold: false, holdRetainedApplied: false, hasVerifiedNewerHold: true }),
       };
     }
     if (hasStoredT2) {
+      const matchedLiveT2 = Boolean(liveT2Hold && String(storedCheckout.slotHoldId || "") === String(liveT2Hold.holdId || ""));
+      const hasVerifiedNewerHold = matchedLiveT2 || isUnexpiredHold({
+        holdId: storedCheckout.slotHoldId, holdToken: storedCheckout.slotHoldToken, expiresAt: storedCheckout.slotHoldExpiresAt,
+      });
       setSessionHold(
-        liveT2Hold && String(storedCheckout.slotHoldId || "") === String(liveT2Hold.holdId || "")
+        matchedLiveT2
           ? { slotHoldId: liveT2Hold.holdId, slotHoldToken: liveT2Hold.holdToken, slotHoldExpiresAt: liveT2Hold.expiresAt || "", phase: liveT2Hold.phase || "active" }
           : null,
         storedCheckout
       );
       return {
         nextCheckout: storedCheckout, requote: true, returnToBookingWithHold: null,
-        banner: buildFailureBanner({ terminalStatus, data: responseData, isUpgrade: false, ownsCurrentHold: false, holdRetainedApplied: false }),
+        banner: buildFailureBanner({ terminalStatus, data: responseData, isUpgrade: false, ownsCurrentHold: false, holdRetainedApplied: false, hasVerifiedNewerHold }),
       };
     }
   }
@@ -176,13 +184,15 @@ const applyDodoTerminalHoldOutcome = ({
     });
     setSessionHold({ slotHoldId: ref.slotHoldId, slotHoldToken: ref.slotHoldToken, slotHoldExpiresAt: expiresAt, phase: ref.phase || "active" }, nextCheckout);
     writeStoredCheckout(nextCheckout);
-    emitHoldState({
-      holdId: ref.slotHoldId, holdToken: ref.slotHoldToken, expiresAt,
-      startTimeUTC: nextCheckout.startTimeUTC || bookingData?.startTimeUTC || "",
-      packageTitle: nextCheckout.packageTitle || packageTitle,
-      packagePrice: nextCheckout.packagePrice || packagePrice,
-      phase: ref.phase || "active",
-    });
+    if (ownsLiveHold || !liveT2Hold) {
+      emitHoldState({
+        holdId: ref.slotHoldId, holdToken: ref.slotHoldToken, expiresAt,
+        startTimeUTC: nextCheckout.startTimeUTC || bookingData?.startTimeUTC || "",
+        packageTitle: nextCheckout.packageTitle || packageTitle,
+        packagePrice: nextCheckout.packagePrice || packagePrice,
+        phase: ref.phase || "active",
+      });
+    }
     return {
       nextCheckout, requote: true, returnToBookingWithHold: null,
       banner: buildFailureBanner({ terminalStatus, data: responseData, isUpgrade: false, ownsCurrentHold: true, holdRetainedApplied: true }),
@@ -250,9 +260,9 @@ export async function runLegacyDodoStatusCheck({
     });
     if (!operation.current()) return;
     const st = String(data?.status || "").trim().toLowerCase();
-    if (response.ok && (st === "booked" || st === "email_partial")) await onBooked(data, operation, activeSession);
-    else if (response.ok && data?.manualReviewRequired === true) onManualReview(data.recoveryReason);
+    if (response.ok && data?.manualReviewRequired === true) onManualReview(data.recoveryReason);
     else if (response.ok && data?.cleanupPending === true) onCleanupPending?.(data?.recoveryReason || CLEANUP_PENDING_MSG, data);
+    else if (response.ok && (st === "booked" || st === "email_partial")) await onBooked(data, operation, activeSession);
     else if (["failed", "abandoned", "refunded"].includes(st) && isAffirmativeTerminalRelease(response.status === 200, data)) {
       releasePaymentSessionLock({ token, scopeKey: activeSession?.scopeKey || "", seq: allocatePaymentSessionSeq() });
       onTerminalClear(st, token, data);
@@ -347,8 +357,10 @@ export const persistStrippedSession = ({ session, data, seq, scopeKey, persistPa
   ) {
     delete cleanedPayload.checkoutUrl;
   }
+  const ref = data?.refreshedHold || data?.hold;
   const next = commitPaymentSessionState({
     ...session,
+    ...(ref?.slotHoldId && !isUpgradePaymentSession(session) ? { sessionHoldId: String(ref.slotHoldId).trim(), sessionHoldNonce: extractTokenNonce(ref.slotHoldToken || "") } : {}),
     providerPayload: cleanedPayload,
     providerOrderReady: data?.providerOrderReady ?? session.providerOrderReady,
     result: mergeResult(session.result, data),
@@ -409,7 +421,8 @@ const clearNonDodoHold = ({
 }) => {
   const ownsHold = ownsSessionHold(activeSession, flowCtx);
   const keepHold = (!forceReleaseHold && activeSession?.provider !== "dodo") || isUpgrade || !isTerminal;
-  if (keepHold || !ownsHold) return false;
+  const liveHold = readLiveSlotHold();
+  if (keepHold || !ownsHold || (liveHold && !isLiveHoldOwnedBySession(activeSession, liveHold))) return false;
   const nextCheckout = { ...(checkoutRef.current || bookingData), slotHoldId: "", slotHoldToken: "", slotHoldExpiresAt: "" };
   checkoutRef.current = nextCheckout;
   setSessionHold(null);

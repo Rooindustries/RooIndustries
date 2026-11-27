@@ -249,8 +249,9 @@ export const createPaymentConsentActions = (c) => {
     if (!operation.current()) return;
     c.loadCheckoutHold()
       .then((m) => operation.current() && m.runCheckPaymentStatus({
-        activeSession, operation, currentScopeKeyRef: c.currentScopeKeyRef, setPaymentStatusBusy: c.setPaymentStatusBusy,
-        navigateToConfirmation: c.navigateToConfirmation, showBanner: c.showBanner, clearPaymentSession: c.clearPaymentSession,
+        ...c.checkoutFlowCtxRef.current, activeSession, operation, currentScopeKeyRef: c.currentScopeKeyRef,
+        setPaymentStatusBusy: c.setPaymentStatusBusy, navigateToConfirmation: c.navigateToConfirmation,
+        showBanner: c.showBanner, clearPaymentSession: c.clearPaymentSession,
         persistPaymentSession: c.persistPaymentSession, flow: m.createCheckoutFlow(c.checkoutFlowCtxRef.current),
       }))
       .catch((error) => { if (operation.current()) c.showBanner("error", error?.message || "Unable to load payment status. Please try again."); });

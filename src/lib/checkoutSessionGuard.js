@@ -137,6 +137,6 @@ export const buildBookingFromUnresolvedSession = (session) => {
     couponCode: String(fp.couponCode || "").trim(),
     slotHoldId: fp.originalOrderId ? "" : holdId,
     slotHoldToken: fp.originalOrderId ? "" : holdToken,
-    slotHoldExpiresAt: String(ref?.slotHoldExpiresAt || ref?.expiresAt || session?.sessionExpiresAt || "").trim(),
+    slotHoldExpiresAt: fp.originalOrderId ? "" : String(ref?.slotHoldExpiresAt || ref?.expiresAt || session?.sessionExpiresAt || "").trim(),
   };
 };

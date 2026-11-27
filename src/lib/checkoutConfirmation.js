@@ -32,11 +32,9 @@ export const hasMatchingLockedPaymentSessionForHold = (hold) => {
   const fp = pJson(s.fingerprint), sk = pJson(s.scopeKey);
   if (fp?.originalOrderId || sk?.k === "u") return false;
   const r = s.result?.refreshedHold || s.result?.hold;
-  const sid = str(s.sessionHoldId || r?.slotHoldId || (sk?.k === "b" ? sk.h : ""));
-  if (sid) {
-    const sn = extractTokenNonce(s.sessionHoldId ? s.sessionHoldNonce : r?.slotHoldId ? r.slotHoldToken : sk?.n);
-    return sid === id && sameNonce(n, sn);
-  }
+  if (r?.slotHoldId) return str(r.slotHoldId) === id && sameNonce(n, extractTokenNonce(r.slotHoldToken));
+  if (s.sessionHoldId) return str(s.sessionHoldId) === id && sameNonce(n, extractTokenNonce(s.sessionHoldNonce));
+  if (sk?.k === "b" && sk.h) return str(sk.h) === id && sameNonce(n, extractTokenNonce(sk.n));
   const c = rJson("checkout_booking_state");
   return Boolean(str(c?.slotHoldId) === id && sameNonce(n, extractTokenNonce(c?.slotHoldToken)) && fp && (!hold.startTimeUTC || fp.startTimeUTC === hold.startTimeUTC) && (!hold.packageTitle || fp.packageTitle === hold.packageTitle));
 };
