@@ -300,10 +300,7 @@ export const createPaymentConsentActions = (c) => {
     const outcomeMod = await m.loadTerminalOutcome();
     if (!operation.current()) return;
     if (kind === "paid") {
-      if (operation.token) {
-        m.releasePaymentSessionLock({ token: operation.token, scopeKey: resolvedSession?.scopeKey || "", seq: m.allocatePaymentSessionSeq() });
-      }
-      c.clearPaymentSession("", operation.token, { alreadyReleased: true });
+      c.clearPaymentSession("", operation.token);
       operation.token = "";
     }
     const state = outcomeMod.createConfirmationNavigationState({

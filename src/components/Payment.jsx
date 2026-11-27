@@ -817,11 +817,11 @@ export default function Payment({ hideFooter = false }) {
     return showConfirmation(kind, responseBody, operation, activeSessionOverride);
   };
 
-  const startSessionCheckout = async (provider, operation = createPaymentOperation()) => {
+  const startSessionCheckout = async (provider, operation = createPaymentOperation(), preSnap = null) => {
     const cm = consentModRef.current || await loadConsentPanel();
     consentModRef.current = cm;
     cm.ensureConsentBaseline(consentCtxRef.current);
-    const startSnap = cm.snapPaymentStart(), m = await loadCheckoutHold();
+    const startSnap = preSnap || cm.snapPaymentStart(), m = await loadCheckoutHold();
     return m.runStartSessionCheckout({
       ...consentCtxRef.current, provider, operation, startSnap, checkoutFingerprint, rawBookingData,
       parseCheckoutFingerprint, otherCheckoutStarting, sessionStartRef, quoteFingerprint,
@@ -858,10 +858,13 @@ export default function Payment({ hideFooter = false }) {
   const runOutcomeAction = (fn, fallback) =>
     loadCheckoutHold().then((m) => m.loadTerminalOutcome().then(fn)).catch(() => showBanner("error", fallback, { persistent: true }));
 
-  const handleDodoCheckout = () => runOutcomeAction(
-    (o) => o.runDodoCheckoutFlow({ ...consentCtxRef.current, setPayingDodo, finalAmount, displayQuoteCurrency }),
-    "Unable to open checkout. Please try again."
-  );
+  const handleDodoCheckout = () => {
+    const startSnap = consentModRef.current?.snapPaymentStart?.();
+    return runOutcomeAction(
+      (o) => o.runDodoCheckoutFlow({ ...consentCtxRef.current, startSnap, setPayingDodo, finalAmount, displayQuoteCurrency }),
+      "Unable to open checkout. Please try again."
+    );
+  };
 
   useEffect(() => {
     if (!hydrated || dodoReturnHandled.current) return;
@@ -881,14 +884,20 @@ export default function Payment({ hideFooter = false }) {
   const validateReferral = (code) => runConsentAction("validateCode", { slot: "referral", code });
   const validateCoupon = (code) => runConsentAction("validateCode", { slot: "coupon", code });
 
-  const handleFreeBooking = () => runOutcomeAction(
-    (o) => o.runFreeBookingCheckout({ ...consentCtxRef.current, isFree, setCreatingFree, beginCheckoutConfirmation, holdForGuard, showConfirmation, holdExpiresAt, holdExpiryHandledRef }),
-    "Something went wrong saving your free booking. Please try again."
-  );
-  const handleRazorpayPay = () => runOutcomeAction(
-    (o) => o.runRazorpayCheckoutFlow({ ...consentCtxRef.current, canUseRazorpay, rzpReady, isFree, finalAmount, setPayingRzp, displayQuoteCurrency, packageTitle }),
-    "Payment could not be processed. Please try again."
-  );
+  const handleFreeBooking = () => {
+    const startSnap = consentModRef.current?.snapPaymentStart?.();
+    return runOutcomeAction(
+      (o) => o.runFreeBookingCheckout({ ...consentCtxRef.current, startSnap, isFree, setCreatingFree, beginCheckoutConfirmation, holdForGuard, showConfirmation, holdExpiresAt, holdExpiryHandledRef }),
+      "Something went wrong saving your free booking. Please try again."
+    );
+  };
+  const handleRazorpayPay = () => {
+    const startSnap = consentModRef.current?.snapPaymentStart?.();
+    return runOutcomeAction(
+      (o) => o.runRazorpayCheckoutFlow({ ...consentCtxRef.current, startSnap, canUseRazorpay, rzpReady, isFree, finalAmount, setPayingRzp, displayQuoteCurrency, packageTitle }),
+      "Payment could not be processed. Please try again."
+    );
+  };
 
   const containerVariants = { hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.1, delayChildren: 0.1 } } };
   const itemVariants = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 260, damping: 30 } } };

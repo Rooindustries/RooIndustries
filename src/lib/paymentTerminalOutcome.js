@@ -281,7 +281,7 @@ export async function runDodoCheckoutFlow(c) {
   if (!operation.current() || c.payingDodo || c.paymentBusy || c.paymentActionRef.current.cancelling || c.otherCheckoutStarting("dodo") || !c.ensureSlotBeforeAction()) return;
   c.setPayingDodo(true);
   try {
-    const session = await c.startSessionCheckout("dodo", operation);
+    const session = await c.startSessionCheckout("dodo", operation, c.startSnap);
     if (!operation.current() || session?.terminal) return;
     const verified = verifyProviderLaunchPayload({
       provider: "dodo", payload: session?.providerPayload,
@@ -318,7 +318,7 @@ export async function runFreeBookingCheckout(c) {
   const endConfirmation = c.beginCheckoutConfirmation(c.holdForGuard);
   try {
     c.showBanner("info", "Confirming your free booking...");
-    const session = await c.startSessionCheckout("free", operation);
+    const session = await c.startSessionCheckout("free", operation, c.startSnap);
     if (!operation.current() || session?.stale) return;
     const data = session?.result || {};
     const status = String(data.status || "").trim().toLowerCase();
@@ -463,7 +463,7 @@ export const runRazorpayCheckoutFlow = async (c) => {
   try {
     if (c.finalAmount <= 0) { c.showBanner("error", "Final amount is zero or negative. Please contact support."); return; }
     c.setPayingRzp(true); c.showBanner("info", "Opening secure checkout...");
-    const rzpSession = await c.startSessionCheckout("razorpay", operation);
+    const rzpSession = await c.startSessionCheckout("razorpay", operation, c.startSnap);
     if (!operation.current() || rzpSession?.terminal) return;
     const verified = verifyProviderLaunchPayload({ provider: "razorpay", payload: rzpSession.providerPayload, expectedAmount: rzpSession.result?.quote?.netAmount ?? c.finalAmount, expectedCurrency: rzpSession.result?.quote?.currency || c.displayQuoteCurrency });
     if (!verified.ok) { c.showBanner("error", verified.reason); return; }
