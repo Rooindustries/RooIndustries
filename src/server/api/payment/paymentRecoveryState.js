@@ -92,10 +92,10 @@ export const hasKnownCaptureRecord = (r = {}) => {
   );
 };
 
-const isCleanupPending = (r = {}) =>
+export const isCleanupPending = (r = {}) =>
   r?.resourceReleasePending === true && !hasPreservedOwnerReview(r);
 
-const isManualReviewRequired = (r = {}) => {
+export const isManualReviewRequired = (r = {}) => {
   const st = String(r?.status || "").trim().toLowerCase();
   const prov = String(r?.provider || "").trim().toLowerCase();
   const ps = String(r?.providerPaymentState || "").trim().toLowerCase();
@@ -110,15 +110,16 @@ const isManualReviewRequired = (r = {}) => {
     !hasKnownCaptureRecord(r);
   const verifiedRevComplete =
     hasVerifiedReversal(r) && !releasePending && r?.refundRequiresBookingSync !== true && !hasExplicitOwnerReview(r);
+  const verifiedFullRefund = st === "refunded" && verifiedRevComplete;
   return (
     preserved ||
-    r?.dodoDisputeActive === true ||
+    (r?.dodoDisputeActive === true && !verifiedFullRefund) ||
     (r?.reconciliationRecoveryTerminal === true && !resumablePendingCleanup && !verifiedRevComplete) ||
     (prov === "dodo" && r?.providerRecoveryTerminal === true && !verifiedUnpaidDodo && !verifiedRevComplete)
   );
 };
 
-const isCompletedTerminalOutcome = (r = {}) => {
+export const isCompletedTerminalOutcome = (r = {}) => {
   const st = String(r?.status || "").trim().toLowerCase();
   const ps = String(r?.providerPaymentState || "").trim().toLowerCase();
   const cleanupPending = isCleanupPending(r) || r?.refundRequiresBookingSync === true;

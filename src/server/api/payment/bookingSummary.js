@@ -3,7 +3,7 @@ import { asBookingSummary } from "../../../lib/bookingSummary.js";
 import { logSafeWarn } from "../../safeErrorLog.js";
 import { getPaymentRecordById } from "./paymentRecord.js";
 import { buildSalesReceipt } from "./salesReceipt.ts";
-import { resolveLiveAbandonedRefreshedHold } from "./startPrePricingRetry.js";
+import { resolveLiveRefreshedHold } from "./startPrePricingRetry.js";
 
 const { resolveStoreBackend } = envValue;
 const settled = status =>
@@ -23,8 +23,11 @@ export const buildBrowserCompletionBody = async ({ client, record: authorizedRec
   let bookingSummary = null;
   let requiresReschedule = body.requiresReschedule === true;
   let analyticsReceipt = body.analyticsReceipt;
-  const refreshedHold = String(body.status || "").trim().toLowerCase() === "abandoned"
-    ? await resolveLiveAbandonedRefreshedHold({ client, record: authorizedRecord })
+  const bodyStatus = String(body.status || "").trim().toLowerCase();
+  const shouldVerifyRefreshedHold =
+    bodyStatus === "abandoned" || (bodyStatus === "failed" && Object.hasOwn(body, "refreshedHold"));
+  const verifiedRefreshedHold = shouldVerifyRefreshedHold
+    ? await resolveLiveRefreshedHold({ client, record: authorizedRecord })
     : null;
   try {
     if (settled(body.status) && body.bookingId) {
@@ -66,9 +69,11 @@ export const buildBrowserCompletionBody = async ({ client, record: authorizedRec
   } catch (error) {
     logSafeWarn("Booking summary unavailable", error);
   }
+  const { refreshedHold: bodyRefreshedHold, ...restBody } = body;
+  const resolvedRefreshedHold = shouldVerifyRefreshedHold ? verifiedRefreshedHold : bodyRefreshedHold;
   return {
-    ...body, bookingSummary, requiresReschedule,
+    ...restBody, bookingSummary, requiresReschedule,
     ...(Object.hasOwn(body, "analyticsReceipt") ? { analyticsReceipt } : {}),
-    ...(refreshedHold ? { refreshedHold } : {}),
+    ...(resolvedRefreshedHold ? { refreshedHold: resolvedRefreshedHold } : {}),
   };
 };

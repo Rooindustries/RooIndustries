@@ -41,17 +41,23 @@ const isConflictError = (error) =>
 
 const hasBooking = (record) => Boolean(String(record?.bookingId || "").trim());
 
-const providerStateChange = (current, next) => {
-  const state = String(next || "").trim();
-  if (!state || state === current || stageOf(state) < stageOf(current)) return {};
+const TERMINAL_UNPAID_STATES = new Set(["failed", "cancelled"]);
+
+const providerStateChange = (current, next, { allowTerminal = false } = {}) => {
+  const state = String(next || "").trim().toLowerCase();
+  const cur = String(current || "").trim().toLowerCase();
+  if (!state) return {};
+  if (TERMINAL_UNPAID_STATES.has(state) && allowTerminal !== true) return {};
+  if (stageOf(state) < stageOf(cur)) return {};
+  if (state === cur) return { providerStateCheckedAt: new Date().toISOString() };
   return { providerPaymentState: state, providerStateCheckedAt: new Date().toISOString() };
 };
 
 const stopsReconcile = (values) =>
   values.providerRecoveryTerminal === true || values.reconciliationRecoveryTerminal === true;
 
-export const observedProviderState = (record, observed) =>
-  hasBooking(record) ? {} : providerStateChange(record?.providerPaymentState, observed);
+export const observedProviderState = (record, observed, options = {}) =>
+  hasBooking(record) ? {} : providerStateChange(record?.providerPaymentState, observed, options);
 
 export const unconfirmedProviderState = (record, values) => {
   const next = { ...record, ...values };
@@ -192,7 +198,7 @@ const evaluateOwnerReviewUpdate = (record, inspection) => {
     return { conclusive: true, updates: { providerPaymentState: "succeeded", providerReversalVerified: false } };
   }
   if (inspection.recognizedStatus === true) {
-    return { conclusive: true, updates: legacyUnverified ? { providerReversalVerified: false } : providerStateChange(record.providerPaymentState, inspection.normalizedStatus) };
+    return { conclusive: true, updates: legacyUnverified ? { providerReversalVerified: false } : providerStateChange(record.providerPaymentState, inspection.normalizedStatus, { allowTerminal: true }) };
   }
   return { conclusive: false, updates: legacyUnverified ? { providerReversalVerified: false } : {} };
 };

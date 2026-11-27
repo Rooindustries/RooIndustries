@@ -287,7 +287,7 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
       paymentTaxInclusive = value;
     };
     const setPaymentAmountOverrides = values => {
-      const knownKeys = ['tax', 'total_amount', 'status', 'disputes', 'refund_status', 'refunds'];
+      const knownKeys = ['tax', 'total_amount', 'status', 'disputes', 'refund_status', 'refunds', 'error_code', 'error_message'];
       assert.ok(Object.keys(values).every(key => knownKeys.includes(key)));
       paymentAmountOverrides = { ...values };
     };
