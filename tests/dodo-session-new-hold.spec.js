@@ -22,7 +22,7 @@ const routeAbandonedDodo = async page => {
       },
     } });
   });
-  await page.route("**/api/payment/status", route => route.fulfill({ json: { ok: true, status: "abandoned", provider: "dodo" } }));
+  await page.route("**/api/payment/status", route => route.fulfill({ json: { ok: true, status: "abandoned", provider: "dodo", providerPaymentState: "cancelled", terminalOutcomeComplete: true, cleanupPending: false, manualReviewRequired: false } }));
   return starts;
 };
 

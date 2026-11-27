@@ -544,7 +544,18 @@ test("reserved ad tags and malformed refs never override saved referral or fire 
   }
   expect(flow.state.calls.filter((c) => /gads-max|chatgpt-ads/i.test(c.query))).toEqual([]);
 
-  await page.route("**/api/payment/status", (route) => route.fulfill({ json: { ok: true, status: "started" } }));
+  await page.route("**/api/payment/status", (route) => route.fulfill({
+    json: {
+      ok: true,
+      status: "started",
+      provider: "dodo",
+      providerOrderReady: true,
+      quoteFingerprint: "pre-rollout-frozen-fp",
+      quoteFingerprintValid: true,
+      quote: { currency: "USD", grossAmount: 84.99, netAmount: 67.99, isFree: false },
+      providerPayload: { checkoutUrl: "/__test/checkout-handoff", orderId: "fixture-order-1" },
+    },
+  }));
   await page.evaluate((state) => {
     sessionStorage.clear();
     sessionStorage.setItem("checkout_booking_state", JSON.stringify(state));
@@ -1717,7 +1728,9 @@ test("applying a referral after changing payment method keeps the refreshed hold
     route.fulfill({
       json: {
         ok: true,
+        status: "abandoned",
         cancelled: true,
+        terminalOutcomeComplete: true,
         refreshedHold: {
           slotHoldId: "hold-ui-1",
           slotHoldToken: "hold-refreshed-token",
@@ -1849,7 +1862,9 @@ test("in-flight referral validation finishing after Razorpay release keeps the r
   await page.route("**/api/payment/cancel", (route) => route.fulfill({
     json: {
       ok: true,
+      status: "abandoned",
       cancelled: true,
+      terminalOutcomeComplete: true,
       refreshedHold: { slotHoldId: holdId, slotHoldToken: "cancel-hold-token", slotHoldExpiresAt: expiry, phase: "holding" },
     },
   }));
@@ -1982,6 +1997,7 @@ test("in-flight referral replying while Razorpay release is pending does not dis
         ok: true,
         status: "abandoned",
         cancelled: true,
+        terminalOutcomeComplete: true,
         refreshedHold: { slotHoldId: holdId, slotHoldToken: "cancel-hold-token", slotHoldExpiresAt: expiry, phase: "holding" },
       },
     });
@@ -2110,6 +2126,7 @@ test("saved creator discount survives reloading a locked Razorpay checkout and r
       ok: true,
       status: "abandoned",
       cancelled: true,
+      terminalOutcomeComplete: true,
       refreshedHold: { slotHoldId: holdId, slotHoldToken: "cancel-hold-token", slotHoldExpiresAt: expiry, phase: "holding" },
     },
   }));
@@ -2222,7 +2239,18 @@ test("resumed locked Razorpay checkout still finalizes when saved referral resto
       },
     });
   });
-  await page.route("**/api/payment/status", (route) => route.fulfill({ json: { ok: true, status: "started" } }));
+  await page.route("**/api/payment/status", (route) => route.fulfill({
+    json: {
+      ok: true,
+      status: "started",
+      provider: "razorpay",
+      providerOrderReady: true,
+      quoteFingerprint: "fixture-quote",
+      quoteFingerprintValid: true,
+      quote: { currency: "USD", grossAmount: 84.99, netAmount: 76.49, isFree: false, effectiveReferralCode: "friend" },
+      providerPayload: { orderId: "order_fixture", key: "rzp_test_fixture", amount: 7649, currency: "USD" },
+    },
+  }));
 
   await flow.review();
   await flow.payment();

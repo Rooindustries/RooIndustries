@@ -225,7 +225,18 @@ test.describe("reservation recovery", () => {
 
   for (const requested of ["/?ref=friend&utm_source=discord", campaignPath]) {
     test(`closing a resumed payment after reload restores ${requested}`, async ({ page, flow }) => {
-      await page.route("**/api/payment/status", route => route.fulfill({ json: { ok: true, status: "started", provider: "dodo" } }));
+      await page.route("**/api/payment/status", route => route.fulfill({
+        json: {
+          ok: true,
+          status: "started",
+          provider: "dodo",
+          providerOrderReady: true,
+          quoteFingerprint: "fixture-quote",
+          quoteFingerprintValid: true,
+          quote: { currency: "USD", grossAmount: 84.99, netAmount: 84.99, isFree: false },
+          providerPayload: { checkoutUrl: "/__test/checkout-handoff", dodoReturnTag: "fixture-dodo-tag" },
+        },
+      }));
       await flow.review();
       await flow.payment();
       await page.getByRole("button", { name: "Pay your way", exact: true }).click();

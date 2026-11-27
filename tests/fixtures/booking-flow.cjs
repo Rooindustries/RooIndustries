@@ -268,7 +268,7 @@ const routePaidStart = async (page, baseURL, { lose = 0, hold = 0 } = {}) => {
   await page.context().route("**/api/payment/start", (route) => {
     const json = {
       ...startedCheckout(baseURL, checkouts, route.request()),
-      quote: { grossAmount: overhaulPrice, netAmount: overhaulPrice, isFree: false },
+      quote: { currency: "USD", grossAmount: overhaulPrice, netAmount: overhaulPrice, isFree: false },
     };
     if (losing > 0) {
       losing -= 1;
@@ -283,8 +283,18 @@ const routePaidStart = async (page, baseURL, { lose = 0, hold = 0 } = {}) => {
   return gate;
 };
 
-const routeStartedStatus = (context) =>
-  context.route("**/api/payment/status", (route) => route.fulfill({ json: { ok: true, status: "started" } }));
+const routeStartedStatus = (context, baseURL) =>
+  context.route("**/api/payment/status", (route) => route.fulfill({
+    json: {
+      ok: true,
+      status: "started",
+      providerOrderReady: true,
+      quoteFingerprint: "fixture-quote",
+      quoteFingerprintValid: true,
+      quote: { currency: "USD", grossAmount: overhaulPrice, netAmount: overhaulPrice, isFree: false },
+      providerPayload: { checkoutUrl: `${baseURL || new URL(route.request().url()).origin}/__test/checkout-handoff`, dodoReturnTag: "fixture-dodo-tag" },
+    },
+  }));
 
 const payButton = (tab) => tab.getByRole("button", { name: "Pay your way", exact: true });
 
@@ -298,7 +308,7 @@ const resumeCheckout = async (page) => {
 
 const openPayment = async (page, flow, baseURL, options) => {
   const gate = await routePaidStart(page, baseURL, options);
-  await routeStartedStatus(page.context());
+  await routeStartedStatus(page.context(), baseURL);
   await flow.review("/booking?package=overhaul");
   await flow.payment();
   return gate;

@@ -96,8 +96,8 @@ export function uiRepairsFixture({ json, read, base }) {
       if (p === '/api/releaseHold') { json(res, { ok: true }); return true; }
       if (p === '/api/payment/quote') { json(res, { ok: true, quote: { netAmount: 84.99, isFree: false }, quoteFingerprint: 'quote-ui', providers: { dodo: { enabled: true }, paypal: { enabled: false }, razorpay: { enabled: false } } }); return true; }
       if (p === '/api/payment/start') { json(res, { ok: true, paymentAccessToken: 'payment-ui', providerPayload: { checkoutUrl: `${base}/__ui/hosted/checkout`, taxInclusive: false }, sessionExpiresAt: hold.expiresAt, status: 'started' }); return true; }
-      if (p === '/api/payment/finalize' || p === '/api/payment/status') { json(res, state.mode === 'failed' ? { ok: true, status: 'failed' } : { ok: true, status: 'booked', bookingId: 'receipt-ui', emailDispatchToken: 'receipt-token-ui' }); return true; }
-      if (p === '/api/payment/cancel') { json(res, state.mode === 'captured' ? { ok: true, captured: true, status: 'booked', bookingId: 'receipt-ui', emailDispatchToken: 'receipt-token-ui' } : { ok: true, cancelled: true, refreshedHold: { slotHoldId: 'hold-refreshed', slotHoldToken: 'hold-refreshed-token', slotHoldExpiresAt: hold.expiresAt } }); return true; }
+      if (p === '/api/payment/finalize' || p === '/api/payment/status') { json(res, state.mode === 'failed' ? { ok: true, status: 'failed', terminalOutcomeComplete: true } : { ok: true, status: 'booked', bookingId: 'receipt-ui', emailDispatchToken: 'receipt-token-ui' }); return true; }
+      if (p === '/api/payment/cancel') { json(res, state.mode === 'captured' ? { ok: true, captured: true, status: 'booked', bookingId: 'receipt-ui', emailDispatchToken: 'receipt-token-ui' } : { ok: true, cancelled: true, status: 'abandoned', terminalOutcomeComplete: true, refreshedHold: { slotHoldId: 'hold-refreshed', slotHoldToken: 'hold-refreshed-token', slotHoldExpiresAt: hold.expiresAt } }); return true; }
       json(res, { ok: false, error: 'Synthetic UI fixture refuses this endpoint.' }, 503); return true;
     }
   };
