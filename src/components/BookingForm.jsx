@@ -2277,33 +2277,30 @@ export default function BookingForm() {
 
     const finalReferralCode = String(appliedReferral?.code || "").trim();
     const finalCouponCode = String(appliedCoupon?.code || "").trim();
+    const reviewAmount = toMoney(reviewDiscounts.finalAmount, reviewCurrency);
 
     const payload = {
       displayDate,
       displayTime,
-
       localTimeZone: userTimeZone,
       localTimeLabel: displayTime,
-
       startTimeUTC: selectedSlot.utcStart.toISOString(),
-
       discord: form.discord.trim(),
       email: form.email.trim(),
       specs: form.specs.trim(),
       mainGame: form.mainGame.trim(),
       message: form.notes.trim(),
-
       packageTitle: selectedPackage.title,
       packagePrice: selectedPackage.price,
-
       status: "pending",
-
       slotHoldId: myHold?.holdId || null,
       slotHoldToken: myHold?.holdToken || null,
       slotHoldExpiresAt: myHold?.expiresAt || null,
-
       ...(finalReferralCode ? { referralCode: finalReferralCode } : {}),
       ...(finalCouponCode ? { couponCode: finalCouponCode } : {}),
+      expectedClientTotal: reviewAmount,
+      expectedClientCurrency: reviewCurrency,
+      acceptedQuoteTotal: reviewAmount,
       acceptedQuoteCurrency: reviewCurrency,
     };
 
@@ -2324,14 +2321,7 @@ export default function BookingForm() {
     // Keep hold persisted for banner
     const backgroundLocation =
       location.state?.backgroundLocation || location.state || null;
-    try {
-      sessionStorage.setItem(
-        CHECKOUT_BOOKING_STORAGE_KEY,
-        JSON.stringify(payload)
-      );
-    } catch {
-      console.error("Failed to persist checkout state");
-    }
+    writeBrowserStorage("sessionStorage", CHECKOUT_BOOKING_STORAGE_KEY, JSON.stringify(payload));
 
     navigate("/payment", {
       state: {

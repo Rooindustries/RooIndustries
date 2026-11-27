@@ -1,5 +1,5 @@
 import { writeBrowserStorage } from "./browserStorage";
-import { normalizeCurrencyCode, toSubunitsClient } from "./checkoutCodes";
+import { normalizeCurrencyCode, toMoney, toSubunitsClient } from "./checkoutCodes";
 import { extractTokenNonce } from "./checkoutConfirmation";
 import {
   areSameLineageScopeKeys, clearStoredPaymentSessionState, extractPaymentLockId,
@@ -12,6 +12,14 @@ let nextSessionSeq = 0;
 
 export const STORAGE_SAVE_ERROR = "Your browser could not save this payment session. Checkout has stayed here so you can check its status or change payment method. Allow browser storage and try again to open checkout.";
 export const STORAGE_SAVE_CHANGE_ONLY_ERROR = "Your browser could not save this payment session. Checkout has stayed here so you can change payment method. Allow browser storage and try again to open checkout.";
+
+export const quoteExceedsAcceptedCeiling = ({ quote, acceptedQuoteTotal, acceptedQuoteCurrency }) => {
+  if (!quote || typeof quote !== "object" || acceptedQuoteTotal === null || !acceptedQuoteCurrency) return false;
+  const qCur = normalizeCurrencyCode(quote.currency || "USD"), aCur = normalizeCurrencyCode(acceptedQuoteCurrency);
+  if (qCur !== aCur) return true;
+  const qNet = quote.isFree === true ? 0 : Math.max(0, toMoney(quote.netAmount ?? 0, qCur));
+  return qNet > toMoney(acceptedQuoteTotal, aCur);
+};
 
 export const fetchPaymentJson = async (url, options = {}, timeoutMs = 15_000) => {
   const controller = typeof AbortController === "function" ? new AbortController() : null;

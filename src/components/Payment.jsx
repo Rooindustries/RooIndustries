@@ -1,4 +1,3 @@
-import { clearBookingConfirmation, createBookingConfirmation } from "../lib/confirmationReceipt";
 import { writeBrowserStorage, removeBrowserStorage } from "../lib/browserStorage";
 import React, { lazy, Suspense, useState, useMemo, useEffect, useRef } from "react";
 import { useLocation, Link, useNavigate } from "react-router-dom";
@@ -28,14 +27,18 @@ import { normalizeLinkReferral } from "../lib/refShape.js";
 import { markReservationTerminal, reservationScopeKey } from "../lib/reservationScope";
 import {
   areSameLineageScopeKeys, clearDodoNavQuery, clearStoredPaymentSessionState,
-  extractPaymentLockId, isPaymentLockReleased, ownsSessionHold, parseCheckoutFingerprint,
-  paymentSessionMatchesBookingLineage, paymentSessionMatchesCheckout,
-  readScopedQuoteProvider, readStoredPaymentSessionState, selectPaymentBookingData,
-  syncCheckoutRef, validateDodoCallback, writeScopedQuoteProvider, writeStoredPaymentSessionState,
+  extractPaymentLockId, isPaymentLockReleased, mergeLineageCheckout, ownsSessionHold,
+  parseCheckoutFingerprint, paymentSessionMatchesBookingLineage, paymentSessionMatchesCheckout,
+  readScopedQuoteProvider, readStoredPaymentSessionState,
+  selectPaymentBookingData, syncCheckoutRef, validateDodoCallback, writeScopedQuoteProvider,
+  writeStoredPaymentSessionState,
 } from "../lib/checkoutSessionGuard";
+import { resolveInitialConsentBaseline } from "../lib/paymentConsentBaseline";
 import PayPalMethodPanel from "./PayPalPanelSlot";
 const loadCheckoutHold = () => import("../lib/paymentCheckoutHold");
+const loadConsentPanel = () => import("./PaymentConsentPanel");
 const ActiveUpgradeBlocker = lazy(() => loadCheckoutHold().then((m) => ({ default: m.ActiveUpgradeBlocker })));
+const PaymentConsentPanel = lazy(loadConsentPanel);
 
 const { applyPackagePricing } = packagePricing;
 const PAYMENT_FETCH_TIMEOUT_MS = 15_000;
@@ -43,34 +46,16 @@ const PAYMENT_STATUS_POLL_TIMEOUT_MS = 90_000;
 const PAYMENT_STATUS_POLL_INTERVAL_MS = 2_500;
 const CONFIRMATION_PRELOAD_WAIT_MS = 2500;
 
-const formatLocalDate = (utcDate, timeZone) => {
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      ...(timeZone ? { timeZone } : {}),
-      weekday: "long",
-      month: "long",
-      day: "numeric",
-      year: "numeric",
-    }).format(utcDate);
-  } catch {
-    return "-";
-  }
-};
-
-const formatLocalTime = (utcDate, timeZone) => {
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      ...(timeZone ? { timeZone } : {}),
-      hour: "numeric",
-      minute: "2-digit",
-    }).format(utcDate);
-  } catch {
-    return "-";
-  }
-};
+const formatLocalDate = (utcDate, timeZone) => { try { return new Intl.DateTimeFormat(undefined, { ...(timeZone ? { timeZone } : {}), weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(utcDate); } catch { return "-"; } };
+const formatLocalTime = (utcDate, timeZone) => { try { return new Intl.DateTimeFormat(undefined, { ...(timeZone ? { timeZone } : {}), hour: "numeric", minute: "2-digit" }).format(utcDate); } catch { return "-"; } };
 
 export default function Payment({ hideFooter = false }) {
-  useEffect(() => { clearBookingConfirmation(); }, []);
+  useEffect(() => {
+    try {
+      for (const k of Object.keys(window.sessionStorage)) if (k.startsWith("booking_confirmation_summary:")) window.sessionStorage.removeItem(k);
+      window.sessionStorage.removeItem("booking_confirmation_state");
+    } catch {}
+  }, []);
   useEffect(preloadPurchaseTracking, []);
   useEffect(() => {
     preloadConfirmationPages().catch(() => {});
@@ -101,31 +86,6 @@ export default function Payment({ hideFooter = false }) {
   const readStoredPaymentSession = readStoredPaymentSessionState, writeStoredPaymentSession = writeStoredPaymentSessionState, clearStoredPaymentSession = clearStoredPaymentSessionState;
   const readStoredCheckout = readStoredCheckoutBooking;
   const writeStoredCheckout = (value) => { try { if (!value || typeof value !== "object") sessionStorage.removeItem(CHECKOUT_BOOKING_STORAGE_KEY); else sessionStorage.setItem(CHECKOUT_BOOKING_STORAGE_KEY, JSON.stringify(value)); } catch {} };
-
-  const buildConfirmationNavigationState = (responseBody = {}) => {
-    const baseState = getModalFlowState();
-    const bookingId = String(responseBody?.bookingId || "").trim();
-    holdExpiryHandledRef.current = true;
-    markReservationTerminal(currentScopeKeyRef.current, responseBody?.status || "booked");
-
-    writeStoredCheckout(null);
-    try {
-      removeBrowserStorage("sessionStorage", "my_slot_hold");
-      window.dispatchEvent(new CustomEvent("hold-state", { detail: null }));
-    } catch {}
-
-    if (!bookingId) {
-      clearBookingConfirmation();
-      return baseState;
-    }
-
-    const bookingConfirmation = createBookingConfirmation(responseBody);
-
-    return {
-      ...(baseState || {}),
-      bookingConfirmation,
-    };
-  };
 
   const [popState, setPopState] = useState({ key: "", seq: 0 });
   const locationKeyRef = useRef(location.key); locationKeyRef.current = location.key;
@@ -163,7 +123,7 @@ export default function Payment({ hideFooter = false }) {
   useEffect(() => {
     const syncedBookingData = checkoutRef.current || bookingData;
     if (navState.bookingData) {
-      writeStoredCheckout(syncedBookingData);
+      writeStoredCheckout(mergeLineageCheckout(readStoredCheckout(), syncedBookingData));
     }
 
     const params = new URLSearchParams(location.search);
@@ -306,6 +266,17 @@ export default function Payment({ hideFooter = false }) {
   const [quoteRetryCount, setQuoteRetryCount] = useState(0);
   const [alreadyTargetInfo, setAlreadyTargetInfo] = useState(null);
   const [blockingUpgradeSession, setBlockingUpgradeSession] = useState(null);
+  const [quoteHold, setQuoteHold] = useState(null);
+  const quoteHoldRef = useRef(null); quoteHoldRef.current = quoteHold;
+  const referralRef = useRef(referral); referralRef.current = referral;
+  const couponRef = useRef(coupon); couponRef.current = coupon;
+  const consentScopeRef = useRef("");
+  const consentStateRef = useRef(resolveInitialConsentBaseline({}));
+  if (hydrated && !areSameLineageScopeKeys(consentScopeRef.current, currentScopeKey)) {
+    consentScopeRef.current = currentScopeKey;
+    consentStateRef.current = resolveInitialConsentBaseline(bookingData);
+  }
+  const hasConsentHold = Boolean(quoteHold);
   const validationGenRef = useRef(0);
   const referralCheckGenRef = useRef(0);
   const couponCheckGenRef = useRef(0);
@@ -326,7 +297,21 @@ export default function Payment({ hideFooter = false }) {
     setValidatingCoupon(false);
     setAlreadyTargetInfo(null);
     setBlockingUpgradeSession(null);
+    quoteHoldRef.current = null;
+    setQuoteHold(null);
   }, [currentScopeKey]);
+
+  const consentModRef = useRef(null);
+  useEffect(() => { loadConsentPanel().then((m) => { consentModRef.current = m; }).catch(() => {}); }, []);
+  const consentCtxRef = useRef(null);
+  const runConsentAction = (name, arg) => {
+    const mod = consentModRef.current;
+    if (mod) return mod.createPaymentConsentActions(consentCtxRef.current)[name](arg);
+    return loadConsentPanel().then((m) => { consentModRef.current = m; return m.createPaymentConsentActions(consentCtxRef.current)[name](arg); }).catch(() => {});
+  };
+  const applyAuthoritativeQuote = (arg) => runConsentAction("applyAuthoritativeQuote", arg);
+  const handleAcceptQuoteHold = (hold) => runConsentAction("handleAcceptQuoteHold", hold);
+  const handleRemoveDiscount = (slot) => runConsentAction("handleRemoveDiscount", slot);
 
   const showBanner = (type, text, options = {}) => {
     setBanner({ type, text, ...options });
@@ -568,6 +553,7 @@ export default function Payment({ hideFooter = false }) {
     }
 
     const requestScopeKey = currentScopeKey, requestProvider = lockedProvider || selectedQuoteProvider || "";
+    const reqRefCode = String(referral?.code || "").trim().toLowerCase(), reqCpnCode = String(coupon?.code || "").trim().toLowerCase();
     const quoteInputKey = `${requestScopeKey}|${packageTitle}|${bookingData.originalOrderId || ""}|${bookingData.upgradeIntentToken || ""}|${referral?.code || ""}|${coupon?.code || ""}|${quoteRetryCount}`;
     const targetCurrency = normalizeCurrencyCode((requestProvider && providerConfig?.[requestProvider]?.currency) || serverQuoteRef.current?.currency || "USD");
     if (lastQuoteKeyRef.current === quoteInputKey && serverQuoteRef.current && quoteFingerprintRef.current && normalizeCurrencyCode(serverQuoteRef.current.currency) === targetCurrency) {
@@ -598,12 +584,12 @@ export default function Payment({ hideFooter = false }) {
       { signal: controller?.signal }
     )
       .then((data) => {
-        if (!active || quoteVersionRef.current !== requestQuoteVersion || currentScopeKeyRef.current !== requestScopeKey || (lockedProviderRef.current || selectedQuoteProviderRef.current || "") !== requestProvider) return;
+        if (!active || quoteVersionRef.current !== requestQuoteVersion || currentScopeKeyRef.current !== requestScopeKey || (lockedProviderRef.current || selectedQuoteProviderRef.current || "") !== requestProvider || String(referralRef.current?.code || "").trim().toLowerCase() !== reqRefCode || String(couponRef.current?.code || "").trim().toLowerCase() !== reqCpnCode) return;
         lastQuoteKeyRef.current = quoteInputKey;
+        const qFp = String(data.quoteFingerprint || data.fingerprint || "").trim();
         setServerQuote(data.quote || null);
-        setQuoteFingerprint(
-          String(data.quoteFingerprint || data.fingerprint || "").trim()
-        );
+        setQuoteFingerprint(qFp);
+        if (data.quote) applyAuthoritativeQuote({ quote: data.quote, quoteVersion: requestQuoteVersion, quoteFingerprint: qFp, scopeKey: requestScopeKey });
         if (data.providers) {
           setProviderAvailabilityKnown(["dodo", "razorpay", "paypal"].every(
             (provider) => typeof data.providers[provider]?.enabled === "boolean"
@@ -700,7 +686,7 @@ export default function Payment({ hideFooter = false }) {
       .then((m) => {
         if (!active || codeScopeKeyRef.current !== startedCodeScopeKey || !codeApplicationAllowedRef.current) return;
         return m.runPreApplyCheckoutCodes({
-          couponCode, referralCode, refLower, persistedRef, packageTitle, referral,
+          couponCode, referralCode, refLower, persistedRef, packageTitle, referral, referralRef, couponRef,
           referralResKeyRef, startedReservationKey, preApplyPrefix, skipPreApplyKeyRef,
           location, navState, navigate, showBanner,
           isCurrent: () => active && codeScopeKeyRef.current === startedCodeScopeKey && codeApplicationAllowedRef.current,
@@ -856,6 +842,12 @@ export default function Payment({ hideFooter = false }) {
     readStoredPaymentSession, paymentView, paymentSession, persistPaymentSession, paymentActionRef,
     paymentMountedRef, stripReservedCode, skipPreApplyKeyRef, activeReservationKeyRef,
   };
+  consentCtxRef.current = {
+    ...checkoutFlowCtxRef.current, currentScopeKeyRef, consentStateRef, referralRef, couponRef,
+    quoteHoldRef, setQuoteHold, quoteVersionRef, quoteFingerprintRef, manualCodeAllowedRef, checkingCode,
+    referral, coupon, validationGenRef, lastQuoteKeyRef, setReferral, setReferralInput, setReferralError,
+    writeStoredReferral, setCoupon, setCouponInput, setCouponError,
+  };
 
   const getActivePaymentSession = (provider) =>
     [readStoredPaymentSession(), paymentSession].find((s) => s?.provider === provider && s?.paymentAccessToken && !isPaymentLockReleased(s.paymentAccessToken) && paymentSessionMatchesCheckout(s.fingerprint, checkoutFingerprint) && paymentSessionMatchesBookingLineage(s, bookingData)) || null;
@@ -933,22 +925,19 @@ export default function Payment({ hideFooter = false }) {
       .catch((error) => { if (operation.current()) showBanner("error", error?.message || "Unable to load payment status. Please try again."); });
   };
 
-  const buildFinalizeNavigation = (responseBody, operation) => {
-    if (!operation.current()) return null;
-    clearPaymentSession("", operation.token);
-    operation.token = "";
-    return buildConfirmationNavigationState(responseBody);
-  };
-
   const showConfirmation = async (kind, responseBody, operation) => {
-    await Promise.race([
-      preloadConfirmationPage(kind).catch(() => {}),
-      new Promise(resolve => setTimeout(resolve, CONFIRMATION_PRELOAD_WAIT_MS)),
+    const [m] = await Promise.all([
+      loadConsentPanel(),
+      Promise.race([
+        preloadConfirmationPage(kind).catch(() => {}),
+        new Promise((resolve) => setTimeout(resolve, CONFIRMATION_PRELOAD_WAIT_MS)),
+      ]),
     ]);
     if (!operation.current()) return;
-    const state = kind === "paid"
-      ? buildFinalizeNavigation(responseBody, operation)
-      : buildConfirmationNavigationState(responseBody);
+    if (kind === "paid") { clearPaymentSession("", operation.token); operation.token = ""; }
+    const state = m.createConfirmationNavigationState({
+      responseBody, baseState: getModalFlowState(), scopeKey: currentScopeKeyRef.current, holdExpiryHandledRef, writeStoredCheckout,
+    });
     navigate(kind === "paid" ? "/payment-success" : "/thank-you", { state, replace: true });
   };
 
@@ -969,7 +958,8 @@ export default function Payment({ hideFooter = false }) {
       setQuoteFingerprint, setProviderConfig, selectQuoteProvider, showConfirmation,
       writeStoredReferral, setReferral, setReferralInput, setCoupon, setCouponInput,
       setReferralError, setCouponError, paymentStartBody, countCheckoutStartOnce, eventMoment,
-      trackCheckoutSessionStarted, trackConfirmedPurchase, flow: m.createCheckoutFlow(checkoutFlowCtxRef.current),
+      trackCheckoutSessionStarted, trackConfirmedPurchase, consentStateRef, quoteHoldRef,
+      onAuthoritativeQuote: applyAuthoritativeQuote, flow: m.createCheckoutFlow(checkoutFlowCtxRef.current),
     });
   };
 
@@ -1026,7 +1016,7 @@ export default function Payment({ hideFooter = false }) {
         manualCodeAllowedRef, currentScopeKeyRef, scopeKey, validationGenRef, referralCheckGenRef,
         validating, validatingCoupon, setReferral, setReferralError, writeStoredReferral,
         coupon, setValidating, packageTitle, setCoupon, setCouponInput, setReferralInput, referral,
-        setCouponError, showBanner,
+        referralRef, couponRef, setCouponError, showBanner,
       }, m.createCheckoutFlow(checkoutFlowCtxRef.current)))
       .catch(() => { if (currentScopeKeyRef.current === scopeKey) setReferralError("We couldn't validate that referral code. Please try again."); });
   }
@@ -1037,7 +1027,8 @@ export default function Payment({ hideFooter = false }) {
       .then((m) => m.runValidateCoupon(code, {
         manualCodeAllowedRef, currentScopeKeyRef, scopeKey, validationGenRef, couponCheckGenRef,
         validating, validatingCoupon, setCoupon, setCouponError, setValidatingCoupon,
-        packageTitle, setReferral, setReferralInput, writeStoredReferral, setCouponInput, referral, showBanner,
+        packageTitle, setReferral, setReferralInput, writeStoredReferral, setCouponInput, referral,
+        referralRef, couponRef, showBanner,
       }, m.createCheckoutFlow(checkoutFlowCtxRef.current)))
       .catch(() => { if (currentScopeKeyRef.current === scopeKey) setCouponError("We couldn't validate that coupon code. Please try again."); });
   }
@@ -1149,6 +1140,12 @@ export default function Payment({ hideFooter = false }) {
         )}
       </motion.div>
 
+
+      {quoteHold && (
+        <Suspense fallback={null}>
+          <PaymentConsentPanel quoteHold={quoteHold} quoteLoading={quoteLoading} onAcceptQuoteHold={handleAcceptQuoteHold} />
+        </Suspense>
+      )}
 
       {(alreadyTargetInfo || blockingUpgradeSession) && (
         <Suspense fallback={null}>
@@ -1310,6 +1307,16 @@ export default function Payment({ hideFooter = false }) {
                   <span className="glow-line glow-line-bottom" />
                   <span className="glow-line glow-line-left" />
                 </button>
+                {referral && (
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveDiscount("referral")}
+                    disabled={checkingCode || checkoutActionBusy}
+                    className="text-xs text-ink-secondary underline underline-offset-2"
+                  >
+                    Remove referral code
+                  </button>
+                )}
               </form>
               {referralError && !validating && (
                 <p
@@ -1370,17 +1377,7 @@ export default function Payment({ hideFooter = false }) {
                 {coupon && (
                   <button
                     type="button"
-                    onClick={() => {
-                      if (!manualCodeAllowedRef.current || checkingCode) return;
-                      validationGenRef.current += 1;
-                      setCoupon(null);
-                      setCouponInput("");
-                      setCouponError("");
-                      runCheckoutAction(
-                        (m) => m.createCheckoutFlow(checkoutFlowCtxRef.current).persistCodes({ referralCode: referral?.code || "", couponCode: "" }),
-                        "Unable to update coupon."
-                      );
-                    }}
+                    onClick={() => handleRemoveDiscount("coupon")}
                     disabled={checkingCode || checkoutActionBusy}
                     className="text-xs text-ink-secondary underline underline-offset-2"
                   >
@@ -1450,7 +1447,7 @@ export default function Payment({ hideFooter = false }) {
                 onClick={handleFreeBooking}
                 disabled={
                   creatingFree || paymentBusy || checkingCode || quoteLoading ||
-                  !quoteFingerprint || otherCheckoutStarting("free")
+                  !quoteFingerprint || hasConsentHold || otherCheckoutStarting("free")
                 }
                 className="glow-button px-4 py-3 rounded-lg text-sm font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60"
               >
@@ -1476,7 +1473,7 @@ export default function Payment({ hideFooter = false }) {
                   </div>
                   <div className="flex w-full shrink-0 flex-col gap-2 md:w-52">
                     <button type="button" onClick={handleDodoCheckout}
-                      disabled={!canSubmitBooking || payingDodo || paymentStatusBusy || cancellingPayment || quoteLoading || !quoteFingerprint || !providerIsAvailableForSession("dodo") || otherCheckoutStarting("dodo")}
+                      disabled={!canSubmitBooking || payingDodo || paymentStatusBusy || cancellingPayment || quoteLoading || !quoteFingerprint || hasConsentHold || !providerIsAvailableForSession("dodo") || otherCheckoutStarting("dodo")}
                       className="glow-button inline-flex h-11 w-full items-center justify-center whitespace-nowrap rounded-lg px-4 text-sm font-semibold disabled:opacity-60">
                       {payingDodo ? "Opening checkout..." : lockedProvider === "dodo" ? "Resume checkout" : "Pay your way"}
                     </button>
@@ -1525,6 +1522,7 @@ export default function Payment({ hideFooter = false }) {
                     paymentStatusBusy || cancellingPayment ||
                     quoteLoading ||
                     !quoteFingerprint ||
+                    hasConsentHold ||
                     !canUseRazorpay ||
                     !providerIsAvailableForSession("razorpay") ||
                     otherCheckoutStarting("razorpay")
@@ -1601,6 +1599,7 @@ export default function Payment({ hideFooter = false }) {
                             paymentBusy ||
                             quoteLoading ||
                             !quoteFingerprint ||
+                            hasConsentHold ||
                             !providerIsAvailableForSession("paypal") ||
                             otherCheckoutStarting("paypal")
                           }
@@ -1615,6 +1614,7 @@ export default function Payment({ hideFooter = false }) {
                           onClick={(data, actions) => {
                             const blocked = !createPaymentOperation().current() ||
                               paymentActionRef.current.cancelling || paymentBusy ||
+                              Boolean(quoteHoldRef.current) ||
                               pendingStartsRef.current.length > 0 || !ensureSlotBeforeAction();
                             if (blocked) return actions?.reject ? actions.reject() : false;
                             return actions?.resolve ? actions.resolve() : true;

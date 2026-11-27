@@ -10,7 +10,7 @@ import {
 import {
   allocatePaymentSessionSeq, canWriteRefreshedHold, commitPaymentSessionState,
   doesLiveHoldMatchLineage, fetchPaymentJson, isAffirmativeTerminalRelease,
-  persistDetachedStartResult, readLiveSlotHold,
+  persistDetachedStartResult, quoteExceedsAcceptedCeiling, readLiveSlotHold,
 } from "./paymentSessionLocks";
 import { runResumePaymentSession } from "./paymentSessionResume";
 import { markReservationTerminal, recordHoldNonceRotation, reservationScopeKey } from "./reservationScope";
@@ -31,6 +31,7 @@ export async function runNewPaymentStart(ctx) {
     setProviderConfig, selectQuoteProvider, showBanner, setSessionHold, showConfirmation, persistPaymentSession,
     stripReservedCode, writeStoredReferral, setReferral, setReferralInput, setCoupon, setCouponInput, setReferralError,
     setCouponError, paymentStartBody, countCheckoutStartOnce, eventMoment, trackCheckoutSessionStarted, trackConfirmedPurchase,
+    consentStateRef, onAuthoritativeQuote,
   } = ctx;
 
   if (quoteLoading || !startQuoteFp) throw new Error("Checkout price is still being confirmed. Please try again.");
@@ -161,7 +162,9 @@ export async function runNewPaymentStart(ctx) {
         setCouponInput(couponCode); setReferralError(""); setCouponError("");
       }
       if (q) setServerQuote(q);
-      if (claimed.quoteFingerprint) setQuoteFingerprint(str(claimed.quoteFingerprint));
+      const claimedFp = str(claimed.quoteFingerprint);
+      if (claimedFp) setQuoteFingerprint(claimedFp);
+      if (q && onAuthoritativeQuote) onAuthoritativeQuote({ quote: q, quoteVersion: quoteVersionRef.current, quoteFingerprint: claimedFp || startQuoteFp, scopeKey: adoptedScope });
       operation.token = adopted.paymentAccessToken;
       if (adoptedProvider === "dodo") { dodoReturnHandled.current = adopted.paymentAccessToken; stripDodoReturnFromHistory(); }
       persistPaymentSession(adopted, true);
@@ -172,8 +175,10 @@ export async function runNewPaymentStart(ctx) {
     if (quoteVersionRef.current === startQuoteVersion) {
       if (isMismatch && provider !== "free") selectQuoteProvider(provider, startScope);
       if (data?.quote) setServerQuote(data.quote);
-      if (data?.quoteFingerprint || data?.fingerprint) setQuoteFingerprint(str(data.quoteFingerprint || data.fingerprint));
+      const mismatchFp = str(data?.quoteFingerprint || data?.fingerprint);
+      if (mismatchFp) setQuoteFingerprint(mismatchFp);
       if (data?.providers) setProviderConfig((current) => ({ ...current, ...data.providers }));
+      if (data?.quote && onAuthoritativeQuote) onAuthoritativeQuote({ quote: data.quote, quoteVersion: quoteVersionRef.current, quoteFingerprint: mismatchFp || startQuoteFp, scopeKey: startScope });
     }
     if (isMismatch) throw new Error("The price changed. Review the updated total and click again.");
     throw new Error(data?.error || "Unable to start payment.");
@@ -201,11 +206,23 @@ export async function runNewPaymentStart(ctx) {
   if (provider !== "free") selectQuoteProvider(provider, startScope);
   if (data.quote) setServerQuote(data.quote);
   if (returnedFp) setQuoteFingerprint(returnedFp);
+  const ceiling = consentStateRef?.current;
+  const exceedsCeiling = Boolean(
+    data.quote && ceiling && quoteExceedsAcceptedCeiling({
+      quote: data.quote,
+      acceptedQuoteTotal: ceiling.acceptedQuoteTotal,
+      acceptedQuoteCurrency: ceiling.acceptedQuoteCurrency,
+    })
+  );
+  if (data.quote && onAuthoritativeQuote) {
+    onAuthoritativeQuote({ quote: data.quote, quoteVersion: quoteVersionRef.current, quoteFingerprint: returnedFp || startQuoteFp, scopeKey: startScope });
+  }
   if (provider !== "free") {
     operation.token = committed.paymentAccessToken;
     if (provider === "dodo") { dodoReturnHandled.current = committed.paymentAccessToken; stripDodoReturnFromHistory(); }
     persistPaymentSession(committed, true);
   }
+  if (exceedsCeiling) return { ...committed, terminal: true, stale: true };
   if (provider !== "free" && responseStatus && responseStatus !== "started") {
     if (data?.manualReviewRequired === true || data?.cleanupPending === true) showBanner("info", data.recoveryReason || "Payment is still being verified.", { persistent: true });
     return { ...committed, terminal: true };
@@ -226,9 +243,9 @@ export async function runStartSessionCheckout(ctx) {
     pendingStartsRef, setPendingStarts, otherCheckoutStarting, sessionStartRef,
     quoteVersionRef, quoteFingerprintRef, quoteFingerprint, validationGenRef,
     readStoredCheckout, holdForGuard, dodoReturnHandled, latestNavRef, navigate,
-    checkoutRef, paymentMountedRef, paymentView, flow,
+    checkoutRef, paymentMountedRef, paymentView, flow, consentStateRef, quoteHoldRef, onAuthoritativeQuote,
   } = ctx;
-  if (!operation.current() || paymentActionRef.current.cancelling) return { terminal: true, stale: true };
+  if (!operation.current() || paymentActionRef.current.cancelling || quoteHoldRef?.current) return { terminal: true, stale: true };
   const startScope = currentScopeKeyRef.current;
   const storedActive = readStoredPaymentSession() || paymentSession;
   if (
@@ -244,6 +261,7 @@ export async function runStartSessionCheckout(ctx) {
       navigateToConfirmation, clearPaymentSession, parseCheckoutFingerprint,
       referral, coupon, persistPaymentSession, pendingStartsRef, setPendingStarts,
       otherCheckoutStarting, paymentActionRef, paymentMountedRef, paymentView, flow,
+      consentStateRef, quoteVersionRef, onAuthoritativeQuote,
     });
     if (resumed) return resumed;
   }
