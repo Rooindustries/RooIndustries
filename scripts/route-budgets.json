@@ -250,6 +250,10 @@
       "js": 16384,
       "css": 1024
     },
+    "src/components/Payment.jsx -> ./PaymentConsentPanel": {
+      "js": 6144,
+      "css": 1024
+    },
     "src/components/Footer.jsx -> ../lib/consent": {
       "js": 5120,
       "css": 1024

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { formatCheckoutAmount, normalizeCurrencyCode } from "../lib/checkoutMoney";
+import { formatCheckoutAmount, normalizeCurrencyCode, toMoney } from "../lib/checkoutMoney";
 import { reportRequestError } from "../lib/clientRequest";
 import useUpgradeEligibility, { fetchUpgradeInfo } from "../lib/useUpgradeEligibility";
 import { useNavigate } from "react-router-dom";
@@ -117,6 +117,7 @@ export default function UpgradeXoc() {
       (utcStart ? formatLocalTime(utcStart, clientTimeZone) : "");
 
     const upgradeCurrency = normalizeCurrencyCode(upgradeInfo.currency || "USD");
+    const upgradeAmount = toMoney(upgradePrice, upgradeCurrency);
     const bookingData = {
         discord: booking.discord || "",
         email: upgradeInfo.requestInput.email,
@@ -135,6 +136,9 @@ export default function UpgradeXoc() {
 
       originalOrderId: booking._id,
       upgradeIntentToken: String(upgradeInfo.upgradeIntentToken || "").trim(),
+      expectedClientTotal: upgradeAmount,
+      expectedClientCurrency: upgradeCurrency,
+      acceptedQuoteTotal: upgradeAmount,
       acceptedQuoteCurrency: upgradeCurrency,
     };
 

@@ -157,17 +157,18 @@ const test = base.extend({
       if (path === "/api/payment/providers") return json(route, { ok: true, providers });
       if (path === "/api/payment/quote") {
         const body = request.postDataJSON() || {};
+        const basePrice = body.originalOrderId ? 45 : overhaulPrice;
         const couponCode = String(body.couponCode || "").toLowerCase();
         const referralCode = String(body.referralCode || "").toLowerCase();
         const cents = (value) => Math.round(value * 100) / 100;
         const couponDiscountAmount =
-          couponCode === "save20" || (couponCode === "friend" && state.collision) ? cents(overhaulPrice * 0.2) : 0;
+          couponCode === "save20" || (couponCode === "friend" && state.collision) ? cents(basePrice * 0.2) : 0;
         const referralDiscountPercent =
           referralCode === "friend" || (referralCode === "save20" && state.collision) ? 10 : 0;
-        const referralDiscountAmount = cents((overhaulPrice - couponDiscountAmount) * referralDiscountPercent / 100);
-        const netAmount = cents(overhaulPrice - couponDiscountAmount - referralDiscountAmount);
+        const referralDiscountAmount = cents((basePrice - couponDiscountAmount) * referralDiscountPercent / 100);
+        const netAmount = cents(basePrice - couponDiscountAmount - referralDiscountAmount);
         return json(route, { ok: true, quoteFingerprint: "fixture-quote", providers, quote: {
-          grossAmount: overhaulPrice, netAmount, isFree: false,
+          grossAmount: basePrice, netAmount, isFree: false,
           couponDiscountAmount, referralDiscountAmount, referralDiscountPercent,
         } });
       }

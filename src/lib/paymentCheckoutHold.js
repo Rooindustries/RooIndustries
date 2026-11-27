@@ -49,6 +49,8 @@ export async function runPreApplyCheckoutCodes(c) {
   if (nextReferral && nextCoupon?.canCombineWithReferral === false) {
     nextCoupon = null; nextCouponInput = ""; c.setCouponError("This coupon can't be used together with a referral discount.");
   }
+  if (c.referralRef) c.referralRef.current = nextReferral;
+  if (c.couponRef) c.couponRef.current = nextCoupon;
   c.setReferral(nextReferral); c.setCoupon(nextCoupon); c.setReferralInput(nextReferralInput); c.setCouponInput(nextCouponInput);
   const currentSess = c.readLinkReferralFromSession(), sameSess = currentSess.toLowerCase() === c.refLower;
   if ((droppedPassive || (!referralUnavailable && !nextReferral?.code && (referralRejected || !nextCoupon))) && sameSess) c.writeLinkReferralToSession("");
@@ -170,7 +172,7 @@ export const runDodoCheckout = async (c) => {
     const verified = verifyProviderLaunchPayload({ provider: "dodo", payload: session?.providerPayload, expectedAmount: session?.result?.quote?.netAmount ?? c.finalAmount, expectedCurrency: session?.result?.quote?.currency || c.displayQuoteCurrency });
     if (!verified.ok) throw new Error(verified.reason);
     const r = session.result?.refreshedHold || session.result?.hold || c.sessionHold;
-    const ret = { ...(c.checkoutRef.current || c.bookingData), ...(r?.slotHoldId && r?.slotHoldToken ? { slotHoldId: r.slotHoldId, slotHoldToken: r.slotHoldToken, slotHoldExpiresAt: r.slotHoldExpiresAt || r.expiresAt || "" } : {}) };
+    const ret = mergeLineageCheckout(c.readStoredCheckout(), c.checkoutRef.current || c.bookingData, r?.slotHoldId && r?.slotHoldToken ? { slotHoldId: r.slotHoldId, slotHoldToken: r.slotHoldToken, slotHoldExpiresAt: r.slotHoldExpiresAt || r.expiresAt || "" } : {});
     if (!c.writeBrowserStorage("sessionStorage", c.checkoutKey, JSON.stringify(ret)) || !c.writeStoredPaymentSession(session)) {
       c.showBanner("error", STORAGE_SAVE_ERROR, { persistent: true });
       return;
@@ -187,9 +189,7 @@ export const runValidateReferral = async (code, c, flow) => {
   if (!stillHere() || c.validating || c.validatingCoupon) return;
   const normalizedCode = str(code);
   if (!normalizedCode) {
-    c.validationGenRef.current += 1;
-    c.setReferral(null); c.setReferralError(""); c.writeStoredReferral("");
-    flow.persistCodes({ referralCode: "", couponCode: c.coupon?.code || "", stripRef: true }); return;
+    c.setReferralInput(c.referral?.code || ""); c.setReferralError(""); return;
   }
   const myGen = ++c.referralCheckGenRef.current;
   c.validationGenRef.current += 1;
@@ -199,22 +199,24 @@ export const runValidateReferral = async (code, c, flow) => {
     if (c.referralCheckGenRef.current !== myGen || !stillHere()) return;
     c.validationGenRef.current += 1;
     if (!result.ok) {
-      if (!result.unavailable) { c.setReferral(null); c.writeStoredReferral(""); flow.persistCodes({ referralCode: "", couponCode: c.coupon?.code || "", stripRef: true }); }
+      if (!result.unavailable) { if (c.referralRef) c.referralRef.current = null; c.setReferral(null); c.writeStoredReferral(""); flow.persistCodes({ referralCode: "", couponCode: c.coupon?.code || "", stripRef: true }); }
       c.setReferralError(result.unavailable ? result.error : "Invalid or inactive referral code."); return;
     }
     if (result.type === "coupon") {
       const safeCoupon = sanitizeCouponForCheckout(result.value);
       if (!safeCoupon) { c.setReferralError("Invalid or inactive referral code."); return; }
       if (safeCoupon.canCombineWithReferral === false && c.referral) { c.setCouponError("This coupon can't be used together with a referral discount."); return; }
+      if (c.couponRef) c.couponRef.current = safeCoupon;
       c.setCoupon(safeCoupon); c.setCouponInput(safeCoupon.code); c.setReferralInput(c.referral?.code || "");
       flow.persistCodes({ referralCode: c.referral?.code || "", couponCode: safeCoupon.code });
       c.showBanner("info", "This code is a coupon, so it was applied as a coupon."); return;
     }
     const safeReferral = sanitizeReferralForCheckout(result.value);
     if (!safeReferral) { c.setReferralError("Invalid or inactive referral code."); return; }
+    if (c.referralRef) c.referralRef.current = safeReferral;
     c.setReferral(safeReferral); c.setReferralInput(safeReferral.code); c.writeStoredReferral(safeReferral.code);
     const nextCouponCode = c.coupon?.canCombineWithReferral === false ? "" : c.coupon?.code || "";
-    if (c.coupon?.canCombineWithReferral === false) { c.setCoupon(null); c.setCouponInput(""); c.showBanner("info", "Current coupon can't be combined with referrals and was removed."); }
+    if (c.coupon?.canCombineWithReferral === false) { if (c.couponRef) c.couponRef.current = null; c.setCoupon(null); c.setCouponInput(""); c.showBanner("info", "Current coupon can't be combined with referrals and was removed."); }
     flow.persistCodes({ referralCode: safeReferral.code, couponCode: nextCouponCode, stripRef: true });
   } catch { if (c.referralCheckGenRef.current === myGen && stillHere()) { c.validationGenRef.current += 1; console.error("Referral validation failed"); c.setReferralError("We couldn't validate that referral code. Please try again."); } }
   finally { if (c.referralCheckGenRef.current === myGen && sameScope()) c.setValidating(false); }
@@ -225,9 +227,7 @@ export const runValidateCoupon = async (code, c, flow) => {
   if (!stillHere() || c.validating || c.validatingCoupon) return;
   const normalizedCode = str(code);
   if (!normalizedCode) {
-    c.validationGenRef.current += 1;
-    c.setCoupon(null); c.setCouponError("");
-    flow.persistCodes({ referralCode: c.referral?.code || "", couponCode: "" }); return;
+    c.setCouponInput(c.coupon?.code || ""); c.setCouponError(""); return;
   }
   const myGen = ++c.couponCheckGenRef.current;
   c.validationGenRef.current += 1;
@@ -237,20 +237,23 @@ export const runValidateCoupon = async (code, c, flow) => {
     if (c.couponCheckGenRef.current !== myGen || !stillHere()) return;
     c.validationGenRef.current += 1;
     if (!result.ok) {
-      if (!result.unavailable) { c.setCoupon(null); flow.persistCodes({ referralCode: c.referral?.code || "", couponCode: "" }); }
+      if (!result.unavailable) { if (c.couponRef) c.couponRef.current = null; c.setCoupon(null); flow.persistCodes({ referralCode: c.referral?.code || "", couponCode: "" }); }
       c.setCouponError(result.error || "Invalid coupon code."); return;
     }
     if (result.type === "referral") {
       const safeReferral = sanitizeReferralForCheckout(result.value);
       if (!safeReferral) { c.setCouponError("Invalid coupon code."); return; }
+      if (c.referralRef) c.referralRef.current = safeReferral;
+      if (c.couponRef) c.couponRef.current = null;
       c.setReferral(safeReferral); c.setReferralInput(safeReferral.code); c.writeStoredReferral(safeReferral.code);
       c.setCoupon(null); c.setCouponInput("");
       flow.persistCodes({ referralCode: safeReferral.code, couponCode: "", stripRef: true });
       c.showBanner("info", "This code is a referral, so it was applied as a referral."); return;
     }
     const safeCoupon = sanitizeCouponForCheckout(result.value);
-    if (!safeCoupon) { c.setCoupon(null); flow.persistCodes({ referralCode: c.referral?.code || "", couponCode: "" }); c.setCouponError("Invalid coupon code."); return; }
-    if (safeCoupon.canCombineWithReferral === false && c.referral) { c.setCoupon(null); flow.persistCodes({ referralCode: c.referral?.code || "", couponCode: "" }); c.setCouponError("This coupon can't be used together with a referral discount. Remove the referral or use a different coupon."); return; }
+    if (!safeCoupon) { if (c.couponRef) c.couponRef.current = null; c.setCoupon(null); flow.persistCodes({ referralCode: c.referral?.code || "", couponCode: "" }); c.setCouponError("Invalid coupon code."); return; }
+    if (safeCoupon.canCombineWithReferral === false && c.referral) { if (c.couponRef) c.couponRef.current = null; c.setCoupon(null); flow.persistCodes({ referralCode: c.referral?.code || "", couponCode: "" }); c.setCouponError("This coupon can't be used together with a referral discount. Remove the referral or use a different coupon."); return; }
+    if (c.couponRef) c.couponRef.current = safeCoupon;
     c.setCoupon(safeCoupon); c.setCouponInput(safeCoupon.code);
     flow.persistCodes({ referralCode: c.referral?.code || "", couponCode: safeCoupon.code });
     c.showBanner("success", `Coupon applied: ${formatCouponValue(safeCoupon)}`);
@@ -367,9 +370,9 @@ export const createCheckoutFlow = (ctx) => {
     const tokenCurrent = () => ctx.paymentMountedRef.current && str((readStoredPaymentSession() || paymentView.session)?.paymentAccessToken) === operation.token;
     return { activeSession, paymentAccessToken, operation, tokenCurrent, cancelCurrent: () => tokenCurrent() && paymentActionRef.current.seq === cancelSeq, syncSeq: () => (cancelSeq = paymentActionRef.current.seq) };
   };
-  const persistCodes = ({ referralCode = bookingData.referralCode || "", couponCode = bookingData.couponCode || "", stripRef = false } = {}) => {
+  const persistCodes = ({ referralCode = bookingData.referralCode || "", couponCode = bookingData.couponCode || "", stripRef = false, extra = {} } = {}) => {
     const { location: loc, navState } = ctx.latestNavRef.current;
-    const next = patchCheckout({ referralCode: ctx.stripReservedCode(referralCode), couponCode: ctx.stripReservedCode(couponCode), code: 1 });
+    const next = patchCheckout({ referralCode: ctx.stripReservedCode(referralCode), couponCode: ctx.stripReservedCode(couponCode), code: 1, ...extra });
     const params = new URLSearchParams(loc.search);
     if (stripRef) params.delete("ref");
     const search = params.toString() ? `?${params}` : "";

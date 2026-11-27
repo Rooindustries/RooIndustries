@@ -840,6 +840,8 @@ test("legacy promo-2026-11-24 is rejected on links, migrates from pre-PR stores,
   await expect(page.locator("#payment-referral-code")).toHaveValue("promo-2026-11-24");
   await page.locator("#payment-referral-code").fill("");
   await page.locator("#payment-referral-code").locator("..").getByRole("button", { name: "Apply", exact: true }).click();
+  await expect(page.locator("#payment-referral-code")).toHaveValue("promo-2026-11-24");
+  await page.getByRole("button", { name: "Remove referral code", exact: true }).click();
   await expect(page).toHaveURL(/\/payment$/);
   await page.reload();
   await expect(page.locator("#payment-referral-code")).toHaveValue("");

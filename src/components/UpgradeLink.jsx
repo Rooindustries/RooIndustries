@@ -3,7 +3,7 @@ import useUpgradeEligibility, { fetchUpgradeInfo } from "../lib/useUpgradeEligib
 import { useNavigate, useParams } from "react-router-dom";
 import { CLIENT_REQUEST_TIMEOUT_MS, reportRequestError, requestTimeoutError } from "../lib/clientRequest";
 import { getPublicContent } from "../lib/publicContentClient";
-import { formatCheckoutAmount, normalizeCurrencyCode } from "../lib/checkoutMoney";
+import { formatCheckoutAmount, normalizeCurrencyCode, toMoney } from "../lib/checkoutMoney";
 import packageContent from "../lib/packageContent";
 import packagePricing from "../lib/packagePricing";
 
@@ -212,6 +212,7 @@ export default function UpgradeLink() {
       (utcStart ? formatLocalTime(utcStart, clientTimeZone) : "");
 
     const upgradeCurrency = normalizeCurrencyCode(upgradeInfo.currency || "USD");
+    const upgradeAmount = toMoney(upgradePrice, upgradeCurrency);
     const bookingData = {
       discord: booking.discord || "",
       email: upgradeInfo.requestInput.email,
@@ -230,6 +231,9 @@ export default function UpgradeLink() {
 
       originalOrderId: booking._id,
       upgradeIntentToken: String(upgradeInfo.upgradeIntentToken || "").trim(),
+      expectedClientTotal: upgradeAmount,
+      expectedClientCurrency: upgradeCurrency,
+      acceptedQuoteTotal: upgradeAmount,
       acceptedQuoteCurrency: upgradeCurrency,
     };
 

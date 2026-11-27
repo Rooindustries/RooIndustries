@@ -4,7 +4,8 @@ import {
 } from "./checkoutSessionGuard";
 import {
   allocatePaymentSessionSeq, canWriteRefreshedHold, commitPaymentSessionState,
-  fetchPaymentJson, isAffirmativeTerminalRelease, readLiveSlotHold, releasePaymentSessionLock, verifyProviderLaunchPayload,
+  fetchPaymentJson, isAffirmativeTerminalRelease, quoteExceedsAcceptedCeiling,
+  readLiveSlotHold, releasePaymentSessionLock, verifyProviderLaunchPayload,
 } from "./paymentSessionLocks";
 import { markReservationTerminal } from "./reservationScope";
 
@@ -63,6 +64,7 @@ export async function runResumePaymentSession(ctx) {
     navigateToConfirmation, clearPaymentSession, parseCheckoutFingerprint,
     referral, coupon, persistPaymentSession, pendingStartsRef, setPendingStarts,
     otherCheckoutStarting, paymentActionRef, paymentMountedRef, paymentView, flow,
+    consentStateRef, quoteVersionRef, onAuthoritativeQuote,
   } = ctx;
   if (otherCheckoutStarting(provider)) {
     throw new Error("Another payment method is still starting. Please wait a moment and try again.");
@@ -148,6 +150,23 @@ export async function runResumePaymentSession(ctx) {
     }, { seq: statusSeq, scopeKey: resumeScopeKey });
     if (!updated) return { terminal: true, stale: true };
     persistPaymentSession(updated, true);
+    const ceiling = consentStateRef?.current;
+    const exceedsCeiling = Boolean(
+      data?.quote && ceiling && quoteExceedsAcceptedCeiling({
+        quote: data.quote,
+        acceptedQuoteTotal: ceiling.acceptedQuoteTotal,
+        acceptedQuoteCurrency: ceiling.acceptedQuoteCurrency,
+      })
+    );
+    if (data?.quote && onAuthoritativeQuote) {
+      onAuthoritativeQuote({
+        quote: data.quote,
+        quoteVersion: quoteVersionRef?.current ?? 0,
+        quoteFingerprint: str(data.quoteFingerprint),
+        scopeKey: resumeScopeKey,
+      });
+    }
+    if (exceedsCeiling) return { ...updated, terminal: true };
     return updated;
   }
 
