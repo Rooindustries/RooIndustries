@@ -2,7 +2,7 @@ import { removeBrowserStorage, writeBrowserStorage } from "./browserStorage";
 import { clearBookingConfirmation, createBookingConfirmation } from "./confirmationReceipt";
 import { extractTokenNonce } from "./checkoutConfirmation";
 import {
-  buildBookingFromUnresolvedSession, clearDodoNavQuery, mergeLineageCheckout, ownsSessionHold,
+  buildBookingFromUnresolvedSession, clearDodoNavQuery, mergeLineageCheckout,
   parseCheckoutFingerprint, paymentSessionMatchesBookingLineage, paymentSessionMatchesCheckout,
   stripDodoReturnFromHistory, writeStoredPaymentSessionState,
 } from "./checkoutSessionGuard";
@@ -392,19 +392,27 @@ export const applyCancelRefreshedHold = ({
     (ownsCheckout || ownsLiveHold) &&
     (!ownsLiveHold || ((!initialHoldId || doesLiveHoldMatchLineage(initialHoldId, initialHoldNonce)) && canWriteRefreshedHold(refreshedHold, initialHoldId, initialHoldNonce)))
   ) {
-    recordHoldNonceRotation({ slotHoldId: refreshedHold.slotHoldId, fromNonce: initialHoldNonce || bookingData?.slotHoldToken || "", toNonce: refreshedHold.slotHoldToken });
+    const fromNonce = getSessionHoldIdentity(activeSession).holdNonce || (ownsLiveHold ? initialHoldNonce : "") || (ownsCheckout ? storedCheckout?.slotHoldToken : "") || "";
+    recordHoldNonceRotation({ slotHoldId: refreshedHold.slotHoldId, fromNonce, toNonce: refreshedHold.slotHoldToken });
     if (ownsCheckout) {
-      refreshedCheckout = mergeLineageCheckout(storedCheckout, bookingData, {
+      const checkoutBase = sessionOwnsCheckoutBooking(activeSession, bookingData) ? bookingData : storedCheckout;
+      refreshedCheckout = mergeLineageCheckout(storedCheckout, checkoutBase, {
         slotHoldId: refreshedHold.slotHoldId, slotHoldToken: refreshedHold.slotHoldToken, slotHoldExpiresAt: refreshedHold.slotHoldExpiresAt,
       });
       setSessionHold(refreshedHold, refreshedCheckout);
       writeStoredCheckout(refreshedCheckout);
     }
     if (ownsLiveHold || (!liveHold && ownsCheckout)) {
+      const ownedMeta = ownsCheckout
+        ? (refreshedCheckout || storedCheckout)
+        : { ...buildBookingFromUnresolvedSession(activeSession), ...(liveHold || {}) };
       emitHoldState({
         holdId: refreshedHold.slotHoldId, holdToken: refreshedHold.slotHoldToken,
-        expiresAt: refreshedHold.slotHoldExpiresAt, startTimeUTC: bookingData?.startTimeUTC || "",
-        packageTitle, packagePrice, phase: "holding",
+        expiresAt: refreshedHold.slotHoldExpiresAt,
+        startTimeUTC: ownedMeta?.startTimeUTC || "",
+        packageTitle: ownedMeta?.packageTitle || (ownsCheckout ? packageTitle : ""),
+        ...(ownedMeta?.packagePrice || (ownsCheckout && packagePrice) ? { packagePrice: ownedMeta?.packagePrice || packagePrice } : {}),
+        phase: "holding",
       });
     }
   }
@@ -419,20 +427,25 @@ export const clearPaymentSessionOutcome = (c) => {
   return clearNonDodoHold(c);
 };
 const clearNonDodoHold = ({
-  activeSession, isUpgrade, isTerminal, forceReleaseHold, flowCtx,
-  checkoutRef, bookingData, setSessionHold, writeStoredCheckout,
+  activeSession, isUpgrade, isTerminal, forceReleaseHold,
+  checkoutRef, bookingData, setSessionHold, readStoredCheckout, writeStoredCheckout,
   dodoReturnHandled, latestNavRef, navigate, showBanner, terminalStatus, reason,
 }) => {
-  const ownsHold = ownsSessionHold(activeSession, flowCtx);
   const keepHold = (!forceReleaseHold && activeSession?.provider !== "dodo") || isUpgrade || !isTerminal;
   const liveHold = readLiveSlotHold();
-  if (keepHold || !ownsHold || (liveHold && !isLiveHoldOwnedBySession(activeSession, liveHold))) return false;
-  const nextCheckout = { ...(checkoutRef.current || bookingData), slotHoldId: "", slotHoldToken: "", slotHoldExpiresAt: "" };
-  checkoutRef.current = nextCheckout;
-  setSessionHold(null);
-  writeStoredCheckout(nextCheckout);
-  emitHoldState(null);
-  clearDodoNavQuery({ dodoReturnHandled, latestNavRef, navigate, nextCheckout, force: true });
+  const ownsLive = isLiveHoldOwnedBySession(activeSession, liveHold);
+  const currentCheckout = readStoredCheckout?.() || checkoutRef.current || bookingData;
+  const ownsCheckout = sessionOwnsCheckoutBooking(activeSession, currentCheckout);
+  if (keepHold || (!ownsLive && !ownsCheckout) || (liveHold && !ownsLive)) return false;
+  let nextCheckout = null;
+  if (ownsCheckout) {
+    nextCheckout = { ...currentCheckout, slotHoldId: "", slotHoldToken: "", slotHoldExpiresAt: "" };
+    checkoutRef.current = nextCheckout;
+    setSessionHold(null);
+    writeStoredCheckout(nextCheckout);
+  }
+  if (ownsLive || !liveHold) emitHoldState(null);
+  clearDodoNavQuery({ dodoReturnHandled, latestNavRef, navigate, nextCheckout, force: Boolean(nextCheckout) });
   showBanner("error", String(reason || "").trim() || (terminalStatus === "refunded"
     ? "This payment was refunded. Go back to booking to choose a time."
     : "Payment was not completed and the slot was released. Go back to booking to choose a time."), { persistent: true });
