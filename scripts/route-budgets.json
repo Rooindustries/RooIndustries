@@ -113,7 +113,7 @@
       "css": 25600
     },
     "/tourney": {
-      "js": 121856,
+      "js": 122880,
       "css": 27648
     },
     "/upgrade-xoc": {
@@ -312,6 +312,10 @@
     },
     "src/lib/monitoring/client.js -> ./browser": {
       "js": 147456,
+      "css": 1024
+    },
+    "src/lib/paymentSessionResume.js -> ./paymentTerminalOutcome": {
+      "js": 6144,
       "css": 1024
     },
     "src/lib/paymentStartBody.js -> ./bookingAnalytics": {

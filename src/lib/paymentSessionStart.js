@@ -4,8 +4,8 @@ import { extractTokenNonce } from "./checkoutConfirmation";
 import {
   areSameLineageScopeKeys, beginPendingPaymentStart, clearDodoNavQuery,
   endPendingPaymentStart, extractPaymentLockId, isPaymentLockReleased,
-  mergeLineageCheckout, paymentSessionMatchesBookingLineage, paymentSessionMatchesCheckout,
-  readStoredPaymentSessionState, stripDodoReturnFromHistory, syncHistoryCheckoutBooking,
+  mergeLineageCheckout, readStoredPaymentSessionState,
+  stripDodoReturnFromHistory, syncHistoryCheckoutBooking,
 } from "./checkoutSessionGuard";
 import {
   allocatePaymentSessionSeq, canWriteRefreshedHold, commitPaymentSessionState,
@@ -195,13 +195,16 @@ export async function runNewPaymentStart(ctx) {
   const returnedNet = netOf(data.quote), currentNet = netOf(serverQuoteRef.current), latestFp = str(quoteFingerprintRef?.current);
   const quoteMoved = (returnedFp && startQuoteFp && returnedFp !== startQuoteFp) || (returnedNet !== null && currentNet !== null && returnedNet !== currentNet) || (quoteVersionRef.current !== startQuoteVersion && Boolean(latestFp && startQuoteFp && latestFp !== startQuoteFp));
   const refreshedHold = data.refreshedHold || data.hold || null;
-  if (!bookingData.originalOrderId && !initialHoldId && refreshedHold?.slotHoldId && !canWriteRefreshedHold(refreshedHold, "", "")) {
+  const isUpgrade = Boolean(str(bookingData?.originalOrderId));
+  if (!isUpgrade && !initialHoldId && refreshedHold?.slotHoldId && !canWriteRefreshedHold(refreshedHold, "", "")) {
     return { terminal: true, stale: true };
   }
   const candidateCheckout = previewCheckout(refreshedHold), sessionScope = reservationScopeKey(candidateCheckout) || startScope;
-  const nextSession = { provider, fingerprint: checkoutFingerprint, scopeKey: sessionScope, paymentAccessToken: str(data.paymentAccessToken), providerPayload: data.providerPayload || {}, providerOrderReady: data.providerOrderReady !== false, sessionExpiresAt: str(data.sessionExpiresAt), result: data };
+  const sessionHoldId = isUpgrade ? "" : str(refreshedHold?.slotHoldId || initialHoldId || fallbackHoldId);
+  const sessionHoldNonce = isUpgrade ? "" : extractTokenNonce(refreshedHold?.slotHoldToken || initialHoldNonce || sessionHold?.slotHoldToken || bookingData?.slotHoldToken || "");
+  const nextSession = { provider, fingerprint: checkoutFingerprint, scopeKey: sessionScope, sessionHoldId, sessionHoldNonce, paymentAccessToken: str(data.paymentAccessToken), providerPayload: data.providerPayload || {}, providerOrderReady: data.providerOrderReady !== false, sessionExpiresAt: str(data.sessionExpiresAt), result: data };
   const isCurrentOp = operation.current();
-  if (provider !== "free" && booked && isCurrentOp) { await showConfirmation("paid", data, operation); return { ...nextSession, terminal: true }; }
+  if (provider !== "free" && booked && isCurrentOp) { await showConfirmation("paid", data, operation, nextSession); return { ...nextSession, terminal: true }; }
   const committed = provider === "free" ? nextSession : commitPaymentSessionState(nextSession, { seq: startSeq, scopeKey: sessionScope });
   if (provider !== "free" && !committed) return { terminal: true, stale: true };
   publishPendingHold(refreshedHold);
@@ -240,7 +243,7 @@ export async function runNewPaymentStart(ctx) {
 export async function runStartSessionCheckout(ctx) {
   const {
     provider, operation, startSnap, currentScopeKeyRef, paymentActionRef,
-    readStoredPaymentSession, paymentSession, checkoutFingerprint, bookingData,
+    readStoredPaymentSession, paymentSession, bookingData, rawBookingData,
     fetchJson = fetchPaymentJson, showBanner, navigateToConfirmation, clearPaymentSession,
     parseCheckoutFingerprint, referral, coupon, persistPaymentSession,
     pendingStartsRef, setPendingStarts, otherCheckoutStarting, sessionStartRef,
@@ -254,8 +257,6 @@ export async function runStartSessionCheckout(ctx) {
   if (
     storedActive?.provider === provider &&
     !isPaymentLockReleased(storedActive.paymentAccessToken) &&
-    paymentSessionMatchesCheckout(storedActive?.fingerprint, checkoutFingerprint) &&
-    paymentSessionMatchesBookingLineage(storedActive, bookingData) &&
     storedActive?.paymentAccessToken &&
     storedActive?.providerPayload
   ) {
@@ -264,7 +265,7 @@ export async function runStartSessionCheckout(ctx) {
       navigateToConfirmation, clearPaymentSession, parseCheckoutFingerprint,
       referral, coupon, persistPaymentSession, pendingStartsRef, setPendingStarts,
       otherCheckoutStarting, paymentActionRef, paymentMountedRef, paymentView, flow,
-      consentStateRef, quoteVersionRef, onAuthoritativeQuote,
+      consentStateRef, quoteVersionRef, onAuthoritativeQuote, rawBookingData, bookingData, readStoredCheckout,
     });
     if (resumed) return resumed;
   }

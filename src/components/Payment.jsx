@@ -1,5 +1,5 @@
-import { clearBookingConfirmation, createBookingConfirmation } from "../lib/confirmationReceipt";
-import { writeBrowserStorage, removeBrowserStorage } from "../lib/browserStorage";
+import { clearBookingConfirmation } from "../lib/confirmationReceipt";
+import { writeBrowserStorage } from "../lib/browserStorage";
 import React, { lazy, Suspense, useState, useMemo, useEffect, useRef } from "react";
 import { useLocation, Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -26,23 +26,33 @@ import { stripRefFromSearch, writeLinkReferralToSession } from "../lib/arrivalSn
 import { normalizeLinkReferral } from "../lib/refShape.js";
 import { markReservationTerminal, reservationScopeKey } from "../lib/reservationScope";
 import {
-  areSameLineageScopeKeys, clearDodoNavQuery, clearStoredPaymentSessionState,
-  extractPaymentLockId, isPaymentLockReleased, mergeLineageCheckout, ownsSessionHold,
-  parseCheckoutFingerprint, paymentSessionMatchesBookingLineage, paymentSessionMatchesCheckout,
-  readScopedQuoteProvider, readStoredPaymentSessionState,
-  selectPaymentBookingData, syncCheckoutRef, validateDodoCallback, writeScopedQuoteProvider,
+  areSameLineageScopeKeys, buildBookingFromUnresolvedSession, clearDodoNavQuery,
+  clearStoredPaymentSessionState, extractPaymentLockId, isPaymentLockReleased,
+  mergeLineageCheckout, parseCheckoutFingerprint,
+  paymentSessionMatchesBookingLineage, paymentSessionMatchesCheckout,
+  readScopedQuoteProvider, readStoredPaymentSessionState, selectPaymentBookingData,
+  syncCheckoutRef, validateDodoCallback, writeScopedQuoteProvider,
   writeStoredPaymentSessionState,
 } from "../lib/checkoutSessionGuard";
 import PayPalMethodPanel from "./PayPalPanelSlot";
-const loadCheckoutHold = () => import("../lib/paymentCheckoutHold");
+let cachedCheckoutHoldMod = null;
+const loadCheckoutHold = () => import("../lib/paymentCheckoutHold").then((m) => { cachedCheckoutHoldMod = m; return m; });
 const loadConsentPanel = () => import("./PaymentConsentPanel");
 const ActiveUpgradeBlocker = lazy(() => loadCheckoutHold().then((m) => ({ default: m.ActiveUpgradeBlocker })));
 const PaymentConsentPanel = lazy(loadConsentPanel);
+const PaymentBanner = lazy(() => loadConsentPanel().then((m) => ({ default: m.PaymentBanner })));
+
+const GlowLines = () => (
+  <>
+    <span className="glow-line glow-line-top" />
+    <span className="glow-line glow-line-right" />
+    <span className="glow-line glow-line-bottom" />
+    <span className="glow-line glow-line-left" />
+  </>
+);
 
 const { applyPackagePricing } = packagePricing;
 const PAYMENT_FETCH_TIMEOUT_MS = 15_000;
-const PAYMENT_STATUS_POLL_TIMEOUT_MS = 90_000;
-const PAYMENT_STATUS_POLL_INTERVAL_MS = 2_500;
 const CONFIRMATION_PRELOAD_WAIT_MS = 2500;
 
 const formatLocalDate = (utcDate, timeZone) => { try { return new Intl.DateTimeFormat(undefined, { ...(timeZone ? { timeZone } : {}), weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(utcDate); } catch { return "-"; } };
@@ -61,13 +71,7 @@ export default function Payment({ hideFooter = false }) {
 
   useEffect(() => {
     setHydrated(true);
-    try {
-      setBrowserTimeZone(
-        Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
-      );
-    } catch {
-      setBrowserTimeZone("UTC");
-    }
+    try { setBrowserTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"); } catch { setBrowserTimeZone("UTC"); }
   }, []);
 
   const FLOW_BACKGROUND_KEY = "flow_background_location";
@@ -92,7 +96,8 @@ export default function Payment({ hideFooter = false }) {
   const navState = useMemo(() => (popState.seq > 0 && popState.key === location.key ? historyUsrState || location.state : location.state || historyUsrState) || {}, [popState, location.key, historyUsrState, location.state]);
 
   const [sessionHoldState, setSessionHoldState] = useState(null);
-  const bookingData = useMemo(() => {
+  const [paymentSession, setPaymentSession] = useState(null);
+  const rawBookingData = useMemo(() => {
     try {
       const parsed = selectPaymentBookingData(navState.bookingData, hydrated ? readStoredCheckout() : null, () => writeStoredCheckout(null));
       const pricedPackage = applyPackagePricing({ title: parsed.packageTitle, price: parsed.packagePrice });
@@ -105,7 +110,16 @@ export default function Payment({ hideFooter = false }) {
       };
     } catch { return {}; }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hydrated, popState.seq, location.key, location.search, navState.bookingData, sessionHoldState?.slotHoldId, sessionHoldState?.slotHoldToken]);
+  }, [hydrated, popState.seq, location.key, location.search, navState.bookingData, sessionHoldState?.slotHoldId, sessionHoldState?.slotHoldToken, paymentSession?.paymentAccessToken]);
+  const unresolvedStoredSession = hydrated ? (paymentSession || readStoredPaymentSession()) : null;
+  const hasLiveUnresolvedSession = Boolean(unresolvedStoredSession?.paymentAccessToken && !isPaymentLockReleased(unresolvedStoredSession.paymentAccessToken));
+  const usingUnresolvedFallback = !rawBookingData.packageTitle && hasLiveUnresolvedSession;
+  const bookingData = useMemo(() => {
+    if (rawBookingData.packageTitle || !hasLiveUnresolvedSession) return rawBookingData;
+    const fallback = buildBookingFromUnresolvedSession(unresolvedStoredSession);
+    const priced = applyPackagePricing({ title: fallback.packageTitle, price: fallback.packagePrice });
+    return { ...fallback, packageTitle: priced?.title || fallback.packageTitle, packagePrice: priced?.price || fallback.packagePrice };
+  }, [rawBookingData, hasLiveUnresolvedSession, unresolvedStoredSession?.paymentAccessToken, unresolvedStoredSession?.fingerprint]);
   const currentScopeKey = useMemo(() => reservationScopeKey(bookingData), [bookingData]);
   const currentScopeKeyRef = useRef(currentScopeKey); currentScopeKeyRef.current = currentScopeKey;
   const checkoutRef = useRef(null);
@@ -116,7 +130,7 @@ export default function Payment({ hideFooter = false }) {
   const paymentActionRef = useRef({ seq: 0, cancelling: false });
   useEffect(() => {
     const syncedBookingData = checkoutRef.current || bookingData;
-    if (navState.bookingData) {
+    if (navState.bookingData && !usingUnresolvedFallback) {
       writeStoredCheckout(mergeLineageCheckout(readStoredCheckout(), syncedBookingData));
     }
 
@@ -135,11 +149,14 @@ export default function Payment({ hideFooter = false }) {
       },
       { replace: true, state: nextState }
     );
-  }, [location.hash, location.pathname, location.search, navState, navigate]);
+  }, [location.hash, location.pathname, location.search, navState, navigate, usingUnresolvedFallback]);
 
   const isUpgrade = !!bookingData.originalOrderId;
   const sessionHold = sessionHoldState && areSameLineageScopeKeys(sessionHoldState.scopeKey, currentScopeKey) ? sessionHoldState : null;
-  const setSessionHold = (next) => setSessionHoldState(next ? { ...next, scopeKey: currentScopeKeyRef.current } : null);
+  const setSessionHold = (next, nextBooking = null) => {
+    if (nextBooking) checkoutRef.current = nextBooking;
+    setSessionHoldState(next ? { ...next, scopeKey: nextBooking ? reservationScopeKey(nextBooking) : currentScopeKeyRef.current } : null);
+  };
   const storedBackground = hydrated ? readStoredBackground() : null;
   const modalBackground =
     navState.backgroundLocation || storedBackground || null;
@@ -192,23 +209,9 @@ export default function Payment({ hideFooter = false }) {
 
   const ensureSlotBeforeAction = () => {
     if (canSubmitBooking) return true;
-    if (isUpgrade) {
-      showBanner(
-        "error",
-        "Missing time details for this upgrade. Please contact support."
-      );
-      return false;
-    }
-    showBanner(
-      "error",
-      holdExpired
-        ? "Your reserved slot expired. Please select a new time before completing your booking."
-        : "Please select a time slot before completing your booking."
-    );
-    navigate("/booking", {
-      state: backToBookingState,
-      replace: true,
-    });
+    if (isUpgrade) { showBanner("error", "Missing time details for this upgrade. Please contact support."); return false; }
+    showBanner("error", holdExpired ? "Your reserved slot expired. Please select a new time before completing your booking." : "Please select a time slot before completing your booking.");
+    navigate("/booking", { state: backToBookingState, replace: true });
     return false;
   };
 
@@ -328,19 +331,8 @@ export default function Payment({ hideFooter = false }) {
       holdExpiryHandledRef.current = true;
       codeApplicationAllowedRef.current = false;
       manualCodeAllowedRef.current = false;
-      showBanner(
-        "error",
-        "Your reserved slot expired. Please select a new time before completing your booking."
-      );
-      const background = navState.backgroundLocation || readStoredBackground();
-      navigate("/booking", {
-        state: {
-          ...(background ? { backgroundLocation: background } : {}),
-          modal: true,
-          ...navState,
-        },
-        replace: true,
-      });
+      showBanner("error", "Your reserved slot expired. Please select a new time before completing your booking.");
+      navigate("/booking", { state: backToBookingState, replace: true });
     };
 
     let timeoutId;
@@ -360,7 +352,6 @@ export default function Payment({ hideFooter = false }) {
     return () => clearTimeout(timeoutId);
   }, [hydrated, holdExpiresAt, holdForGuard, holdGuarded, confirmationVersion, processingDodoReturn, creatingFree, navigate, navState, location]);
 
-  const [paymentSession, setPaymentSession] = useState(null);
   const sessionQuote = paymentSession?.paymentAccessToken ? paymentSession?.result?.quote : null;
   const net = sessionQuote?.netAmount;
   const quoteValid = (net != null && net !== "" && Number.isFinite(Number(net))) || sessionQuote?.isFree === true;
@@ -393,7 +384,6 @@ export default function Payment({ hideFooter = false }) {
   const [providersSettled, setProvidersSettled] = useState(false);
   const [providerAvailabilityKnown, setProviderAvailabilityKnown] = useState(false);
   const quoteProvidersAppliedRef = useRef(false);
-  useBookingDialogPending(!hydrated || !providersSettled || (Boolean(packageTitle) && !quoteSettled));
   const [showInternalPayments, setShowInternalPayments] = useState(false);
   const [paymentStatusBusy, setPaymentStatusBusy] = useState(false);
   const [cancellingPayment, setCancellingPayment] = useState(false);
@@ -469,6 +459,19 @@ export default function Payment({ hideFooter = false }) {
     ]
   );
 
+  const isForeignFingerprint = Boolean(
+    paymentSession?.paymentAccessToken &&
+    !paymentSessionMatchesCheckout(paymentSession.fingerprint, checkoutFingerprint)
+  );
+  const dodoReopenBlocked =
+    lockedProvider === "dodo" &&
+    (paymentSession?.providerOrderReady === false ||
+      paymentSession?.result?.providerOrderReady === false ||
+      paymentSession?.result?.cleanupPending === true ||
+      paymentSession?.result?.attemptStarted === true ||
+      !String(paymentSession?.providerPayload?.checkoutUrl || "").trim());
+  useBookingDialogPending(!hydrated || !providersSettled || (Boolean(packageTitle) && !isForeignFingerprint && !usingUnresolvedFallback && !quoteSettled));
+
   const paymentMountedRef = useRef(true);
   const paymentViewRef = useRef(null);
   if (paymentViewRef.current?.key !== location.key ||
@@ -497,6 +500,7 @@ export default function Payment({ hideFooter = false }) {
 
   const createPaymentOperation = (expectedToken) => {
     const activeSession = readStoredPaymentSession() || paymentView.session;
+    const expectedFp = String(activeSession?.fingerprint || "").trim();
     const operation = {
       token: String(expectedToken ?? activeSession?.paymentAccessToken ?? "").trim(),
       current: () => {
@@ -506,7 +510,7 @@ export default function Payment({ hideFooter = false }) {
         const currentToken = String(session?.paymentAccessToken || "").trim();
         if (operation.token) {
           return currentView?.key === paymentView.key && currentToken === operation.token &&
-            paymentSessionMatchesCheckout(session?.fingerprint, currentView?.fingerprint);
+            (!expectedFp || String(session?.fingerprint || "").trim() === expectedFp);
         }
         return currentView === paymentView && currentToken === "";
       },
@@ -543,7 +547,7 @@ export default function Payment({ hideFooter = false }) {
       }
       return () => { active = false; };
     }
-    if (!packageTitle || preApplyingCodes) {
+    if (!packageTitle || preApplyingCodes || isForeignFingerprint || usingUnresolvedFallback) {
       setServerQuote(null);
       setQuoteFingerprint("");
       setQuoteLoading(false);
@@ -638,6 +642,8 @@ export default function Payment({ hideFooter = false }) {
     referral?.code,
     coupon?.code,
     preApplyingCodes,
+    isForeignFingerprint,
+    usingUnresolvedFallback,
     quoteRetryCount,
     lockedSessionQuote, paymentSession?.result?.quoteFingerprint,
   ]);
@@ -654,7 +660,7 @@ export default function Payment({ hideFooter = false }) {
   }, [referral]);
 
   useEffect(() => {
-    if (!hydrated || !packageTitle) return;
+    if (!hydrated || !packageTitle || usingUnresolvedFallback) return;
     const preApplyPrefix = `${activeReservationKey}|${bookingData.referralCode || ""}|${bookingData.couponCode || ""}|`;
     const preApplyKey = `${preApplyPrefix}${location.search}`;
     if (skipPreApplyKeyRef.current && skipPreApplyKeyRef.current === preApplyKey) {
@@ -701,30 +707,15 @@ export default function Payment({ hideFooter = false }) {
       });
     return () => { active = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [codeScopeKey, bookingData.couponCode, bookingData.referralCode, hydrated, location.search, packageTitle]);
+  }, [codeScopeKey, bookingData.couponCode, bookingData.referralCode, hydrated, location.search, packageTitle, usingUnresolvedFallback]);
 
   useEffect(() => {
-    if (!canUseRazorpay) {
-      setRzpReady(false);
-      return undefined;
-    }
-    const script = document.createElement("script");
-    script.src = "https://checkout.razorpay.com/v1/checkout.js";
-    script.async = true;
-    script.onload = () => setRzpReady(true);
-    script.onerror = () => {
-      console.error("Failed to load Razorpay SDK");
-      setRzpReady(false);
-      showBanner(
-        "error",
-        "Payment system failed to load. Please refresh the page and try again."
-      );
-    };
-    document.body.appendChild(script);
-
-    return () => {
-      document.body.removeChild(script);
-    };
+    if (!canUseRazorpay) { setRzpReady(false); return undefined; }
+    let active = true, cleanup = null;
+    loadCheckoutHold().then((m) => m.loadTerminalOutcome()).then((o) => {
+      if (active) cleanup = o.mountRazorpaySdk({ setRzpReady, showBanner });
+    }).catch(() => {});
+    return () => { active = false; cleanup?.(); };
   }, [canUseRazorpay]);
 
   useEffect(() => {
@@ -743,37 +734,25 @@ export default function Payment({ hideFooter = false }) {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const params = new URLSearchParams(location.search);
-    const internalToggle = params.get("internalPayments");
-
+    const internalToggle = new URLSearchParams(location.search).get("internalPayments");
     try {
-      if (internalToggle === "1") {
-        sessionStorage.setItem(INTERNAL_PAYMENTS_KEY, "1");
-      } else if (internalToggle === "0") {
-        sessionStorage.removeItem(INTERNAL_PAYMENTS_KEY);
-      }
-
+      if (internalToggle === "1") sessionStorage.setItem(INTERNAL_PAYMENTS_KEY, "1");
+      else if (internalToggle === "0") sessionStorage.removeItem(INTERNAL_PAYMENTS_KEY);
       const host = String(window.location.hostname || "").toLowerCase();
-      const isLocalHost = host === "localhost" || host === "127.0.0.1";
-      const hasInternalSession =
-        sessionStorage.getItem(INTERNAL_PAYMENTS_KEY) === "1";
-
-      setShowInternalPayments(isLocalHost || hasInternalSession);
-    } catch {
-      setShowInternalPayments(false);
-    }
+      setShowInternalPayments(host === "localhost" || host === "127.0.0.1" || sessionStorage.getItem(INTERNAL_PAYMENTS_KEY) === "1");
+    } catch { setShowInternalPayments(false); }
   }, [location.search]);
 
   useEffect(() => {
-    if (!hydrated || !packageTitle) return;
+    if (!hydrated) return;
     const stored = readStoredPaymentSession();
-    if (
-      stored?.fingerprint &&
-      !isPaymentLockReleased(stored.paymentAccessToken) &&
-      paymentSessionMatchesCheckout(stored.fingerprint, checkoutFingerprint) &&
-      paymentSessionMatchesBookingLineage(stored, bookingData)
-    ) {
-      if (!referral && !coupon && !referralInput && !couponInput && !bookingData.referralCode && !bookingData.couponCode) {
+    if (stored?.paymentAccessToken && !isPaymentLockReleased(stored.paymentAccessToken)) {
+      if (
+        packageTitle &&
+        paymentSessionMatchesCheckout(stored.fingerprint, checkoutFingerprint) &&
+        paymentSessionMatchesBookingLineage(stored, bookingData) &&
+        !referral && !coupon && !referralInput && !couponInput && !bookingData.referralCode && !bookingData.couponCode
+      ) {
         const storedFingerprint = parseCheckoutFingerprint(stored.fingerprint);
         const storedReferralCode = stripReservedCode(storedFingerprint?.referralCode);
         const storedCouponCode = stripReservedCode(storedFingerprint?.couponCode);
@@ -809,69 +788,38 @@ export default function Payment({ hideFooter = false }) {
   const getActivePaymentSession = (provider) =>
     [readStoredPaymentSession(), paymentSession].find((s) => s?.provider === provider && s?.paymentAccessToken && !isPaymentLockReleased(s.paymentAccessToken) && paymentSessionMatchesCheckout(s.fingerprint, checkoutFingerprint) && paymentSessionMatchesBookingLineage(s, bookingData)) || null;
 
-  const clearPaymentSession = (terminalStatus = "", expectedToken = "", { alreadyReleased = false, forceReleaseHold = false, reason = "" } = {}) => {
-    const storedSession = readStoredPaymentSession();
-    const activeSession = storedSession || paymentSession;
+  const clearPaymentSession = (terminalStatus = "", expectedToken = "", { alreadyReleased = false, forceReleaseHold = false, reason = "", responseData = null } = {}) => {
+    const activeSession = readStoredPaymentSession() || paymentSession;
     if (expectedToken && activeSession?.paymentAccessToken && extractPaymentLockId(activeSession.paymentAccessToken) !== extractPaymentLockId(expectedToken)) return true;
+    const outcomeMod = cachedCheckoutHoldMod?.getCachedTerminalOutcome?.();
+    const activeScope = activeSession?.scopeKey || (activeSession && outcomeMod?.sessionOwnsCheckoutBooking(activeSession, bookingData) ? currentScopeKeyRef.current : "");
     sessionStartRef.current = null;
     setPaymentSession(null);
     paymentView.session = null;
     if (!alreadyReleased) clearStoredPaymentSession();
-    if (terminalStatus === "refunded") markReservationTerminal(currentScopeKeyRef.current, "refunded");
-    const isTerminal = ["failed", "abandoned", "refunded"].includes(terminalStatus);
-    const ownsHold = ownsSessionHold(activeSession, checkoutFlowCtxRef.current);
-    if (isTerminal && activeSession?.provider === "dodo" && (isUpgrade || !ownsHold)) {
-      clearDodoNavQuery({ dodoReturnHandled, latestNavRef, navigate, nextCheckout: checkoutRef.current });
-    }
-    const keepHold = (!forceReleaseHold && activeSession?.provider !== "dodo") || isUpgrade || !isTerminal;
-    if (keepHold || !ownsHold) return false;
-    const nextCheckout = {
-      ...(checkoutRef.current || bookingData),
-      slotHoldId: "",
-      slotHoldToken: "",
-      slotHoldExpiresAt: "",
-    };
-    checkoutRef.current = nextCheckout;
-    setSessionHold(null);
-    writeStoredCheckout(nextCheckout);
-    removeBrowserStorage("sessionStorage", "my_slot_hold");
-    window.dispatchEvent(new CustomEvent("hold-state", { detail: null }));
-    clearDodoNavQuery({ dodoReturnHandled, latestNavRef, navigate, nextCheckout, force: true });
-    const fallback = terminalStatus === "refunded"
-      ? "This payment was refunded. Go back to booking to choose a time."
-      : "Payment was not completed and the slot was released. Go back to booking to choose a time.";
-    showBanner("error", String(reason || "").trim() || fallback, { persistent: true });
-    return true;
+    if (terminalStatus === "refunded" && activeScope) markReservationTerminal(activeScope, "refunded");
+    if (!outcomeMod) return false;
+    return outcomeMod.clearPaymentSessionOutcome({
+      ...consentCtxRef.current, activeSession, terminalStatus, responseData, isUpgrade,
+      isTerminal: ["failed", "abandoned", "refunded"].includes(terminalStatus),
+      forceReleaseHold, reason, location, navState, backToBookingState, setQuoteRetryCount,
+      flowCtx: checkoutFlowCtxRef.current,
+    });
   };
 
   const handleChangePaymentMethod = (existingOp = null, opts) => runConsentAction("changePaymentMethod", existingOp, opts);
   const handleCheckPaymentStatus = () => runConsentAction("checkPaymentStatus");
 
-  const buildConfirmationNavigationState = (responseBody = {}) => {
-    const baseState = getModalFlowState();
-    const bookingId = String(responseBody?.bookingId || "").trim();
-    holdExpiryHandledRef.current = true;
-    markReservationTerminal(currentScopeKeyRef.current, responseBody?.status || "booked");
-    writeStoredCheckout(null);
-    try { removeBrowserStorage("sessionStorage", "my_slot_hold"); window.dispatchEvent(new CustomEvent("hold-state", { detail: null })); } catch {}
-    if (!bookingId) { clearBookingConfirmation(); return baseState; }
-    return { ...(baseState || {}), bookingConfirmation: createBookingConfirmation(responseBody) };
-  };
+  const showConfirmation = (kind, responseBody, operation, activeSessionOverride = null) =>
+    runConsentAction("showConfirmationFlow", {
+      kind, responseBody, operation, activeSessionOverride,
+      preloadConfirmationPage, preloadWaitMs: CONFIRMATION_PRELOAD_WAIT_MS,
+      getModalFlowState, holdExpiryHandledRef,
+    }, { fallback: "" });
 
-  const showConfirmation = async (kind, responseBody, operation) => {
-    await Promise.race([
-      preloadConfirmationPage(kind).catch(() => {}),
-      new Promise((resolve) => setTimeout(resolve, CONFIRMATION_PRELOAD_WAIT_MS)),
-    ]);
-    if (!operation.current()) return;
-    if (kind === "paid") { clearPaymentSession("", operation.token); operation.token = ""; }
-    const state = buildConfirmationNavigationState(responseBody);
-    navigate(kind === "paid" ? "/payment-success" : "/thank-you", { state, replace: true });
-  };
-
-  const navigateToConfirmation = (kind, responseBody, operation) => {
+  const navigateToConfirmation = (kind, responseBody, operation, activeSessionOverride = null) => {
     trackConfirmedPurchase(responseBody.analyticsReceipt);
-    return showConfirmation(kind, responseBody, operation);
+    return showConfirmation(kind, responseBody, operation, activeSessionOverride);
   };
 
   const startSessionCheckout = async (provider, operation = createPaymentOperation()) => {
@@ -880,7 +828,7 @@ export default function Payment({ hideFooter = false }) {
     cm.ensureConsentBaseline(consentCtxRef.current);
     const startSnap = cm.snapPaymentStart(), m = await loadCheckoutHold();
     return m.runStartSessionCheckout({
-      ...consentCtxRef.current, provider, operation, startSnap, checkoutFingerprint,
+      ...consentCtxRef.current, provider, operation, startSnap, checkoutFingerprint, rawBookingData,
       parseCheckoutFingerprint, otherCheckoutStarting, sessionStartRef, quoteFingerprint,
       holdForGuard, buildCheckoutPayload, serverQuoteRef, quoteLoading, setAlreadyTargetInfo,
       setBlockingUpgradeSession, setServerQuote, setQuoteFingerprint, setProviderConfig,
@@ -891,14 +839,14 @@ export default function Payment({ hideFooter = false }) {
     });
   };
 
-  const finalizeSessionCheckout = async ({ paymentAccessToken, providerData, operation = createPaymentOperation(paymentAccessToken), captured = false, scopeKey = "" }) => {
+  const finalizeSessionCheckout = async ({ paymentAccessToken, providerData, operation = createPaymentOperation(paymentAccessToken), captured = false, scopeKey = "", activeSession = null }) => {
     if (!captured && !operation.current()) return null;
     const m = await loadCheckoutHold();
     if (!captured && !operation.current()) return null;
     return m.runFinalizeSessionCheckout({
       ...consentCtxRef.current, paymentAccessToken, providerData, operation, captured, scopeKey,
-      fetchTimeoutMs: PAYMENT_FETCH_TIMEOUT_MS, pollTimeoutMs: PAYMENT_STATUS_POLL_TIMEOUT_MS,
-      pollIntervalMs: PAYMENT_STATUS_POLL_INTERVAL_MS, flow: m.createCheckoutFlow(checkoutFlowCtxRef.current),
+      activeSession: activeSession || readStoredPaymentSession() || paymentSession,
+      flow: m.createCheckoutFlow(checkoutFlowCtxRef.current),
     });
   };
   consentCtxRef.current = {
@@ -909,16 +857,14 @@ export default function Payment({ hideFooter = false }) {
     setCouponInput, setCouponError, showBanner, paymentBusy, payingDodo, payingRzp, pendingStartCount, pendingStartsRef,
     setPendingStarts, createPaymentOperation, setCancellingPayment, navigateToConfirmation, clearPaymentSession, paymentStatusBusy,
     cancellingPayment, finalizeSessionCheckout, setPaymentStatusBusy, otherCheckoutStarting, ensureSlotBeforeAction,
-    startSessionCheckout, writeStoredPaymentSession,
+    startSessionCheckout, writeStoredPaymentSession, usingUnresolvedFallback,
   };
 
-  const runCheckoutAction = (fn, fallback) =>
-    loadCheckoutHold().then(fn).catch(() => showBanner("error", fallback, { persistent: true }));
+  const runOutcomeAction = (fn, fallback) =>
+    loadCheckoutHold().then((m) => m.loadTerminalOutcome().then(fn)).catch(() => showBanner("error", fallback, { persistent: true }));
 
-  const handleDodoCheckout = () => runCheckoutAction(
-    ({ runDodoCheckout }) => runDodoCheckout({
-      ...consentCtxRef.current, setPayingDodo, checkoutKey: CHECKOUT_BOOKING_STORAGE_KEY, finalAmount, displayQuoteCurrency,
-    }),
+  const handleDodoCheckout = () => runOutcomeAction(
+    (o) => o.runDodoCheckoutFlow({ ...consentCtxRef.current, setPayingDodo, finalAmount, displayQuoteCurrency }),
     "Unable to open checkout. Please try again."
   );
 
@@ -934,60 +880,25 @@ export default function Payment({ hideFooter = false }) {
     const callbackScope = currentScopeKeyRef.current;
     const operation = createPaymentOperation(session.paymentAccessToken);
     if (!operation.current()) return;
-    (async () => {
-      const m = await loadCheckoutHold();
-      if (!operation.current() || currentScopeKeyRef.current !== callbackScope) return;
-      if (action === "cancel") await handleChangePaymentMethod(operation, { rethrow: true });
-      else if (action === "finalize") await finalizeSessionCheckout({ paymentAccessToken: session.paymentAccessToken, providerData: {}, operation });
-      else await m.runLegacyDodoStatusCheck({ token: session.paymentAccessToken, operation, setBusy: setPaymentStatusBusy, onBooked: (d, op) => navigateToConfirmation("paid", d, op), onManualReview: (msg) => showBanner("info", msg, { persistent: true }), onTerminalClear: (s, t) => clearPaymentSession(s, t) });
-    })().catch((error) => {
-      if (action === "cancel" && dodoReturnHandled.current === session.paymentAccessToken) dodoReturnHandled.current = "";
-      if (operation.current()) showBanner("error", error.message || "Payment confirmation is pending. Check again shortly.");
-    });
+    runConsentAction("runDodoCallback", { action, session, callbackScope, operation }, { fallback: "" });
   }, [hydrated, location.search, paymentSession, bookingData, checkoutFingerprint]);
 
   const validateReferral = (code) => runConsentAction("validateCode", { slot: "referral", code });
   const validateCoupon = (code) => runConsentAction("validateCode", { slot: "coupon", code });
 
-  function handleFreeBooking() {
-    return runCheckoutAction(
-      ({ runFreeBookingCheckout }) => runFreeBookingCheckout({
-        ...consentCtxRef.current, isFree, setCreatingFree, beginCheckoutConfirmation, holdForGuard,
-        showConfirmation, holdExpiresAt, holdExpiryHandledRef,
-      }),
-      "Something went wrong saving your free booking. Please try again."
-    );
-  }
-  function handleRazorpayPay() {
-    return runCheckoutAction(
-      ({ runRazorpayCheckout }) => runRazorpayCheckout({
-        ...consentCtxRef.current, canUseRazorpay, rzpReady, isFree, finalAmount, setPayingRzp,
-        displayQuoteCurrency, packageTitle,
-      }),
-      "Payment could not be processed. Please try again."
-    );
-  }
+  const handleFreeBooking = () => runOutcomeAction(
+    (o) => o.runFreeBookingCheckout({ ...consentCtxRef.current, isFree, setCreatingFree, beginCheckoutConfirmation, holdForGuard, showConfirmation, holdExpiresAt, holdExpiryHandledRef }),
+    "Something went wrong saving your free booking. Please try again."
+  );
+  const handleRazorpayPay = () => runOutcomeAction(
+    (o) => o.runRazorpayCheckoutFlow({ ...consentCtxRef.current, canUseRazorpay, rzpReady, isFree, finalAmount, setPayingRzp, displayQuoteCurrency, packageTitle }),
+    "Payment could not be processed. Please try again."
+  );
 
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    visible: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.1,
-        delayChildren: 0.1,
-      },
-    },
-  };
+  const containerVariants = { hidden: { opacity: 0 }, visible: { opacity: 1, transition: { staggerChildren: 0.1, delayChildren: 0.1 } } };
+  const itemVariants = { hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 260, damping: 30 } } };
 
-  const itemVariants = {
-    hidden: { opacity: 0, y: 20 },
-    visible: {
-      opacity: 1,
-      y: 0,
-      transition: { type: "spring", stiffness: 260, damping: 30 },
-    },
-  };
-
+  const BannerComponent = consentModRef.current?.PaymentBanner || PaymentBanner;
   return (
     <motion.section
       className="booking-payment relative z-10 py-4 px-6 max-w-3xl mx-auto text-ink"
@@ -1007,48 +918,16 @@ export default function Payment({ hideFooter = false }) {
       </motion.div>
 
       <motion.div variants={itemVariants}>
-        {banner && banner.text && (
-          <div
-            ref={bannerRef}
-            role={banner.type === "error" ? "alert" : "status"}
-            aria-live={banner.type === "error" ? "assertive" : "polite"}
-            aria-atomic="true"
-            className={`mt-6 scroll-mt-6 rounded-xl border px-4 py-3 text-sm flex items-center gap-3 shadow-[0_0_25px_rgba(15,23,42,0.8)] ${
-              banner.type === "error"
-                ? "border-danger-border bg-danger-soft text-danger-text"
-                : banner.type === "success"
-                ? "border-success-border bg-success-soft text-success-text"
-                : "border-info-border bg-info-soft text-info-text"
-            }`}
-          >
-            <span className="text-lg" aria-hidden="true">
-              {banner.type === "error"
-                ? "!"
-                : banner.type === "success"
-                ? "OK"
-                : "i"}
-            </span>
-            <p className="flex-1">{banner.text}</p>
-            {banner.retryQuote && (
-              <button
-                type="button"
-                onClick={() => {
-                  setBanner(null);
-                  setQuoteRetryCount((count) => count + 1);
-                }}
-                className="rounded-md border border-current px-2 py-1 text-xs font-semibold uppercase tracking-wide hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info-border"
-              >
-                Retry price check
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => setBanner(null)}
-              className="text-xs uppercase tracking-wide opacity-70 hover:opacity-100"
-            >
-              Close
-            </button>
-          </div>
+        {banner?.text && (
+          <Suspense fallback={null}>
+            <BannerComponent
+              banner={banner}
+              bannerRef={bannerRef}
+              onChooseNewTime={() => navigate("/booking", { state: backToBookingState, replace: true })}
+              onRetryQuote={() => { setBanner(null); setQuoteRetryCount((count) => count + 1); }}
+              onClose={() => setBanner(null)}
+            />
+          </Suspense>
         )}
       </motion.div>
 
@@ -1214,10 +1093,7 @@ export default function Payment({ hideFooter = false }) {
                   className="glow-button px-3 py-2 rounded-md font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 text-sm"
                 >
                   {validating ? "Checking..." : "Apply"}
-                  <span className="glow-line glow-line-top" />
-                  <span className="glow-line glow-line-right" />
-                  <span className="glow-line glow-line-bottom" />
-                  <span className="glow-line glow-line-left" />
+                  <GlowLines />
                 </button>
                 {referral && (
                   <button
@@ -1280,10 +1156,7 @@ export default function Payment({ hideFooter = false }) {
                   className="glow-button px-3 py-2 rounded-md font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60 text-sm"
                 >
                   {validatingCoupon ? "Checking..." : "Apply"}
-                  <span className="glow-line glow-line-top" />
-                  <span className="glow-line glow-line-right" />
-                  <span className="glow-line glow-line-bottom" />
-                  <span className="glow-line glow-line-left" />
+                  <GlowLines />
                 </button>
 
                 {coupon && (
@@ -1319,14 +1192,26 @@ export default function Payment({ hideFooter = false }) {
                 <p className="text-xs text-info-text">
                   This checkout is reserved with {lockedProvider === "dodo" ? "your selected payment option" : lockedProvider === "paypal" ? "PayPal" : "Razorpay"}. Pricing and provider selection are locked for this session. Finish it or safely release this payment method before choosing another.
                 </p>
-                <button
-                  type="button"
-                  onClick={() => handleChangePaymentMethod()}
-                  disabled={cancellingPayment || paymentStatusBusy || payingDodo || payingRzp || pendingStartCount > 0}
-                  className="shrink-0 rounded-md border border-line-input bg-surface-input px-3 py-2 text-xs font-semibold text-ink hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info-border disabled:cursor-wait disabled:opacity-60"
-                >
-                  {cancellingPayment ? "Checking payment..." : "Change payment method"}
-                </button>
+                <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+                  {lockedProvider !== "dodo" && (
+                    <button
+                      type="button"
+                      onClick={handleCheckPaymentStatus}
+                      disabled={paymentStatusBusy || cancellingPayment || pendingStartCount > 0}
+                      className="shrink-0 rounded-md border border-info-border bg-surface-input px-3 py-2 text-xs font-semibold text-ink hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info-border disabled:cursor-wait disabled:opacity-60"
+                    >
+                      {paymentStatusBusy ? "Checking payment..." : "Check payment status"}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => handleChangePaymentMethod()}
+                    disabled={cancellingPayment || paymentStatusBusy || payingDodo || payingRzp || pendingStartCount > 0}
+                    className="shrink-0 rounded-md border border-line-input bg-surface-input px-3 py-2 text-xs font-semibold text-ink hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-info-border disabled:cursor-wait disabled:opacity-60"
+                  >
+                    {cancellingPayment ? "Checking payment..." : "Change payment method"}
+                  </button>
+                </div>
               </div>
             )}
           </>
@@ -1364,15 +1249,12 @@ export default function Payment({ hideFooter = false }) {
                 className="glow-button px-4 py-3 rounded-lg text-sm font-semibold inline-flex items-center justify-center gap-2 disabled:opacity-60"
               >
                 {creatingFree ? "Confirming..." : "Confirm Free Booking"}
-                <span className="glow-line glow-line-top" />
-                <span className="glow-line glow-line-right" />
-                <span className="glow-line glow-line-bottom" />
-                <span className="glow-line glow-line-left" />
+                <GlowLines />
               </button>
             </div>
           ) : (
             <>
-              {providerConfig.dodo?.enabled && (
+              {(providerConfig.dodo?.enabled || lockedProvider === "dodo") && (
                 <div>
                 <div className="low-perf-surface glass-premium glass-card-surface mt-6 flex flex-col items-center justify-between gap-4 rounded-xl border border-line-input px-4 py-4 md:flex-row">
                   <div className="grid w-full min-w-0 grid-cols-[5rem_minmax(0,1fr)] items-center gap-3">
@@ -1385,13 +1267,13 @@ export default function Payment({ hideFooter = false }) {
                   </div>
                   <div className="flex w-full shrink-0 flex-col gap-2 md:w-52">
                     <button type="button" onClick={handleDodoCheckout}
-                      disabled={!canSubmitBooking || payingDodo || paymentStatusBusy || cancellingPayment || quoteLoading || !quoteFingerprint || hasConsentHold || !providerIsAvailableForSession("dodo") || otherCheckoutStarting("dodo")}
+                      disabled={!canSubmitBooking || !providerConfig.dodo?.enabled || payingDodo || paymentStatusBusy || cancellingPayment || quoteLoading || !quoteFingerprint || hasConsentHold || isForeignFingerprint || usingUnresolvedFallback || dodoReopenBlocked || !providerIsAvailableForSession("dodo") || otherCheckoutStarting("dodo")}
                       className="glow-button inline-flex h-11 w-full items-center justify-center whitespace-nowrap rounded-lg px-4 text-sm font-semibold disabled:opacity-60">
                       {payingDodo ? "Opening checkout..." : lockedProvider === "dodo" ? "Resume checkout" : "Pay your way"}
                     </button>
                     {lockedProvider === "dodo" && (
                       <button type="button" disabled={payingDodo || paymentBusy || pendingStartCount > 0}
-                        className="rounded-md px-3 py-2 text-xs font-semibold text-ink-muted hover:text-ink disabled:opacity-60"
+                        className="rounded-md border border-line-input bg-surface-input px-3 py-2 text-xs font-semibold text-ink hover:bg-surface-hover disabled:opacity-60"
                         onClick={handleCheckPaymentStatus}>
                         {paymentStatusBusy ? "Checking payment..." : "Check payment status"}
                       </button>
@@ -1448,10 +1330,7 @@ export default function Payment({ hideFooter = false }) {
                       : !razorpayAvailabilityKnown
                         ? "Checking availability..."
                         : "Pay with Razorpay"}
-                  <span className="glow-line glow-line-top" />
-                  <span className="glow-line glow-line-right" />
-                  <span className="glow-line glow-line-bottom" />
-                  <span className="glow-line glow-line-left" />
+                  <GlowLines />
                 </button>
               </div>
               {onlinePaymentUnavailable ? (
@@ -1589,10 +1468,7 @@ export default function Payment({ hideFooter = false }) {
               ←
             </span>
             <span>Back to Booking</span>
-            <span className="glow-line glow-line-top" />
-            <span className="glow-line glow-line-right" />
-            <span className="glow-line glow-line-bottom" />
-            <span className="glow-line glow-line-left" />
+            <GlowLines />
           </Link>
         </motion.div>
       )}

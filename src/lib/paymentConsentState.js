@@ -163,6 +163,7 @@ export const computeManualDiscountRemoval = ({
 
 export const createPaymentConsentActions = (c) => {
   const persist = (patch = {}) => {
+    if (c.usingUnresolvedFallback) return c.bookingData;
     const next = mergeLineageCheckout(c.readStoredCheckout(), c.checkoutRef.current || c.bookingData, patch);
     c.checkoutRef.current = next; c.writeStoredCheckout(next); syncHistoryCheckoutBooking(next);
     return next;
@@ -239,7 +240,7 @@ export const createPaymentConsentActions = (c) => {
     const token = String(activeSession?.paymentAccessToken || "").trim();
     if (!token || c.paymentStatusBusy || c.cancellingPayment || c.paymentActionRef.current.cancelling) return;
     if (!(activeSession?.providerOrderReady === false || activeSession?.result?.providerOrderReady === false)) {
-      c.finalizeSessionCheckout({ paymentAccessToken: token, providerData: {} }).catch((error) =>
+      c.finalizeSessionCheckout({ paymentAccessToken: token, providerData: {}, activeSession }).catch((error) =>
         c.showBanner("error", error?.message || "Unable to load payment status. Please try again.")
       );
       return;
@@ -264,7 +265,55 @@ export const createPaymentConsentActions = (c) => {
         }
       });
   };
-  return { applyAuthoritativeQuote, handleAcceptQuoteHold, handleRemoveDiscount, changePaymentMethod, checkPaymentStatus, validateCode };
+  const runDodoCallback = async ({ action, session, callbackScope, operation }) => {
+    try {
+      const m = await c.loadCheckoutHold();
+      if (!operation.current() || c.currentScopeKeyRef.current !== callbackScope) return;
+      if (action === "cancel") await changePaymentMethod(operation);
+      else if (action === "finalize") await c.finalizeSessionCheckout({ paymentAccessToken: session.paymentAccessToken, providerData: {}, operation, activeSession: session });
+      else {
+        const outcomeMod = await m.loadTerminalOutcome();
+        if (!operation.current() || c.currentScopeKeyRef.current !== callbackScope) return;
+        await outcomeMod.runLegacyDodoStatusCheck({
+          token: session.paymentAccessToken, activeSession: session, operation, fetchJson: m.fetchPaymentJson, setBusy: c.setPaymentStatusBusy,
+          onBooked: (d, op, sess) => c.navigateToConfirmation("paid", d, op, sess),
+          onManualReview: (msg) => c.showBanner("info", msg, { persistent: true }),
+          onCleanupPending: (msg) => c.showBanner("info", msg, { persistent: true }),
+          onTerminalClear: (s, t, d) => c.clearPaymentSession(s, t, { alreadyReleased: true, responseData: d }),
+        });
+      }
+    } catch (error) {
+      if (action === "cancel" && c.dodoReturnHandled.current === session.paymentAccessToken) c.dodoReturnHandled.current = "";
+      if (operation.current()) c.showBanner("error", error.message || "Payment confirmation is pending. Check again shortly.");
+    }
+  };
+  const showConfirmationFlow = async ({ kind, responseBody, operation, activeSessionOverride = null, preloadConfirmationPage, preloadWaitMs, getModalFlowState, holdExpiryHandledRef }) => {
+    const resolvedSession = activeSessionOverride || c.readStoredPaymentSession() || c.paymentSession;
+    const [m] = await Promise.all([
+      c.loadCheckoutHold(),
+      Promise.race([
+        preloadConfirmationPage(kind).catch(() => {}),
+        new Promise((resolve) => setTimeout(resolve, preloadWaitMs)),
+      ]),
+    ]);
+    const outcomeMod = await m.loadTerminalOutcome();
+    if (!operation.current()) return;
+    if (kind === "paid") {
+      if (operation.token) {
+        m.releasePaymentSessionLock({ token: operation.token, scopeKey: resolvedSession?.scopeKey || "", seq: m.allocatePaymentSessionSeq() });
+      }
+      c.clearPaymentSession("", operation.token, { alreadyReleased: true });
+      operation.token = "";
+    }
+    const state = outcomeMod.createConfirmationNavigationState({
+      responseBody, baseState: getModalFlowState(), scopeKey: c.currentScopeKeyRef.current,
+      holdExpiryHandledRef, writeStoredCheckout: c.writeStoredCheckout,
+      activeSession: kind === "paid" ? resolvedSession : null,
+      readStoredCheckout: c.readStoredCheckout,
+    });
+    c.navigate(kind === "paid" ? "/payment-success" : "/thank-you", { state, replace: true });
+  };
+  return { applyAuthoritativeQuote, handleAcceptQuoteHold, handleRemoveDiscount, changePaymentMethod, checkPaymentStatus, validateCode, runDodoCallback, showConfirmationFlow };
 };
 
 export const fetchPaymentProviders = ({ req, hasPaypalClientId, paypalClientIdFromEnv, setProviderAvailabilityKnown, setProviderConfig, setProvidersSettled, isActive, isSuperseded }) =>
@@ -300,7 +349,7 @@ export const runPayPalApprove = async (data, actions, c) => {
   try {
     const details = await actions.order.capture();
     await c.finalizeSessionCheckout({
-      operation, captured: true, scopeKey: tokenScopeKey,
+      operation, captured: true, scopeKey: tokenScopeKey, activeSession,
       paymentAccessToken: String(activeSession.paymentAccessToken).trim(),
       providerData: { paypalOrderId: details?.id || data?.orderID || "", payerEmail: details?.payer?.email_address || "" },
     });

@@ -2,7 +2,7 @@ import { fetchJsonWithTimeout } from "./clientRequest";
 import { extractTokenNonce } from "./checkoutConfirmation";
 import { CODE_VALIDATION_UNAVAILABLE_MESSAGE, formatCouponValue, sanitizeCouponForCheckout, sanitizeReferralForCheckout } from "./checkoutCodes";
 import { areSameLineageScopeKeys, clearDodoNavQuery, isNonResumablePaymentData, mergeLineageCheckout, ownsSessionHold, stripDodoReturnFromHistory, syncCheckoutRef, syncHistoryCheckoutBooking } from "./checkoutSessionGuard";
-import { allocatePaymentSessionSeq, fetchPaymentJson, isAffirmativeTerminalRelease, releasePaymentSessionLock, STORAGE_SAVE_CHANGE_ONLY_ERROR, STORAGE_SAVE_ERROR, verifyProviderLaunchPayload } from "./paymentSessionLocks";
+import { fetchPaymentJson, isAffirmativeTerminalRelease, STORAGE_SAVE_CHANGE_ONLY_ERROR, STORAGE_SAVE_ERROR, verifyProviderLaunchPayload } from "./paymentSessionLocks";
 import { areSameLineageNonces, markReservationTerminal, recordHoldNonceRotation, reservationScopeKey } from "./reservationScope";
 
 export async function runPreApplyCheckoutCodes(c) {
@@ -111,6 +111,8 @@ export const hasSessionOwnedHoldForCancel = (hold, session) => {
   if (!hold || !session?.paymentAccessToken) return false;
   const holdId = str(hold.holdId || hold.slotHoldId), holdNonce = extractTokenNonce(hold.holdToken || hold.slotHoldToken);
   if (!holdId || !holdNonce) return false;
+  const sid = str(session.sessionHoldId);
+  if (sid) return sid === holdId && (!session.sessionHoldNonce || areSameLineageNonces(holdId, session.sessionHoldNonce, holdNonce));
   const r = session.result?.refreshedHold || session.result?.hold;
   if (r?.slotHoldId) return str(r.slotHoldId) === holdId && areSameLineageNonces(holdId, r.slotHoldToken, holdNonce);
   if (session.scopeKey) { try { const p = JSON.parse(session.scopeKey); return p?.k === "b" && str(p.h) === holdId && areSameLineageNonces(holdId, p.n, holdNonce); } catch { return false; } }
@@ -158,41 +160,6 @@ export async function runBookingPaymentRelease({ hold, checkout, packageTitle, h
   }
 }
 export { fetchPaymentJson, isNonResumablePaymentData, STORAGE_SAVE_ERROR, stripDodoReturnFromHistory, syncCheckoutRef, syncHistoryCheckoutBooking, verifyProviderLaunchPayload };
-export const runLegacyDodoStatusCheck = async ({ token, operation, fetchJson = fetchPaymentJson, setBusy, onBooked, onManualReview, onTerminalClear }) => {
-  setBusy(true);
-  try {
-    const { response, data } = await fetchJson("/api/payment/status", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: "{}" });
-    if (!operation.current()) return;
-    const st = str(data?.status).toLowerCase();
-    if (response.ok && (st === "booked" || st === "email_partial") && data?.cleanupPending !== true && data?.manualReviewRequired !== true) await onBooked(data, operation);
-    else if (response.ok && (data?.manualReviewRequired === true || data?.cleanupPending === true)) onManualReview(data.recoveryReason || "Payment is still being verified.");
-    else if (["failed", "abandoned", "refunded"].includes(st) && isAffirmativeTerminalRelease(response.status === 200, data)) {
-      releasePaymentSessionLock({ token, scopeKey: "", seq: allocatePaymentSessionSeq() });
-      onTerminalClear(st, token);
-    }
-  } finally { if (operation.current()) setBusy(false); }
-};
-export const runDodoCheckout = async (c) => {
-  const operation = c.createPaymentOperation();
-  if (!operation.current() || c.payingDodo || c.paymentBusy || c.paymentActionRef.current.cancelling || c.otherCheckoutStarting("dodo") || !c.ensureSlotBeforeAction()) return;
-  c.setPayingDodo(true);
-  try {
-    const session = await c.startSessionCheckout("dodo", operation);
-    if (!operation.current() || session?.terminal) return;
-    const verified = verifyProviderLaunchPayload({ provider: "dodo", payload: session?.providerPayload, expectedAmount: session?.result?.quote?.netAmount ?? c.finalAmount, expectedCurrency: session?.result?.quote?.currency || c.displayQuoteCurrency });
-    if (!verified.ok) throw new Error(verified.reason);
-    const r = session.result?.refreshedHold || session.result?.hold || c.sessionHold;
-    const ret = mergeLineageCheckout(c.readStoredCheckout(), c.checkoutRef.current || c.bookingData, r?.slotHoldId && r?.slotHoldToken ? { slotHoldId: r.slotHoldId, slotHoldToken: r.slotHoldToken, slotHoldExpiresAt: r.slotHoldExpiresAt || r.expiresAt || "" } : {});
-    if (!c.writeBrowserStorage("sessionStorage", c.checkoutKey, JSON.stringify(ret)) || !c.writeStoredPaymentSession(session)) {
-      c.showBanner("error", STORAGE_SAVE_ERROR, { persistent: true });
-      return;
-    }
-    stripDodoReturnFromHistory(); window.location.assign(verified.checkoutUrl);
-  } catch (error) {
-    if (!operation.current()) return;
-    c.showBanner("error", (error?.name === "AbortError" || error?.name === "TimeoutError") ? "Checkout timed out. Please try again." : error.message || "Unable to open checkout.", { persistent: true });
-  } finally { if (operation.current()) c.setPayingDodo(false); }
-};
 export const runValidateReferral = async (code, c, flow) => {
   const sameScope = () => !c.currentScopeKeyRef || areSameLineageScopeKeys(c.currentScopeKeyRef.current, c.scopeKey);
   const stillHere = () => c.manualCodeAllowedRef.current && sameScope();
@@ -270,24 +237,6 @@ export const runValidateCoupon = async (code, c, flow) => {
   } catch { if (c.couponCheckGenRef.current === myGen && stillHere()) { c.validationGenRef.current += 1; console.error("Coupon validation failed"); c.setCouponError("We couldn't validate that coupon code. Please try again."); } }
   finally { if (c.couponCheckGenRef.current === myGen && sameScope()) c.setValidatingCoupon(false); }
 };
-export const runFreeBookingCheckout = async (c) => {
-  const operation = c.createPaymentOperation();
-  if (!operation.current() || !c.isFree || c.validating || c.validatingCoupon || c.paymentBusy || c.paymentActionRef.current.cancelling || c.otherCheckoutStarting("free") || !c.ensureSlotBeforeAction()) return;
-  c.manualCodeAllowedRef.current = false; c.setCreatingFree(true);
-  const endConfirmation = c.beginCheckoutConfirmation(c.holdForGuard);
-  try {
-    c.showBanner("info", "Confirming your free booking...");
-    const session = await c.startSessionCheckout("free", operation);
-    if (!operation.current() || session?.stale) return;
-    const data = session?.result || {}, status = str(data.status).toLowerCase();
-    if (!data.bookingId || (status !== "booked" && status !== "email_partial")) throw new Error(data.error || "Could not save your free booking.");
-    await c.showConfirmation("free", data, operation);
-  } catch (err) {
-    if (!operation.current()) return;
-    console.error("Free booking failed"); c.showBanner("error", err?.message || "Something went wrong saving your free booking. Please contact support.");
-    if (c.holdExpiresAt && new Date(c.holdExpiresAt).getTime() <= Date.now()) { c.holdExpiryHandledRef.current = true; c.navigate("/", { replace: true }); }
-  } finally { endConfirmation(); if (operation.current()) c.setCreatingFree(false); }
-};
 export const runPayPalCreateOrder = async ({ paymentActionRef, startSessionCheckout, finalAmount, displayQuoteCurrency, writeStoredPaymentSession, showBanner }) => {
   const releasing = "Payment method release is in progress.";
   if (paymentActionRef.current.cancelling) throw new Error(releasing);
@@ -305,39 +254,6 @@ export const runPayPalCreateOrder = async ({ paymentActionRef, startSessionCheck
     throw new Error(STORAGE_SAVE_CHANGE_ONLY_ERROR);
   }
   return verified.orderId;
-};
-export const runRazorpayCheckout = async (c) => {
-  const operation = c.createPaymentOperation();
-  if (!operation.current() || c.payingRzp || c.paymentBusy || c.paymentActionRef.current.cancelling || c.otherCheckoutStarting("razorpay")) return;
-  if (!c.canUseRazorpay) { c.showBanner("error", "Razorpay secure checkout is currently unavailable. Please try again shortly."); return; }
-  if (!c.rzpReady || !window.Razorpay) { c.showBanner("error", "Payment system is still loading. Please wait a few seconds and try again."); return; }
-  if (!c.ensureSlotBeforeAction()) return;
-  if (c.isFree) { c.showBanner("error", "This booking is fully discounted. Use the 'Confirm Free Booking' button instead."); return; }
-  try {
-    if (c.finalAmount <= 0) { c.showBanner("error", "Final amount is zero or negative. Please contact support."); return; }
-    c.setPayingRzp(true); c.showBanner("info", "Opening secure checkout...");
-    const rzpSession = await c.startSessionCheckout("razorpay", operation);
-    if (!operation.current() || rzpSession?.terminal) return;
-    const verified = verifyProviderLaunchPayload({ provider: "razorpay", payload: rzpSession.providerPayload, expectedAmount: rzpSession.result?.quote?.netAmount ?? c.finalAmount, expectedCurrency: rzpSession.result?.quote?.currency || c.displayQuoteCurrency });
-    if (!verified.ok) { c.showBanner("error", verified.reason); return; }
-    if (c.writeStoredPaymentSession && !c.writeStoredPaymentSession(rzpSession)) {
-      c.showBanner("error", STORAGE_SAVE_CHANGE_ONLY_ERROR, { persistent: true });
-      return;
-    }
-    const paymentAccessToken = rzpSession.paymentAccessToken;
-    new window.Razorpay({
-      key: verified.key, amount: verified.amount, currency: verified.currency, name: "Roo Industries", description: `${c.packageTitle} booking`, order_id: verified.orderId,
-      method: { card: true, netbanking: true, upi: true, wallet: true }, theme: { color: "#0ea5e9" },
-      handler: async (response) => {
-        if (!operation.current()) return;
-        try {
-          await c.finalizeSessionCheckout({ operation, paymentAccessToken: str(paymentAccessToken || c.paymentSession?.paymentAccessToken), providerData: { razorpayOrderId: response.razorpay_order_id, razorpayPaymentId: response.razorpay_payment_id, razorpaySignature: response.razorpay_signature } });
-        } catch { if (operation.current()) { console.error("Razorpay booking finalization failed"); c.showBanner("error", "Payment succeeded but something went wrong saving your booking. Please contact support."); } }
-      },
-      modal: { ondismiss: () => { if (operation.current()) c.showBanner("info", "Checkout closed. Your payment session is still reserved for this method."); } },
-    }).open();
-  } catch (err) { if (operation.current()) { console.error("Razorpay checkout failed"); c.showBanner("error", err?.message || "Payment could not be processed. Please try again."); } }
-  finally { if (operation.current()) c.setPayingRzp(false); }
 };
 export const createCheckoutFlow = (ctx) => {
   const { bookingData, checkoutRef, paymentActionRef, readStoredCheckout, writeStoredCheckout, readStoredPaymentSession, persistPaymentSession, paymentView } = ctx;
@@ -395,6 +311,11 @@ export const createCheckoutFlow = (ctx) => {
 export { default as ActiveUpgradeBlocker } from "../components/ActiveUpgradeBlocker";
 export { default as PayPalMethodPanel } from "../components/PayPalMethodPanel";
 export {
+  allocatePaymentSessionSeq,
+  getCachedTerminalOutcome,
+  loadTerminalOutcome,
+  readLiveSlotHold,
+  releasePaymentSessionLock,
   runChangePaymentMethod,
   runCheckPaymentStatus,
   runFinalizeSessionCheckout,

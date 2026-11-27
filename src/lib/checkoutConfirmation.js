@@ -29,12 +29,15 @@ export const hasMatchingLockedPaymentSessionForHold = (hold) => {
   if (!hold || typeof window === "undefined") return false;
   const s = rJson("payment_session_state"), [id, n] = holdKey(hold);
   if (!s?.paymentAccessToken || !s?.provider || !id) return false;
+  const fp = pJson(s.fingerprint), sk = pJson(s.scopeKey);
+  if (fp?.originalOrderId || sk?.k === "u") return false;
   const r = s.result?.refreshedHold || s.result?.hold;
-  if (r?.slotHoldId) return str(r.slotHoldId) === id && sameNonce(n, extractTokenNonce(r.slotHoldToken));
-  const sk = pJson(s.scopeKey);
-  if (sk?.k === "b") return str(sk.h) === id && sameNonce(n, sk.n);
-  if (sk?.k === "u") return false;
-  const c = rJson("checkout_booking_state"), fp = pJson(s.fingerprint);
+  const sid = str(s.sessionHoldId || r?.slotHoldId || (sk?.k === "b" ? sk.h : ""));
+  if (sid) {
+    const sn = extractTokenNonce(s.sessionHoldId ? s.sessionHoldNonce : r?.slotHoldId ? r.slotHoldToken : sk?.n);
+    return sid === id && sameNonce(n, sn);
+  }
+  const c = rJson("checkout_booking_state");
   return Boolean(str(c?.slotHoldId) === id && sameNonce(n, extractTokenNonce(c?.slotHoldToken)) && fp && (!hold.startTimeUTC || fp.startTimeUTC === hold.startTimeUTC) && (!hold.packageTitle || fp.packageTitle === hold.packageTitle));
 };
 export const hasPendingPaymentStartForHold = (hold) => {

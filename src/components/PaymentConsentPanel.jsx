@@ -1,5 +1,6 @@
 import React from "react";
 import { formatCheckoutAmount } from "../lib/checkoutCodes";
+export { default as PaymentBanner } from "./PaymentBanner";
 export { countCheckoutStartOnce, paymentStartBody, snapPaymentStart } from "../lib/paymentStartBody";
 export { createPaymentConsentActions, ensureConsentBaseline, fetchPaymentProviders, runPayPalApprove } from "../lib/paymentConsentState";
 
