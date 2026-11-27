@@ -2309,6 +2309,7 @@ try{
           refundProcessedAmountInSubunits: 999,
         } : {}),
         ...(kind.startsWith('release') ? {
+          bookingId: '',
           resourceReleasePending: true, resourceReleaseTargetStatus: 'abandoned',
           couponReservationId: 'couponReservation.fixture',
         } : {}),

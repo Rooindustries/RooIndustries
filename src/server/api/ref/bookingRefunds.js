@@ -11,6 +11,7 @@ import { toSubunits } from "../payment/providerClients.js";
 import { calculateCreatorCommission, originalBookingCommission } from "../../referrals/commissionMoney.js";
 import { resolveDisputeReferralAccounting } from "../../referrals/disputeAccounting.js";
 import { holdOwnsSlot } from "../../booking/holdOwnership.js";
+import { hasExplicitOwnerReview } from "../payment/paymentRecoveryState.js";
 
 export const resolvePaymentCurrency = (paymentRecord = {}, { booking = {}, refund = {}, fallback = "USD" } = {}) => {
   const values = [paymentRecord.pricingSnapshot?.currency, paymentRecord.bookingPayload?.currency,
@@ -80,6 +81,7 @@ const markPaymentRecordRefunded = async ({ client, paymentRecord, now }) => {
       current.refundRequiresBookingSync === false && !current.recoveryReason &&
       !current.recoveryAttemptCount && !current.recoveryFailureCount &&
       current.reconciliationRecoveryTerminal !== true && !current.nextRecoveryAt) return true;
+  const preserveOwnerReview = hasExplicitOwnerReview(current);
   let patch = client.patch(current._id);
   if (current._rev && typeof patch.ifRevisionId === "function") {
     patch = patch.ifRevisionId(current._rev);
@@ -93,6 +95,7 @@ const markPaymentRecordRefunded = async ({ client, paymentRecord, now }) => {
       recoveryAttemptCount: 0,
       recoveryFailureCount: 0,
       reconciliationRecoveryTerminal: false,
+      ...(preserveOwnerReview ? { recoveryOwnerReviewRequired: true } : {}),
       nextRecoveryAt: "",
       updatedAt: now,
     })
@@ -109,6 +112,7 @@ const markPaymentRecordRefundPending = async ({ client, paymentRecord, now }) =>
   if (!current?._id) return false;
   if (current.status === "refunded" && current.refundState === "full" &&
       current.refundRequiresBookingSync === false && !current.recoveryReason) return true;
+  const preserveOwnerReview = hasExplicitOwnerReview(current);
   let patch = client.patch(current._id);
   if (current._rev && typeof patch.ifRevisionId === "function") {
     patch = patch.ifRevisionId(current._rev);
@@ -119,6 +123,7 @@ const markPaymentRecordRefundPending = async ({ client, paymentRecord, now }) =>
       refundState: "full",
       refundRequiresBookingSync: true,
       recoveryReason: "refund_requires_booking_sync",
+      ...(preserveOwnerReview ? { recoveryOwnerReviewRequired: true } : {}),
       updatedAt: now,
     })
     .commit();
@@ -332,12 +337,14 @@ export const applyBookingRefund = async ({ client, paymentRecord, refund = {} })
     );
   }
   if (paymentRecord?._id) {
+    const preserveOwnerReview = hasExplicitOwnerReview(paymentRecord);
     patchRevision(transaction, paymentRecord, (patch) =>
       patch.set({
         status: "refunded",
         refundState: "full",
         refundRequiresBookingSync: true,
         recoveryReason: "refund_requires_booking_sync",
+        ...(preserveOwnerReview ? { recoveryOwnerReviewRequired: true } : {}),
         updatedAt: now,
       })
     );

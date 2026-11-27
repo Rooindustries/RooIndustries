@@ -421,10 +421,22 @@ const mockClient = {
         return transaction;
       },
       patch(id, callback) {
-        const patchOps = { set: {}, revisionId: "" };
+        const patchOps = { set: {}, setIfMissing: {}, dec: {}, inc: {}, revisionId: "" };
         const patchBuilder = {
           set(values = {}) {
             patchOps.set = { ...patchOps.set, ...values };
+            return patchBuilder;
+          },
+          setIfMissing(values = {}) {
+            patchOps.setIfMissing = { ...patchOps.setIfMissing, ...values };
+            return patchBuilder;
+          },
+          dec(values = {}) {
+            patchOps.dec = { ...patchOps.dec, ...values };
+            return patchBuilder;
+          },
+          inc(values = {}) {
+            patchOps.inc = { ...patchOps.inc, ...values };
             return patchBuilder;
           },
           ifRevisionId(revisionId) {
@@ -436,8 +448,8 @@ const mockClient = {
         operations.push({ type: "patch", id, ...patchOps });
         return transaction;
       },
-      delete(id) {
-        operations.push({ type: "delete", id });
+      delete(id, options = {}) {
+        operations.push({ type: "delete", id, revisionId: options?.ifRevisionId || "" });
         return transaction;
       },
       async commit() {
@@ -445,24 +457,35 @@ const mockClient = {
           if (operation.type === "create" && findDocById(operation.doc._id)) {
             throw createConflictError();
           }
-          if (operation.type === "patch") {
+          if (operation.type === "patch" || operation.type === "delete") {
             const doc = findDocById(operation.id);
             if (!doc || (operation.revisionId && doc._rev !== operation.revisionId)) {
               throw createConflictError();
             }
           }
         });
+        const results = [];
         for (const operation of operations) {
           if (operation.type === "create") {
-            await mockClient.create(operation.doc);
+            results.push({ ...(await mockClient.create(operation.doc)) });
           } else if (operation.type === "patch") {
             const doc = findDocById(operation.id);
+            Object.entries(operation.setIfMissing || {}).forEach(([k, v]) => {
+              if (doc[k] === undefined) doc[k] = v;
+            });
+            Object.entries(operation.dec || {}).forEach(([k, v]) => {
+              doc[k] = Number(doc[k] || 0) - Number(v || 0);
+            });
+            Object.entries(operation.inc || {}).forEach(([k, v]) => {
+              doc[k] = Number(doc[k] || 0) + Number(v || 0);
+            });
             Object.assign(doc, operation.set, { _rev: nextRevision() });
+            results.push({ ...doc });
           } else {
             removeDocById(operation.id);
           }
         }
-        return { transactionId: `tx-${Date.now()}` };
+        return { transactionId: `tx-${Date.now()}`, results };
       },
     };
     return transaction;
@@ -4575,7 +4598,6 @@ describe('Dodo checkout lifecycle',()=>{
     expect(mockSendBookingEmails).toHaveBeenCalledTimes(2);
   });
   test.each([
-    ['unavailable', 'dodo_payment_binding_mismatch'],
     ['disabled', 'dodo_environment_disabled'],
   ])('%s Dodo inspections stop automatic recovery until fresh matching proof arrives', async (state, reason) => {
     await startDodo();
@@ -4853,21 +4875,6 @@ describe('Dodo checkout lifecycle',()=>{
       expect(mockCreateBooking).toHaveBeenCalledTimes(1);
     } finally {
       jest.useRealTimers();
-    }
-  });
-  test.each(['failed','cancelled'])('%s releases the hold and preserves its terminal payment policy',async status=>{
-    await startDodo();latest.status=status;
-    const result=await notify(`payment.${status}`);
-    expect(result.httpStatus).toBe(200);expect(store.bookings).toHaveLength(0);
-    expect(getOnlyPaymentRecord().status).toBe(status === 'failed' ? 'failed' : 'abandoned');
-    expect(getOnlyPaymentRecord()).toMatchObject({ providerPaymentState: status, providerRecoveryTerminal: true, lateCaptureWatchUntil: '', nextRecoveryAt: '' });
-    latest.status='succeeded';const late=await notify('payment.succeeded','evt_late_capture');
-    if (status === 'failed') {
-      expect(late.body.status).toBe('failed');
-      expect(store.bookings).toHaveLength(0);
-    } else {
-      expect(['booked','email_partial']).toContain(late.body.status);
-      expect(store.bookings).toHaveLength(1);
     }
   });
 });

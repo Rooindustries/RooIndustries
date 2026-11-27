@@ -1,7 +1,12 @@
 import { getPaymentRecordById } from "./paymentRecord.js";
 import { observedProviderState } from "./providerPaymentState.js";
 import { settledDodoPaymentState } from "./dodoProvider.js";
-import { ALL_PENDING_AND_PARTIAL_DODO_STATES, hasPreservedOwnerReview } from "./paymentRecoveryState.js";
+import {
+  ALL_PENDING_AND_PARTIAL_DODO_STATES,
+  hasKnownCaptureRecord,
+  hasPreservedOwnerReview,
+  isWebhookLateWatchRecovery,
+} from "./paymentRecoveryState.js";
 import { logSafeError } from "../../safeErrorLog.js";
 
 export const RESUMABLE_WATCH_REASONS = [
@@ -98,11 +103,15 @@ export const RECOVERY_RECORDS_GROQ = `*[_type == $type
   _id asc
 )[0...50]`;
 
+export const hasActiveLateCaptureWatch = (record = {}) =>
+  typeof record?.lateCaptureWatchUntil === "string" &&
+  record.lateCaptureWatchUntil.replace(/[ \t\r\n]+/g, "").length > 0;
+
 export const isExhaustedWatch = (record) =>
   ["paypal", "razorpay", "dodo"].includes(record.provider) && String(record.status || "").toLowerCase() === "abandoned" &&
   record.reconciliationRecoveryTerminal === true && RESUMABLE_WATCH_REASONS.includes(record.recoveryReason) &&
   record.recoveryFailureCount === 12 && record.nextRecoveryAt === "9999-12-31T23:59:59.999Z" &&
-  !!record.lateCaptureWatchUntil && record.providerRecoveryTerminal !== true &&
+  hasActiveLateCaptureWatch(record) && record.providerRecoveryTerminal !== true &&
   record.recoveryOwnerReviewRequired !== true && record.resourceReleasePending !== true &&
   record.refundRequiresBookingSync !== true && record.providerRefundDetailsMissing !== true;
 
@@ -143,8 +152,16 @@ export const isExhaustedResumableDodo = (record, { dodoEnabled = true, nowMs = D
     return true;
   }
   return dodoEnabled === true && (st === "failed" || st === "abandoned") &&
-    Boolean(String(record.lateCaptureWatchUntil || "").trim());
+    hasActiveLateCaptureWatch(record);
 };
+
+export const isExhaustedCleanupWatchActive = (record = {}) =>
+  record?.provider === "dodo" &&
+  record.reconciliationRecoveryTerminal === true &&
+  record.providerRecoveryTerminal !== true &&
+  !hasPreservedOwnerReview(record) &&
+  ["failed", "abandoned"].includes(String(record.status || "").trim().toLowerCase()) &&
+  hasActiveLateCaptureWatch(record);
 
 export const holdLostToPayment = (hold, record) =>
   ["paypal", "razorpay", "dodo"].includes(record.provider) && !!hold &&
@@ -182,48 +199,144 @@ export const isTransientVerificationFailure = (reason = "") => {
 };
 
 export const webhookFinalizationResult = (finalized) => {
-  const retry = !finalized.ok && finalized.paymentRecord?.reconciliationRecoveryTerminal === true &&
-    !String(finalized.paymentRecord?.bookingId || "").trim() &&
-    isTransientVerificationFailure(finalized.paymentRecord?.recoveryReason);
+  const retry =
+    finalized?.retryWebhook === true ||
+    (!finalized.ok &&
+      finalized.paymentRecord?.reconciliationRecoveryTerminal === true &&
+      !String(finalized.paymentRecord?.bookingId || "").trim() &&
+      isTransientVerificationFailure(finalized.paymentRecord?.recoveryReason));
   return retry
     ? { httpStatus: 503, body: { ...finalized.response, ok: false }, retryWebhook: true }
     : { httpStatus: finalized.httpStatus, body: finalized.response };
 };
 
-export const hasObservedCapture = (inspection) => inspection.state === "captured" &&
+export const hasKnownCapture = (record = {}) => hasKnownCaptureRecord(record);
+
+export const hasObservedCapture = (inspection) =>
+  inspection.state === "captured" &&
   (!inspection.payment || settledDodoPaymentState(inspection.payment) === "succeeded");
 
-export const hasKnownCapture = (record) =>
-  ["succeeded", "refunded", "disputed"].includes(record.providerPaymentState) ||
-  record.verificationState === "server_verified";
+const buildCaptureLineageUpdates = (record = {}) => {
+  const status = String(record.status || "").trim().toLowerCase();
+  const target = String(record.resourceReleaseTargetStatus || "").trim().toLowerCase();
+  return {
+    ...(status === "failed" || target === "failed" ? { capturedAfterFailure: true } : {}),
+    ...(status === "abandoned" || target === "abandoned" ? { capturedAfterAbandonment: true } : {}),
+  };
+};
 
-export const recordCapturedProviderState = async ({ client, record, currentOperation, patchRecord }) => {
-  const observed = observedProviderState(record, "succeeded");
-  if (!observed.providerPaymentState) return { owned: true, record };
-  const operation = await currentOperation({ client, record });
-  if (!operation.owned) return operation;
-  try {
-    return { owned: true, record: await patchRecord({ client, record, set: observed }) };
-  } catch (error) {
-    if (Number(error?.statusCode || error?.status || 0) !== 409) throw error;
-    return { owned: false, record: await getPaymentRecordById(client, record._id) };
+export const recordCapturedProviderState = async ({
+  client,
+  record,
+  currentOperation,
+  patchRecord,
+  source = "",
+  providerPaymentId = "",
+  captureAmountUpdates = null,
+  validateBinding = null,
+}) => {
+  let current = record;
+  let hadConflict = false;
+  for (let attempt = 0; attempt < 5 && current?._id; attempt += 1) {
+    const status = String(current.status || "").trim().toLowerCase();
+    const clearingLateWatch = isWebhookLateWatchRecovery(current, source);
+    if (
+      ["booked", "email_partial", "refunded"].includes(status) ||
+      current.dodoDisputeActive === true ||
+      ["refunded", "disputed"].includes(current.providerPaymentState) ||
+      (!clearingLateWatch && hasPreservedOwnerReview(current))
+    ) {
+      return { owned: false, record: current };
+    }
+    if (typeof validateBinding === "function") {
+      const check = validateBinding(current);
+      if (!check?.ok) return { owned: false, record: current, bindingError: check };
+    }
+    const observed = observedProviderState(current, "succeeded");
+    const lineage = buildCaptureLineageUpdates(current);
+    const hasPendingRelease =
+      current.resourceReleasePending === true ||
+      Boolean(current.resourceReleaseTargetStatus) ||
+      Boolean(current.resourceReleaseReason);
+    const alreadyClaimed =
+      Boolean(String(current.captureClaimedAt || "").trim()) &&
+      String(current.providerPaymentState || "").trim().toLowerCase() === "succeeded";
+    const needsResumeStatus =
+      clearingLateWatch || ["failed", "abandoned"].includes(status) || current.reconciliationRecoveryTerminal === true;
+    if (alreadyClaimed && !needsResumeStatus && !hasPendingRelease) {
+      return { owned: true, record: current };
+    }
+    const cleanId = String(providerPaymentId || "").trim();
+    const idPatch = cleanId && !String(current.providerPaymentId || "").trim() ? { providerPaymentId: cleanId } : {};
+    const resolvedAmounts = typeof captureAmountUpdates === "function" ? captureAmountUpdates(current) : captureAmountUpdates;
+    const amountPatch =
+      resolvedAmounts && Object.keys(resolvedAmounts).length
+        ? { providerPublicData: { ...(current.providerPublicData || {}), ...resolvedAmounts } }
+        : {};
+    const attemptPatch =
+      current.provider === "dodo" && current.dodoAttemptObserved !== true ? { dodoAttemptObserved: true } : {};
+    const now = new Date().toISOString();
+    const needsDueRecovery =
+      needsResumeStatus ||
+      hasPendingRelease ||
+      (Boolean(current.nextRecoveryAt) && String(current.nextRecoveryAt) > now);
+    const set = {
+      ...observed,
+      ...lineage,
+      ...idPatch,
+      ...amountPatch,
+      ...attemptPatch,
+      ...(!current.captureClaimedAt ? { captureClaimedAt: now } : {}),
+      ...(clearingLateWatch ? { recoveryReason: "", capturedAfterAbandonment: true } : {}),
+      ...(hasPendingRelease ? { resourceReleasePending: false, resourceReleaseTargetStatus: "", resourceReleaseReason: "" } : {}),
+      ...(needsResumeStatus ? { status: "needs_recovery", reconciliationRecoveryTerminal: false, providerRecoveryTerminal: false } : {}),
+      ...(needsDueRecovery ? { nextRecoveryAt: now } : {}),
+    };
+    if (!Object.keys(set).length) return { owned: true, record: current };
+    const operation = await currentOperation({ client, record: current });
+    if (!operation.owned) {
+      if (operation.record?._id && operation.record._rev !== current._rev) {
+        hadConflict = true;
+        current = operation.record;
+        continue;
+      }
+      return operation;
+    }
+    try {
+      return { owned: true, record: await patchRecord({ client, record: current, set }) };
+    } catch (error) {
+      if (Number(error?.statusCode || error?.status || 0) !== 409) throw error;
+      hadConflict = true;
+      current = await getPaymentRecordById(client, current._id);
+    }
   }
+  return { owned: false, record: current || record, conflictExhausted: hadConflict };
 };
 
 export const holdCapturedReleaseForReview = async ({ client, record, patchRecord }) => {
-  if (record.reconciliationRecoveryTerminal === true) return record;
+  const status = String(record?.status || "").trim().toLowerCase();
+  if (["booked", "email_partial", "refunded"].includes(status) || (record.reconciliationRecoveryTerminal === true && hasPreservedOwnerReview(record))) {
+    return record;
+  }
   try {
-    const retained = await patchRecord({ client, record, set: {
-      reconciliationRecoveryTerminal: true,
-      recoveryReason: "captured_payment_release_requires_review",
-      nextRecoveryAt: "9999-12-31T23:59:59.999Z",
-    } });
-    logSafeError("Captured payment release requires owner review", Object.assign(new Error(), {
-      code: "captured_payment_release_requires_review",
-    }));
+    const retained = await patchRecord({
+      client,
+      record,
+      set: {
+        status: "needs_recovery",
+        reconciliationRecoveryTerminal: true,
+        recoveryOwnerReviewRequired: true,
+        recoveryReason: "captured_payment_release_requires_review",
+        resourceReleasePending: false,
+        resourceReleaseTargetStatus: "",
+        resourceReleaseReason: "",
+        nextRecoveryAt: "9999-12-31T23:59:59.999Z",
+      },
+    });
+    logSafeError("Captured payment release requires owner review", Object.assign(new Error(), { code: "captured_payment_release_requires_review" }));
     return retained;
   } catch (error) {
     if (Number(error?.statusCode || error?.status || 0) !== 409) throw error;
-    return getPaymentRecordById(client, record._id);
+    return (await getPaymentRecordById(client, record._id)) || record;
   }
 };
