@@ -86,6 +86,7 @@ returns boolean language sql immutable set search_path = '' as $$
       lower(coalesce(p_status, '')) in ('captured', 'captured_client', 'captured_webhook', 'verified_server', 'finalizing', 'booked', 'email_partial')
       or lower(coalesce(p_payload->>'verificationState', '')) = 'server_verified'
       or lower(coalesce(p_payload->>'providerPaymentState', '')) in ('succeeded', 'processing', 'requires_merchant_action', 'requires_capture', 'partially_captured', 'partially_captured_and_capturable')
+      or coalesce(p_payload->>'recoveryReason', '') = 'dodo_refund_requires_reconciliation'
       or nullif(btrim(coalesce(p_payload->>'captureClaimedAt', '')), '') is not null))) is true;
 $$;
 

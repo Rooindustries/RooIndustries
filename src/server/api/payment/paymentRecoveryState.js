@@ -58,6 +58,7 @@ export const hasKnownCaptureRecord = (r = {}) => {
     CAPTURED_STATUSES.has(st) ||
     String(r.verificationState || "").trim().toLowerCase() === "server_verified" ||
     ["succeeded", "refunded", "disputed"].includes(ps) ||
+    String(r.recoveryReason || "").trim() === "dodo_refund_requires_reconciliation" ||
     Boolean(String(r.captureClaimedAt || "").trim()) ||
     Boolean(String(r.bookingId || "").trim())
   );
