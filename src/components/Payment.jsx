@@ -89,13 +89,8 @@ export default function Payment({ hideFooter = false }) {
   const locationKeyRef = useRef(location.key); locationKeyRef.current = location.key;
   useEffect(() => {
     const onPop = () => setPopState((p) => ({ key: locationKeyRef.current, seq: p.seq + 1 }));
-    const onPageShow = (event) => { if (event.persisted) setPayingDodo(false); };
     window.addEventListener("popstate", onPop);
-    window.addEventListener("pageshow", onPageShow);
-    return () => {
-      window.removeEventListener("popstate", onPop);
-      window.removeEventListener("pageshow", onPageShow);
-    };
+    return () => window.removeEventListener("popstate", onPop);
   }, []);
   const historyUsrState = hydrated && typeof window !== "undefined" ? window.history?.state?.usr : null;
   const navState = useMemo(() => (popState.seq > 0 && popState.key === location.key ? historyUsrState || location.state : location.state || historyUsrState) || {}, [popState, location.key, historyUsrState, location.state]);

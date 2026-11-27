@@ -321,8 +321,15 @@ export async function runDodoCheckoutFlow(c) {
     stripDodoReturnFromHistory();
     await waitForHandoffFrame();
     if (!operation.current()) return;
-    window.location.assign(verified.checkoutUrl);
-    handedOff = true;
+    const onRestore = (e) => { if (e.persisted && operation.current()) c.setPayingDodo(false); };
+    window.addEventListener("pageshow", onRestore, { once: true });
+    try {
+      window.location.assign(verified.checkoutUrl);
+      handedOff = true;
+    } catch (assignErr) {
+      window.removeEventListener("pageshow", onRestore);
+      throw assignErr;
+    }
   } catch (error) {
     if (!operation.current()) return;
     c.showBanner("error", (error?.name === "AbortError" || error?.name === "TimeoutError") ? "Checkout timed out. Please try again." : error.message || "Unable to open checkout.", { persistent: true });

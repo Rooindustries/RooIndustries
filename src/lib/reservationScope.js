@@ -30,9 +30,12 @@ export const reservationScopeKey = (b = {}) => {
   return !h && !t ? "" : JSON.stringify({ k: "b", h, n: extractTokenNonce(b.slotHoldToken || b.holdToken || ""), p, t, e });
 };
 export const recordHoldNonceRotation = ({ slotHoldId, fromNonce, toNonce } = {}) => {
-  const holdId = String(slotHoldId || "").trim(), from = extractTokenNonce(fromNonce), to = extractTokenNonce(toNonce);
-  if (!holdId || !from || !to || from === to || typeof window === "undefined") return;
-  const rot = readScopeMap(ROTATION_KEY); rot[`${holdId}:${from}`] = to;
+  const h = String(slotHoldId || "").trim(), f = extractTokenNonce(fromNonce), t = extractTokenNonce(toNonce);
+  if (!h || !f || !t || f === t || typeof window === "undefined") return;
+  const rot = readScopeMap(ROTATION_KEY);
+  let tip = f;
+  if (walkHoldRotations(h, t, rot, (n) => n === f) || walkHoldRotations(h, f, rot, (n) => (tip = n) === t) || tip === t) return;
+  rot[`${h}:${tip}`] = t;
   try { sessionStorage.setItem(ROTATION_KEY, JSON.stringify(rot)); } catch {}
 };
 export const markReservationTerminal = (scopeKey, status) => {
