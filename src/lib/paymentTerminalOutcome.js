@@ -276,10 +276,28 @@ export async function runLegacyDodoStatusCheck({
   }
 }
 
+const waitForHandoffFrame = () =>
+  new Promise((resolve) => {
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(fallback);
+      resolve();
+    };
+    const fallback = setTimeout(done, 100);
+    if (typeof requestAnimationFrame === "function" && typeof document !== "undefined" && document.visibilityState === "visible") {
+      requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(done, 0))));
+    } else {
+      setTimeout(done, 0);
+    }
+  });
+
 export async function runDodoCheckoutFlow(c) {
   const operation = c.createPaymentOperation();
   if (!operation.current() || c.payingDodo || c.paymentBusy || c.paymentActionRef.current.cancelling || c.otherCheckoutStarting("dodo") || !c.ensureSlotBeforeAction()) return;
   c.setPayingDodo(true);
+  let handedOff = false;
   try {
     const session = await c.startSessionCheckout("dodo", operation, c.startSnap);
     if (!operation.current() || session?.terminal) return;
@@ -301,12 +319,15 @@ export async function runDodoCheckoutFlow(c) {
       return;
     }
     stripDodoReturnFromHistory();
+    await waitForHandoffFrame();
+    if (!operation.current()) return;
     window.location.assign(verified.checkoutUrl);
+    handedOff = true;
   } catch (error) {
     if (!operation.current()) return;
     c.showBanner("error", (error?.name === "AbortError" || error?.name === "TimeoutError") ? "Checkout timed out. Please try again." : error.message || "Unable to open checkout.", { persistent: true });
   } finally {
-    if (operation.current()) c.setPayingDodo(false);
+    if (!handedOff && operation.current()) c.setPayingDodo(false);
   }
 }
 
