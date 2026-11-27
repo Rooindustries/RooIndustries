@@ -6709,7 +6709,7 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
       error: "The refund status does not match the settled refunds." } };
   }
   let captureAmountUpdates =
-    payment.status === "succeeded" && (succeededRefunds.length > 0 || disputed)
+    payment.status === "succeeded" && (succeededRefunds.length > 0 || disputed || hasKnownCaptureRecord(record))
       ? getDodoCaptureAmountUpdates(record, { totalAmount: payment.total_amount, taxAmount: payment.tax })
       : {};
   if (Object.keys(captureAmountUpdates).length) {
