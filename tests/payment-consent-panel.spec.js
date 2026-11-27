@@ -298,3 +298,66 @@ test("late quote after Manual Remove neither restores code nor resets removal au
   const afterRepeatRemove = await page.evaluate(() => JSON.parse(sessionStorage.getItem("checkout_booking_state") || "{}"));
   expect(afterRepeatRemove.acceptedQuoteTotal).toBe(80);
 });
+
+test("fixed coupon missing both couponDiscountValue and couponDiscountAmount fails closed on referral removal", async ({ page, flow }) => {
+  await flow.review();
+  await flow.payment();
+
+  await page.route(/\/api\/ref\/validateReferral/, (route) => {
+    const code = (new URL(route.request().url()).searchParams.get("code") || "").toLowerCase();
+    return route.fulfill({
+      json: code === "friend"
+        ? { ok: true, active: true, eligible: true, referral: { code: "friend", currentDiscountPercent: 10 } }
+        : { ok: false, error: "Invalid referral code.", reason: "not_found" },
+    });
+  });
+  await page.route(/\/api\/ref\/validateCoupon/, (route) => {
+    const code = (new URL(route.request().url()).searchParams.get("code") || "").toLowerCase();
+    return route.fulfill({
+      json: code === "flat20"
+        ? { ok: true, coupon: { code: "flat20", discountType: "fixed", discountAmount: 20, canCombineWithReferral: true } }
+        : { ok: false, error: "Invalid coupon code." },
+    });
+  });
+  await page.route("**/api/payment/quote", (route) => {
+    const body = route.request().postDataJSON() || {};
+    const hasRef = String(body.referralCode || "").toLowerCase() === "friend";
+    return route.fulfill({
+      json: {
+        ok: true,
+        currency: "USD",
+        quoteFingerprint: hasRef ? "fp-fixed-missing-both" : "fp-fixed-after-remove",
+        providers: { dodo: { enabled: true, mode: "test", currency: "USD" }, razorpay: { enabled: false, mode: "disabled", currency: "USD" }, paypal: { enabled: false, mode: "disabled", currency: "USD" } },
+        quote: hasRef
+          ? { currency: "USD", grossAmount: 100, netAmount: 72, isFree: false, referralCode: "friend", referralDiscountAmount: 8, referralDiscountPercent: 10, couponCode: "flat20", couponDiscountType: "fixed" }
+          : { currency: "USD", grossAmount: 100, netAmount: 80, isFree: false, referralDiscountAmount: 0, couponCode: "flat20", couponDiscountType: "fixed", couponDiscountAmount: 20, couponDiscountValue: 20 },
+      },
+    });
+  });
+
+  await page.evaluate(() => {
+    const checkout = JSON.parse(sessionStorage.getItem("checkout_booking_state") || "{}");
+    const nextB = {
+      ...checkout,
+      packagePrice: "$100.00",
+      referralCode: "friend",
+      couponCode: "flat20",
+      expectedClientTotal: 72,
+      expectedClientCurrency: "USD",
+      acceptedQuoteTotal: 72,
+      acceptedQuoteCurrency: "USD",
+    };
+    sessionStorage.setItem("checkout_booking_state", JSON.stringify(nextB));
+    window.history.replaceState({ usr: { bookingData: nextB } }, "", "/payment");
+  });
+
+  await page.reload();
+  await expect(page.getByText("$72.00 USD")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Remove referral code", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Remove coupon", exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Remove referral code", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Accept updated price", exact: true })).toBeVisible();
+  const afterRemove = await page.evaluate(() => JSON.parse(sessionStorage.getItem("checkout_booking_state") || "{}"));
+  expect(afterRemove.acceptedQuoteTotal).toBe(72);
+});

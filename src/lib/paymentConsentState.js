@@ -48,7 +48,8 @@ export const buildConfirmedQuoteBreakdown = (
   const currency = normalizeCurrencyCode(quote.currency || "USD");
   const grossAmount = Math.max(0, toMoney(quote.grossAmount ?? quote.netAmount ?? 0, currency));
   const netAmount = quote.isFree === true ? 0 : Math.max(0, toMoney(quote.netAmount ?? 0, currency));
-  const couponDiscountAmount = Math.max(0, toMoney(quote.couponDiscountAmount ?? 0, currency));
+  const rawCouponAmt = finiteNonNeg(quote.couponDiscountAmount);
+  const couponDiscountAmount = rawCouponAmt !== null ? toMoney(rawCouponAmt, currency) : 0;
   const couponDiscountPercent = Math.max(0, Number(quote.couponDiscountPercent ?? coupon?.discountPercent ?? 0) || 0);
   const rawType = String(quote.couponDiscountType || coupon?.discountType || "").trim().toLowerCase();
   const couponDiscountType = rawType === "fixed" || rawType === "percent" ? rawType : couponDiscountPercent > 0 ? "percent" : "fixed";
@@ -56,7 +57,7 @@ export const buildConfirmedQuoteBreakdown = (
   const couponFixedAmount = couponDiscountType === "fixed"
     ? (serverFixedVal !== null
       ? toMoney(serverFixedVal, currency)
-      : (couponDiscountAmount < grossAmount ? couponDiscountAmount : null))
+      : (rawCouponAmt !== null && couponDiscountAmount < grossAmount ? couponDiscountAmount : null))
     : 0;
   return {
     currency,
