@@ -1,7 +1,7 @@
 ---------------------------- MODULE BookingHolds ----------------------------
 EXTENDS Naturals, FiniteSets, TLC
 
-CONSTANTS Tabs, Slots, HoldMinutes, Backstop, MaxTime, MaxNonce
+CONSTANTS Tabs, Slots, HoldMinutes, Backstop, MaxTime, MaxNonce, MaxRetries
 
 NoSlot == "no_slot"
 NoNonce == 0
@@ -19,25 +19,31 @@ vars == <<now, nextNonce, hold, lock, tab, rec, bookings>>
 
 TabPermutations == Permutations(Tabs)
 
-EmptyHold == [phase |-> "none", nonce |-> NoNonce, exp |-> 0, rec |-> NoNonce]
+EmptyHold == [phase |-> "none", nonce |-> NoNonce, exp |-> 0, rec |-> NoNonce,
+              failures |-> 0, retainedAfterExpiry |-> FALSE]
 EmptyTab == [slot |-> NoSlot, nonce |-> NoNonce, exp |-> 0, details |-> FALSE, paying |-> NoNonce]
 EmptyRec == [status |-> "none", slot |-> NoSlot, tokenExp |-> 0, created |-> 0,
              pay |-> "open", paidInTime |-> FALSE, details |-> FALSE, knownCaptured |-> FALSE, terminal |-> FALSE,
-             outlived |-> FALSE, valid |-> TRUE]
+             outlived |-> FALSE, valid |-> TRUE, retainRead |-> FALSE,
+             failedObserved |-> FALSE, abandonedObserved |-> FALSE,
+             lateCaptureClaimed |-> FALSE, claimInFlight |-> FALSE, crashedAfterClaim |-> FALSE]
 
 TypeOK ==
   /\ now \in Times
   /\ nextNonce \in 1..(MaxNonce + 1)
   /\ hold \in [Slots -> [phase : {"none", "released", "consumed", "expired"} \cup LivePhases,
-                         nonce : 0..DeadNonce, exp : Times, rec : 0..MaxNonce]]
+                         nonce : 0..DeadNonce, exp : Times, rec : 0..MaxNonce,
+                         failures : 0..MaxRetries, retainedAfterExpiry : BOOLEAN]]
   /\ lock \in [Slots -> 0..RestoredId]
   /\ tab \in [Tabs -> [slot : Slots \cup {NoSlot}, nonce : 0..MaxNonce, exp : Times,
                        details : BOOLEAN, paying : 0..MaxNonce]]
-  /\ rec \in [Nonces -> [status : {"none", "started", "needs_recovery", "booked", "rescheduled", "abandoned"},
+  /\ rec \in [Nonces -> [status : {"none", "started", "needs_recovery", "booked", "rescheduled", "abandoned", "failed"},
                          slot : Slots \cup {NoSlot}, tokenExp : Times, created : Times,
-                         pay : {"open", "processing", "captured", "closed"},
+                         pay : {"open", "processing", "captured", "failed", "closed"},
                          paidInTime : BOOLEAN, details : BOOLEAN, knownCaptured : BOOLEAN, terminal : BOOLEAN,
-                         outlived : BOOLEAN, valid : BOOLEAN]]
+                         outlived : BOOLEAN, valid : BOOLEAN, retainRead : BOOLEAN,
+                         failedObserved : BOOLEAN, abandonedObserved : BOOLEAN,
+                         lateCaptureClaimed : BOOLEAN, claimInFlight : BOOLEAN, crashedAfterClaim : BOOLEAN]]
 
 Init ==
   /\ now = 0
@@ -60,11 +66,11 @@ BookingFor(n) == {b \in bookings : b.id = n}
 
 SlotBookings(s) == {b \in bookings : b.slot = s}
 
-ReleasedHold(h) == [h EXCEPT !.phase = "released", !.nonce = DeadNonce, !.exp = now, !.rec = NoNonce]
+ReleasedHold(h) == [h EXCEPT !.phase = "released", !.nonce = DeadNonce, !.exp = now, !.rec = NoNonce, !.retainedAfterExpiry = FALSE]
 
-PaymentReleasedHold(h) == [h EXCEPT !.phase = "released", !.exp = now, !.rec = NoNonce]
+PaymentReleasedHold(h) == [h EXCEPT !.phase = "released", !.exp = now, !.rec = NoNonce, !.retainedAfterExpiry = FALSE]
 
-ConsumedHold(h) == [h EXCEPT !.phase = "consumed", !.exp = now]
+ConsumedHold(h) == [h EXCEPT !.phase = "consumed", !.exp = now, !.retainedAfterExpiry = FALSE]
 
 HoldSlot(t, s) ==
   LET tk == tab[t]
@@ -74,7 +80,9 @@ HoldSlot(t, s) ==
         prev \notin {NoSlot, s} /\ TokenOwns(tk, prev) /\ hold[prev].phase = "payment_pending"
       releasePrevious ==
         prev \notin {NoSlot, s} /\ TokenOwns(tk, prev) /\ hold[prev].phase # "payment_pending"
-      granted == [phase |-> "active", nonce |-> nextNonce, exp |-> now + HoldMinutes, rec |-> NoNonce]
+      keptFailures == IF HoldOwnsSlot(h) /\ TokenOwns(tk, s) THEN h.failures ELSE 0
+      granted == [phase |-> "active", nonce |-> nextNonce, exp |-> now + HoldMinutes,
+                  rec |-> NoNonce, failures |-> keptFailures, retainedAfterExpiry |-> FALSE]
   IN /\ VisitorsActive
      /\ nextNonce <= MaxNonce
      /\ ~movingFromPendingPayment
@@ -130,7 +138,7 @@ StartPayment(t) ==
                                               !.tokenExp = now + HoldMinutes, !.created = now,
                                               !.details = TRUE]]
                /\ hold' = [hold EXCEPT ![s].phase = "payment_pending", ![s].rec = n,
-                                       ![s].exp = now + HoldMinutes]
+                                       ![s].exp = now + HoldMinutes, ![s].retainedAfterExpiry = FALSE]
                /\ tab' = [tab EXCEPT ![t].exp = now + HoldMinutes, ![t].paying = n]
      /\ UNCHANGED <<now, nextNonce, lock, bookings>>
 
@@ -144,13 +152,13 @@ CancelPayment(t) ==
      /\ hold[s].rec = n
      /\ IF hold[s].exp > now
           THEN /\ nextNonce <= MaxNonce
-               /\ hold' = [hold EXCEPT ![s].phase = "holding", ![s].nonce = nextNonce, ![s].rec = NoNonce]
+               /\ hold' = [hold EXCEPT ![s].phase = "holding", ![s].nonce = nextNonce, ![s].rec = NoNonce, ![s].retainedAfterExpiry = FALSE]
                /\ tab' = [tab EXCEPT ![t].nonce = nextNonce, ![t].exp = hold[s].exp, ![t].paying = NoNonce]
                /\ nextNonce' = nextNonce + 1
           ELSE /\ hold' = [hold EXCEPT ![s] = PaymentReleasedHold(hold[s])]
                /\ tab' = [tab EXCEPT ![t].paying = NoNonce]
                /\ UNCHANGED nextNonce
-     /\ rec' = [rec EXCEPT ![n].status = "abandoned"]
+     /\ rec' = [rec EXCEPT ![n].status = "abandoned", ![n].abandonedObserved = TRUE]
      /\ UNCHANGED <<now, lock, bookings>>
 
 SubmitPayment(n) ==
@@ -170,14 +178,93 @@ PaymentSucceeds(n) ==
 
 PaymentFails(n) ==
   /\ rec[n].pay = "processing"
-  /\ rec' = [rec EXCEPT ![n].pay = "open"]
+  /\ rec' = [rec EXCEPT ![n].pay = IF MaxRetries > 0 THEN "failed" ELSE "open"]
+  /\ UNCHANGED <<now, nextNonce, hold, lock, tab, bookings>>
+
+LateCaptureAfterFailure(n) ==
+  /\ MaxRetries > 0
+  /\ rec[n].pay = "failed"
+  /\ rec[n].status \in {"failed", "needs_recovery"}
+  /\ ~rec[n].terminal
+  /\ rec' = [rec EXCEPT ![n].pay = "captured", ![n].valid = TRUE]
+  /\ UNCHANGED <<now, nextNonce, hold, lock, tab, bookings>>
+
+FailReadRetainEligible(n) ==
+  LET s == rec[n].slot
+  IN /\ MaxRetries > 0
+     /\ rec[n].pay = "failed"
+     /\ rec[n].status \in {"started", "needs_recovery"}
+     /\ ~rec[n].retainRead
+     /\ ~rec[n].knownCaptured
+     /\ ~rec[n].terminal
+     /\ hold[s].phase = "payment_pending"
+     /\ hold[s].rec = n
+     /\ hold[s].exp > now
+     /\ hold[s].failures < MaxRetries
+     /\ rec' = [rec EXCEPT ![n].retainRead = TRUE]
+     /\ UNCHANGED <<now, nextNonce, hold, lock, tab, bookings>>
+
+FailCommitRetain(n) ==
+  LET s == rec[n].slot
+  IN /\ MaxRetries > 0
+     /\ rec[n].pay = "failed"
+     /\ rec[n].status \in {"started", "needs_recovery"}
+     /\ rec[n].retainRead
+     /\ ~rec[n].knownCaptured
+     /\ ~rec[n].terminal
+     /\ hold[s].phase = "payment_pending"
+     /\ hold[s].rec = n
+     /\ hold[s].failures < MaxRetries
+     /\ nextNonce <= MaxNonce
+     /\ hold' = [hold EXCEPT ![s].phase = "active", ![s].nonce = nextNonce,
+                             ![s].rec = NoNonce, ![s].failures = hold[s].failures + 1,
+                             ![s].retainedAfterExpiry = (hold[s].exp <= now)]
+     /\ tab' = [t \in Tabs |->
+          IF tab[t].paying = n
+            THEN [tab[t] EXCEPT !.nonce = nextNonce, !.exp = hold[s].exp, !.paying = NoNonce]
+            ELSE tab[t]]
+     /\ rec' = [rec EXCEPT ![n].status = "failed", ![n].failedObserved = TRUE,
+                           ![n].retainRead = FALSE, ![n].paidInTime = FALSE]
+     /\ nextNonce' = nextNonce + 1
+     /\ UNCHANGED <<now, lock, bookings>>
+
+FailReleaseHold(n) ==
+  LET s == rec[n].slot
+  IN /\ MaxRetries > 0
+     /\ rec[n].pay = "failed"
+     /\ rec[n].status \in {"started", "needs_recovery"}
+     /\ ~rec[n].knownCaptured
+     /\ ~rec[n].terminal
+     /\ (hold[s].rec # n \/ hold[s].exp <= now \/ hold[s].failures >= MaxRetries \/ nextNonce > MaxNonce)
+     /\ hold' = IF hold[s].rec = n THEN [hold EXCEPT ![s] = PaymentReleasedHold(hold[s])] ELSE hold
+     /\ tab' = [t \in Tabs |-> IF tab[t].paying = n THEN [tab[t] EXCEPT !.paying = NoNonce] ELSE tab[t]]
+     /\ rec' = [rec EXCEPT ![n].status = "failed", ![n].failedObserved = TRUE,
+                           ![n].retainRead = FALSE, ![n].paidInTime = FALSE]
+     /\ UNCHANGED <<now, nextNonce, lock, bookings>>
+
+PendingVetoFailure(n) ==
+  /\ MaxRetries > 0
+  /\ rec[n].pay = "processing"
+  /\ rec[n].status \in {"started", "needs_recovery"}
+  /\ ~rec[n].terminal
+  /\ ~rec[n].failedObserved
+  /\ rec' = [rec EXCEPT ![n].status = "needs_recovery", ![n].failedObserved = TRUE, ![n].paidInTime = FALSE]
+  /\ UNCHANGED <<now, nextNonce, hold, lock, tab, bookings>>
+
+PendingVetoAbandonment(n) ==
+  /\ MaxRetries > 0
+  /\ rec[n].pay = "processing"
+  /\ rec[n].status \in {"started", "needs_recovery"}
+  /\ ~rec[n].terminal
+  /\ ~rec[n].abandonedObserved
+  /\ rec' = [rec EXCEPT ![n].status = "needs_recovery", ![n].abandonedObserved = TRUE, ![n].paidInTime = FALSE]
   /\ UNCHANGED <<now, nextNonce, hold, lock, tab, bookings>>
 
 CheckoutExpires(n) ==
   LET s == rec[n].slot
   IN /\ rec[n].status \in {"started", "needs_recovery", "abandoned"}
      /\ rec[n].pay = "open"
-     /\ rec' = [rec EXCEPT ![n].pay = "closed", ![n].status = "abandoned"]
+     /\ rec' = [rec EXCEPT ![n].pay = "closed", ![n].status = "abandoned", ![n].abandonedObserved = TRUE]
      /\ hold' = IF rec[n].status \in {"started", "needs_recovery"} /\ hold[s].rec = n
                   THEN [hold EXCEPT ![s] = PaymentReleasedHold(hold[s])]
                   ELSE hold
@@ -213,7 +300,7 @@ CommitBooking(n) ==
                                     paidInTime |-> rec[n].paidInTime]}
      /\ lock' = [lock EXCEPT ![s] = n]
      /\ hold' = [hold EXCEPT ![s] = ConsumedHold(hold[s])]
-     /\ rec' = [rec EXCEPT ![n].status = "booked"]
+     /\ rec' = [rec EXCEPT ![n].status = "booked", ![n].claimInFlight = FALSE]
 
 RecordReschedule(n) ==
   LET s == rec[n].slot
@@ -222,20 +309,49 @@ RecordReschedule(n) ==
                                            hold |-> Snapshot(n), paidInTime |-> rec[n].paidInTime]}
                       ELSE bookings
      /\ hold' = IF hold[s].rec = n THEN [hold EXCEPT ![s] = ConsumedHold(hold[s])] ELSE hold
-     /\ rec' = [rec EXCEPT ![n].status = IF BookingFor(n) = {} THEN "rescheduled" ELSE "booked"]
+     /\ rec' = [rec EXCEPT ![n].status = IF BookingFor(n) = {} THEN "rescheduled" ELSE "booked",
+                           ![n].claimInFlight = FALSE]
      /\ UNCHANGED lock
 
 MarkNeedsRecovery(n) ==
   /\ rec' = [rec EXCEPT ![n].status = "needs_recovery",
-                          ![n].knownCaptured = rec[n].knownCaptured \/ rec[n].pay = "captured"]
+                          ![n].knownCaptured = rec[n].knownCaptured \/ rec[n].pay = "captured",
+                          ![n].failedObserved = rec[n].failedObserved \/ rec[n].status = "failed",
+                          ![n].abandonedObserved = rec[n].abandonedObserved \/ rec[n].status = "abandoned"]
   /\ UNCHANGED <<hold, lock, bookings>>
+
+ClaimLateCapture(n) ==
+  /\ rec[n].pay = "captured"
+  /\ rec[n].valid
+  /\ ~rec[n].knownCaptured
+  /\ ~rec[n].terminal
+  /\ (rec[n].status \in {"failed", "abandoned"}
+      \/ (rec[n].status = "needs_recovery" /\ (rec[n].failedObserved \/ rec[n].abandonedObserved)))
+  /\ rec' = [rec EXCEPT ![n].status = "needs_recovery",
+                        ![n].knownCaptured = TRUE,
+                        ![n].lateCaptureClaimed = TRUE,
+                        ![n].claimInFlight = TRUE,
+                        ![n].failedObserved = rec[n].failedObserved \/ rec[n].status = "failed",
+                        ![n].abandonedObserved = rec[n].abandonedObserved \/ rec[n].status = "abandoned"]
+  /\ UNCHANGED <<now, nextNonce, hold, lock, tab, bookings>>
+
+CrashAfterLateCaptureClaim(n) ==
+  /\ rec[n].status = "needs_recovery"
+  /\ rec[n].knownCaptured
+  /\ rec[n].lateCaptureClaimed
+  /\ rec[n].claimInFlight
+  /\ rec' = [rec EXCEPT ![n].claimInFlight = FALSE, ![n].crashedAfterClaim = TRUE]
+  /\ UNCHANGED <<now, nextNonce, hold, lock, tab, bookings>>
 
 FinalizeCapture(n) ==
   /\ rec[n].pay = "captured"
   /\ rec[n].valid
-  /\ rec[n].status \in {"started", "needs_recovery", "abandoned"}
-  /\ IF rec[n].status = "abandoned"
-       THEN RecordReschedule(n)
+  /\ ~rec[n].terminal
+  /\ rec[n].status \in {"started", "needs_recovery"}
+  /\ IF rec[n].failedObserved \/ rec[n].abandonedObserved
+       THEN /\ rec[n].lateCaptureClaimed
+            /\ rec[n].claimInFlight
+            /\ RecordReschedule(n)
      ELSE IF BookingFor(n) # {}
        THEN /\ rec' = [rec EXCEPT ![n].status = "booked"]
             /\ UNCHANGED <<hold, lock, bookings>>
@@ -249,7 +365,11 @@ ReconcileRecovery(n) ==
   /\ rec[n].valid
   /\ ~rec[n].terminal
   /\ rec[n].status = "needs_recovery"
-  /\ IF CanCommit(n) THEN CommitBooking(n) ELSE RecordReschedule(n)
+  /\ IF rec[n].failedObserved \/ rec[n].abandonedObserved
+       THEN /\ rec[n].lateCaptureClaimed
+            /\ ~rec[n].claimInFlight
+            /\ RecordReschedule(n)
+     ELSE IF CanCommit(n) THEN CommitBooking(n) ELSE RecordReschedule(n)
   /\ UNCHANGED <<now, nextNonce, tab>>
 
 ReconcilePending(n) ==
@@ -265,14 +385,14 @@ ReconcileUnpaid(n) ==
      /\ ~rec[n].terminal
      /\ rec[n].pay \in {"open", "closed"}
      /\ now >= rec[n].created + HoldMinutes
-     /\ rec' = [rec EXCEPT ![n].status = "abandoned"]
+     /\ rec' = [rec EXCEPT ![n].status = "abandoned", ![n].abandonedObserved = TRUE]
      /\ hold' = IF hold[s].rec = n THEN [hold EXCEPT ![s] = PaymentReleasedHold(hold[s])] ELSE hold
      /\ UNCHANGED <<now, nextNonce, lock, tab, bookings>>
 
 CleanupExpiredHold(s) ==
   /\ hold[s].phase \in {"active", "holding"}
   /\ hold[s].exp <= now
-  /\ hold' = [hold EXCEPT ![s].phase = "expired", ![s].nonce = DeadNonce]
+  /\ hold' = [hold EXCEPT ![s].phase = "expired", ![s].nonce = DeadNonce, ![s].retainedAfterExpiry = FALSE]
   /\ UNCHANGED <<now, nextNonce, lock, tab, rec, bookings>>
 
 RecoveryGivesUp(n) ==
@@ -287,7 +407,7 @@ ReconcileRejectsCapture(n) ==
   /\ rec[n].pay = "captured"
   /\ ~rec[n].valid
   /\ ~rec[n].terminal
-  /\ rec[n].status \in {"started", "needs_recovery", "abandoned"}
+  /\ rec[n].status \in {"started", "needs_recovery", "abandoned", "failed"}
   /\ rec' = [rec EXCEPT ![n].status = "needs_recovery", ![n].terminal = TRUE, ![n].knownCaptured = TRUE]
   /\ UNCHANGED <<now, nextNonce, hold, lock, tab, bookings>>
 
@@ -321,7 +441,7 @@ UnconfirmedPaymentHoldExpires(s) ==
   /\ hold[s].phase = "payment_pending"
   /\ hold[s].exp + Backstop <= now
   /\ ~rec[hold[s].rec].knownCaptured
-  /\ hold' = [hold EXCEPT ![s].phase = "expired", ![s].nonce = DeadNonce]
+  /\ hold' = [hold EXCEPT ![s].phase = "expired", ![s].nonce = DeadNonce, ![s].retainedAfterExpiry = FALSE]
   /\ rec' = [rec EXCEPT ![hold[s].rec].outlived =
                 rec[hold[s].rec].pay \in {"processing", "captured"} /\ ~rec[hold[s].rec].knownCaptured]
   /\ UNCHANGED <<now, nextNonce, lock, tab, bookings>>
@@ -339,12 +459,55 @@ Next ==
                      \/ \E s \in Slots : HoldSlot(t, s)
                      \/ \E u \in Tabs : DuplicateTab(t, u)
   \/ \E n \in Nonces : \/ SubmitPayment(n) \/ PaymentSucceeds(n) \/ PaymentFails(n) \/ CheckoutExpires(n)
+                       \/ ClaimLateCapture(n) \/ CrashAfterLateCaptureClaim(n)
                        \/ FinalizeCapture(n) \/ ReconcileRecovery(n) \/ ReconcilePending(n)
                        \/ ReconcileUnpaid(n) \/ RecoveryGivesUp(n) \/ WebhookRecordsCapture(n)
                        \/ OwnerRefundsUnbookedCapture(n) \/ ReconcileRejectsCapture(n)
+                       \/ LateCaptureAfterFailure(n) \/ FailReadRetainEligible(n) \/ FailCommitRetain(n)
+                       \/ FailReleaseHold(n) \/ PendingVetoFailure(n) \/ PendingVetoAbandonment(n)
 
-Server(n) == FinalizeCapture(n) \/ ReconcileRecovery(n) \/ ReconcilePending(n)
+Server(n) == ClaimLateCapture(n) \/ FinalizeCapture(n) \/ ReconcileRecovery(n) \/ ReconcilePending(n)
              \/ ReconcileUnpaid(n) \/ WebhookRecordsCapture(n) \/ ReconcileRejectsCapture(n)
+             \/ FailReadRetainEligible(n) \/ FailCommitRetain(n) \/ FailReleaseHold(n)
+
+RetryHoldSlot(t, s) ==
+  /\ ~HoldOwnsSlot(hold[s])
+  /\ (hold[s].phase = "none"
+      \/ (hold[s].phase \in {"active", "expired"} /\ tab[t].slot = NoSlot)
+      \/ (hold[s].phase = "released" /\ hold[s].failures = MaxRetries /\ tab[t].slot = s))
+  /\ HoldSlot(t, s)
+
+RetryLateCapture(n) ==
+  /\ \A m \in Nonces : ~(rec[m].failedObserved /\ rec[m].pay = "captured")
+  /\ \A m \in 1..(n - 1) : ~rec[m].failedObserved
+  /\ LateCaptureAfterFailure(n)
+
+RetryPendingVeto(n) ==
+  /\ n = 1
+  /\ rec[n].slot # NoSlot
+  /\ hold[rec[n].slot].rec = n
+  /\ \A m \in Nonces : ~rec[m].failedObserved /\ ~rec[m].abandonedObserved
+  /\ (PendingVetoFailure(n) \/ PendingVetoAbandonment(n))
+
+RetryNext ==
+  \/ Tick
+  \/ \E s \in Slots : CleanupExpiredHold(s) \/ UnconfirmedPaymentHoldExpires(s)
+  \/ \E t \in Tabs : \/ TypeDetails(t) \/ StartPayment(t)
+                     \/ (nextNonce = 2 /\ tab[t].slot # NoSlot /\ hold[tab[t].slot].failures = 0
+                         /\ CancelPayment(t))
+                     \/ \E s \in Slots : RetryHoldSlot(t, s)
+  \/ \E n \in Nonces : \/ SubmitPayment(n) \/ PaymentFails(n)
+                       \/ (rec[n].pay = "processing"
+                           /\ rec' = [rec EXCEPT ![n].pay = "captured", ![n].valid = TRUE]
+                           /\ UNCHANGED <<now, nextNonce, hold, lock, tab, bookings>>)
+                       \/ RetryLateCapture(n) \/ FailReadRetainEligible(n) \/ FailCommitRetain(n)
+                       \/ FailReleaseHold(n) \/ RetryPendingVeto(n)
+                       \/ ClaimLateCapture(n) \/ CrashAfterLateCaptureClaim(n)
+                       \/ FinalizeCapture(n) \/ ReconcileRecovery(n)
+                       \/ (n = 1 /\ ReconcileUnpaid(n))
+
+RetrySpec == Init /\ [][RetryNext]_vars /\ WF_vars(Tick) /\ \A n \in Nonces : WF_vars(Server(n))
+               /\ \A s \in Slots : WF_vars(UnconfirmedPaymentHoldExpires(s))
 
 Spec == Init /\ [][Next]_vars /\ WF_vars(Tick) /\ \A n \in Nonces : WF_vars(Server(n)) /\ SF_vars(CheckoutExpires(n))
           /\ \A s \in Slots : WF_vars(UnconfirmedPaymentHoldExpires(s))
@@ -357,8 +520,12 @@ OneHoldPerSlotStart ==
 NoSecondHoldOverLiveHold ==
   [][\A s \in Slots :
        (hold'[s].nonce # hold[s].nonce /\ hold'[s].phase = "active" /\ HoldOwnsSlot(hold[s]))
-         => /\ hold[s].phase # "payment_pending"
-            /\ \E u \in Tabs : TokenOwns(tab[u], s) /\ tab'[u].slot = s /\ tab'[u].nonce = hold'[s].nonce]_vars
+         => \/ /\ hold[s].phase # "payment_pending"
+               /\ \E u \in Tabs : TokenOwns(tab[u], s) /\ tab'[u].slot = s /\ tab'[u].nonce = hold'[s].nonce
+            \/ /\ hold[s].phase = "payment_pending"
+               /\ hold'[s].failures = hold[s].failures + 1
+               /\ hold'[s].exp = hold[s].exp
+               /\ rec'[hold[s].rec].status = "failed"]_vars
 
 PaymentHoldKeptThroughBackstop ==
   [][\A s \in Slots :
@@ -403,5 +570,57 @@ PaymentHoldsResolve ==
 PaymentHoldHasOwner ==
   \A s \in Slots :
     hold[s].phase = "payment_pending" => rec[hold[s].rec].status \in {"started", "needs_recovery"}
+
+FailureCountBounded ==
+  \A s \in Slots : hold[s].failures <= MaxRetries
+
+RetainedFailureNeverExtendsExpiry ==
+  [][\A s \in Slots :
+       (hold[s].phase = "payment_pending" /\ hold'[s].phase = "active"
+        /\ hold'[s].failures = hold[s].failures + 1)
+         => hold'[s].exp = hold[s].exp]_vars
+
+ObservedFailureNeverOriginalSlot ==
+  \A b \in bookings :
+    (b.id \in Nonces /\ (rec[b.id].failedObserved \/ rec[b.id].abandonedObserved)) => b.kind = "reschedule"
+
+LateCaptureRequiresDurableClaim ==
+  \A b \in bookings :
+    (b.id \in Nonces /\ b.kind = "reschedule"
+     /\ (rec[b.id].failedObserved \/ rec[b.id].abandonedObserved))
+      => rec[b.id].lateCaptureClaimed
+
+NotWitnessRetainedRetrySuccess ==
+  ~(\E b \in bookings : b.kind = "slot" /\ b.id > 1 /\ \E n \in Nonces : rec[n].status = "failed")
+
+NotWitnessThreeFailuresThenRelease ==
+  ~(\E s \in Slots : hold[s].phase = "released" /\ hold[s].failures = MaxRetries)
+
+NotWitnessReadThenCommitExpiryRace ==
+  ~(\E s \in Slots : hold[s].phase = "active" /\ hold[s].retainedAfterExpiry /\ hold[s].failures >= 1 /\ hold[s].exp <= now)
+
+NotWitnessVisitorClaimsExpiredRetained ==
+  ~(\E s \in Slots, t \in Tabs :
+      tab[t].slot = s /\ hold[s].phase = "active" /\ hold[s].failures = 0
+      /\ hold[s].nonce >= 3 /\ \E n \in Nonces : rec[n].status = "failed")
+
+NotWitnessLateCaptureAfterFailure ==
+  ~(\E b \in bookings :
+      b.id \in Nonces /\ b.kind = "reschedule" /\ rec[b.id].failedObserved /\ b.hold.rec # b.id)
+
+NotWitnessClaimCrashReconcileReschedule ==
+  ~(\E b \in bookings :
+      b.id \in Nonces /\ b.kind = "reschedule"
+      /\ rec[b.id].lateCaptureClaimed /\ rec[b.id].crashedAfterClaim)
+
+NotWitnessPendingVetoFailureReschedule ==
+  ~(\E b \in bookings :
+      b.id \in Nonces /\ b.kind = "reschedule" /\ rec[b.id].failedObserved
+      /\ b.hold.phase = "payment_pending" /\ b.hold.rec = b.id)
+
+NotWitnessNonceBoundaryFallbackRelease ==
+  ~(\E n \in Nonces, s \in Slots :
+      rec[n].status = "failed" /\ nextNonce > MaxNonce
+      /\ hold[s].phase = "released" /\ hold[s].failures < MaxRetries)
 
 =============================================================================

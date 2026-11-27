@@ -29,7 +29,47 @@ if ! has_checksum "$jar" 2>/dev/null; then
 fi
 
 cd "$(dirname "$0")/../formal"
-for config in BookingHolds BookingHoldsLiveness BookingHoldsMove; do
+for config in BookingHolds BookingHoldsLiveness BookingHoldsMove BookingHoldsRetries; do
   java -XX:+UseParallelGC -jar "$jar" -deadlock -workers auto \
     -metadir "$states/$config" -config "$config.cfg" BookingHolds.tla
+done
+
+witnesses=(
+  NotWitnessRetainedRetrySuccess
+  NotWitnessThreeFailuresThenRelease
+  NotWitnessReadThenCommitExpiryRace
+  NotWitnessVisitorClaimsExpiredRetained
+  NotWitnessLateCaptureAfterFailure
+  NotWitnessClaimCrashReconcileReschedule
+  NotWitnessPendingVetoFailureReschedule
+  NotWitnessNonceBoundaryFallbackRelease
+)
+for inv in "${witnesses[@]}"; do
+  cfg="$states/witness-$inv.cfg"
+  cat > "$cfg" <<EOF
+SPECIFICATION RetrySpec
+CONSTANTS
+  Tabs = {t1, t2}
+  Slots = {s1}
+  HoldMinutes = 1
+  Backstop = 1
+  MaxTime = 1
+  MaxNonce = 6
+  MaxRetries = 3
+SYMMETRY TabPermutations
+INVARIANT $inv
+EOF
+  out="$states/witness-$inv.out"
+  if java -XX:+UseParallelGC -jar "$jar" -deadlock -workers auto \
+    -metadir "$states/meta-$inv" -config "$cfg" BookingHolds.tla > "$out" 2>&1; then
+    echo "Reachability witness failed (never violated): $inv" >&2
+    cat "$out" >&2
+    exit 1
+  fi
+  if ! grep -Fq "Invariant $inv is violated." "$out"; then
+    echo "Reachability witness errored unexpectedly: $inv" >&2
+    cat "$out" >&2
+    exit 1
+  fi
+  echo "Reachability witness verified: $inv"
 done
