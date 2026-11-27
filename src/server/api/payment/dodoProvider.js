@@ -179,7 +179,15 @@ export const validateDodoReversalDetails = async ({ payment, hydrateRefund = ret
     const id = String(r?.refund_id || "").trim();
     if (!id || seenRefunds.has(id)) return { ok: false, reason: "dodo_refund_details_incomplete" };
     seenRefunds.add(id);
-    if (String(r?.status || "").trim().toLowerCase() !== "succeeded") continue;
+    const rStatus = String(r?.status || "").trim().toLowerCase();
+    if (rStatus !== "succeeded") {
+      if (!["failed", "pending", "review"].includes(rStatus) || r.payment_id !== payment.payment_id ||
+          (r.amount != null && (!Number.isSafeInteger(r.amount) || r.amount <= 0 || r.amount > payment.total_amount)) ||
+          (r.currency != null && r.currency !== payment.currency)) {
+        return { ok: false, reason: "dodo_refund_mismatch" };
+      }
+      continue;
+    }
     let amount = r?.amount;
     const inlineOk = Number.isSafeInteger(amount) && amount > 0 &&
       r.payment_id === payment.payment_id && r.currency === DODO_CURRENCY;
@@ -305,15 +313,18 @@ export const verifyDodoCapture = async ({ record, payment: suppliedPayment }) =>
   const validation = validateDodoPayment({ record, payment });
   if (!validation.ok) return validation;
   if (payment.status !== "succeeded") return { ok: false, retryable: true, reason: `dodo_payment_${payment.status || "pending"}` };
+  if (
+    (!Array.isArray(payment.disputes) || payment.disputes.length === 0) &&
+    (payment.refund_status === "full" || (payment.refund_status === "partial" && !suppliedPayment))
+  ) {
+    return { ok: false, captured: true, retryable: true, reason: "dodo_refund_requires_reconciliation" };
+  }
   const reversal = await validateDodoReversalDetails({ payment });
   if (!reversal.ok) {
     return { ok: false, captured: true, retryable: false, reason: reversal.reason };
   }
   if (reversal.hasUnresolvedDispute || reversal.hasTerminalDispute) {
     return { ok: false, captured: true, retryable: false, reason: "dodo_payment_disputed" };
-  }
-  if (payment.refund_status === "full" || (payment.refund_status === "partial" && !suppliedPayment)) {
-    return { ok: false, captured: true, retryable: true, reason: "dodo_refund_requires_reconciliation" };
   }
   if ((payment.refunds || []).some((r) => r.status === "succeeded") && !suppliedPayment) {
     return { ok: false, retryable: true, reason: "dodo_refund_requires_reconciliation" };

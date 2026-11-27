@@ -1504,7 +1504,10 @@ export async function registerAttributionScenarios(ctx) {
           headers: { authorization: `Bearer ${dodoPat}` },
           body: {},
         });
-        assert.equal(failCancel.status, 409, JSON.stringify(failCancel));
+        assert.equal(failCancel.status, 202, JSON.stringify(failCancel));
+        assert.equal(failCancel.body.ok, false);
+        assert.equal(failCancel.body.cancelled, false);
+        assert.equal(failCancel.body.cleanupPending, true);
         const stillPending = (await ctx.row(dodoFailRecordId)).payload;
         assert.equal(stillPending.status, "needs_recovery");
         assert.equal(stillPending.resourceReleasePending, true);

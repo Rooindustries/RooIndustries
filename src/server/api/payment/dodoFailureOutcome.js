@@ -452,6 +452,10 @@ export const handleDodoCancelInspection = async ({
   }
   if (inspection.state === "captured") {
     const refreshed = await refreshDodoPayment({ client, record: updated, payment: inspection.payment, source: "reconcile", includeRefreshedHold: true });
+    if (refreshed.httpStatus >= 400 && ["dodo_refund_requires_reconciliation", "dodo_refund_details_pending"].includes(refreshed.body?.code)) {
+      const latest = (await getPaymentRecordById(client, updated._id)) || updated;
+      return { handled: false, record: latest };
+    }
     return {
       handled: true,
       result: {
