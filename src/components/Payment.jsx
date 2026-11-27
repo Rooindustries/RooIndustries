@@ -153,14 +153,7 @@ export default function Payment({ hideFooter = false }) {
   const isModalMode = !!modalBackground || navState.modal === true;
   const hideFooterEffective = hideFooter || isModalMode;
 
-  const getModalFlowState = () => {
-    if (!isModalMode) return undefined;
-    return {
-      backgroundLocation:
-        modalBackground || { pathname: "/", search: "", hash: "" },
-      modal: true,
-    };
-  };
+  const getModalFlowState = () => (isModalMode ? { backgroundLocation: modalBackground || { pathname: "/", search: "", hash: "" }, modal: true } : undefined);
 
   const backToBookingState = {
     ...(modalBackground ? { backgroundLocation: modalBackground } : {}),
@@ -294,7 +287,7 @@ export default function Payment({ hideFooter = false }) {
   const consentModRef = useRef(null);
   useEffect(() => { loadConsentPanel().then((m) => { consentModRef.current = m; }).catch(() => {}); }, []);
   const consentCtxRef = useRef(null);
-  const runConsentAction = (name, arg) => {
+  const runConsentAction = (name, arg, { fallback = "Unable to update checkout. Please try again.", rethrow = false } = {}) => {
     const mod = consentModRef.current;
     if (mod) return mod.createPaymentConsentActions(consentCtxRef.current)[name](arg);
     const scope = currentScopeKeyRef.current;
@@ -302,9 +295,12 @@ export default function Payment({ hideFooter = false }) {
       consentModRef.current = m;
       if (!paymentMountedRef.current || !areSameLineageScopeKeys(currentScopeKeyRef.current, scope)) return;
       return m.createPaymentConsentActions(consentCtxRef.current)[name](arg);
-    }).catch(() => {});
+    }, (err) => {
+      if (rethrow) throw err;
+      if (fallback && paymentMountedRef.current) showBanner("error", fallback, { persistent: true });
+    });
   };
-  const applyAuthoritativeQuote = (arg) => runConsentAction("applyAuthoritativeQuote", arg);
+  const applyAuthoritativeQuote = (arg) => runConsentAction("applyAuthoritativeQuote", arg, { fallback: "" });
   const handleAcceptQuoteHold = (hold) => runConsentAction("handleAcceptQuoteHold", hold);
   const handleRemoveDiscount = (slot) => runConsentAction("handleRemoveDiscount", slot);
 
@@ -418,7 +414,6 @@ export default function Payment({ hideFooter = false }) {
   const selectQuoteProvider = (p, scopeKey = currentScopeKeyRef.current) => { const n = String(p || "").trim().toLowerCase(); writeScopedQuoteProvider(scopeKey, n); setQuoteProvState({ scopeKey, provider: n }); };
   const displayQuoteCurrency = normalizeCurrencyCode(paymentSession?.result?.quote?.currency || serverQuote?.currency || (lockedProvider && providerConfig?.[lockedProvider]?.currency) || (selectedQuoteProvider && providerConfig?.[selectedQuoteProvider]?.currency) || bookingData?.acceptedQuoteCurrency || "USD");
   const paymentBusy = paymentStatusBusy || cancellingPayment;
-  const RECOVERING_MSG = "Checkout is being recovered. Check the payment status shortly.";
   const checkoutActionBusy = Boolean(
     creatingFree || payingDodo || payingRzp || pendingStartCount > 0 || lockedProvider || paymentBusy
   );
@@ -447,24 +442,11 @@ export default function Payment({ hideFooter = false }) {
   const canDisplayPaypalMethod = shouldRenderPaypalBlock && canUsePaypal;
 
   const buildCheckoutPayload = (salesAttribution) => ({
-    ...bookingData,
-    salesAttribution,
-    packageTitle,
-    packagePrice,
-    email: bookingData.email || "",
-    localTimeZone: userTimeZone,
-    displayDate: date,
-    displayTime: time,
-    referralCode: referral?.code || "",
-    couponCode: coupon?.code || "",
+    ...bookingData, salesAttribution, packageTitle, packagePrice, email: bookingData.email || "",
+    localTimeZone: userTimeZone, displayDate: date, displayTime: time, referralCode: referral?.code || "", couponCode: coupon?.code || "",
     slotHoldId: checkoutRef.current?.slotHoldId || sessionHold?.slotHoldId || bookingData.slotHoldId || "",
     slotHoldToken: checkoutRef.current?.slotHoldToken || sessionHold?.slotHoldToken || bookingData.slotHoldToken || "",
-    slotHoldExpiresAt:
-      checkoutRef.current?.slotHoldExpiresAt ||
-      sessionHold?.slotHoldExpiresAt ||
-      sessionHold?.expiresAt ||
-      bookingData.slotHoldExpiresAt ||
-      "",
+    slotHoldExpiresAt: checkoutRef.current?.slotHoldExpiresAt || holdExpiresAt || "",
   });
 
   const checkoutFingerprint = useMemo(
@@ -538,17 +520,27 @@ export default function Payment({ hideFooter = false }) {
       lastQuoteKeyRef.current = "";
       const lockedFp = String(paymentSession?.result?.quoteFingerprint || "locked-session").trim();
       const lockedScope = currentScopeKey, lockedVer = quoteVersionRef.current;
-      setServerQuote(lockedSessionQuote);
-      setQuoteFingerprint(lockedFp);
-      setQuoteLoading(false);
       const reconcile = (m) => {
         if (!active) return;
         consentModRef.current = m;
         m.createPaymentConsentActions(consentCtxRef.current).applyAuthoritativeQuote({ quote: lockedSessionQuote, quoteVersion: lockedVer, quoteFingerprint: lockedFp, scopeKey: lockedScope });
+        setServerQuote(lockedSessionQuote);
+        setQuoteFingerprint(lockedFp);
+        setQuoteLoading(false);
         setQuoteSettled(true);
       };
       if (consentModRef.current) reconcile(consentModRef.current);
-      else loadConsentPanel().then(reconcile).catch(() => { if (active) setQuoteSettled(true); });
+      else {
+        setServerQuote(null);
+        setQuoteFingerprint("");
+        setQuoteLoading(true);
+        loadConsentPanel().then(reconcile, () => {
+          if (!active) return;
+          setQuoteLoading(false);
+          setQuoteSettled(true);
+          showBanner("error", "Unable to confirm checkout price.", { persistent: true, retryQuote: true });
+        });
+      }
       return () => { active = false; };
     }
     if (!packageTitle || preApplyingCodes) {
@@ -697,11 +689,9 @@ export default function Payment({ hideFooter = false }) {
       .then((m) => {
         if (!active || codeScopeKeyRef.current !== startedCodeScopeKey || !codeApplicationAllowedRef.current) return;
         return m.runPreApplyCheckoutCodes({
-          couponCode, referralCode, refLower, persistedRef, packageTitle, referral, referralRef, couponRef,
-          referralResKeyRef, startedReservationKey, preApplyPrefix, skipPreApplyKeyRef,
-          location, navState, navigate, showBanner,
+          ...consentCtxRef.current, couponCode, referralCode, refLower, persistedRef,
+          referralResKeyRef, startedReservationKey, preApplyPrefix, location, navState,
           isCurrent: () => active && codeScopeKeyRef.current === startedCodeScopeKey && codeApplicationAllowedRef.current,
-          setReferral, setCoupon, setReferralInput, setCouponInput, setReferralError, setCouponError,
           readLinkReferralFromSession, writeLinkReferralToSession, normalizeLinkReferral, stripRefFromSearch,
         });
       })
@@ -854,7 +844,7 @@ export default function Payment({ hideFooter = false }) {
     return true;
   };
 
-  const handleChangePaymentMethod = (existingOp = null) => runConsentAction("changePaymentMethod", existingOp);
+  const handleChangePaymentMethod = (existingOp = null, opts) => runConsentAction("changePaymentMethod", existingOp, opts);
   const handleCheckPaymentStatus = () => runConsentAction("checkPaymentStatus");
 
   const buildConfirmationNavigationState = (responseBody = {}) => {
@@ -912,7 +902,7 @@ export default function Payment({ hideFooter = false }) {
     });
   };
   consentCtxRef.current = {
-    ...checkoutFlowCtxRef.current, checkoutFlowCtxRef, loadCheckoutHold, currentScopeKeyRef, consentScopeRef, consentStateRef,
+    ...checkoutFlowCtxRef.current, checkoutFlowCtxRef, consentCtxRef, loadCheckoutHold, currentScopeKeyRef, consentScopeRef, consentStateRef,
     referralRef, couponRef, quoteHoldRef, setQuoteHold, quoteVersionRef, quoteFingerprintRef, manualCodeAllowedRef, checkingCode,
     referral, coupon, validationGenRef, referralCheckGenRef, couponCheckGenRef, validating, validatingCoupon, setValidating,
     setValidatingCoupon, lastQuoteKeyRef, setReferral, setReferralInput, setReferralError, writeStoredReferral, setCoupon,
@@ -947,10 +937,13 @@ export default function Payment({ hideFooter = false }) {
     (async () => {
       const m = await loadCheckoutHold();
       if (!operation.current() || currentScopeKeyRef.current !== callbackScope) return;
-      if (action === "cancel") await handleChangePaymentMethod(operation);
+      if (action === "cancel") await handleChangePaymentMethod(operation, { rethrow: true });
       else if (action === "finalize") await finalizeSessionCheckout({ paymentAccessToken: session.paymentAccessToken, providerData: {}, operation });
       else await m.runLegacyDodoStatusCheck({ token: session.paymentAccessToken, operation, setBusy: setPaymentStatusBusy, onBooked: (d, op) => navigateToConfirmation("paid", d, op), onManualReview: (msg) => showBanner("info", msg, { persistent: true }), onTerminalClear: (s, t) => clearPaymentSession(s, t) });
-    })().catch((error) => { if (operation.current()) showBanner("error", error.message || "Payment confirmation is pending. Check again shortly."); });
+    })().catch((error) => {
+      if (action === "cancel" && dodoReturnHandled.current === session.paymentAccessToken) dodoReturnHandled.current = "";
+      if (operation.current()) showBanner("error", error.message || "Payment confirmation is pending. Check again shortly.");
+    });
   }, [hydrated, location.search, paymentSession, bookingData, checkoutFingerprint]);
 
   const validateReferral = (code) => runConsentAction("validateCode", { slot: "referral", code });

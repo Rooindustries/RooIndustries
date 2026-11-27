@@ -217,19 +217,21 @@ export const createPaymentConsentActions = (c) => {
     c.navigate({ pathname: loc.pathname, search, hash: loc.hash }, { replace: true, state: { ...latestNav, bookingData: next } });
   };
   const changePaymentMethod = async (existingOp = null) => {
-    const blocked = c.paymentBusy || c.payingDodo || c.payingRzp || c.pendingStartCount > 0 || c.pendingStartsRef.current.length > 0;
+    const isBlocked = (ctx) => ctx.paymentBusy || ctx.payingDodo || ctx.payingRzp || ctx.pendingStartCount > 0 || ctx.pendingStartsRef.current.length > 0;
+    if (isBlocked(c)) return;
     let m;
     try { m = await c.loadCheckoutHold(); } catch {
       c.showBanner("error", "The payment method could not be changed. Please try again.", { persistent: true });
       return;
     }
-    const flow = m.createCheckoutFlow(c.checkoutFlowCtxRef.current);
-    const cancel = flow.beginCancel(c.createPaymentOperation, blocked, existingOp);
+    const live = c.consentCtxRef?.current || c;
+    const flow = m.createCheckoutFlow(live.checkoutFlowCtxRef.current);
+    const cancel = flow.beginCancel(live.createPaymentOperation, isBlocked(live), existingOp);
     if (!cancel) return;
     await m.runChangePaymentMethod({
-      ...c.checkoutFlowCtxRef.current, cancel, currentScopeKeyRef: c.currentScopeKeyRef, setCancellingPayment: c.setCancellingPayment,
-      navigateToConfirmation: c.navigateToConfirmation, showBanner: c.showBanner, clearPaymentSession: c.clearPaymentSession,
-      manualCodeAllowedRef: c.manualCodeAllowedRef, flow,
+      ...live.checkoutFlowCtxRef.current, cancel, currentScopeKeyRef: live.currentScopeKeyRef, setCancellingPayment: live.setCancellingPayment,
+      navigateToConfirmation: live.navigateToConfirmation, showBanner: live.showBanner, clearPaymentSession: live.clearPaymentSession,
+      manualCodeAllowedRef: live.manualCodeAllowedRef, flow,
     });
   };
   const checkPaymentStatus = async () => {

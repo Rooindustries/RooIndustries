@@ -355,6 +355,12 @@ test("fixed coupon missing both couponDiscountValue and couponDiscountAmount fai
   await expect(page.getByText("$72.00 USD")).toBeVisible();
   await expect(page.getByRole("button", { name: "Remove referral code", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Remove coupon", exact: true })).toBeVisible();
+  await expect.poll(() =>
+    page.evaluate(() => {
+      const b = JSON.parse(sessionStorage.getItem("checkout_booking_state") || "{}")?.acceptedServerQuoteBreakdown;
+      return Boolean(b && b.referralCode === "friend" && b.couponCode === "flat20");
+    })
+  ).toBe(true);
 
   await page.getByRole("button", { name: "Remove referral code", exact: true }).click();
   await expect(page.getByRole("button", { name: "Accept updated price", exact: true })).toBeVisible();
