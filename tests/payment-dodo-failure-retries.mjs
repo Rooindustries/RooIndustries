@@ -151,9 +151,15 @@ test('HTTP failure-reason mapper covers all 10 safe codes without echoing raw er
   }
 
   let currentPayload = await fixture.hold();
+  let firstAttemptToken = '';
   for (let attempt = 1; attempt <= 4; attempt += 1) {
     const started = await fixture.start(currentPayload);
     assert.equal(started.status, 200, `attempt ${attempt} start: ${JSON.stringify(started)}`);
+    if (attempt === 2 && firstAttemptToken) {
+      const staleReplay = await fixture.post('/api/payment/status', {}, firstAttemptToken);
+      assert.equal(staleReplay.status, 200);
+      assert.equal(staleReplay.body.refreshedHold, undefined);
+    }
     const holdBeforeFail = await holdFor(currentPayload);
     const rec = await recordFor(started);
     fixture.setPaymentAmountOverrides({ status: 'failed', error_code: 'do_not_honor', error_message: 'raw bank' });
@@ -170,6 +176,7 @@ test('HTTP failure-reason mapper covers all 10 safe codes without echoing raw er
       assert.equal(holdAfter.paymentFailureCount, attempt);
       assert.equal(holdAfter.expiresAt, holdBeforeFail.expiresAt);
       assert.ok(st.body.refreshedHold?.slotHoldToken);
+      if (attempt === 1) firstAttemptToken = started.body.paymentAccessToken;
       currentPayload = { ...currentPayload, slotHoldToken: st.body.refreshedHold.slotHoldToken };
     } else {
       assert.equal(st.body.holdRetained, false);
@@ -196,7 +203,9 @@ test('before- and after-35m token.exp matrix across all 3 providers makes 0 prov
           providerOrderId: `ord_${id}`, providerPaymentId: `pay_${id}`,
           providerPaymentState: terminalStatus === 'failed' ? 'failed' : 'cancelled',
           pricingFingerprint: fp, backendOwner: 'supabase', cutoverGeneration: 0,
-          resourceReleasePending: false, reconciliationRecoveryTerminal: false, providerRecoveryTerminal: true,
+          resourceReleasePending: false, reconciliationRecoveryTerminal: false,
+          providerRecoveryTerminal: provider === 'dodo',
+          ...(provider !== 'dodo' && terminalStatus === 'abandoned' ? { lateCaptureWatchUntil: futureIso } : {}),
           ...(terminalStatus === 'abandoned'
             ? { cancelledHoldSnapshot: { slotHoldId: 'slotHold.expired', slotHoldToken: 'tok', slotHoldExpiresAt: pastIso, phase: 'holding' } }
             : { refreshedHoldSnapshot: { slotHoldId: 'slotHold.expired', slotHoldToken: 'tok', slotHoldExpiresAt: pastIso, phase: 'active' } }),
@@ -204,44 +213,33 @@ test('before- and after-35m token.exp matrix across all 3 providers makes 0 prov
         });
         const beforeDoc = await fixture.commerce.getDocument(id);
         const token = makeToken(beforeDoc, { expired });
+        const beforeSnap = await fixture.snapshot();
 
-        let providerCalls = 0;
-        const origFetch = globalThis.fetch;
-        globalThis.fetch = (input, init) => {
-          const url = typeof input === 'string' ? input : input?.url || '';
-          if (url.includes('/provider/')) providerCalls += 1;
-          return origFetch(input, init);
-        };
-        try {
-          const stRes = await fixture.post('/api/payment/status', {}, token);
-          assert.equal(stRes.status, 200, `${provider}/${terminalStatus}/exp=${expired} /status`);
-          assert.equal(stRes.body.refreshedHold, undefined);
+        const stRes = await fixture.post('/api/payment/status', {}, token);
+        assert.equal(stRes.status, 200, `${provider}/${terminalStatus}/exp=${expired} /status`);
+        assert.equal(stRes.body.refreshedHold, undefined);
 
-          const finRes = await fixture.post('/api/payment/finalize', {}, token);
-          assert.equal(finRes.status, provider === 'dodo' ? 200 : 409, `${provider}/${terminalStatus}/exp=${expired} /finalize: ${JSON.stringify(finRes)}`);
+        const finRes = await fixture.post('/api/payment/finalize', {}, token);
+        assert.equal(finRes.status, provider === 'dodo' ? 200 : 409, `${provider}/${terminalStatus}/exp=${expired} /finalize: ${JSON.stringify(finRes)}`);
 
-          const canRes = await fixture.post('/api/payment/cancel', {}, token);
-          if (terminalStatus === 'failed') {
-            if (provider === 'dodo') {
-              assert.equal(canRes.status, 200);
-              assert.equal(canRes.body.cancelled, false);
-            } else {
-              assert.equal(canRes.status, 409);
-            }
-          } else if (provider === 'dodo') {
+        const canRes = await fixture.post('/api/payment/cancel', {}, token);
+        if (terminalStatus === 'failed') {
+          if (provider === 'dodo') {
             assert.equal(canRes.status, 200);
-            assert.equal(canRes.body.cancelled, true);
-            assert.equal(canRes.body.refreshedHold, undefined);
+            assert.equal(canRes.body.cancelled, false);
           } else {
-            assert.equal(canRes.status, expired ? 409 : 200);
+            assert.equal(canRes.status, 409);
           }
-
-          assert.equal(providerCalls, 0, `${provider}/${terminalStatus}/exp=${expired} made ${providerCalls} provider calls`);
-          const afterDoc = await fixture.commerce.getDocument(id);
-          assert.equal(afterDoc._rev, beforeDoc._rev, `${provider}/${terminalStatus}/exp=${expired} mutated record`);
-        } finally {
-          globalThis.fetch = origFetch;
+        } else if (provider === 'dodo') {
+          assert.equal(canRes.status, 200);
+          assert.equal(canRes.body.cancelled, true);
+          assert.equal(canRes.body.refreshedHold, undefined);
+        } else {
+          assert.equal(canRes.status, expired ? 409 : 200);
         }
+
+        const afterSnap = await fixture.snapshot();
+        assert.deepEqual(afterSnap, beforeSnap, `${provider}/${terminalStatus}/exp=${expired} mutated stored state or called provider`);
       }
     }
 
@@ -260,7 +258,7 @@ test('before- and after-35m token.exp matrix across all 3 providers makes 0 prov
 });
 
 test('cleanup-fallback forced-order checks preserve capture/settled/pending states and /cancel honors 409-before-202 precedence', async () => {
-  const runFallback = async ({ mutateFresh, expectStatus, expectPending, expectReason }) => {
+  const runFallback = async ({ mutateFresh, expectStatus, expectPending, expectReason, payment = null }) => {
     const { record } = await startDodoCheckout();
     const { redemptionId } = await seedCouponAndLock(record._id, crypto.randomUUID().slice(0, 6));
     await fixture.commerce.patch(record._id).set({ couponReservationId: redemptionId }).commit();
@@ -269,7 +267,7 @@ test('cleanup-fallback forced-order checks preserve capture/settled/pending stat
     const outcome = await commitDodoFailureOutcome({
       client: fixture.commerce,
       record: stale,
-      payment: null,
+      payment,
       source: 'reconcile',
       reason: 'dodo_payment_failed',
       prepareCouponRelease: async () => {
@@ -300,6 +298,11 @@ test('cleanup-fallback forced-order checks preserve capture/settled/pending stat
     expectStatus: 202, expectPending: false, expectReason: 'captured_payment_release_requires_review',
   });
   await runFallback({
+    mutateFresh: id => fixture.commerce.patch(id).set({ status: 'started', providerPaymentState: 'partially_captured' }).commit(),
+    expectStatus: 202, expectPending: false, expectReason: 'dodo_partial_capture_requires_recovery',
+  });
+  await runFallback({
+    payment: { payment_id: 'pay_live_failed_partial_race', status: 'failed', error_code: 'do_not_honor' },
     mutateFresh: id => fixture.commerce.patch(id).set({ status: 'started', providerPaymentState: 'partially_captured' }).commit(),
     expectStatus: 202, expectPending: false, expectReason: 'dodo_partial_capture_requires_recovery',
   });
@@ -345,6 +348,14 @@ test('all 5 exhaustion watch-deadline cases plus deadline revision-change race p
   assert.equal(d1.lateCaptureWatchUntil, '');
   assert.equal((await fixture.commerce.getDocument(c1.redemptionId)).status, 'released');
   assert.equal(await fixture.commerce.getDocument(c1.lockId), null);
+
+  const cPaid = await seedExhausted('dlpaid', { providerPaymentState: 'unknown', couponReservationId: '', startClaimId: '' });
+  fixture.setPaymentAmountOverrides({ status: 'succeeded' });
+  assert.equal((await cron()).status, 200);
+  const dPaid = await fixture.commerce.getDocument(cPaid.recordId);
+  assert.equal(dPaid.status, 'booked');
+  assert.ok(dPaid.bookingId);
+  assert.equal(dPaid.resourceReleasePending, false);
 
   for (const [tag, storedState, targetStatus, expectStatus] of [
     ['dl2', 'failed', 'failed', 'failed'],

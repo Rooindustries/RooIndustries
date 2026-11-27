@@ -83,10 +83,13 @@ const stageCleanupFailure = async (args) => {
     return makeResponse(false, 202, retained, buildPublicStatusBody, includeRefreshedHold);
   }
   const storedState = String(current.providerPaymentState || "").trim().toLowerCase();
-  if (!freshLiveTerminal && ALL_PENDING_AND_PARTIAL_DODO_STATES.has(storedState)) {
+  const revisionUnchanged = !record?._rev || current._rev === record._rev;
+  const partialCaptured = PARTIAL_CAPTURE_DODO_STATES.includes(storedState);
+  const effectiveFreshLiveTerminal = freshLiveTerminal && revisionUnchanged && !partialCaptured;
+  if (partialCaptured || (!effectiveFreshLiveTerminal && ALL_PENDING_AND_PARTIAL_DODO_STATES.has(storedState))) {
     const vetoed = await vetoDodoPendingCleanup({
       client, record: current, observedState: storedState, providerPaymentId, targetStatus, source,
-      reason: PARTIAL_CAPTURE_DODO_STATES.includes(storedState)
+      reason: partialCaptured
         ? "dodo_partial_capture_requires_recovery" : "dodo_payment_still_live",
       patchRecord,
     });
@@ -101,7 +104,7 @@ const stageCleanupFailure = async (args) => {
       client,
       record: current,
       set: {
-        ...stateObsPatch(current, observedState, { allowTerminal: freshLiveTerminal }),
+        ...stateObsPatch(current, observedState, { allowTerminal: effectiveFreshLiveTerminal }),
         ...paymentIdPatch(current, providerPaymentId),
         ...failureFields,
         status: PAYMENT_STATUS_NEEDS_RECOVERY,
@@ -174,7 +177,7 @@ const commitDodoTerminalOutcome = async ({
   mode, client, record, payment = null, source = "reconcile", reason = "",
   prepareCouponRelease = null, appendCouponRelease = null, loadCouponReservationHandlers = null,
   patchRecord, getNextPaymentRecoveryAt, buildPublicStatusBody, includeRefreshedHold = false,
-  allowStoredTerminalRelease = false, deadlinePinnedRev = "", deadlinePinnedCheckedAt = "", closeWatchOnCommit = false,
+  allowStoredTerminalRelease = false, allowUnattemptedRelease = false, deadlinePinnedRev = "", deadlinePinnedCheckedAt = "", closeWatchOnCommit = false,
 }) => {
   const isCancel = mode === "cancelled";
   const targetStatus = isCancel ? PAYMENT_STATUS_ABANDONED : PAYMENT_STATUS_FAILED;
@@ -256,6 +259,7 @@ const commitDodoTerminalOutcome = async ({
     const now = nowIso();
     const watchUntil = closeWatchOnCommit ? "" : hasActiveLateCaptureWatch(current) ? current.lateCaptureWatchUntil : futureIso(LATE_CAPTURE_WATCH_SECONDS);
     const terminalObsState = freshRevisionMatchedTerminal ? liveState : allowStoredTerminalRelease && ["failed", "cancelled"].includes(storedState) ? storedState : "";
+    if (!terminalObsState && !allowUnattemptedRelease) return stageCleanupFailure(stageArgs);
     const { holdPatch, outcomeMeta } = buildHoldOutcome({ isCancel, isUpgrade, holdDoc, holdOwned, current, failureFields, now });
     const recordSet = {
       ...stateObsPatch(current, terminalObsState, { allowTerminal: true }),
@@ -289,8 +293,6 @@ const commitDodoTerminalOutcome = async ({
     if (claimOwned) tx = tx.delete(claim._id, { ifRevisionId: claim._rev });
     try {
       await tx.commit();
-      const committed = (await getPaymentRecordById(client, current._id)) || { ...current, ...recordSet };
-      return makeResponse(true, 200, committed, buildPublicStatusBody, includeRefreshedHold);
     } catch (error) {
       if (isConflict(error)) {
         if (!deadlinePinnedRev && attempt < maxAttempts - 1) continue;
@@ -299,6 +301,11 @@ const commitDodoTerminalOutcome = async ({
       }
       return stageCleanupFailure(stageArgs);
     }
+    let committed = { ...current, ...recordSet };
+    try {
+      committed = (await getPaymentRecordById(client, current._id)) || committed;
+    } catch {}
+    return makeResponse(true, 200, committed, buildPublicStatusBody, includeRefreshedHold);
   }
   const latest = (await getPaymentRecordById(client, record._id)) || record;
   return makeResponse(false, 202, latest, buildPublicStatusBody, includeRefreshedHold);
@@ -311,6 +318,8 @@ export const handleExhaustedCleanupWatchDeadline = async ({
   client, record, dodoEnabled, inspection = null, prepareCouponRelease = null, appendCouponRelease = null,
   loadCouponReservationHandlers = null, patchRecord, getNextPaymentRecoveryAt, buildPublicStatusBody,
 }) => {
+  const inspectedRev = record?._rev || "";
+  const inspectedCheckedAt = record?.providerStateCheckedAt || "";
   const current = (await getPaymentRecordById(client, record._id)) || record;
   if (isLockedOrSettled(current) || hasKnownCaptureRecord(current) || hasExplicitOwnerReview(current)) {
     return makeResponse(true, 200, current, buildPublicStatusBody, false);
@@ -328,8 +337,13 @@ export const handleExhaustedCleanupWatchDeadline = async ({
     const escalated = await escalateExhaustedCleanupToOwnerReview({ client, record: current, source: "reconcile", patchRecord });
     return makeResponse(false, 202, escalated, buildPublicStatusBody, false);
   }
+  if (liveValidTerminal && inspectedRev && (current._rev !== inspectedRev || String(current.providerStateCheckedAt || "") !== String(inspectedCheckedAt || ""))) {
+    return makeResponse(false, 202, current, buildPublicStatusBody, false);
+  }
   const resolvedMode = liveValidTerminal ? liveStatus : storedState;
-  const targetIsCancel = resolvedMode === "cancelled" || String(current.resourceReleaseTargetStatus || "").trim().toLowerCase() === PAYMENT_STATUS_ABANDONED;
+  const targetIsCancel = liveValidTerminal
+    ? liveStatus === "cancelled"
+    : resolvedMode === "cancelled" || String(current.resourceReleaseTargetStatus || "").trim().toLowerCase() === PAYMENT_STATUS_ABANDONED;
   return commitDodoTerminalOutcome({
     mode: targetIsCancel ? "cancelled" : "failed",
     client, record: current, payment: liveValidTerminal ? inspection.payment : null,
@@ -337,7 +351,8 @@ export const handleExhaustedCleanupWatchDeadline = async ({
     prepareCouponRelease, appendCouponRelease, loadCouponReservationHandlers, patchRecord,
     getNextPaymentRecoveryAt, buildPublicStatusBody, includeRefreshedHold: false,
     allowStoredTerminalRelease: storedSafeTerminal,
-    deadlinePinnedRev: current._rev, deadlinePinnedCheckedAt: current.providerStateCheckedAt || "",
+    deadlinePinnedRev: inspectedRev || current._rev,
+    deadlinePinnedCheckedAt: inspectedRev ? inspectedCheckedAt : (current.providerStateCheckedAt || ""),
     closeWatchOnCommit: dodoEnabled && liveValidTerminal,
   });
 };
@@ -395,9 +410,19 @@ export const handleDodoCancelInspection = async ({
     });
     return { handled: true, result: { httpStatus: 409, body: { ok: false, code: inspection.reason, error: "The payment does not match this checkout." } } };
   }
-  const updated = await persistDodoInspectionEvidence({ client, record, inspection, patchRecord });
+  if (inspection.retryable === false) {
+    await persistDodoInspectionEvidence({ client, record, inspection, patchRecord, stopOnConflict: true });
+    return { handled: true, result: { httpStatus: 409, body: { ok: false, code: inspection.reason || "dodo_payment_mismatch", error: "The payment does not match this checkout." } } };
+  }
+  let evidenceConflicted = false;
+  const updated = await persistDodoInspectionEvidence({
+    client, record, inspection, patchRecord,
+    stopOnConflict: true,
+    onConflict: () => { evidenceConflicted = true; },
+  });
   const liveStatus = String(inspection.payment?.status || "").trim().toLowerCase();
-  if (ACTIVE_OR_PARTIAL_DODO_STATES.includes(liveStatus)) {
+  const updatedState = String(updated?.providerPaymentState || "").trim().toLowerCase();
+  if (ACTIVE_OR_PARTIAL_DODO_STATES.includes(liveStatus) || ACTIVE_OR_PARTIAL_DODO_STATES.includes(updatedState)) {
     return {
       handled: true,
       result: { httpStatus: 409, body: { ok: false, status, code: "provider_pending", error: "Payment is still processing. Check its status before changing methods." } },
@@ -432,6 +457,21 @@ export const handleDodoCancelInspection = async ({
       result: {
         httpStatus: refreshed.httpStatus,
         body: { ...(await buildBrowserCompletionBody({ client, record: updated, body: refreshed.body })), cancelled: false, captured: true },
+      },
+    };
+  }
+  if (evidenceConflicted) {
+    return {
+      handled: true,
+      result: {
+        httpStatus: 409,
+        body: {
+          ok: false,
+          cancelled: false,
+          status: String(updated?.status || status).trim().toLowerCase(),
+          code: "payment_state_changed",
+          error: "Payment state changed before it could be released.",
+        },
       },
     };
   }

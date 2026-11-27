@@ -127,21 +127,29 @@ test('booking contact validation over HTTP', { timeout: 300000 }, async t => {
     });
 
     await check('stored payment session with legacy malformed contacts still resumes unchanged', async result => {
-      const payload = await hold();
-      const created = await start(payload);
-      assert.equal(created.status, 200, JSON.stringify(created));
-      const record = await recordFor(payload);
-      const legacy = { ...record.bookingPayload, email: 'legacy-invalid', discord: '',
-        specs: { legacy: true }, mainGame: '', message: ['legacy'], localTimeZone: 'Mars/Olympus' };
-      const quote = await post('/api/payment/quote', { bookingPayload: legacy });
-      assert.equal(quote.status, 200, JSON.stringify(quote));
-      await commerce.patch(record._id).set({ bookingPayload: legacy, quoteFingerprint: quote.body.quoteFingerprint }).commit();
-      if (record.startClaimId) await commerce.patch(record.startClaimId).set({ quoteFingerprint: quote.body.quoteFingerprint }).commit();
-      const before = await snapshot();
-      result.response = await start(legacy);
-      assert.equal(result.response.status, 200, JSON.stringify(result.response));
-      assert.equal(result.response.body.providerPayload.orderId, created.body.providerPayload.orderId);
-      assert.ok(isDeepStrictEqual(await snapshot(), before), 'Resuming a session changed stored state');
+      fixture.setCheckoutPaymentStarted(false);
+      try {
+        const payload = await hold();
+        const created = await start(payload);
+        assert.equal(created.status, 200, JSON.stringify(created));
+        const record = await recordFor(payload);
+        const legacy = { ...record.bookingPayload, email: 'legacy-invalid', discord: '',
+          specs: { legacy: true }, mainGame: '', message: ['legacy'], localTimeZone: 'Mars/Olympus' };
+        const quote = await post('/api/payment/quote', { bookingPayload: legacy });
+        assert.equal(quote.status, 200, JSON.stringify(quote));
+        await commerce.patch(record._id).set({ bookingPayload: legacy, quoteFingerprint: quote.body.quoteFingerprint }).commit();
+        if (record.startClaimId) await commerce.patch(record.startClaimId).set({ quoteFingerprint: quote.body.quoteFingerprint }).commit();
+        const { providerRequests: _beforeReqs, ...beforeDb } = await snapshot();
+        const mutatingBefore = evidence.providerRequests.filter(r => r.method !== 'GET').length;
+        result.response = await start(legacy);
+        assert.equal(result.response.status, 200, JSON.stringify(result.response));
+        assert.equal(result.response.body.providerPayload.orderId, created.body.providerPayload.orderId);
+        const { providerRequests: _afterReqs, ...afterDb } = await snapshot();
+        assert.ok(isDeepStrictEqual(afterDb, beforeDb), 'Resuming a session changed stored state');
+        assert.equal(evidence.providerRequests.filter(r => r.method !== 'GET').length, mutatingBefore);
+      } finally {
+        fixture.setCheckoutPaymentStarted(true);
+      }
     });
 
     for (const localTimeZone of ['UTC', '+01:00', 'US/Eastern']) {
@@ -205,22 +213,30 @@ test('booking contact validation over HTTP', { timeout: 300000 }, async t => {
     });
 
     await check('stored upgrade session with legacy malformed contacts still resumes unchanged', async result => {
-      const { payload } = await seedUpgrade({ email: 'legacy-invalid' });
-      const created = await start(payload);
-      assert.equal(created.status, 200, JSON.stringify(created));
-      const record = await commerce.fetch(
-        '*[_type == "paymentRecord" && providerOrderId == $id][0]',
-        { id: created.body.providerPayload.orderId }
-      );
-      const legacy = { ...record.bookingPayload, discord: { legacy: true }, specs: ['legacy'],
-        mainGame: 47, message: { legacy: true }, localTimeZone: 'Mars/Olympus' };
-      await commerce.patch(record._id).set({ bookingPayload: legacy }).commit();
-      const before = await snapshot();
-      result.response = await start(legacy);
-      assert.equal(result.response.status, 200, JSON.stringify(result.response));
-      assert.equal(result.response.body.providerPayload.orderId, created.body.providerPayload.orderId);
-      result.noMutation = isDeepStrictEqual(before, await snapshot());
-      assert.ok(result.noMutation, 'Resuming an upgrade changed stored state');
+      fixture.setCheckoutPaymentStarted(false);
+      try {
+        const { payload } = await seedUpgrade({ email: 'legacy-invalid' });
+        const created = await start(payload);
+        assert.equal(created.status, 200, JSON.stringify(created));
+        const record = await commerce.fetch(
+          '*[_type == "paymentRecord" && providerOrderId == $id][0]',
+          { id: created.body.providerPayload.orderId }
+        );
+        const legacy = { ...record.bookingPayload, discord: { legacy: true }, specs: ['legacy'],
+          mainGame: 47, message: { legacy: true }, localTimeZone: 'Mars/Olympus' };
+        await commerce.patch(record._id).set({ bookingPayload: legacy }).commit();
+        const { providerRequests: _beforeReqs, ...beforeDb } = await snapshot();
+        const mutatingBefore = evidence.providerRequests.filter(r => r.method !== 'GET').length;
+        result.response = await start(legacy);
+        assert.equal(result.response.status, 200, JSON.stringify(result.response));
+        assert.equal(result.response.body.providerPayload.orderId, created.body.providerPayload.orderId);
+        const { providerRequests: _afterReqs, ...afterDb } = await snapshot();
+        result.noMutation = isDeepStrictEqual(beforeDb, afterDb) &&
+          evidence.providerRequests.filter(r => r.method !== 'GET').length === mutatingBefore;
+        assert.ok(result.noMutation, 'Resuming an upgrade changed stored state');
+      } finally {
+        fixture.setCheckoutPaymentStarted(true);
+      }
     });
 
     await check('upgrade with empty placeholders and inherited malformed email still starts and finalizes', async result => {

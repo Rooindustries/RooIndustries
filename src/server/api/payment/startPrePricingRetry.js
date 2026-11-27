@@ -67,15 +67,22 @@ export const canRestoreUnpaidRecovery = (record, inspection = null) => {
     record?.dodoDisputeActive !== true && !str(record?.providerPaymentId) &&
     !["failed", "cancelled"].includes(payState) && str(record?.providerOrderId) !== "";
 };
-export const resolveLiveAbandonedRefreshedHold = async ({ client, record }) => {
+export const resolveLiveRefreshedHold = async ({ client, record }) => {
   if (!client || !record?._id) return null;
-  const hasSnap = lower(record.status) === "abandoned" && Boolean(record.cancelledHoldSnapshot?.slotHoldToken);
+  const st = lower(record.status);
+  if (st !== "abandoned" && st !== "failed") return null;
+  const hasSnap = st === "abandoned"
+    ? Boolean(record.cancelledHoldSnapshot?.slotHoldToken)
+    : Boolean(record.refreshedHoldSnapshot?.slotHoldToken);
   const fresh = hasSnap ? record : await getPaymentRecordById(client, record._id);
-  const snap = fresh?.cancelledHoldSnapshot;
-  const okSnap = lower(fresh?.status) === "abandoned" && snap?.slotHoldId && snap?.slotHoldToken &&
+  const freshSt = lower(fresh?.status);
+  if (freshSt !== "abandoned" && freshSt !== "failed") return null;
+  const snap = freshSt === "abandoned" ? fresh?.cancelledHoldSnapshot : fresh?.refreshedHoldSnapshot;
+  const expectedPhase = freshSt === "abandoned" ? "holding" : "active";
+  const okSnap = snap?.slotHoldId && snap?.slotHoldToken &&
     Date.parse(snap.slotHoldExpiresAt) > Date.now();
   const hold = okSnap ? await client.fetch('*[_type == "slotHold" && _id == $id][0]', { id: snap.slotHoldId }) : null;
-  const okHold = hold?._id && lower(hold.phase) === "holding" && !str(hold.paymentRecordId) &&
+  const okHold = hold?._id && lower(hold.phase) === expectedPhase && !str(hold.paymentRecordId) &&
     Date.parse(hold.expiresAt) > Date.now();
   if (!okHold) return null;
   const valid = verifyHoldToken({
@@ -83,8 +90,15 @@ export const resolveLiveAbandonedRefreshedHold = async ({ client, record }) => {
     holdNonce: hold.holdNonce || "", backend: resolveStoreBackend(hold.backendOwner || fresh.backendOwner),
     cutoverGeneration: num(hold.cutoverGeneration),
   });
-  return valid ? snap : null;
+  if (!valid) return null;
+  return {
+    slotHoldId: String(snap.slotHoldId),
+    slotHoldToken: String(snap.slotHoldToken),
+    slotHoldExpiresAt: String(snap.slotHoldExpiresAt),
+    phase: String(snap.phase || expectedPhase),
+  };
 };
+export const resolveLiveAbandonedRefreshedHold = resolveLiveRefreshedHold;
 const completeOrUnavailable = async (run) => {
   try { return await run(); } catch (error) {
     logSafeWarn("Payment status hold lookup unavailable", error);

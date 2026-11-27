@@ -185,7 +185,7 @@ export const validateDodoReversalDetails = async ({ payment, hydrateRefund = ret
       r.payment_id === payment.payment_id && r.currency === DODO_CURRENCY;
     if (!inlineOk) {
       let hydrated;
-      try { hydrated = await hydrateRefund(id); } catch { return { ok: false, reason: "dodo_refund_details_incomplete" }; }
+      try { hydrated = await hydrateRefund(id); } catch { return { ok: false, retryable: true, reason: "dodo_refund_lookup_pending" }; }
       if (!hydrated || hydrated.refund_id !== id || hydrated.payment_id !== payment.payment_id ||
           hydrated.currency !== DODO_CURRENCY || String(hydrated.status || "").trim().toLowerCase() !== "succeeded" ||
           !Number.isSafeInteger(hydrated.amount) || hydrated.amount <= 0) {

@@ -56,7 +56,9 @@ export const isLockedOrSettled = (record) => {
   );
 };
 
-export const persistDodoInspectionEvidence = async ({ client, record, inspection, patchRecord, recordState = true }) => {
+export const persistDodoInspectionEvidence = async ({
+  client, record, inspection, patchRecord, recordState = true, stopOnConflict = false, onConflict = null,
+}) => {
   if (
     !record?._id ||
     !inspection ||
@@ -84,6 +86,10 @@ export const persistDodoInspectionEvidence = async ({ client, record, inspection
     } catch (error) {
       if (!isConflict(error)) throw error;
       current = (await getPaymentRecordById(client, current._id)) || current;
+      if (stopOnConflict) {
+        if (typeof onConflict === "function") onConflict(current);
+        return current;
+      }
     }
   }
   return current;
@@ -170,7 +176,13 @@ export const vetoDodoPendingCleanup = async ({
 }) => {
   let current = (await getPaymentRecordById(client, record._id)) || record;
   for (let attempt = 0; attempt < 4 && current?._id; attempt += 1) {
-    if (isLockedOrSettled(current) || hasKnownCaptureRecord(current)) {
+    const curStatus = String(current.status || "").trim().toLowerCase();
+    if (
+      isLockedOrSettled(current) ||
+      hasKnownCaptureRecord(current) ||
+      ([PAYMENT_STATUS_FAILED, PAYMENT_STATUS_ABANDONED].includes(curStatus) &&
+        current.resourceReleasePending !== true)
+    ) {
       return { ok: true, httpStatus: 200, paymentRecord: current };
     }
     const lineage = {

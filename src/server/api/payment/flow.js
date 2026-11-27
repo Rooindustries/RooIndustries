@@ -3760,7 +3760,7 @@ export const startPaymentSession = async ({
     }
 
     if (provider === "dodo" && !checkoutCreated && String(refreshed.providerOrderId || "").trim() && refreshedStatus === PAYMENT_STATUS_STARTED) {
-      return guardDodoCheckoutReuse({
+      return await guardDodoCheckoutReuse({
         client, existing: refreshed, inspectDodoCheckout, patchRecord: patchPaymentRecord,
         buildProviderPayloadFromRecord, paymentAccessToken, getHoldById,
         shared: {
@@ -3853,12 +3853,15 @@ export const finalizePaymentSession = async ({
   const binding = validateImmutableProviderBinding({ record, providerData: flatProviderData });
   if (!binding.ok) return { httpStatus: 409, body: { ok: false, code: binding.reason } };
   const terminalStatus = String(record?.status || "").trim().toLowerCase();
-  const activeLateCaptureWatch =
-    isFutureIso(record?.lateCaptureWatchUntil) && record?.providerRecoveryTerminal !== true;
+  const activeDodoLateCaptureWatch =
+    record.provider === "dodo" &&
+    !resolved.tokenExpired &&
+    isFutureIso(record?.lateCaptureWatchUntil) &&
+    record?.providerRecoveryTerminal !== true;
   if (
     isCompletedTerminalOutcome(record) &&
     [PAYMENT_STATUS_FAILED, PAYMENT_STATUS_ABANDONED].includes(terminalStatus) &&
-    !activeLateCaptureWatch
+    !activeDodoLateCaptureWatch
   ) {
     const isDodo = record.provider === "dodo";
     const body = await buildBrowserCompletionBody({ client, record, body: buildPublicStatusBody(record, { includeRefreshedHold: isDodo }) });
@@ -5035,14 +5038,15 @@ export const reconcilePaymentSessions = async ({
           summary.recovery += 1;
           continue;
         }
-        if (isExhaustedDeadline) {
+        const liveSt = String(dodoInspection.payment?.status || "").trim().toLowerCase();
+        const liveCaptured = liveSt === "succeeded" || dodoInspection.state === "captured";
+        if (isExhaustedDeadline && !liveCaptured) {
           const deadlineRes = await handleExhaustedCleanupWatchDeadline({ ...dodoDeps, record, dodoEnabled, inspection: dodoInspection });
           Object.assign(record, deadlineRes.paymentRecord || {});
           conclusiveProviderEvidence = dodoInspection.noPaymentId === true || (dodoInspection.coreValidated === true && dodoInspection.recognizedStatus === true);
           bumpOutcome(record);
           continue;
         }
-        const liveSt = String(dodoInspection.payment?.status || "").trim().toLowerCase();
         Object.assign(record, await persistDodoInspectionEvidence({
           client, record, inspection: dodoInspection, patchRecord: patchPaymentRecord,
           recordState: Boolean(record.providerPaymentState) || PARTIAL_CAPTURE_DODO_STATES.includes(liveSt),
@@ -5198,6 +5202,9 @@ export const reconcilePaymentSessions = async ({
           ? await (targetStatus === PAYMENT_STATUS_FAILED ? commitDodoFailureOutcome : commitDodoCancellationOutcome)({
               ...dodoDeps, record, payment: dodoInspection?.payment || null, source: "reconcile", reason,
               allowStoredTerminalRelease: !dodoEnabled && ["failed", "cancelled"].includes(storedState),
+              allowUnattemptedRelease: dodoEnabled
+                ? dodoInspection?.noPaymentId === true
+                : !storedState && !hasKnownCapture(record),
             })
           : targetStatus === PAYMENT_STATUS_FAILED
             ? await markTerminalFinalizeFailure({ client, record, source: "reconcile", reason })
@@ -6687,11 +6694,16 @@ export const refreshDodoPayment = async ({
     }
   };
   const disputes = Array.isArray(payment.disputes) ? payment.disputes : [];
+  if (disputes.length > 0 && payment.status !== "succeeded") {
+    return { httpStatus: 409, body: { ok: false, code: "dodo_dispute_mismatch" } };
+  }
   const seenDisputeIds = new Set();
   for (const dispute of disputes) {
     const disputeId = String(dispute?.dispute_id || "").trim();
     const amountValid = typeof dispute?.amount === "string" && /^\d+(\.\d+)?$/.test(dispute.amount.trim()) && Number(dispute.amount.trim()) > 0;
-    if (!disputeId || seenDisputeIds.has(disputeId) || dispute.payment_id !== payment.payment_id || dispute.currency !== payment.currency ||
+    const paymentMismatch = dispute?.payment_id != null && String(dispute.payment_id).trim() !== String(payment.payment_id || "").trim();
+    const currencyMismatch = dispute?.currency != null && String(dispute.currency).trim() !== String(payment.currency || "USD").trim();
+    if (!disputeId || seenDisputeIds.has(disputeId) || paymentMismatch || currencyMismatch ||
         !["dispute_opened", "dispute_expired", "dispute_accepted", "dispute_cancelled", "dispute_challenged", "dispute_won", "dispute_lost"].includes(dispute.dispute_status) ||
         !["pre_dispute", "dispute", "pre_arbitration"].includes(dispute.dispute_stage) || !amountValid) {
       await persistCaptureBeforeReject();
@@ -6712,7 +6724,14 @@ export const refreshDodoPayment = async ({
   const disputed = disputes.some((dispute) => !["dispute_won", "dispute_cancelled"].includes(dispute.dispute_status)) ||
     (record.dodoDisputeActive === true && disputes.length === 0);
   if (payment.status === "succeeded" && (hasUnresolvedDispute || disputed)) {
-    await validateDodoReversalDetails({ payment, hydrateRefund: retrieveDodoRefund });
+    const reversalCheck = await validateDodoReversalDetails({ payment, hydrateRefund: retrieveDodoRefund });
+    if (!reversalCheck.ok) {
+      await persistCaptureBeforeReject();
+      return {
+        httpStatus: reversalCheck.retryable ? 503 : 409,
+        body: { ok: false, code: reversalCheck.reason || "dodo_refund_details_incomplete" },
+      };
+    }
   }
   let disputeBooking;
   if ((disputed || record.dodoDisputeActive === true) && record.bookingId) {
@@ -6831,12 +6850,16 @@ export const refreshDodoPayment = async ({
           providerRecoveryTerminal: !!terminalDispute,
           providerRecoveryTerminalReason: terminalReason,
           verificationState: disputed ? "disputed" : "server_verified",
-          status: disputed || !record.bookingId ? PAYMENT_STATUS_NEEDS_RECOVERY
-            : record.emailDispatchRequired || record.recoveryNotificationRequired ? PAYMENT_STATUS_EMAIL_PARTIAL : PAYMENT_STATUS_BOOKED,
-          recoveryReason: terminalReason || (disputed ? "dodo_payment_disputed" : ""),
-          nextRecoveryAt: disputed && !terminalDispute ? getNextPaymentRecoveryAt(record.attemptCount || 0) : "",
+          status: alreadyFullRefund
+            ? PAYMENT_STATUS_REFUNDED
+            : disputed || !record.bookingId ? PAYMENT_STATUS_NEEDS_RECOVERY
+              : record.emailDispatchRequired || record.recoveryNotificationRequired ? PAYMENT_STATUS_EMAIL_PARTIAL : PAYMENT_STATUS_BOOKED,
+          recoveryReason: alreadyFullRefund
+            ? String(record.recoveryReason || "").trim()
+            : terminalReason || (disputed ? "dodo_payment_disputed" : ""),
+          nextRecoveryAt: alreadyFullRefund ? "" : disputed && !terminalDispute ? getNextPaymentRecoveryAt(record.attemptCount || 0) : "",
           events: terminalDispute ? mergePaymentRecordEvents(record.events,
-            buildPaymentRecordEvent({ status: PAYMENT_STATUS_NEEDS_RECOVERY, source, reason: terminalReason, data: terminalDispute })) : record.events || [],
+            buildPaymentRecordEvent({ status: alreadyFullRefund ? PAYMENT_STATUS_REFUNDED : PAYMENT_STATUS_NEEDS_RECOVERY, source, reason: terminalReason, data: terminalDispute })) : record.events || [],
           updatedAt: nowIso(),
         }));
       });
@@ -6845,7 +6868,10 @@ export const refreshDodoPayment = async ({
       if (!record) return { httpStatus: 503, body: { ok: false, code: "payment_record_unavailable", error: "Payment details are temporarily unavailable." } };
     }
   }
-  if (hasUnresolvedDispute) {
+  const alreadyFullyRefunded =
+    record.status === PAYMENT_STATUS_REFUNDED ||
+    String(record.refundState || "").trim().toLowerCase() === "full";
+  if (hasUnresolvedDispute && !alreadyFullyRefunded) {
     await persistCaptureBeforeReject();
     const webhook = source === "webhook";
     return {

@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { issueHoldToken } from "../../booking/holdToken.js";
+import { ACTIVE_OR_PARTIAL_DODO_STATES } from "./paymentFailureReason.js";
 import { HOLD_PHASE_HOLDING, PAYMENT_STATUS_ABANDONED, PAYMENT_STATUS_STARTED, PAYMENT_START_CLAIM_TYPE, PAYMENT_UPGRADE_LOCK_TYPE, buildPaymentRecordEvent, mergePaymentRecordEvents } from "./paymentRecord.js";
 
 const err = (httpStatus, error) => ({ httpStatus, body: { ok: false, error } });
@@ -13,7 +14,8 @@ export const commitAtomicDodoRequiresPaymentMethodCancel = async ({
   const prepareCoupon = prepareCouponRelease || loaded.prepareCouponRelease, appendCoupon = appendCouponRelease || loaded.appendCouponRelease;
   if (record.couponReservationId && (typeof prepareCoupon !== "function" || typeof appendCoupon !== "function")) return err(503, "Coupon release is temporarily unavailable.");
   const fresh = (await getPaymentRecordById(client, record._id)) || record;
-  if (!inspectedRev || fresh?._rev !== inspectedRev || String(fresh?.status || "").trim().toLowerCase() !== PAYMENT_STATUS_STARTED || hasKnownCapture(fresh)) return err(409, "Payment state changed before it could be released.");
+  const freshState = String(fresh?.providerPaymentState || "").trim().toLowerCase();
+  if (!inspectedRev || fresh?._rev !== inspectedRev || String(fresh?.status || "").trim().toLowerCase() !== PAYMENT_STATUS_STARTED || hasKnownCapture(fresh) || ACTIVE_OR_PARTIAL_DODO_STATES.includes(freshState)) return err(409, "Payment state changed before it could be released.");
   const holdId = String(fresh?.bookingPayload?.slotHoldId || "").trim(), hold = holdId ? await getHoldById(client, holdId) : null;
   if (holdId && (!hold?._id || !hold._rev || String(hold.paymentRecordId || "").trim() !== String(fresh._id).trim())) return err(409, "The slot reservation is no longer owned by this payment.");
   const expiresAt = String(hold?.expiresAt || "").trim(), holdExpired = Boolean(holdId && hold?._id && !isFutureIso(expiresAt));
