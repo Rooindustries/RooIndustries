@@ -6,7 +6,8 @@ import {
   exhaustedPendingCleanupNeedsResume,
   hasActiveLateCaptureWatch,
 } from "./lateCaptureRecovery.js";
-import { hasKnownCaptureRecord, hasPreservedOwnerReview } from "./paymentRecoveryState.js";
+import { PARTIAL_CAPTURE_DODO_STATES } from "./paymentFailureReason.js";
+import { ALL_PENDING_AND_PARTIAL_DODO_STATES, hasKnownCaptureRecord, hasPreservedOwnerReview } from "./paymentRecoveryState.js";
 import {
   buildPaymentRecordEvent,
   getPaymentRecordById,
@@ -223,11 +224,21 @@ export const vetoDodoPendingCleanup = async ({
 export const finalizeExhaustedCleanup = async ({
   client, record, targetStatus, reason, observedState = "", providerPaymentId = "",
   failureFields = {}, source = "reconcile", patchRecord, getNextPaymentRecoveryAt,
-  buildPublicStatusBody, includeRefreshedHold = false,
+  buildPublicStatusBody, includeRefreshedHold = false, freshLiveTerminal = false,
 }) => {
-  const current = (await getPaymentRecordById(client, record._id)) || record;
+  const current = record?._rev ? record : (await getPaymentRecordById(client, record._id)) || record;
   if (isLockedOrSettled(current) || hasKnownCaptureRecord(current)) {
     return { ok: true, httpStatus: 200, paymentRecord: current, response: buildPublicStatusBody(current, { includeRefreshedHold }) };
+  }
+  const storedState = String(current.providerPaymentState || "").trim().toLowerCase();
+  const partialCaptured = PARTIAL_CAPTURE_DODO_STATES.includes(storedState);
+  if (partialCaptured || (!freshLiveTerminal && ALL_PENDING_AND_PARTIAL_DODO_STATES.has(storedState))) {
+    const vetoed = await vetoDodoPendingCleanup({
+      client, record: current, observedState: storedState, providerPaymentId, targetStatus, source,
+      reason: partialCaptured ? "dodo_partial_capture_requires_recovery" : "dodo_payment_still_live",
+      patchRecord,
+    });
+    return { ok: vetoed.ok, httpStatus: vetoed.httpStatus, paymentRecord: vetoed.paymentRecord, response: buildPublicStatusBody(vetoed.paymentRecord, { includeRefreshedHold }) };
   }
   const terminalStatus =
     targetStatus === PAYMENT_STATUS_FAILED || String(current.status || "").trim().toLowerCase() === PAYMENT_STATUS_FAILED
@@ -240,7 +251,7 @@ export const finalizeExhaustedCleanup = async ({
       client,
       record: current,
       set: {
-        ...stateObsPatch(current, observedState),
+        ...stateObsPatch(current, observedState, { allowTerminal: freshLiveTerminal }),
         ...paymentIdPatch(current, providerPaymentId),
         ...missingFailureFields,
         status: terminalStatus,

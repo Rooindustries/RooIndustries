@@ -186,6 +186,14 @@ test('HTTP failure-reason mapper covers all 10 safe codes without echoing raw er
       assert.equal(holdAfter.phase, 'released');
     }
   }
+
+  const directFail = await startDodoCheckout();
+  fixture.setPaymentAmountOverrides({ status: 'failed', error_code: 'do_not_honor', error_message: 'raw bank' });
+  const firstFin = await fixture.post('/api/payment/finalize', {}, directFail.token);
+  assert.equal(firstFin.status, 200, JSON.stringify(firstFin));
+  assert.equal(firstFin.body.status, 'failed');
+  assert.equal(firstFin.body.holdRetained, true);
+  assert.ok(firstFin.body.refreshedHold?.slotHoldToken);
 });
 
 test('before- and after-35m token.exp matrix across all 3 providers makes 0 provider calls and keeps DB unchanged', async () => {

@@ -70,10 +70,8 @@ export const canRestoreUnpaidRecovery = (record, inspection = null) => {
 export const resolveLiveRefreshedHold = async ({ client, record }) => {
   if (!client || !record?._id) return null;
   const st = lower(record.status);
-  if (st !== "abandoned" && st !== "failed") return null;
-  const hasSnap = st === "abandoned"
-    ? Boolean(record.cancelledHoldSnapshot?.slotHoldToken)
-    : Boolean(record.refreshedHoldSnapshot?.slotHoldToken);
+  const hasSnap = (st === "abandoned" && Boolean(record.cancelledHoldSnapshot?.slotHoldToken)) ||
+    (st === "failed" && Boolean(record.refreshedHoldSnapshot?.slotHoldToken));
   const fresh = hasSnap ? record : await getPaymentRecordById(client, record._id);
   const freshSt = lower(fresh?.status);
   if (freshSt !== "abandoned" && freshSt !== "failed") return null;

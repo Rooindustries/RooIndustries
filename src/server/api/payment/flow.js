@@ -6723,7 +6723,7 @@ export const refreshDodoPayment = async ({
   const terminalDispute = hasUnresolvedDispute ? null : dodoDisputes.find(dispute => isTerminalDisputeStatus(dispute.status));
   const disputed = disputes.some((dispute) => !["dispute_won", "dispute_cancelled"].includes(dispute.dispute_status)) ||
     (record.dodoDisputeActive === true && disputes.length === 0);
-  if (payment.status === "succeeded" && (hasUnresolvedDispute || disputed)) {
+  if (payment.status === "succeeded" && (disputes.length > 0 || record.dodoDisputeActive === true)) {
     const reversalCheck = await validateDodoReversalDetails({ payment, hydrateRefund: retrieveDodoRefund });
     if (!reversalCheck.ok) {
       await persistCaptureBeforeReject();

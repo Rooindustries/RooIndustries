@@ -96,7 +96,7 @@ const stageCleanupFailure = async (args) => {
     return makeResponse(vetoed.ok, vetoed.httpStatus, vetoed.paymentRecord, buildPublicStatusBody, includeRefreshedHold);
   }
   const nextFailures = normalizePaymentFailureCount(current.recoveryFailureCount) + 1;
-  if (nextFailures >= 12) return finalizeExhaustedCleanup({ ...args, record: current });
+  if (nextFailures >= 12) return finalizeExhaustedCleanup({ ...args, record: current, freshLiveTerminal: effectiveFreshLiveTerminal });
   const nextAttempts = Math.min(12, normalizePaymentFailureCount(current.recoveryAttemptCount) + 1);
   let staged = current;
   try {
