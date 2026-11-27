@@ -1,10 +1,70 @@
 import { fetchJsonWithTimeout } from "./clientRequest";
 import { extractTokenNonce } from "./checkoutConfirmation";
-import { CODE_VALIDATION_UNAVAILABLE_MESSAGE, formatCouponValue, normalizeCurrencyCode, sanitizeCouponForCheckout, sanitizeReferralForCheckout, toSubunitsClient } from "./checkoutCodes";
-import { beginPendingPaymentStart, clearDodoNavQuery, endPendingPaymentStart, isNonResumablePaymentData, mergeLineageCheckout, ownsSessionHold, paymentSessionMatchesBookingLineage, paymentSessionMatchesCheckout, stripDodoReturnFromHistory, syncCheckoutRef, syncHistoryCheckoutBooking } from "./checkoutSessionGuard";
+import { CODE_VALIDATION_UNAVAILABLE_MESSAGE, formatCouponValue, sanitizeCouponForCheckout, sanitizeReferralForCheckout } from "./checkoutCodes";
+import { clearDodoNavQuery, isNonResumablePaymentData, mergeLineageCheckout, ownsSessionHold, stripDodoReturnFromHistory, syncCheckoutRef, syncHistoryCheckoutBooking } from "./checkoutSessionGuard";
+import { fetchPaymentJson, verifyProviderLaunchPayload } from "./paymentSessionLocks";
 import { areSameLineageNonces, markReservationTerminal, recordHoldNonceRotation, reservationScopeKey } from "./reservationScope";
+
+export async function runPreApplyCheckoutCodes(c) {
+  let nextReferral = null, referralUnavailable = false, referralRejected = false, nextCoupon = null;
+  let nextReferralInput = c.referralCode, nextCouponInput = c.couponCode, infoMessage = "", droppedPassive = false;
+  const dropPassive = () => { droppedPassive = true; nextReferralInput = nextReferral?.code || ""; };
+  const applyResolved = (result, source) => {
+    const blocksPassive = !c.persistedRef && nextCoupon?.canCombineWithReferral === false;
+    if (!result?.ok) {
+      if (source !== "referral") { nextCouponInput = ""; c.setCouponError(result?.error || "Invalid coupon code."); }
+      else if (result?.unavailable) {
+        referralUnavailable = true;
+        if (!nextReferral && !blocksPassive && c.referralResKeyRef.current === c.startedReservationKey && c.referral?.code?.toLowerCase() === c.refLower) nextReferral = c.referral;
+        if (blocksPassive) nextReferralInput = "";
+        c.setReferralError(result.error);
+      } else { referralRejected = true; nextReferralInput = nextReferral?.code || ""; c.setReferralError("Invalid or inactive referral code."); }
+      return;
+    }
+    if (result.type === "referral") {
+      const safeReferral = sanitizeReferralForCheckout(result.value);
+      if (!safeReferral) return;
+      if (source === "referral" && (blocksPassive || (!c.persistedRef && nextReferral))) return dropPassive();
+      nextReferral = safeReferral; nextReferralInput = safeReferral.code;
+      if (source === "coupon") { nextCouponInput = ""; infoMessage = "This code is a referral, so it was applied as a referral."; }
+      return;
+    }
+    const safeCoupon = sanitizeCouponForCheckout(result.value);
+    if (!safeCoupon) return;
+    if (source === "referral" && nextCoupon && !c.persistedRef) return dropPassive();
+    if (safeCoupon.canCombineWithReferral === false && nextReferral) { nextCouponInput = ""; c.setCouponError("This coupon can't be used together with a referral discount."); return; }
+    nextCoupon = safeCoupon; nextCouponInput = safeCoupon.code;
+    if (source === "referral") { nextReferralInput = nextReferral?.code || ""; infoMessage = "This code is a coupon, so it was applied as a coupon."; }
+  };
+  if (c.couponCode) {
+    const result = await resolveCheckoutCode(c.couponCode, c.packageTitle);
+    if (!c.isCurrent()) return;
+    applyResolved(result, "coupon");
+  }
+  if (c.referralCode && c.refLower !== c.couponCode.toLowerCase()) {
+    const result = await resolveCheckoutCode(c.referralCode, c.packageTitle);
+    if (!c.isCurrent()) return;
+    applyResolved(result, "referral");
+  } else if (c.referralCode && nextReferral) { nextCouponInput = ""; }
+  if (nextReferral && nextCoupon?.canCombineWithReferral === false) {
+    nextCoupon = null; nextCouponInput = ""; c.setCouponError("This coupon can't be used together with a referral discount.");
+  }
+  c.setReferral(nextReferral); c.setCoupon(nextCoupon); c.setReferralInput(nextReferralInput); c.setCouponInput(nextCouponInput);
+  const currentSess = c.readLinkReferralFromSession(), sameSess = currentSess.toLowerCase() === c.refLower;
+  if ((droppedPassive || (!referralUnavailable && !nextReferral?.code && (referralRejected || !nextCoupon))) && sameSess) c.writeLinkReferralToSession("");
+  else if (!referralUnavailable && nextReferral?.code && !currentSess) c.writeLinkReferralToSession(nextReferral.code);
+  if (infoMessage) c.showBanner("info", infoMessage);
+  if (droppedPassive) {
+    const curSearch = window.location.search;
+    const nextSearch = c.normalizeLinkReferral(new URLSearchParams(curSearch).get("ref") || "").toLowerCase() === c.refLower ? c.stripRefFromSearch(curSearch) : null;
+    if (nextSearch !== null) {
+      c.skipPreApplyKeyRef.current = `${c.preApplyPrefix}${nextSearch}`;
+      c.navigate({ pathname: c.location.pathname, search: nextSearch, hash: c.location.hash }, { replace: true, state: c.navState });
+    }
+  }
+}
+
 const str = (v) => String(v || "").trim();
-const num = (v) => Number(v || 0);
 const unavailableCode = () => ({ ok: false, unavailable: true, error: CODE_VALIDATION_UNAVAILABLE_MESSAGE });
 const lookupCode = async (url, fetchImpl) => {
   try {
@@ -88,8 +148,8 @@ export async function runBookingPaymentRelease({ hold, checkout, packageTitle, h
     onError((error?.name === "AbortError" || error?.name === "TimeoutError") ? "The payment session could not be released. Please try again." : error?.message || "The payment session could not be released.");
   }
 }
-export { isNonResumablePaymentData, stripDodoReturnFromHistory, syncCheckoutRef, syncHistoryCheckoutBooking };
-export const runLegacyDodoStatusCheck = async ({ token, operation, fetchJson, setBusy, onBooked, onManualReview, onTerminalClear }) => {
+export { fetchPaymentJson, isNonResumablePaymentData, stripDodoReturnFromHistory, syncCheckoutRef, syncHistoryCheckoutBooking, verifyProviderLaunchPayload };
+export const runLegacyDodoStatusCheck = async ({ token, operation, fetchJson = fetchPaymentJson, setBusy, onBooked, onManualReview, onTerminalClear }) => {
   setBusy(true);
   try {
     const { response, data } = await fetchJson("/api/payment/status", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: "{}" });
@@ -97,136 +157,8 @@ export const runLegacyDodoStatusCheck = async ({ token, operation, fetchJson, se
     const st = str(data?.status).toLowerCase();
     if (response.ok && (st === "booked" || st === "email_partial")) await onBooked(data, operation);
     else if (response.ok && data?.manualReviewRequired === true) onManualReview(data.recoveryReason);
-    else if (response.ok && ["failed", "abandoned", "refunded"].includes(st) && data?.terminalOutcomeComplete !== false) onTerminalClear(st, token);
+    else if (response.ok && ["failed", "abandoned", "refunded"].includes(st) && data?.cleanupPending !== true && data?.manualReviewRequired !== true && (st === "refunded" ? data?.terminalOutcomeComplete !== false : data?.terminalOutcomeComplete === true)) onTerminalClear(st, token);
   } finally { if (operation.current()) setBusy(false); }
-};
-export const verifyProviderLaunchPayload = ({ provider, payload, expectedAmount, expectedCurrency }) => {
-  if (!payload || typeof payload !== "object") return { ok: false, reason: "Missing provider order details." };
-  const cur = normalizeCurrencyCode(expectedCurrency), sub = toSubunitsClient(expectedAmount, cur);
-  const pCur = str(payload.currency).toUpperCase(), pAmt = Number(payload.amount || 0), orderId = str(payload.orderId);
-  if (provider === "razorpay") {
-    const key = str(payload.key || payload.keyId);
-    return orderId && key && pCur === cur && Number.isSafeInteger(pAmt) && pAmt === sub ? { ok: true, orderId, key, currency: pCur, amount: pAmt } : { ok: false, reason: "Payment order details did not match the confirmed quote." };
-  }
-  if (provider === "paypal") return orderId && pCur === cur && Number.isSafeInteger(pAmt) && pAmt === sub ? { ok: true, orderId, currency: pCur, amount: pAmt } : { ok: false, reason: "PayPal order details did not match the confirmed quote." };
-  return { ok: true };
-};
-export const runStartSessionCheckout = async ({ provider, operation, startSnap, c, flow }) => {
-  if (!operation.current() || c.paymentActionRef.current.cancelling) return { terminal: true, stale: true };
-  const startedScopeKey = c.currentScopeKeyRef.current;
-  if (c.paymentSession?.provider === provider && paymentSessionMatchesCheckout(c.paymentSession?.fingerprint, c.checkoutFingerprint) &&
-      paymentSessionMatchesBookingLineage(c.paymentSession, c.bookingData) && c.paymentSession?.paymentAccessToken && c.paymentSession?.providerPayload) {
-    const resumed = await flow.resume({ provider, operation, fetchJson: c.fetchJson, navigateToConfirmation: c.navigateToConfirmation, clearPaymentSession: c.clearPaymentSession });
-    if (resumed.done) return resumed.value;
-  }
-  if (c.sessionStartRef.current?.provider === provider && c.sessionStartRef.current.operation.current()) return c.sessionStartRef.current.promise;
-  if (c.otherCheckoutStarting(provider)) throw new Error("Another payment method is still starting. Please wait a moment and try again.");
-  c.manualCodeAllowedRef.current = false;
-  const promise = (async () => {
-    if (c.quoteLoading || !c.quoteFingerprint) throw new Error("Checkout price is still being confirmed. Please try again.");
-    const body = await c.paymentStartBody({ operation, provider, quoteFingerprint: c.quoteFingerprint, salesAttribution: c.bookingData.salesAttribution, startSnap, buildPayload: c.buildCheckoutPayload });
-    if (!body) return { terminal: true, stale: true };
-    const { response, data } = await c.fetchJson("/api/payment/start", { method: "POST", headers: { "Content-Type": "application/json" }, body });
-    const moment = c.eventMoment(), booked = response.ok && data?.ok && ["booked", "email_partial"].includes(str(data.status).toLowerCase());
-    if (booked) c.trackConfirmedPurchase(data.analyticsReceipt);
-    if (response.ok && data?.ok) await c.countCheckoutStartOnce(data, provider, () => c.trackCheckoutSessionStarted({ packageTitle: c.bookingData.packageTitle, price: data.quote?.netAmount, provider, moment }));
-    if (!operation.current() || c.paymentActionRef.current.cancelling || c.currentScopeKeyRef.current !== startedScopeKey) return { terminal: true, stale: true };
-    if (!response.ok || !data?.ok) {
-      if (flow.applyClaimed(data?.claimedSession || data?.lockedSession, operation)) throw new Error("A payment session is already open for this reservation. Resume it or click Change payment method.");
-      const isMismatch = response.status === 409 && ["quote_changed", "quote_fingerprint_mismatch", "quote_fingerprint_required"].includes(str(data?.code));
-      if (isMismatch && provider !== "free") c.selectQuoteProvider(provider, startedScopeKey);
-      if (data?.quote) c.setServerQuote(data.quote);
-      if (data?.quoteFingerprint || data?.fingerprint) c.setQuoteFingerprint(str(data.quoteFingerprint || data.fingerprint));
-      if (data?.providers) c.setProviderConfig((cur) => ({ ...cur, ...data.providers }));
-      if (isMismatch) throw new Error("The price changed. Review the updated total and click again.");
-      throw new Error(data?.error || "Unable to start payment.");
-    }
-    if (provider !== "free") c.selectQuoteProvider(provider, startedScopeKey);
-    if (data.quote) c.setServerQuote(data.quote);
-    if (data.quoteFingerprint || data.fingerprint) c.setQuoteFingerprint(str(data.quoteFingerprint || data.fingerprint));
-    const r = data.refreshedHold || data.hold || null;
-    let nextCheckout = c.bookingData;
-    if (r?.slotHoldId && r?.slotHoldToken) {
-      recordHoldNonceRotation({ slotHoldId: r.slotHoldId, fromNonce: c.sessionHold?.slotHoldToken || c.checkoutRef.current?.slotHoldToken || c.bookingData?.slotHoldToken || "", toNonce: r.slotHoldToken });
-      c.setSessionHold(r);
-      nextCheckout = mergeLineageCheckout(c.readStoredCheckout(), c.checkoutRef.current || c.bookingData, { slotHoldId: r.slotHoldId, slotHoldToken: r.slotHoldToken, slotHoldExpiresAt: r.slotHoldExpiresAt || r.expiresAt || "" });
-      c.checkoutRef.current = nextCheckout; c.writeStoredCheckout(nextCheckout); syncHistoryCheckoutBooking(nextCheckout);
-      try {
-        const holdState = { holdId: r.slotHoldId, holdToken: r.slotHoldToken, expiresAt: r.slotHoldExpiresAt || r.expiresAt || "", startTimeUTC: c.bookingData.startTimeUTC || "", packageTitle: c.packageTitle, phase: r.phase || "payment_pending" };
-        c.writeBrowserStorage("sessionStorage", "my_slot_hold", JSON.stringify(holdState));
-        window.dispatchEvent(new CustomEvent("hold-state", { detail: holdState }));
-      } catch {}
-    }
-    const nextSession = { provider, fingerprint: c.checkoutFingerprint, scopeKey: reservationScopeKey(nextCheckout) || startedScopeKey, paymentAccessToken: str(data.paymentAccessToken), providerPayload: data.providerPayload || {}, sessionExpiresAt: str(data.sessionExpiresAt), result: data };
-    if (provider !== "free" && booked) { await c.showConfirmation("paid", data, operation); return { ...nextSession, terminal: true }; }
-    if (provider !== "free") {
-      operation.token = nextSession.paymentAccessToken;
-      if (provider === "dodo") { c.dodoReturnHandled.current = nextSession.paymentAccessToken; stripDodoReturnFromHistory(); }
-      c.persistPaymentSession(nextSession);
-    }
-    return nextSession;
-  })();
-  const pendingStartId = beginPendingPaymentStart(c.holdForGuard.holdId, c.holdForGuard.holdToken);
-  c.sessionStartRef.current = { provider, promise, operation };
-  c.setPendingStarts([...c.pendingStartsRef.current, { provider, promise }]);
-  try { return await promise; } catch (error) {
-    if (!operation.current()) return { terminal: true, stale: true };
-    if (!c.readStoredPaymentSession()) clearDodoNavQuery({ dodoReturnHandled: c.dodoReturnHandled, latestNavRef: c.latestNavRef, navigate: c.navigate, nextCheckout: c.checkoutRef.current });
-    throw error;
-  } finally {
-    endPendingPaymentStart(pendingStartId);
-    if (c.sessionStartRef.current?.promise === promise) c.sessionStartRef.current = null;
-    c.setPendingStarts(c.pendingStartsRef.current.filter((s) => s.promise !== promise));
-  }
-};
-export const runFinalizeSessionCheckout = async ({ paymentAccessToken, providerData, operation, captured = false, c, flow }) => {
-  if (!captured && !operation.current()) return null;
-  c.paymentActionRef.current.seq += 1; c.manualCodeAllowedRef.current = false;
-  if (operation.current()) c.setPaymentStatusBusy(true);
-  const poll = async () => {
-    const deadline = Date.now() + c.pollTimeoutMs;
-    while (Date.now() < deadline) {
-      if (!operation.current()) return null;
-      let response, data;
-      try { ({ response, data } = await c.fetchJson("/api/payment/status", { method: "POST", headers: { Authorization: `Bearer ${paymentAccessToken}`, "Content-Type": "application/json" }, body: "{}" }, Math.min(c.fetchTimeoutMs, deadline - Date.now()))); }
-      catch (error) { if (!operation.current()) return null; if (error?.name === "AbortError") continue; throw error; }
-      if (!operation.current()) return null;
-      if (isNonResumablePaymentData(data)) flow.scrubPayload(paymentAccessToken, data);
-      if (!response.ok) throw new Error(data?.error || "Unable to load payment status.");
-      const st = str(data?.status).toLowerCase();
-      if (data?.manualReviewRequired === true || ["booked", "email_partial", "refunded", "failed", "abandoned"].includes(st)) return data;
-      const rem = deadline - Date.now();
-      if (rem > 0) await new Promise((r) => setTimeout(r, Math.min(c.pollIntervalMs, rem)));
-    }
-    throw new Error("Timed out waiting for payment confirmation.");
-  };
-  try {
-    const { response, data } = await c.fetchJson("/api/payment/finalize", { method: "POST", headers: { Authorization: `Bearer ${paymentAccessToken}`, "Content-Type": "application/json" }, body: JSON.stringify({ providerData }) });
-    if (!operation.current()) return null;
-    if (isNonResumablePaymentData(data)) flow.scrubPayload(paymentAccessToken, data);
-    const status = str(data?.status).toLowerCase(), isFinalizedStatus = status === "booked" || status === "email_partial";
-    if (response.ok && data?.manualReviewRequired === true) { c.showBanner("info", data.recoveryReason, { persistent: true }); return data; }
-    if (!response.ok && response.status !== 202 && !isFinalizedStatus) throw new Error(data?.error || "Unable to finalize payment.");
-    if (isFinalizedStatus) { await c.navigateToConfirmation("paid", data, operation); return data; }
-    const finishNonBooked = (payload, st, fallbackMsg) => {
-      if (flow.releaseAbandoned(payload, paymentAccessToken, operation, c.clearPaymentSession)) return payload;
-      const handled = c.clearPaymentSession(st, paymentAccessToken);
-      operation.token = "";
-      if (handled) return payload;
-      throw new Error(payload?.recoveryReason || payload?.error || fallbackMsg);
-    };
-    if (["needs_recovery", "finalizing", "started"].includes(status)) {
-      c.showBanner("info", "Finalizing your payment and booking...");
-      const settled = await poll();
-      if (!operation.current()) return null;
-      const settledStatus = str(settled?.status).toLowerCase();
-      if (settled?.manualReviewRequired === true) { flow.scrubPayload(paymentAccessToken, settled); c.showBanner("info", settled.recoveryReason, { persistent: true }); return settled; }
-      if (settledStatus === "booked" || settledStatus === "email_partial") { await c.navigateToConfirmation("paid", settled, operation); return settled; }
-      return finishNonBooked(settled, settledStatus, "Payment could not be finalized.");
-    }
-    return finishNonBooked(data, status, "Payment finalization failed.");
-  } catch (error) { if (!operation.current()) return null; throw error; }
-  finally { if (operation.current()) c.setPaymentStatusBusy(false); }
 };
 export const runDodoCheckout = async (c) => {
   const operation = c.createPaymentOperation();
@@ -235,14 +167,15 @@ export const runDodoCheckout = async (c) => {
   try {
     const session = await c.startSessionCheckout("dodo", operation);
     if (!operation.current() || session?.terminal) return;
-    if (!session?.providerPayload?.checkoutUrl) throw new Error("Checkout is being recovered. Check the payment status shortly.");
+    const verified = verifyProviderLaunchPayload({ provider: "dodo", payload: session?.providerPayload, expectedAmount: session?.result?.quote?.netAmount ?? c.finalAmount, expectedCurrency: session?.result?.quote?.currency || c.displayQuoteCurrency });
+    if (!verified.ok) throw new Error(verified.reason);
     const r = session.result?.refreshedHold || session.result?.hold || c.sessionHold;
     const ret = { ...(c.checkoutRef.current || c.bookingData), ...(r?.slotHoldId && r?.slotHoldToken ? { slotHoldId: r.slotHoldId, slotHoldToken: r.slotHoldToken, slotHoldExpiresAt: r.slotHoldExpiresAt || r.expiresAt || "" } : {}) };
     if (!c.writeBrowserStorage("sessionStorage", c.checkoutKey, JSON.stringify(ret)) || !c.writeStoredPaymentSession(session)) {
       c.showBanner("error", "Your browser could not save this payment session. Checkout has stayed here so you can check its status or change payment method. Allow browser storage and try again to open checkout.", { persistent: true });
       return;
     }
-    stripDodoReturnFromHistory(); window.location.assign(session.providerPayload.checkoutUrl);
+    stripDodoReturnFromHistory(); window.location.assign(verified.checkoutUrl);
   } catch (error) {
     if (!operation.current()) return;
     c.showBanner("error", (error?.name === "AbortError" || error?.name === "TimeoutError") ? "Checkout timed out. Please try again." : error.message || "Unable to open checkout.", { persistent: true });
@@ -253,13 +186,17 @@ export const runValidateReferral = async (code, c, flow) => {
   if (!stillHere() || c.validating || c.validatingCoupon) return;
   const normalizedCode = str(code);
   if (!normalizedCode) {
+    c.validationGenRef.current += 1;
     c.setReferral(null); c.setReferralError(""); c.writeStoredReferral("");
     flow.persistCodes({ referralCode: "", couponCode: c.coupon?.code || "", stripRef: true }); return;
   }
+  const myGen = ++c.referralCheckGenRef.current;
+  c.validationGenRef.current += 1;
   try {
     c.setValidating(true); c.setReferralError("");
     const result = await resolveCheckoutCode(normalizedCode, c.packageTitle);
-    if (!stillHere()) return;
+    if (c.referralCheckGenRef.current !== myGen || !stillHere()) return;
+    c.validationGenRef.current += 1;
     if (!result.ok) {
       if (!result.unavailable) { c.setReferral(null); c.writeStoredReferral(""); flow.persistCodes({ referralCode: "", couponCode: c.coupon?.code || "", stripRef: true }); }
       c.setReferralError(result.unavailable ? result.error : "Invalid or inactive referral code."); return;
@@ -269,6 +206,7 @@ export const runValidateReferral = async (code, c, flow) => {
       if (!safeCoupon) { c.setReferralError("Invalid or inactive referral code."); return; }
       if (safeCoupon.canCombineWithReferral === false && c.referral) { c.setCouponError("This coupon can't be used together with a referral discount."); return; }
       c.setCoupon(safeCoupon); c.setCouponInput(safeCoupon.code); c.setReferralInput(c.referral?.code || "");
+      flow.persistCodes({ referralCode: c.referral?.code || "", couponCode: safeCoupon.code });
       c.showBanner("info", "This code is a coupon, so it was applied as a coupon."); return;
     }
     const safeReferral = sanitizeReferralForCheckout(result.value);
@@ -277,18 +215,25 @@ export const runValidateReferral = async (code, c, flow) => {
     const nextCouponCode = c.coupon?.canCombineWithReferral === false ? "" : c.coupon?.code || "";
     if (c.coupon?.canCombineWithReferral === false) { c.setCoupon(null); c.setCouponInput(""); c.showBanner("info", "Current coupon can't be combined with referrals and was removed."); }
     flow.persistCodes({ referralCode: safeReferral.code, couponCode: nextCouponCode, stripRef: true });
-  } catch { if (stillHere()) { console.error("Referral validation failed"); c.setReferralError("We couldn't validate that referral code. Please try again."); } }
-  finally { c.setValidating(false); }
+  } catch { if (c.referralCheckGenRef.current === myGen && stillHere()) { c.validationGenRef.current += 1; console.error("Referral validation failed"); c.setReferralError("We couldn't validate that referral code. Please try again."); } }
+  finally { if (c.referralCheckGenRef.current === myGen && c.currentScopeKeyRef.current === c.scopeKey) c.setValidating(false); }
 };
 export const runValidateCoupon = async (code, c, flow) => {
   const stillHere = () => c.manualCodeAllowedRef.current && (!c.currentScopeKeyRef || c.currentScopeKeyRef.current === c.scopeKey);
   if (!stillHere() || c.validating || c.validatingCoupon) return;
   const normalizedCode = str(code);
-  if (!normalizedCode) { c.setCoupon(null); c.setCouponError(""); return; }
+  if (!normalizedCode) {
+    c.validationGenRef.current += 1;
+    c.setCoupon(null); c.setCouponError("");
+    flow.persistCodes({ referralCode: c.referral?.code || "", couponCode: "" }); return;
+  }
+  const myGen = ++c.couponCheckGenRef.current;
+  c.validationGenRef.current += 1;
   try {
     c.setValidatingCoupon(true); c.setCouponError("");
     const result = await resolveCheckoutCode(normalizedCode, c.packageTitle);
-    if (!stillHere()) return;
+    if (c.couponCheckGenRef.current !== myGen || !stillHere()) return;
+    c.validationGenRef.current += 1;
     if (!result.ok) { c.setCoupon(null); c.setCouponError(result.error || "Invalid coupon code."); return; }
     if (result.type === "referral") {
       const safeReferral = sanitizeReferralForCheckout(result.value);
@@ -302,9 +247,10 @@ export const runValidateCoupon = async (code, c, flow) => {
     if (!safeCoupon) { c.setCouponError("Invalid coupon code."); return; }
     if (safeCoupon.canCombineWithReferral === false && c.referral) { c.setCoupon(null); c.setCouponError("This coupon can't be used together with a referral discount. Remove the referral or use a different coupon."); return; }
     c.setCoupon(safeCoupon); c.setCouponInput(safeCoupon.code);
+    flow.persistCodes({ referralCode: c.referral?.code || "", couponCode: safeCoupon.code });
     c.showBanner("success", `Coupon applied: ${formatCouponValue(safeCoupon)}`);
-  } catch { if (stillHere()) { console.error("Coupon validation failed"); c.setCoupon(null); c.setCouponError("We couldn't validate that coupon code. Please try again."); } }
-  finally { c.setValidatingCoupon(false); }
+  } catch { if (c.couponCheckGenRef.current === myGen && stillHere()) { c.validationGenRef.current += 1; console.error("Coupon validation failed"); c.setCoupon(null); c.setCouponError("We couldn't validate that coupon code. Please try again."); } }
+  finally { if (c.couponCheckGenRef.current === myGen && c.currentScopeKeyRef.current === c.scopeKey) c.setValidatingCoupon(false); }
 };
 export const runFreeBookingCheckout = async (c) => {
   const operation = c.createPaymentOperation();
@@ -353,12 +299,8 @@ export const runRazorpayCheckout = async (c) => {
   } catch (err) { if (operation.current()) { console.error("Razorpay checkout failed"); c.showBanner("error", err?.message || "Payment could not be processed. Please try again."); } }
   finally { if (operation.current()) c.setPayingRzp(false); }
 };
-const runTrackedStart = async (pendingRef, setPending, provider, run) => {
-  const entry = { provider }; setPending([...pendingRef.current, entry]);
-  try { return await run(); } finally { setPending(pendingRef.current.filter((item) => item !== entry)); }
-};
 export const createCheckoutFlow = (ctx) => {
-  const { bookingData, checkoutRef, paymentActionRef, readStoredCheckout, writeStoredCheckout, readStoredPaymentSession, persistPaymentSession, paymentView, showBanner } = ctx;
+  const { bookingData, checkoutRef, paymentActionRef, readStoredCheckout, writeStoredCheckout, readStoredPaymentSession, persistPaymentSession, paymentView } = ctx;
   const navReplace = (loc, search, state) => ctx.navigate({ pathname: loc.pathname, search, hash: loc.hash }, { replace: true, state });
   const patchCheckout = (patch) => {
     const next = mergeLineageCheckout(readStoredCheckout(), checkoutRef.current || bookingData || {}, patch);
@@ -383,25 +325,15 @@ export const createCheckoutFlow = (ctx) => {
     persistPaymentSession({ ...cur, providerPayload: cur.providerPayload?.taxInclusive === false ? { taxInclusive: false } : {}, result: { ...(cur.result || {}), ...(data || {}) } });
   };
   const applyReleasedHold = (hold) => writeHold(hold, "holding", ctx.packagePrice);
-  const releaseAbandoned = (resp, token, op, clearPaymentSession) => {
-    if (str(resp?.status).toLowerCase() !== "abandoned") return false;
-    const owns = ownsHold(readStoredPaymentSession() || ctx.paymentSession), nextCheckout = owns ? applyReleasedHold(resp?.refreshedHold) : null;
-    if (owns && !nextCheckout) return false;
-    clearPaymentSession("", token); op.token = ""; clearDodoNav(nextCheckout);
-    showBanner("success", "Payment method released. Choose a payment method below."); return true;
-  };
-  const beginCancel = (createPaymentOperation, blocked) => {
+  const beginCancel = (createPaymentOperation, blocked, existingOp = null) => {
     const activeSession = readStoredPaymentSession() || ctx.paymentSession, paymentAccessToken = str(activeSession?.paymentAccessToken);
     if (!paymentAccessToken || paymentActionRef.current.cancelling || blocked) return null;
-    const operation = createPaymentOperation(paymentAccessToken);
+    const operation = existingOp && typeof existingOp.current === "function" ? existingOp : createPaymentOperation(paymentAccessToken);
     if (!operation.current()) return null;
     let cancelSeq = paymentActionRef.current.seq + 1;
     paymentActionRef.current = { seq: cancelSeq, cancelling: true };
     const tokenCurrent = () => ctx.paymentMountedRef.current && str((readStoredPaymentSession() || paymentView.session)?.paymentAccessToken) === operation.token;
     return { activeSession, paymentAccessToken, operation, tokenCurrent, cancelCurrent: () => tokenCurrent() && paymentActionRef.current.seq === cancelSeq, syncSeq: () => (cancelSeq = paymentActionRef.current.seq) };
-  };
-  const checkStatus = (finalizeSessionCheckout) => {
-    if (!paymentActionRef.current.cancelling) finalizeSessionCheckout({ paymentAccessToken: ctx.paymentSession.paymentAccessToken, providerData: {} }).catch((e) => showBanner("error", e?.message || "Unable to load payment status. Please try again."));
   };
   const persistCodes = ({ referralCode = bookingData.referralCode || "", couponCode = bookingData.couponCode || "", stripRef = false } = {}) => {
     const { location: loc, navState } = ctx.latestNavRef.current;
@@ -412,56 +344,16 @@ export const createCheckoutFlow = (ctx) => {
     ctx.skipPreApplyKeyRef.current = `${ctx.activeReservationKeyRef.current}|${next.referralCode}|${next.couponCode}|${search}`;
     navReplace(loc, search, { ...navState, bookingData: next });
   };
-  const applyClaimed = (claimed, operation) => {
-    const provider = str(claimed?.provider), token = str(claimed?.paymentAccessToken);
-    if (!provider || !token) return false;
-    const referralCode = ctx.stripReservedCode(claimed.referralCode), couponCode = ctx.stripReservedCode(claimed.couponCode);
-    const q = claimed.quote && typeof claimed.quote === "object" ? claimed.quote : null;
-    writeHold(claimed.refreshedHold, "payment_pending");
-    const nextCheckout = patchCheckout({ referralCode, couponCode, code: 1 });
-    const fingerprint = JSON.stringify({ packageTitle: ctx.packageTitle, originalOrderId: bookingData.originalOrderId || "", startTimeUTC: bookingData.startTimeUTC || "", email: bookingData.email || "", referralCode, couponCode });
-    ctx.writeStoredReferral(referralCode);
-    ctx.setReferral(referralCode ? { code: referralCode, discountPercent: num(q?.referralDiscountPercent) } : null); ctx.setReferralInput(referralCode);
-    ctx.setCoupon(couponCode ? { code: couponCode, discountType: str(q?.couponDiscountType) || "percent", discountPercent: num(q?.couponDiscountPercent), discountValue: num(q?.couponDiscountValue), canCombineWithReferral: q?.canCombineWithReferral !== false } : null);
-    ctx.setCouponInput(couponCode); ctx.setReferralError(""); ctx.setCouponError("");
-    if (q) ctx.setServerQuote(q);
-    if (claimed.quoteFingerprint) ctx.setQuoteFingerprint(str(claimed.quoteFingerprint));
-    operation.token = token;
-    if (provider === "dodo") { ctx.dodoReturnHandled.current = token; stripDodoReturnFromHistory(); }
-    persistPaymentSession({ provider, fingerprint, scopeKey: reservationScopeKey(nextCheckout), paymentAccessToken: token, providerPayload: claimed.providerPayload && typeof claimed.providerPayload === "object" ? claimed.providerPayload : {}, sessionExpiresAt: str(claimed.sessionExpiresAt), result: claimed });
-    return true;
-  };
-  const resume = async ({ provider, operation, fetchJson, navigateToConfirmation, clearPaymentSession }) => {
-    const session = ctx.paymentSession, tok = session.paymentAccessToken, done = (value) => ({ done: true, value });
-    if (ctx.otherCheckoutStarting(provider)) throw new Error("Another payment method is still starting. Please wait a moment and try again.");
-    const resumeSeq = (paymentActionRef.current.seq += 1);
-    const { response, data } = await runTrackedStart(ctx.pendingStartsRef, ctx.setPendingStarts, provider, () => fetchJson("/api/payment/status", { method: "POST", headers: { Authorization: `Bearer ${tok}`, "Content-Type": "application/json" }, body: "{}" }));
-    const act = paymentActionRef.current;
-    if (!operation.current() || act.cancelling || resumeSeq !== act.seq) return done({ terminal: true, stale: true });
-    const status = str(data?.status).toLowerCase();
-    if (isNonResumablePaymentData(data)) scrubPayload(tok, data);
-    if (!response.ok) throw new Error(data?.error || "Unable to verify payment status. Please try again.");
-    if (data?.manualReviewRequired === true) { showBanner("info", data.recoveryReason, { persistent: true }); return done({ ...session, providerPayload: {}, result: data, terminal: true }); }
-    if (status === "booked" || status === "email_partial") { await navigateToConfirmation("paid", data, operation); return done({ ...session, result: data, terminal: true }); }
-    if (data?.quoteFingerprintValid === false) { showBanner("error", "This payment session cannot be resumed. Check its status instead.", { persistent: true }); return done({ ...session, result: data, terminal: true }); }
-    if (isNonResumablePaymentData(data)) throw new Error(data?.recoveryReason || "Checkout is being recovered. Check the payment status shortly.");
-    if (!["refunded", "failed", "abandoned"].includes(status)) {
-      if (data?.providerOrderReady === false) { showBanner("info", "This payment session is still preparing its order. Check its status shortly.", { persistent: true }); return done({ ...session, result: data, terminal: true }); }
-      const stored = readStoredPaymentSession(), live = (stored?.paymentAccessToken === tok ? stored : paymentView.session) || session;
-      const payload = live?.result?.manualReviewRequired === true ? null : data?.providerPayload;
-      if (!payload || typeof payload !== "object") return done(live);
-      const nextPayload = live.providerPayload?.taxInclusive === false && payload.taxInclusive === undefined ? { taxInclusive: false, ...payload } : { ...payload };
-      const refreshed = { ...live, providerPayload: nextPayload, result: { ...(live.result || {}), ...(data?.quote ? { quote: data.quote } : {}) } };
-      persistPaymentSession(refreshed); return done(refreshed);
-    }
-    if (ownsHold(session) && !(status === "abandoned" && applyReleasedHold(data?.refreshedHold))) {
-      const handled = clearPaymentSession(status, tok); operation.token = "";
-      if (handled) return done({ ...session, result: data, terminal: true });
-      throw new Error(data?.recoveryReason || "This payment session is no longer payable.");
-    }
-    clearPaymentSession("", tok); operation.token = ""; stripDodoReturnFromHistory(); return { done: false };
-  };
-  return { applyReleasedHold, clearDodoNav, ownsHold, scrubPayload, releaseAbandoned, beginCancel, checkStatus, persistCodes, applyClaimed, resume };
+  return { applyReleasedHold, clearDodoNav, ownsHold, scrubPayload, beginCancel, persistCodes };
 };
 
+export { default as ActiveUpgradeBlocker } from "../components/ActiveUpgradeBlocker";
 export { default as PayPalMethodPanel } from "../components/PayPalMethodPanel";
+export {
+  runChangePaymentMethod,
+  runCheckPaymentStatus,
+  runFinalizeSessionCheckout,
+  runNewPaymentStart,
+  runResumePaymentSession,
+  runStartSessionCheckout,
+} from "./paymentSessionFlow";

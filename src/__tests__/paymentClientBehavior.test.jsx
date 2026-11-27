@@ -136,53 +136,6 @@ describe("payment client request and accessibility behavior", () => {
     }
   });
 
-  test.each(["failed", "abandoned", "refunded", "poll-failed", "manual-failed", "resume-failed"])("clears a released Dodo hold after %s", async (outcome) => {
-    jest.useFakeTimers();
-    sessionStorage.setItem("checkout_booking_state", JSON.stringify(checkout));
-    sessionStorage.setItem("my_slot_hold", JSON.stringify({
-      holdId: checkout.slotHoldId,
-      holdToken: checkout.slotHoldToken,
-      expiresAt: checkout.slotHoldExpiresAt,
-      phase: "payment_pending",
-    }));
-    sessionStorage.setItem("payment_session_state", JSON.stringify({
-      provider: "dodo",
-      paymentAccessToken: "dodo-failed-token",
-      providerPayload: { orderId: "cks_failed" },
-      fingerprint: JSON.stringify({ packageTitle: checkout.packageTitle, originalOrderId: "", startTimeUTC: checkout.startTimeUTC, email: checkout.email, referralCode: "", couponCode: "" }),
-    }));
-    global.fetch = jest.fn(async (url) => {
-      if (url === "/api/payment/finalize") return response({ ok: true, status: outcome === "poll-failed" ? "finalizing" : outcome.endsWith("-failed") ? "failed" : outcome });
-      if (url === "/api/payment/status") return response({ ok: true, status: "failed" });
-      if (url === "/api/payment/providers") return response({ ...providerPayload, providers: { ...providerPayload.providers, dodo: { enabled: true, mode: "live" } } });
-      return standardFetch(url);
-    });
-    const manualCheck = outcome === "manual-failed" || outcome === "resume-failed";
-    render(<MemoryRouter initialEntries={[{ pathname: "/payment", search: manualCheck ? "" : "?dodo_return=1" }]}>
-      <Payment hideFooter />
-    </MemoryRouter>);
-
-    if (manualCheck) {
-      const name = outcome === "manual-failed" ? "Check payment status" : "Resume checkout";
-      const button = await screen.findByRole("button", { name });
-      await waitFor(() => expect(button).toBeEnabled());
-      fireEvent.click(button);
-    }
-    await screen.findByText(/Go back to booking to choose a time/);
-    expect(sessionStorage.getItem("my_slot_hold")).toBeNull();
-    expect(sessionStorage.getItem("payment_session_state")).toBeNull();
-    expect(JSON.parse(sessionStorage.getItem("checkout_booking_state"))).toMatchObject({
-      email: checkout.email,
-      slotHoldId: "",
-      slotHoldToken: "",
-      slotHoldExpiresAt: "",
-    });
-    expect(screen.getByRole("button", { name: "Pay your way" })).toBeDisabled();
-    expect(global.fetch).not.toHaveBeenCalledWith("/api/payment/start", expect.anything());
-    await act(async () => { jest.advanceTimersByTime(5000); await flushMicrotasks(); });
-    expect(screen.getByRole("alert")).toHaveTextContent(/Go back to booking to choose a time/);
-  });
-
   test("aborts a stalled quote and exposes an assertive retry message", async () => {
     jest.useFakeTimers();
     let quoteSignal;

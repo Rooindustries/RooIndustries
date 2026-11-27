@@ -89,6 +89,8 @@ test("payment success banner still clears itself", async ({ page, flow }) => {
     json: {
       ok: true,
       cancelled: true,
+      status: "abandoned",
+      terminalOutcomeComplete: true,
       refreshedHold: {
         slotHoldId: "slotHold.fixture",
         slotHoldToken: "fixture-hold-token",

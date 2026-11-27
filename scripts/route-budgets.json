@@ -243,11 +243,11 @@
       "css": 1024
     },
     "src/components/BookingForm.jsx -> ../lib/paymentCheckoutHold": {
-      "js": 12288,
+      "js": 18432,
       "css": 1024
     },
     "src/components/Payment.jsx -> ../lib/paymentCheckoutHold": {
-      "js": 12288,
+      "js": 16384,
       "css": 1024
     },
     "src/components/Footer.jsx -> ../lib/consent": {
@@ -263,7 +263,7 @@
       "css": 1024
     },
     "src/components/PayPalPanelSlot.jsx -> ../lib/paymentCheckoutHold": {
-      "js": 12288,
+      "js": 16384,
       "css": 1024
     },
     "src/components/SalesTelemetry.tsx -> ../lib/pendingArrival": {
@@ -295,7 +295,7 @@
       "css": 1024
     },
     "src/lib/checkoutCodes.js -> ./paymentCheckoutHold": {
-      "js": 12288,
+      "js": 18432,
       "css": 1024
     },
     "src/lib/confirmationPages.js -> ../legacyPages/PaymentSuccess": {

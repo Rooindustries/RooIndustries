@@ -3,10 +3,12 @@ import { announceCheckoutConfirmationChange, extractTokenNonce } from "./checkou
 import { areSameLineageNonces, readScopeMap, reservationScopeKey, walkHoldRotations } from "./reservationScope";
 
 const TERMINAL_KEY = "roo_terminal_reservations", ROTATION_KEY = "roo_hold_rotations";
-const PENDING_KEY = "roo_pending_payment_starts", SESSION_KEY = "payment_session_state", QUOTE_PROVIDER_KEY = "roo_selected_quote_provider";
+const PENDING_KEY = "roo_pending_payment_starts", SESSION_KEY = "payment_session_state";
+const QUOTE_PROVIDER_KEY = "roo_selected_quote_provider", RELEASED_KEY = "roo_released_payment_locks";
 const NON_RESUMABLE = ["needs_recovery", "finalizing", "captured_client", "captured_webhook"];
 const str = (v) => String(v || "").trim();
 const dropDodoQuery = (p) => { const h = p.has("dodo_return") || p.has("dodo_cancel") || p.has("dodo_session"); p.delete("dodo_return"); p.delete("dodo_cancel"); p.delete("dodo_session"); return h; };
+
 export const syncHistoryCheckoutBooking = (bookingData) => { try { const s = typeof window !== "undefined" ? window.history?.state : null; if (s?.usr?.bookingData) window.history.replaceState({ ...s, usr: { ...s.usr, bookingData } }, ""); } catch {} };
 export const syncCheckoutRef = (ref, data, ready) => {
   const cur = ref.current;
@@ -29,7 +31,7 @@ export const clearDodoNavQuery = ({ dodoReturnHandled, latestNavRef, navigate, n
   if (dodoReturnHandled) dodoReturnHandled.current = "";
   const loc = latestNavRef?.current?.location, query = loc ? new URLSearchParams(loc.search) : null;
   if (!query || (!dropDodoQuery(query) && !force)) return;
-  navigate({ pathname: loc.pathname, search: query.toString(), hash: loc.hash }, { replace: true, state: nextCheckout ? { ...latestNavRef.current.navState, bookingData: nextCheckout } : loc.state });
+  navigate({ pathname: loc.pathname, search: query.toString() ? `?${query}` : "", hash: loc.hash }, { replace: true, state: nextCheckout ? { ...latestNavRef.current.navState, bookingData: nextCheckout } : loc.state });
 };
 
 export const parseCheckoutFingerprint = (v) => { try { const p = JSON.parse(String(v || "")); return p && typeof p === "object" && !Array.isArray(p) ? p : null; } catch { return null; } };
@@ -44,7 +46,26 @@ export const writeScopedQuoteProvider = (k, provider) => {
   try { if (!k || !p) sessionStorage.removeItem(QUOTE_PROVIDER_KEY); else sessionStorage.setItem(QUOTE_PROVIDER_KEY, JSON.stringify({ scopeKey: k, provider: p })); } catch {}
 };
 
-export const isReservationTerminal = (k) => {
+export const extractPaymentLockId = (token) => {
+  const raw = str(token);
+  if (!raw) return "";
+  try {
+    const [head] = raw.split(".");
+    if (head) {
+      const b64 = head.replace(/-/g, "+").replace(/_/g, "/");
+      const p = JSON.parse(atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4)));
+      const id = str(p?.paymentRecordId || p?.prId || p?.id || p?.sub);
+      if (id) return id;
+    }
+  } catch {}
+  return raw;
+};
+export const isPaymentLockReleased = (token) => {
+  const id = extractPaymentLockId(token);
+  return Boolean(id && readScopeMap(RELEASED_KEY)[id]);
+};
+
+const isReservationTerminal = (k) => {
   if (!k || typeof window === "undefined") return false;
   const term = readScopeMap(TERMINAL_KEY);
   if (term[k]) return true;
@@ -69,15 +90,15 @@ export const paymentSessionMatchesBookingLineage = (session, booking) => {
   if (booking.originalOrderId) return true;
   const r = session.result?.refreshedHold || session.result?.hold;
   if (!r?.slotHoldId) return true;
-  const vh = String(booking.slotHoldId || "").trim(), vt = String(booking.slotHoldToken || "").trim();
-  return Boolean(vh && String(r.slotHoldId).trim() === vh && (!vt || !r.slotHoldToken || areSameLineageNonces(vh, r.slotHoldToken, vt)));
+  const vh = str(booking.slotHoldId), vt = str(booking.slotHoldToken);
+  return Boolean(vh && str(r.slotHoldId) === vh && (!vt || !r.slotHoldToken || areSameLineageNonces(vh, r.slotHoldToken, vt)));
 };
 
 export const validateDodoCallback = ({ query, session, visibleBooking, visibleFingerprint }) => {
   const isCancel = query.has("dodo_cancel"), isReturn = query.has("dodo_return");
   if (!isCancel && !isReturn) return { action: "none" };
-  if (session?.provider !== "dodo" || !session?.paymentAccessToken || !paymentSessionMatchesCheckout(session.fingerprint, visibleFingerprint) || !paymentSessionMatchesBookingLineage(session, visibleBooking)) return { action: "ignore" };
-  const urlTag = String(query.get("dodo_session") || "").trim(), storedTag = String(session.providerPayload?.dodoReturnTag || session.dodoReturnTag || "").trim();
+  if (session?.provider !== "dodo" || !session?.paymentAccessToken || isPaymentLockReleased(session.paymentAccessToken) || !paymentSessionMatchesCheckout(session.fingerprint, visibleFingerprint) || !paymentSessionMatchesBookingLineage(session, visibleBooking)) return { action: "ignore" };
+  const urlTag = str(query.get("dodo_session")), storedTag = str(session.providerPayload?.dodoReturnTag || session.dodoReturnTag);
   if (isCancel) return urlTag && storedTag && urlTag === storedTag ? { action: "cancel" } : { action: "ignore" };
   return storedTag ? (urlTag && urlTag === storedTag ? { action: "finalize" } : { action: "ignore" }) : (urlTag ? { action: "ignore" } : { action: "status" });
 };
@@ -91,7 +112,7 @@ const syncPendingStarts = () => {
 export const beginPendingPaymentStart = (holdId, holdToken) => {
   if (typeof window === "undefined") return "";
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  window.__rooPendingStarts = { ...readScopeMap(PENDING_KEY), ...(window.__rooPendingStarts || {}), [id]: { holdId: String(holdId || "").trim(), nonce: extractTokenNonce(holdToken), until: Date.now() + 45_000 } };
+  window.__rooPendingStarts = { ...readScopeMap(PENDING_KEY), ...(window.__rooPendingStarts || {}), [id]: { holdId: str(holdId), nonce: extractTokenNonce(holdToken), until: Date.now() + 45_000 } };
   syncPendingStarts(); announceCheckoutConfirmationChange(); return id;
 };
 export const endPendingPaymentStart = (id) => {

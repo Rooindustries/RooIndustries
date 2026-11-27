@@ -58,7 +58,7 @@ export function uiFinishFixture({ json, read, base }) {
       if (!['/api/payment/start', '/api/payment/status', '/api/payment/finalize', '/api/payment/cancel'].includes(p)) return false;
       const body = await read(req); const token = String(req.headers.authorization || '').replace(/^Bearer /, '');
       state.calls.push({ path: p, method: req.method, token, body, time: Date.now() });
-      const reply = p.endsWith('/cancel') ? { ok: true, cancelled: true, refreshedHold: hold } : p.endsWith('/start') ? { ok: true, paymentAccessToken: 'payment-finish-A', status: state.status, providerPayload: { checkoutUrl: `${base}/__ui/hosted/checkout` }, refreshedHold: hold, bookingId: 'receipt-finish-A', emailDispatchToken: 'receipt-finish-A-token' } : { ok: true, status: state.status, bookingId: 'receipt-finish-A', emailDispatchToken: 'receipt-finish-A-token' };
+      const reply = p.endsWith('/cancel') ? { ok: true, cancelled: true, status: 'abandoned', terminalOutcomeComplete: true, refreshedHold: hold } : p.endsWith('/start') ? { ok: true, paymentAccessToken: 'payment-finish-A', status: state.status, providerPayload: { checkoutUrl: `${base}/__ui/hosted/checkout` }, refreshedHold: hold, bookingId: 'receipt-finish-A', emailDispatchToken: 'receipt-finish-A-token' } : { ok: true, status: state.status, terminalOutcomeComplete: true, bookingId: 'receipt-finish-A', emailDispatchToken: 'receipt-finish-A-token' };
       if (p.endsWith('/finalize') && state.finalizeStatus) reply.status = state.finalizeStatus;
       if (p === state.holdPath && (!token || token === 'payment-finish-A')) { pending.set('payment-A', { res, body: reply }); return true; }
       json(res, reply); return true;

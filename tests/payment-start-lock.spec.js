@@ -505,7 +505,7 @@ test("after a timed-out start that claimed the quote on the server, retry restor
     claimed = false;
     return route.fulfill({
       json: {
-        ok: true, status: "abandoned", cancelled: true,
+        ok: true, status: "abandoned", cancelled: true, terminalOutcomeComplete: true,
         refreshedHold: { slotHoldId: holdId, slotHoldToken: "released-hold-token", slotHoldExpiresAt: expiry, phase: "holding" },
       },
     });
@@ -597,6 +597,10 @@ test("after a conflict saves an in-progress Dodo claim with no URL yet, Resume c
         ok: true,
         status: "started",
         provider: "dodo",
+        providerOrderReady: true,
+        quoteFingerprint: "fixture-quote-none",
+        quoteFingerprintValid: true,
+        quote: { currency: "USD", grossAmount: 84.99, netAmount: 84.99, isFree: false },
         providerPayload: { orderId: "cks_ready", checkoutUrl: "/__test/checkout-handoff", taxInclusive: false },
       },
     });
@@ -677,6 +681,10 @@ test("after a PayPal claim recovers from ambiguous creation, PayPal retries rece
         ok: true,
         status: "started",
         provider: "paypal",
+        providerOrderReady: true,
+        quoteFingerprint: "fixture-quote",
+        quoteFingerprintValid: true,
+        quote: { currency: "USD", grossAmount: 84.99, netAmount: 84.99, isFree: false },
         providerPayload: { orderId: "paypal_recovered_1", currency: "USD", amount: 8499 },
       },
     });
@@ -686,6 +694,7 @@ test("after a PayPal claim recovers from ambiguous creation, PayPal retries rece
       ok: true,
       status: "abandoned",
       cancelled: true,
+      terminalOutcomeComplete: true,
       refreshedHold: { slotHoldId: holdId, slotHoldToken: "paypal-released-hold", slotHoldExpiresAt: expiry, phase: "holding" },
     },
   }));
@@ -1003,6 +1012,10 @@ test("Razorpay stays disabled and does not open while Change payment method canc
         ok: true,
         status: "started",
         provider: "razorpay",
+        providerOrderReady: true,
+        quoteFingerprint: "fixture-quote",
+        quoteFingerprintValid: true,
+        quote: { currency: "USD", grossAmount: 84.99, netAmount: 84.99, isFree: false },
         providerPayload: { orderId: "order_rzp_cancel_1", amount: 8499, currency: "USD", key: "rzp_test_fixture" },
       },
     });
@@ -1015,6 +1028,7 @@ test("Razorpay stays disabled and does not open while Change payment method canc
         ok: true,
         cancelled: true,
         status: "abandoned",
+        terminalOutcomeComplete: true,
         refreshedHold: { slotHoldId: holdId, slotHoldToken: "rzp-released-hold", slotHoldExpiresAt: expiry, phase: "holding" },
       },
     });
@@ -1079,7 +1093,7 @@ test("PayPal rejects clicks and createOrder while Change payment method cancella
   await page.route("**/api/payment/status", route => {
     statusCalls += 1;
     return route.fulfill({
-      json: { ok: true, status: "started", provider: "paypal", providerPayload: { orderId: "paypal_cancel_1", currency: "USD", amount: 8499 } },
+      json: { ok: true, status: "started", provider: "paypal", providerOrderReady: true, quoteFingerprint: "fixture-quote", quoteFingerprintValid: true, quote: { currency: "USD", grossAmount: 84.99, netAmount: 84.99, isFree: false }, providerPayload: { orderId: "paypal_cancel_1", currency: "USD", amount: 8499 } },
     });
   });
   let releaseCancel;
@@ -1090,6 +1104,7 @@ test("PayPal rejects clicks and createOrder while Change payment method cancella
         ok: true,
         cancelled: true,
         status: "abandoned",
+        terminalOutcomeComplete: true,
         refreshedHold: { slotHoldId: holdId, slotHoldToken: "paypal-released-hold", slotHoldExpiresAt: expiry, phase: "holding" },
       },
     });
@@ -1155,13 +1170,13 @@ test("Change payment method stays disabled while PayPal resume is awaiting statu
   await page.route("**/api/payment/status", async route => {
     await new Promise(resolve => { releaseStatus = resolve; });
     await route.fulfill({
-      json: { ok: true, status: "started", provider: "paypal", providerPayload: { orderId: "paypal_resume_1", currency: "USD", amount: 8499 } },
+      json: { ok: true, status: "started", provider: "paypal", providerOrderReady: true, quoteFingerprint: "fixture-quote", quoteFingerprintValid: true, quote: { currency: "USD", grossAmount: 84.99, netAmount: 84.99, isFree: false }, providerPayload: { orderId: "paypal_resume_1", currency: "USD", amount: 8499 } },
     });
   });
   let cancelCalls = 0;
   await page.route("**/api/payment/cancel", route => {
     cancelCalls += 1;
-    return route.fulfill({ json: { ok: true, cancelled: true, status: "abandoned" } });
+    return route.fulfill({ json: { ok: true, cancelled: true, status: "abandoned", terminalOutcomeComplete: true } });
   });
 
   await flow.review();
@@ -1729,6 +1744,7 @@ test("cancel 200 abandoned does not unlock Pay your way while PayPal capture is 
         ok: true,
         cancelled: true,
         status: "abandoned",
+        terminalOutcomeComplete: true,
         refreshedHold: { slotHoldId: holdId, slotHoldToken: "paypal-abandoned-hold", slotHoldExpiresAt: expiry, phase: "holding" },
       },
     });
@@ -1866,6 +1882,7 @@ test("cancel 200 abandoned preserves replacement hold token if pending PayPal ca
           ok: true,
           cancelled: true,
           status: "abandoned",
+          terminalOutcomeComplete: true,
           refreshedHold: { slotHoldId: holdId, slotHoldToken: "paypal-replacement-hold-token", slotHoldExpiresAt: expiry, phase: "holding" },
         },
       });
@@ -1876,7 +1893,7 @@ test("cancel 200 abandoned preserves replacement hold token if pending PayPal ca
     });
   });
   await page.route("**/api/payment/status", route => route.fulfill({
-    json: { ok: true, status: "abandoned", provider: "paypal", recoveryReason: "This payment session was cancelled." },
+    json: { ok: true, status: "abandoned", provider: "paypal", terminalOutcomeComplete: true, recoveryReason: "This payment session was cancelled." },
   }));
 
   await flow.review();
@@ -1983,6 +2000,7 @@ test("concurrent Change payment method 409 abandoned keeps retry available to re
         ok: true,
         cancelled: true,
         status: "abandoned",
+        terminalOutcomeComplete: true,
         refreshedHold: { slotHoldId: holdId, slotHoldToken: "paypal-recovered-tab-hold", slotHoldExpiresAt: expiry, phase: "holding" },
       },
     });
@@ -2016,7 +2034,7 @@ test("concurrent Change payment method 409 abandoned keeps retry available to re
 test("Dodo Change payment method clears session and hold on 409 failed and 409 refunded", async ({ page, flow }) => {
   await page.route("**/api/payment/cancel", route => route.fulfill({
     status: 409,
-    json: { ok: false, status: "failed", error: "This payment session can no longer be changed." },
+    json: { ok: false, status: "failed", terminalOutcomeComplete: true, error: "This payment session can no longer be changed." },
   }));
   await setupLockedDodo(page, flow, "dodo-cancel409-failed-pat");
   const changeBtn = page.getByRole("button", { name: "Change payment method", exact: true });
@@ -2101,6 +2119,7 @@ test("Dodo Resume checkout restores refreshedHold on 200 abandoned and starts ch
       ok: true,
       status: "abandoned",
       provider: "dodo",
+      terminalOutcomeComplete: true,
       refreshedHold: { slotHoldId: holdId, slotHoldToken: "dodo-tab-replacement-hold", slotHoldExpiresAt: expiry, phase: "holding" },
     },
   }));
@@ -2176,6 +2195,7 @@ test("Dodo Check payment status restores refreshedHold on 200 abandoned and unlo
       ok: true,
       status: "abandoned",
       provider: "dodo",
+      terminalOutcomeComplete: true,
       refreshedHold: { slotHoldId: holdId, slotHoldToken: "dodo-fin-replacement-hold", slotHoldExpiresAt: expiry, phase: "holding" },
     },
   }));
@@ -2254,6 +2274,7 @@ test("Dodo Resume checkout keeps newer hold when stale abandoned session returns
       ok: true,
       status: "abandoned",
       provider: "dodo",
+      terminalOutcomeComplete: true,
       refreshedHold: { slotHoldId: holdId, slotHoldToken: "dodo-superseded-hold", slotHoldExpiresAt: expiry, phase: "holding" },
     },
   }));
@@ -2284,7 +2305,7 @@ test("Dodo Resume checkout keeps newer hold when stale abandoned session returns
 
 test("Dodo Change payment method clears dead hold when server reports slotReleased after a superseded cancellation", async ({ page, flow }) => {
   await page.route("**/api/payment/cancel", route => route.fulfill({
-    json: { ok: true, cancelled: true, status: "abandoned", slotReleased: true },
+    json: { ok: true, cancelled: true, status: "abandoned", terminalOutcomeComplete: true, slotReleased: true },
   }));
   await setupLockedDodo(page, flow, "dodo-superseded-cancel-pat");
   const changeBtn = page.getByRole("button", { name: "Change payment method", exact: true });
@@ -2309,6 +2330,7 @@ test("Dodo Resume checkout on leftover dodo_return URL clears query params on fa
       ok: true,
       status: "abandoned",
       provider: "dodo",
+      terminalOutcomeComplete: true,
       refreshedHold: { slotHoldId: holdId, slotHoldToken: "dodo-leftover-replacement-hold", slotHoldExpiresAt: expiry, phase: "holding" },
     },
   }));
