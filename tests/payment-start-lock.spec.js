@@ -619,6 +619,8 @@ test("after a conflict saves an in-progress Dodo claim with no URL yet, Resume c
 
   const resume = page.getByRole("button", { name: "Resume checkout", exact: true });
   await expect(resume).toBeVisible();
+  await expect(resume).toBeDisabled();
+  await page.getByRole("button", { name: "Accept updated price", exact: true }).click();
   await resume.click();
   await expect(page.getByText("Checkout is being recovered. Check the payment status shortly.", { exact: true })).toBeVisible();
 
