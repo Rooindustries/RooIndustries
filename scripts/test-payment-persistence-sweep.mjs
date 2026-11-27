@@ -1807,6 +1807,8 @@ try{
     const unavailableWebhook = await a1Hook('paypal');
     saved = (await row(checkout.id)).payload;
     assert.equal(unavailableWebhook.status, 503, JSON.stringify(unavailableWebhook));
+    assert.equal(saved.status, 'abandoned');
+    assert.equal(saved.recoveryReason, 'late_capture_watch_unverified_owner_review');
     assert.equal(saved.reconciliationRecoveryTerminal, true);
     assert.ok(!saved.bookingId);
     providerHook = null;
@@ -1819,6 +1821,46 @@ try{
     assert.ok(saved.bookingId);
     assert.equal(saved.requiresReschedule, true);
     return { ownerReviewRetainedUnknown: true, lateWebhookRecorded: true, requiresReschedule: true };
+  });
+  await run('recovery-paypal-failed-webhook-retry-lineage', async () => {
+    const checkout = await a1Start();
+    await commerce.patch(checkout.id).set({
+      status: 'failed',
+      resourceReleasePending: false,
+      resourceReleaseTargetStatus: '',
+      resourceReleaseReason: '',
+      reconciliationRecoveryTerminal: true,
+      recoveryAttemptCount: 12,
+      recoveryFailureCount: 12,
+      nextRecoveryAt: '9999-12-31T23:59:59.999Z',
+    }).commit();
+    await commerce.patch('slotHold.fixture').set({
+      phase: 'released',
+      expiresAt: new Date(originalNow() - 60_000).toISOString(),
+      paymentRecordId: '',
+    }).commit();
+    await commerce.delete('slotHold.fixture');
+    providerHook = async (request, req, res) => {
+      if (request.path !== '/v2/checkout/orders/order-fixture') return false;
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ name: 'RESOURCE_NOT_FOUND' }));
+      return true;
+    };
+    const failedVerify = await a1Hook('paypal');
+    assert.equal(failedVerify.status, 503, JSON.stringify(failedVerify));
+    let saved = (await row(checkout.id)).payload;
+    assert.equal(saved.status, 'failed');
+    assert.ok(!saved.captureClaimedAt);
+    assert.ok(!saved.bookingId);
+    providerHook = null;
+    const recovered = await a1Hook('paypal');
+    assert.equal(recovered.status, 200, JSON.stringify(recovered));
+    saved = (await row(checkout.id)).payload;
+    assert.equal(saved.capturedAfterFailure, true);
+    assert.equal(saved.requiresReschedule, true);
+    assert.ok(saved.bookingId);
+    assert.equal((await row(saved.bookingId)).payload.requiresReschedule, true);
+    return { failedStatusPreservedOnVerifyRetry: true, capturedAfterFailure: true, requiresReschedule: true };
   });
   for (const failure of [403, 404]) await run(`recovery-razorpay-webhook-retry-${failure}`, async () => {
     const checkout = await a1Start('razorpay');
@@ -2309,6 +2351,7 @@ try{
           refundProcessedAmountInSubunits: 999,
         } : {}),
         ...(kind.startsWith('release') ? {
+          bookingId: '',
           resourceReleasePending: true, resourceReleaseTargetStatus: 'abandoned',
           couponReservationId: 'couponReservation.fixture',
         } : {}),
