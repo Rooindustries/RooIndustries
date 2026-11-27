@@ -2419,6 +2419,8 @@ const finalizePaymentRecordInternal = async ({
   let workingRecord = lease.record;
   const lateCaptureFromAbandoned =
     lease.previousStatus === PAYMENT_STATUS_ABANDONED;
+  const lateCaptureFromFailed =
+    lease.previousStatus === PAYMENT_STATUS_FAILED;
 
   const verification = await verifyProviderCapture({
     record: workingRecord,
@@ -2472,6 +2474,7 @@ const finalizePaymentRecordInternal = async ({
       currentOperation: currentPaymentOperation,
       patchRecord: patchPaymentRecord,
       source: normalizedSource,
+      priorStatus: lease.previousStatus,
       providerPaymentId:
         verification.providerPaymentId ||
         providerData?.dodoPaymentId ||
@@ -2603,6 +2606,7 @@ const finalizePaymentRecordInternal = async ({
   const hold = await getHoldById(client, holdId);
   const lateCaptureLineage =
     lateCaptureFromAbandoned ||
+    lateCaptureFromFailed ||
     workingRecord.capturedAfterFailure === true ||
     workingRecord.capturedAfterAbandonment === true;
   if (lateCaptureLineage || holdLostToPayment(hold, workingRecord)) {
@@ -2610,7 +2614,7 @@ const finalizePaymentRecordInternal = async ({
       const recovered = await recoverCapturedPaymentAsReschedule({
         client,
         record: workingRecord,
-        reason: workingRecord.capturedAfterFailure === true
+        reason: lateCaptureFromFailed || workingRecord.capturedAfterFailure === true
           ? "captured_after_failure"
           : lateCaptureLineage
             ? "captured_after_abandonment"
@@ -4434,7 +4438,9 @@ const recoverCapturedPaymentAsReschedule = async ({
     },
   });
 
-  const preCommitRecord = (await getPaymentRecordById(client, record._id)) || record;
+  const preCommitOperation = await currentPaymentOperation({ client, record });
+  if (!preCommitOperation.owned) return preCommitOperation.record;
+  const preCommitRecord = preCommitOperation.record || record;
   const preCommitStatus = String(preCommitRecord.status || "").trim().toLowerCase();
   if (
     [PAYMENT_STATUS_BOOKED, PAYMENT_STATUS_EMAIL_PARTIAL, PAYMENT_STATUS_REFUNDED].includes(preCommitStatus) ||
@@ -4938,12 +4944,14 @@ export const reconcilePaymentSessions = async ({
           summary.refundsSynced += 1;
         } else {
           const targetRecord = sideEffects.paymentRecord || record;
+          const preserveOwnerReview = hasExplicitOwnerReview(targetRecord);
           if (["payment_currency_mismatch", "payment_currency_invalid"].includes(sideEffects.reason)) {
             await patchPaymentRecord({ client, record: targetRecord, set: {
               recoveryReason: sideEffects.reason,
               providerRecoveryTerminal: true,
               providerRecoveryTerminalReason: sideEffects.reason,
               nextRecoveryAt: "",
+              ...(preserveOwnerReview ? { recoveryOwnerReviewRequired: true } : {}),
             } });
             logSafeError("Refund currency requires manual review", Object.assign(new Error(sideEffects.reason), { code: sideEffects.reason }));
             summary.recovery += 1;
@@ -4955,6 +4963,7 @@ export const reconcilePaymentSessions = async ({
             set: {
               recoveryReason: sideEffects.reason || "refund_side_effect_pending",
               ...buildRecoveryFailureState(targetRecord),
+              ...(preserveOwnerReview ? { recoveryOwnerReviewRequired: true } : {}),
             },
           });
           summary.recovery += 1;

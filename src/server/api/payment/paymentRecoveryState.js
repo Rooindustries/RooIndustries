@@ -65,10 +65,16 @@ export const isSoleLateWatchOwnerReview = (r = {}) => {
   );
 };
 
-export const isWebhookLateWatchRecovery = (r = {}, source = "") =>
-  String(source || "").trim().toLowerCase() === "webhook" &&
-  String(r?.status || "").trim().toLowerCase() === "abandoned" &&
-  isSoleLateWatchOwnerReview(r);
+export const isWebhookLateWatchRecovery = (r = {}, source = "", priorStatus = "") => {
+  if (String(source || "").trim().toLowerCase() !== "webhook") return false;
+  const st = String(r?.status || "").trim().toLowerCase();
+  const prior = String(priorStatus || "").trim().toLowerCase();
+  const effectiveStatus = st === "finalizing" && prior ? prior : st;
+  return (
+    (effectiveStatus === "abandoned" || effectiveStatus === "needs_recovery") &&
+    isSoleLateWatchOwnerReview(r)
+  );
+};
 
 export const hasKnownCaptureRecord = (r = {}) => {
   const st = String(r?.status || "").trim().toLowerCase();

@@ -601,11 +601,12 @@ test('verified late webhook clears sole late-watch review, blocks independent re
   assert.equal(blockedAfter.status, 'abandoned');
 
   const failedWatch = await startCheckout();
+  const seededDueAt = new Date(Date.now() - 60_000).toISOString();
   await fixture.commerce.patch(failedWatch.record._id).set({
     status: 'failed',
     reconciliationRecoveryTerminal: true,
     lateCaptureWatchUntil: new Date(Date.now() + 6 * 60 * 60_000).toISOString(),
-    nextRecoveryAt: new Date(Date.now() - 60_000).toISOString(),
+    nextRecoveryAt: seededDueAt,
   }).commit();
   fixture.setCheckoutPaymentStarted(false);
   const watchRes = await reconcilePaymentSessions({
@@ -616,7 +617,8 @@ test('verified late webhook clears sole late-watch review, blocks independent re
   assert.equal(watchRes.body.summary.failed, 0);
   const afterWatch = await fixture.commerce.getDocument(failedWatch.record._id);
   assert.equal(afterWatch.status, 'failed');
-  assert.ok(afterWatch.nextRecoveryAt);
+  assert.ok(afterWatch.nextRecoveryAt && afterWatch.nextRecoveryAt > seededDueAt);
+  assert.equal(afterWatch.providerOrderLastSeenState, 'unpaid');
 
   fixture.setCheckoutPaymentStarted(true);
   fixture.setPaymentAmountOverrides({ status: 'succeeded' });

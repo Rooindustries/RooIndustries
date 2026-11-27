@@ -216,12 +216,13 @@ export const hasObservedCapture = (inspection) =>
   inspection.state === "captured" &&
   (!inspection.payment || settledDodoPaymentState(inspection.payment) === "succeeded");
 
-const buildCaptureLineageUpdates = (record = {}) => {
+const buildCaptureLineageUpdates = (record = {}, priorStatus = "") => {
   const status = String(record.status || "").trim().toLowerCase();
+  const prior = String(priorStatus || "").trim().toLowerCase();
   const target = String(record.resourceReleaseTargetStatus || "").trim().toLowerCase();
   return {
-    ...(status === "failed" || target === "failed" ? { capturedAfterFailure: true } : {}),
-    ...(status === "abandoned" || target === "abandoned" ? { capturedAfterAbandonment: true } : {}),
+    ...(status === "failed" || prior === "failed" || target === "failed" ? { capturedAfterFailure: true } : {}),
+    ...(status === "abandoned" || prior === "abandoned" || target === "abandoned" ? { capturedAfterAbandonment: true } : {}),
   };
 };
 
@@ -231,15 +232,19 @@ export const recordCapturedProviderState = async ({
   currentOperation,
   patchRecord,
   source = "",
+  priorStatus = "",
   providerPaymentId = "",
   captureAmountUpdates = null,
   validateBinding = null,
 }) => {
+  const expectedLeaseId = String(record?.finalizationLeaseId || "").trim();
+  const normalizedPrior = String(priorStatus || "").trim().toLowerCase();
   let current = record;
   let hadConflict = false;
   for (let attempt = 0; attempt < 5 && current?._id; attempt += 1) {
     const status = String(current.status || "").trim().toLowerCase();
-    const clearingLateWatch = isWebhookLateWatchRecovery(current, source);
+    const effectiveStatus = status === "finalizing" && normalizedPrior ? normalizedPrior : status;
+    const clearingLateWatch = isWebhookLateWatchRecovery(current, source, normalizedPrior);
     if (
       ["booked", "email_partial", "refunded"].includes(status) ||
       current.dodoDisputeActive === true ||
@@ -253,7 +258,7 @@ export const recordCapturedProviderState = async ({
       if (!check?.ok) return { owned: false, record: current, bindingError: check };
     }
     const observed = observedProviderState(current, "succeeded");
-    const lineage = buildCaptureLineageUpdates(current);
+    const lineage = buildCaptureLineageUpdates(current, normalizedPrior);
     const hasPendingRelease =
       current.resourceReleasePending === true ||
       Boolean(current.resourceReleaseTargetStatus) ||
@@ -263,7 +268,10 @@ export const recordCapturedProviderState = async ({
       String(current.providerPaymentState || "").trim().toLowerCase() === "succeeded";
     const needsResumeStatus =
       clearingLateWatch || ["failed", "abandoned"].includes(status) || current.reconciliationRecoveryTerminal === true;
-    if (alreadyClaimed && !needsResumeStatus && !hasPendingRelease) {
+    const needsLineagePatch =
+      (lineage.capturedAfterFailure === true && current.capturedAfterFailure !== true) ||
+      (lineage.capturedAfterAbandonment === true && current.capturedAfterAbandonment !== true);
+    if (alreadyClaimed && !needsResumeStatus && !hasPendingRelease && !needsLineagePatch) {
       return { owned: true, record: current };
     }
     const cleanId = String(providerPaymentId || "").trim();
@@ -280,6 +288,13 @@ export const recordCapturedProviderState = async ({
       needsResumeStatus ||
       hasPendingRelease ||
       (Boolean(current.nextRecoveryAt) && String(current.nextRecoveryAt) > now);
+    const resumeStatusPatch = needsResumeStatus
+      ? {
+          ...(status !== "finalizing" ? { status: "needs_recovery" } : {}),
+          reconciliationRecoveryTerminal: false,
+          providerRecoveryTerminal: false,
+        }
+      : {};
     const set = {
       ...observed,
       ...lineage,
@@ -287,15 +302,22 @@ export const recordCapturedProviderState = async ({
       ...amountPatch,
       ...attemptPatch,
       ...(!current.captureClaimedAt ? { captureClaimedAt: now } : {}),
-      ...(clearingLateWatch ? { recoveryReason: "", capturedAfterAbandonment: true } : {}),
+      ...(clearingLateWatch
+        ? { recoveryReason: "", ...(effectiveStatus === "abandoned" ? { capturedAfterAbandonment: true } : {}) }
+        : {}),
       ...(hasPendingRelease ? { resourceReleasePending: false, resourceReleaseTargetStatus: "", resourceReleaseReason: "" } : {}),
-      ...(needsResumeStatus ? { status: "needs_recovery", reconciliationRecoveryTerminal: false, providerRecoveryTerminal: false } : {}),
+      ...resumeStatusPatch,
       ...(needsDueRecovery ? { nextRecoveryAt: now } : {}),
     };
     if (!Object.keys(set).length) return { owned: true, record: current };
     const operation = await currentOperation({ client, record: current });
     if (!operation.owned) {
-      if (operation.record?._id && operation.record._rev !== current._rev) {
+      const reloadedLeaseId = String(operation.record?.finalizationLeaseId || "").trim();
+      if (
+        operation.record?._id &&
+        operation.record._rev !== current._rev &&
+        reloadedLeaseId === expectedLeaseId
+      ) {
         hadConflict = true;
         current = operation.record;
         continue;
@@ -307,7 +329,11 @@ export const recordCapturedProviderState = async ({
     } catch (error) {
       if (Number(error?.statusCode || error?.status || 0) !== 409) throw error;
       hadConflict = true;
-      current = await getPaymentRecordById(client, current._id);
+      const reloaded = await getPaymentRecordById(client, current._id);
+      if (String(reloaded?.finalizationLeaseId || "").trim() !== expectedLeaseId) {
+        return { owned: false, record: reloaded || current };
+      }
+      current = reloaded;
     }
   }
   return { owned: false, record: current || record, conflictExhausted: hadConflict };
