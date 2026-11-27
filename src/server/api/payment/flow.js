@@ -4313,7 +4313,9 @@ const recoverCapturedPaymentAsReschedule = async ({
   providerData = {},
   paymentProofClaim = null,
 }) => {
-  const initialFresh = (await getPaymentRecordById(client, record._id)) || record;
+  const callerOperation = await currentPaymentOperation({ client, record });
+  if (!callerOperation.owned) return callerOperation.record;
+  const initialFresh = callerOperation.record || record;
   if (isUpgradeCreditReview(initialFresh) || (!isWebhookLateWatchRecovery(initialFresh, source) && hasPreservedOwnerReview(initialFresh))) {
     return initialFresh;
   }
