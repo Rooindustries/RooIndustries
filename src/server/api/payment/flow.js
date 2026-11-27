@@ -6302,8 +6302,13 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
     return { httpStatus: 503, body: { ok: false, code: "dodo_refund_details_pending",
       error: "Refund details are temporarily unavailable." } };
   }
+  const incomingRefundIds = new Set(succeededRefunds.map((refund) => refund.refund_id));
+  const priorProcessedAmount = (Array.isArray(record.refunds) ? record.refunds : [])
+    .filter((entry) => entry?.status === "processed" && !incomingRefundIds.has(entry.providerRefundId))
+    .reduce((sum, entry) => sum + Number(entry.amountInSubunits || 0), 0);
   if ((rawRefundStatus === "full" && succeededRefundAmount !== payment.total_amount) ||
-      (rawRefundStatus === "partial" && !(succeededRefundAmount > 0 && succeededRefundAmount < payment.total_amount)) ||
+      (rawRefundStatus === "partial" && (!(succeededRefundAmount > 0 && succeededRefundAmount < payment.total_amount) ||
+        priorProcessedAmount + succeededRefundAmount >= payment.total_amount)) ||
       succeededRefundAmount > payment.total_amount ||
       (rawRefundStatus !== "" && rawRefundStatus !== "full" && rawRefundStatus !== "partial")) {
     if (payment.status === "succeeded") {
@@ -6395,7 +6400,7 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
   if ([PAYMENT_STATUS_BOOKED, PAYMENT_STATUS_EMAIL_PARTIAL, PAYMENT_STATUS_REFUNDED].includes(record.status)) {
     return { httpStatus: 200, body: buildPublicStatusBody(record) };
   }
-  if (ALL_PENDING_AND_PARTIAL_DODO_STATES.has(String(payment.status || "").trim())) {
+  if (source !== "webhook" && ALL_PENDING_AND_PARTIAL_DODO_STATES.has(String(payment.status || "").trim())) {
     await recordProviderPaymentState({
       client,
       record,

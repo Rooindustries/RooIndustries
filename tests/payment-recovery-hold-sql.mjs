@@ -471,23 +471,28 @@ test('3 forced-order Postgres lock-alignment and post-lock-recheck rows protect 
   });
   await advReady;
   const cleanup1Promise = fixture.database.sql`select public.roo_cleanup_expired_supabase_holds(0, 100) as res`.execute();
-  const waitDeadline = Date.now() + 5000;
-  let waitingOnAdvisory = false;
-  while (Date.now() < waitDeadline) {
-    const waiters = await fixture.database.sql`
-      select pid from pg_stat_activity
-      where wait_event_type = 'Lock' and wait_event = 'advisory'
-        and query like '%roo_cleanup_expired_supabase_holds%'`;
-    if (waiters.length > 0) {
-      waitingOnAdvisory = true;
-      break;
+  let r1;
+  try {
+    const waitDeadline = Date.now() + 5000;
+    let waitingOnAdvisory = false;
+    while (Date.now() < waitDeadline) {
+      const waiters = await fixture.database.sql`
+        select pid from pg_stat_activity
+        where wait_event_type = 'Lock' and wait_event = 'advisory'
+          and query like '%roo_cleanup_expired_supabase_holds%'`;
+      if (waiters.length > 0) {
+        waitingOnAdvisory = true;
+        break;
+      }
+      await new Promise(r => setTimeout(r, 25));
     }
-    await new Promise(r => setTimeout(r, 25));
+    assert.equal(waitingOnAdvisory, true, 'Cleanup query did not block on advisory lock');
+  } finally {
+    releaseAdvisory();
+    await Promise.allSettled([txAdv, cleanup1Promise]);
   }
-  assert.equal(waitingOnAdvisory, true, 'Cleanup query did not block on advisory lock');
-  releaseAdvisory();
   await txAdv;
-  const [{ res: r1 }] = await cleanup1Promise;
+  [{ res: r1 }] = await cleanup1Promise;
   assert.equal(r1.expired_holds, 0);
   assert.equal((await holdFor(c1.payload)).phase, 'payment_pending');
 

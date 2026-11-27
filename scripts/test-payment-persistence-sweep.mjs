@@ -1659,18 +1659,18 @@ try{
         assert.equal(crypto.createHash('sha256').update(await definition()).digest('hex'), baselineHash);
         await fixture.apply(hardenRecoveryMigration, hardenMigrationSql);
         await new Promise(resolve => setTimeout(resolve, 200));
-        try {
-          const before = await snapshot();
-          const rolledBack = await requestFlow('reconcile');
-          assert.equal(rolledBack.body.summary.scanned, 0);
-          assert.deepEqual(await snapshot(), before);
-        } finally {
-          await fixture.apply(hardenRecoveryMigration, hardenRollbackSql);
-          await fixture.apply(name, migrationSql);
-        }
+        const before = await snapshot();
+        const rolledBack = await requestFlow('reconcile');
+        assert.equal(rolledBack.status, 200, JSON.stringify(rolledBack));
+        assert.equal(rolledBack.body.summary.reconcileRunCompleted, true);
+        assert.equal(rolledBack.body.summary.scanned, 0);
+        assert.deepEqual(await snapshot(), before);
       } finally {
+        await fixture.apply(hardenRecoveryMigration, hardenRollbackSql);
+        await fixture.apply(name, migrationSql);
         await fixture.apply(hardenRecoveryMigration, hardenMigrationSql);
         await new Promise(resolve => setTimeout(resolve, 200));
+        assert.notEqual(await helper(), null);
       }
       const restored = await requestFlow('reconcile');
       assert.equal(restored.body.summary.scanned, 1);

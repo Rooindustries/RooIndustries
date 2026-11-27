@@ -114,6 +114,8 @@ const legacyUnverifiedReversals = async (client, limit) => {
     `*[_type == $type && provider == $provider
       && providerPaymentState in ["refunded", "disputed"]
       && providerReversalVerified != true
+      && (!defined(bookingId) || bookingId == "")
+      && !(providerRecoveryTerminalReason in ["dodo_session_mismatch", "dodo_payment_binding_mismatch"])
       && (!defined(providerStateCheckedAt) || providerStateCheckedAt == ""
         || providerStateCheckedAt <= $dueBefore || providerStateCheckedAt >= "2090-01-01T00:00:00Z")][0...${limit}]`,
     { type: PAYMENT_RECORD_TYPE, provider: "dodo", dueBefore }

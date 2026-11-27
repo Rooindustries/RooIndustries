@@ -893,11 +893,14 @@ test('a payment that lost its dispute by expiry keeps its slot when amount misma
       amount: String(checkout.record.pricingSnapshot.netAmount),
     }],
   });
+  await holdRunsOut(checkout, 25 * 60 * 60_000);
   clockShiftMs += 2 * 60 * 60_000;
   assert.equal((await cron()).status, 200);
   const unboundDoc = await fixture.commerce.getDocument(checkout.record._id);
   assert.equal(unboundDoc.providerPaymentState, 'succeeded');
   assert.equal(unboundDoc.providerReversalVerified, false);
+  assert.equal((await holdFor(checkout.payload)).phase, 'payment_pending');
+  assert.equal((await secondVisitor(checkout.payload)).status, 409);
 
   await stopRecovery(checkout, {
     status: 'needs_recovery',

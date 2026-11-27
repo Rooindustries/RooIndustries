@@ -57,10 +57,10 @@ export const exhaustedCleanupWatchActiveGroq = `(
   && providerRecoveryTerminal != true
   && !(${hasPreservedOwnerReviewGroq})
   && lower(status) in ["failed", "abandoned"]
-  && defined(lateCaptureWatchUntil) && lateCaptureWatchUntil != ""
+  && defined(dateTime(lateCaptureWatchUntil))
 )`;
 
-export const exhaustedResumeDueGroq = `(!defined(nextRecoveryAt) || nextRecoveryAt == "" || nextRecoveryAt <= $now || nextRecoveryAt >= "2090-01-01T00:00:00Z")`;
+export const exhaustedResumeDueGroq = `(!defined(nextRecoveryAt) || nextRecoveryAt == "" || (defined(dateTime(nextRecoveryAt)) && (dateTime(nextRecoveryAt) <= dateTime($now) || dateTime(nextRecoveryAt) >= dateTime("2090-01-01T00:00:00Z"))))`;
 
 export const exhaustedWatchQuery = `(provider in ["paypal", "razorpay", "dodo"] && lower(status) == $abandonedStatus
   && reconciliationRecoveryTerminal == true && recoveryReason in $resumableWatchReasons
@@ -100,7 +100,7 @@ export const RECOVERY_RECORDS_GROQ = `*[_type == $type
       lower(status) in [$abandonedStatus, "failed"]
       && (
         (${isCleanupPendingGroq} && (provider != "dodo" || ${dodoCleanupAllowedGroq}))
-        || (defined(lateCaptureWatchUntil) && lateCaptureWatchUntil != "")
+        || defined(dateTime(lateCaptureWatchUntil))
       )
     )
     || ${exhaustedPendingCleanupGroq}
@@ -138,11 +138,15 @@ const isExhaustedResumeDue = (record, nowMs = Date.now()) => {
   return !Number.isFinite(parsed) || parsed <= nowMs || parsed >= SENTINEL_RECOVERY_MS;
 };
 
+const STRICT_ISO_TS_RE = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/;
+
 const isDodoCleanupAllowed = (record, { dodoEnabled = true, nowMs = Date.now() } = {}) => {
   if (dodoEnabled === true) return true;
   const ps = String(record?.providerPaymentState || "").trim();
   if (!ALL_PENDING_AND_PARTIAL_DODO_STATES.has(ps)) return true;
-  const watchMs = Date.parse(String(record?.lateCaptureWatchUntil || "").trim());
+  const rawWatch = typeof record?.lateCaptureWatchUntil === "string" ? record.lateCaptureWatchUntil.trim() : "";
+  if (!STRICT_ISO_TS_RE.test(rawWatch)) return false;
+  const watchMs = Date.parse(rawWatch);
   return Number.isFinite(watchMs) && watchMs <= nowMs;
 };
 

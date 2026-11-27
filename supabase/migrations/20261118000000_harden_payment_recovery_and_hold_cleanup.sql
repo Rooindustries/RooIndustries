@@ -324,6 +324,7 @@ begin
       select legacy_sanity_id, sort_id, payload,
         case when fenced_blocked_at is not null and has_payment_hold then 0
           when pstate in ('refunded', 'disputed') and not ((payload->'providerReversalVerified' = 'true'::jsonb) is true)
+            and coalesce(payload->>'providerRecoveryTerminalReason', '') not in ('dodo_session_mismatch', 'dodo_payment_binding_mismatch')
             and (checked_at is null or checked_at <= v_due_cutoff or checked_at >= '2090-01-01T00:00:00Z'::timestamptz) then 1
           when (pstate = 'unknown' or commerce.is_pending_or_partial_dodo_state(pstate)) and checked_at is not null and checked_at <= v_due_cutoff then 2
           when pstate = 'succeeded' and checked_at is not null and checked_at <= v_due_cutoff then 3 else 9 end as tier,
