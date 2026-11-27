@@ -629,3 +629,133 @@ test('verified late webhook clears sole late-watch review, blocks independent re
   assert.ok(finalWatch.bookingId);
   assert.equal(finalWatch.requiresReschedule, true);
 });
+
+test('free checkout failure releases resources, Dodo processing->failed retries cleanly after transient release error, and upgrade locks obey release gates', async () => {
+  await seedCoupon('coupon_FREEREL', 'FREEREL');
+  const freeCheckout = await startCheckout({ couponCode: 'FREEREL' });
+  await fixture.commerce.patch(freeCheckout.payload.slotHoldId).set({
+    phase: 'released',
+    expiresAt: new Date(Date.now() - 60_000).toISOString(),
+    paymentRecordId: '',
+  }).commit();
+  await fixture.commerce.patch(freeCheckout.record._id).set({
+    provider: 'free',
+    status: 'needs_recovery',
+    finalizationLeaseId: '',
+    finalizationLeaseExpiresAt: '',
+    nextRecoveryAt: new Date(Date.now() - 60_000).toISOString(),
+  }).commit();
+  const freeCron = await cron();
+  assert.equal(freeCron.status, 200, JSON.stringify(freeCron));
+  const freeAfter = await fixture.commerce.getDocument(freeCheckout.record._id);
+  assert.equal(freeAfter.status, 'failed');
+  assert.equal(freeAfter.resourceReleasePending, false);
+  assert.equal(freeAfter.recoveryOwnerReviewRequired || false, false);
+  assert.equal((await fixture.commerce.getDocument(freeCheckout.record.couponReservationId)).status, 'released');
+
+  await seedCoupon('coupon_PROCRETRY', 'PROCRETRY');
+  const procRetry = await startCheckout({ couponCode: 'PROCRETRY' });
+  await fixture.commerce.patch(procRetry.record._id).set({
+    providerPaymentState: 'processing',
+  }).commit();
+  let failTxOnce = true;
+  const transientClient = createInterceptingClient(fixture.commerce, {
+    beforeTxCommit: async () => {
+      if (failTxOnce) {
+        failTxOnce = false;
+        throw new Error('Synthetic transient release failure');
+      }
+    },
+  });
+  fixture.setPaymentAmountOverrides({ status: 'failed' });
+  const firstFailHook = await runDirectDodoWebhook({
+    client: transientClient,
+    paymentId: `payment_${procRetry.record.providerOrderId}`,
+    type: 'payment.failed',
+    eventId: `proc_retry_fail_${procRetry.record._id}`,
+  });
+  assert.equal(failTxOnce, false);
+  assert.equal(firstFailHook.httpStatus, 503, JSON.stringify(firstFailHook));
+  const pendingDoc = await fixture.commerce.getDocument(procRetry.record._id);
+  assert.equal(pendingDoc.resourceReleasePending, true);
+  assert.equal(pendingDoc.providerPaymentState, 'failed');
+  await fixture.commerce.patch(procRetry.record._id).set({
+    nextRecoveryAt: new Date(Date.now() - 60_000).toISOString(),
+  }).commit();
+  const retryCron = await cron();
+  assert.equal(retryCron.status, 200, JSON.stringify(retryCron));
+  const retriedDoc = await fixture.commerce.getDocument(procRetry.record._id);
+  assert.equal(retriedDoc.status, 'failed');
+  assert.equal(retriedDoc.resourceReleasePending, false);
+  assert.equal((await holdFor(procRetry.payload)).phase, 'released');
+  assert.equal((await fixture.commerce.getDocument(procRetry.record.couponReservationId)).status, 'released');
+
+  const blockedLock = await startCheckout();
+  const blockedLockId = `paymentUpgradeLock.${blockedLock.record._id}`;
+  await fixture.commerce.create({
+    _id: blockedLockId,
+    _type: 'paymentUpgradeLock',
+    paymentRecordId: blockedLock.record._id,
+    originalOrderId: 'order_blocked_lock',
+    backendOwner: 'supabase',
+    cutoverGeneration: 0,
+  });
+  await fixture.commerce.patch(blockedLock.record._id).set({
+    startClaimId: blockedLockId,
+    captureClaimedAt: new Date().toISOString(),
+  }).commit();
+  fixture.setPaymentAmountOverrides({ status: 'failed' });
+  await runDirectDodoWebhook({
+    client: fixture.commerce,
+    paymentId: `payment_${blockedLock.record.providerOrderId}`,
+    type: 'payment.failed',
+    eventId: `lock_blocked_${blockedLock.record._id}`,
+  });
+  assert.ok(await fixture.commerce.getDocument(blockedLockId), 'captured payment must keep upgrade lock');
+
+  const failedLock = await startCheckout();
+  const failedLockId = `paymentUpgradeLock.${failedLock.record._id}`;
+  await fixture.commerce.create({
+    _id: failedLockId,
+    _type: 'paymentUpgradeLock',
+    paymentRecordId: failedLock.record._id,
+    originalOrderId: 'order_failed_lock',
+    backendOwner: 'supabase',
+    cutoverGeneration: 0,
+  });
+  await fixture.commerce.patch(failedLock.record._id).set({
+    startClaimId: failedLockId,
+  }).commit();
+  fixture.setPaymentAmountOverrides({ status: 'failed' });
+  const failedLockRes = await runDirectDodoWebhook({
+    client: fixture.commerce,
+    paymentId: `payment_${failedLock.record.providerOrderId}`,
+    type: 'payment.failed',
+    eventId: `lock_failed_${failedLock.record._id}`,
+  });
+  assert.equal(failedLockRes.httpStatus, 200, JSON.stringify(failedLockRes));
+  assert.equal(await fixture.commerce.getDocument(failedLockId), null, 'allowed failure must delete upgrade lock');
+
+  const refundedLock = await startCheckout();
+  const refundedLockId = `paymentUpgradeLock.${refundedLock.record._id}`;
+  await fixture.commerce.create({
+    _id: refundedLockId,
+    _type: 'paymentUpgradeLock',
+    paymentRecordId: refundedLock.record._id,
+    originalOrderId: 'order_refunded_lock',
+    backendOwner: 'supabase',
+    cutoverGeneration: 0,
+  });
+  await fixture.commerce.patch(refundedLock.record._id).set({
+    startClaimId: refundedLockId,
+    status: 'refunded',
+    refundState: 'full',
+    refundRequiresBookingSync: true,
+    providerPaymentState: 'refunded',
+    providerReversalVerified: true,
+    nextRecoveryAt: new Date(Date.now() - 60_000).toISOString(),
+  }).commit();
+  const refundedLockCron = await cron();
+  assert.equal(refundedLockCron.status, 200, JSON.stringify(refundedLockCron));
+  assert.equal(await fixture.commerce.getDocument(refundedLockId), null, 'verified unbooked full refund must delete upgrade lock');
+});

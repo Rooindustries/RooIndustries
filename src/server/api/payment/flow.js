@@ -2141,8 +2141,20 @@ const markTerminalFinalizeFailure = async ({
     return { ok: false, httpStatus: 202, paymentRecord: operation.record, response: buildPublicStatusBody(operation.record) };
   }
   await requirePaymentResourceRevisions({ client, record: operation.record });
+  const stagedVerifiedTerminalState =
+    verifiedPriorPendingState && ["failed", "cancelled"].includes(String(extraTerminalSet?.providerPaymentState || "").trim().toLowerCase())
+      ? {
+          providerPaymentState: extraTerminalSet.providerPaymentState,
+          ...(extraTerminalSet.providerPaymentId ? { providerPaymentId: extraTerminalSet.providerPaymentId } : {}),
+        }
+      : {};
   let stagedRecord = operation.record;
-  if (stagedRecord.status !== PAYMENT_STATUS_FAILED || stagedRecord.resourceReleasePending !== true) {
+  if (
+    stagedRecord.status !== PAYMENT_STATUS_FAILED ||
+    stagedRecord.resourceReleasePending !== true ||
+    (stagedVerifiedTerminalState.providerPaymentState &&
+      stagedRecord.providerPaymentState !== stagedVerifiedTerminalState.providerPaymentState)
+  ) {
     try {
       stagedRecord = await patchPaymentRecord({
         client,
@@ -2155,6 +2167,7 @@ const markTerminalFinalizeFailure = async ({
           finalizationLeaseId: "",
           finalizationLeaseExpiresAt: "",
           source,
+          ...stagedVerifiedTerminalState,
         },
       });
     } catch (error) {
@@ -2885,8 +2898,19 @@ const abandonStartedPaymentRecord = async ({
   }
 
   await requirePaymentResourceRevisions({ client, record: current });
+  const stagedVerifiedTerminalState =
+    verifiedPriorPendingState && ["failed", "cancelled"].includes(String(extraTerminalSet?.providerPaymentState || "").trim().toLowerCase())
+      ? {
+          providerPaymentState: extraTerminalSet.providerPaymentState,
+          ...(extraTerminalSet.providerPaymentId ? { providerPaymentId: extraTerminalSet.providerPaymentId } : {}),
+        }
+      : {};
   let stagedRecord = current;
-  if (currentStatus !== PAYMENT_STATUS_ABANDONED) {
+  if (
+    currentStatus !== PAYMENT_STATUS_ABANDONED ||
+    (stagedVerifiedTerminalState.providerPaymentState &&
+      current.providerPaymentState !== stagedVerifiedTerminalState.providerPaymentState)
+  ) {
     const recoveryAttemptCount = Number(current.recoveryAttemptCount || 0) + 1;
     try {
       stagedRecord = await patchPaymentRecord({
@@ -2902,6 +2926,7 @@ const abandonStartedPaymentRecord = async ({
           resourceReleaseReason: reason,
           finalizationLeaseId: "",
           finalizationLeaseExpiresAt: "",
+          ...stagedVerifiedTerminalState,
         },
         event: buildPaymentRecordEvent({
           status: PAYMENT_STATUS_ABANDONED,
@@ -4398,19 +4423,16 @@ const recoverCapturedPaymentAsReschedule = async ({
         }
       : {}),
     nextRecoveryAt: getNextPaymentRecoveryAt(recoveryAttemptCount),
-    events: mergePaymentRecordEvents(
-      record.events,
-      buildPaymentRecordEvent({
-        status: PAYMENT_STATUS_EMAIL_PARTIAL,
-        source: "reconcile",
-        reason: normalizedReason,
-        data: {
-          providerOrderId: recoveredProviderOrderId,
-          providerPaymentId: recoveredProviderPaymentId,
-        },
-      })
-    ),
   };
+  const rescheduleEvent = buildPaymentRecordEvent({
+    status: PAYMENT_STATUS_EMAIL_PARTIAL,
+    source: "reconcile",
+    reason: normalizedReason,
+    data: {
+      providerOrderId: recoveredProviderOrderId,
+      providerPaymentId: recoveredProviderPaymentId,
+    },
+  });
 
   const preCommitRecord = (await getPaymentRecordById(client, record._id)) || record;
   const preCommitStatus = String(preCommitRecord.status || "").trim().toLowerCase();
@@ -4421,6 +4443,10 @@ const recoverCapturedPaymentAsReschedule = async ({
   ) {
     return preCommitRecord;
   }
+  const preCommitPendingSet = {
+    ...pendingSet,
+    events: mergePaymentRecordEvents(preCommitRecord.events, rescheduleEvent),
+  };
   let recovery;
   try {
     recovery = await handler({
@@ -4434,7 +4460,7 @@ const recoverCapturedPaymentAsReschedule = async ({
       paymentRecordMutation: {
         id: preCommitRecord._id,
         revision: preCommitRecord._rev,
-        set: pendingSet,
+        set: preCommitPendingSet,
       },
       couponReservation,
       referralId,
@@ -4466,7 +4492,11 @@ const recoverCapturedPaymentAsReschedule = async ({
     linkedRecord = await patchPaymentRecord({
       client,
       record: linkedRecord || record,
-      set: { ...pendingSet, bookingId },
+      set: {
+        ...pendingSet,
+        events: mergePaymentRecordEvents((linkedRecord || preCommitRecord).events, rescheduleEvent),
+        bookingId,
+      },
     });
   }
 

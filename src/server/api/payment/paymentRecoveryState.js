@@ -72,6 +72,9 @@ export const isWebhookLateWatchRecovery = (r = {}, source = "") =>
 
 export const hasKnownCaptureRecord = (r = {}) => {
   const st = String(r?.status || "").trim().toLowerCase();
+  if (String(r?.provider || "").trim().toLowerCase() === "free") {
+    return st === "booked" || st === "email_partial" || Boolean(String(r?.bookingId || "").trim());
+  }
   const ps = String(r?.providerPaymentState || "").trim().toLowerCase();
   return (
     CAPTURED_STATUSES.has(st) ||
