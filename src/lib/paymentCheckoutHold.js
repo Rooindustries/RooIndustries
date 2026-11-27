@@ -116,12 +116,12 @@ export const createCheckoutFlow = (ctx) => {
   } = {}) => {
     const { location: loc, navState } = ctx.latestNavRef.current;
     const next = patchCheckout({
-      referralCode: ctx.stripReservedCode(referralCode), couponCode: ctx.stripReservedCode(couponCode),
+      referralCode: ctx.stripReservedCode(referralCode), couponCode: ctx.stripReservedCode(couponCode), code: 1,
     });
     const params = new URLSearchParams(loc.search);
     if (stripRef) params.delete("ref");
     const search = params.toString() ? `?${params}` : "";
-    ctx.skipPreApplyKeyRef.current = `${next.referralCode}|${next.couponCode}|${search}`;
+    ctx.skipPreApplyKeyRef.current = `${ctx.activeReservationKeyRef.current}|${next.referralCode}|${next.couponCode}|${search}`;
     navReplace(loc, search, { ...navState, bookingData: next });
   };
   const applyClaimed = (claimed, operation) => {
@@ -130,7 +130,7 @@ export const createCheckoutFlow = (ctx) => {
     const referralCode = ctx.stripReservedCode(claimed.referralCode), couponCode = ctx.stripReservedCode(claimed.couponCode);
     const q = claimed.quote && typeof claimed.quote === "object" ? claimed.quote : null;
     writeHold(claimed.refreshedHold, "payment_pending");
-    patchCheckout({ referralCode, couponCode });
+    patchCheckout({ referralCode, couponCode, code: 1 });
     const fingerprint = JSON.stringify({
       packageTitle: ctx.packageTitle, originalOrderId: bookingData.originalOrderId || "",
       startTimeUTC: bookingData.startTimeUTC || "", email: bookingData.email || "", referralCode, couponCode,

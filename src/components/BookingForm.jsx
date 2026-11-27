@@ -13,7 +13,7 @@ import { useHydrating } from "../lib/useHydrating";
 import { removeBrowserStorage, writeBrowserStorage } from "../lib/browserStorage";
 import { CLIENT_REQUEST_TIMEOUT_MS, reportRequestError, requestTimeoutError, watchPageLeave } from "../lib/clientRequest";
 import { getPublicContent } from "../lib/publicContentClient";
-import { useLocation, useNavigate, Link } from "react-router-dom";
+import { useLocation, useNavigate, useNavigationType, Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import useHomeSectionLinkHandler from "../lib/useHomeSectionLinkHandler";
 import packageContent from "../lib/packageContent";
@@ -29,7 +29,9 @@ import {
   readStoredCheckoutBooking,
   stripReservedCode,
   updateStoredCheckoutHold,
+  writeStoredCheckoutBooking,
 } from "../lib/checkoutStorage";
+import { readExistingCheckoutReferral, stripRefFromSearch, writeLinkReferralToSession } from "../lib/arrivalSnapshot";
 import { normalizeLinkReferral } from "../lib/refShape.js";
 import {
   calculateCheckoutDiscounts,
@@ -51,6 +53,7 @@ const {
   applyPackagePricing,
   getPackageTitleAliases,
   isTopPackageTitle,
+  resolveKnownPackageTitle,
 } = packagePricing;
 const preparePackage = (pkg) =>
   applyPackageContentOverrides(applyPackagePricing(pkg));
@@ -63,9 +66,10 @@ const IST_OFFSET_MINUTES = 330;
 const FORM_PREFILL_KEY = "booking_form_prefill";
 const HOLD_STORAGE_KEY = "my_slot_hold";
 const BOOKING_DRAFT_KEY = BOOKING_DRAFT_STORAGE_KEY;
+let bookingPopHref = "";
+if (typeof window !== "undefined") window.addEventListener("popstate", () => { bookingPopHref = window.location.href; });
 const PAYMENT_SESSION_STORAGE_KEY = "payment_session_state";
 const SESSION_STATE_KEY = "booking_modal_state";
-const REFERRAL_STORAGE_KEY = "referral_session";
 const INVALID_CHECKOUT_CODE_MESSAGE = "Invalid referral or coupon code.";
 const BOOKING_FETCH_TIMEOUT_MS = CLIENT_REQUEST_TIMEOUT_MS;
 const AVAILABILITY_REFRESH_INTERVAL_MS = 60_000;
@@ -103,13 +107,7 @@ const normalizeForm = (value = {}) => ({
   mainGame: typeof value.mainGame === "string" ? value.mainGame : "",
   notes: typeof value.notes === "string" ? value.notes : "",
 });
-const readReferralFromSession = () => {
-  try {
-    return readLinkReferralFromSession();
-  } catch {
-    return "";
-  }
-};
+const readReferralFromSession = readLinkReferralFromSession;
 const formatUsd = (value) => `$${toMoney(value).toFixed(2)}`;
 const getDraftKey = (pkg) => (pkg?.title ? pkg.title : "_default");
 const isDraftEmpty = (formObj) =>
@@ -565,6 +563,7 @@ export default function BookingForm() {
 
   const prevPackageRef = useRef(selectedPackage.title);
   const prevPackageDataRef = useRef(selectedPackage);
+  const restoringDraftPackageRef = useRef(false);
   const [draftLoading, setDraftLoading] = useState(true);
   const [myHold, setMyHold] = useState(null);
   const currentHoldRef = useRef(myHold);
@@ -615,30 +614,39 @@ export default function BookingForm() {
     });
   };
 
-  // Persist referral from URL into session storage; clear only if explicitly blank
+  const navigationType = useNavigationType();
+  const popEntryRef = useRef({ key: "", popped: false });
+  if (popEntryRef.current.key !== location.key) {
+    popEntryRef.current = {
+      key: location.key,
+      popped: typeof window !== "undefined" && navigationType === "POP" && (bookingPopHref === window.location.href || performance.getEntriesByType?.("navigation")?.[0]?.type === "back_forward"),
+    };
+  }
+  const fromHistoryPop = popEntryRef.current.popped;
+  const stripRefQueryParam = useCallback(() => {
+    const nextSearch = stripRefFromSearch(location.search);
+    if (nextSearch !== null) navigate({ pathname: location.pathname, search: nextSearch, hash: location.hash }, { replace: true, state: location.state });
+  }, [location.hash, location.pathname, location.search, location.state, navigate]);
+
   useEffect(() => {
-    try {
-      const normalizedDismissed = dismissedReferralCode.toLowerCase();
-      if (
-        referralQuery.code &&
-        referralQuery.code.toLowerCase() !== normalizedDismissed
-      ) {
-        sessionStorage.setItem(REFERRAL_STORAGE_KEY, referralQuery.code);
-      } else if (
-        referralQuery.explicitBlank ||
-        (normalizedDismissed && readReferralFromSession().toLowerCase() === normalizedDismissed)
-      ) {
-        sessionStorage.removeItem(REFERRAL_STORAGE_KEY);
-      }
-    } catch {
-      console.error("Failed to persist referral session");
+    if (draftLoading) return;
+    const dismissed = dismissedReferralCode.toLowerCase();
+    const code = referralQuery?.code || "";
+    if (code) {
+      const existing = readExistingCheckoutReferral(selectedPackage.title, { pathname: "/booking", search: location.search });
+      if (existing && existing.toLowerCase() !== code.toLowerCase()) stripRefQueryParam();
+      else if (!fromHistoryPop && code.toLowerCase() !== dismissed) writeLinkReferralToSession(code);
+      return;
     }
-  }, [dismissedReferralCode, referralQuery]);
+    if (dismissed && readReferralFromSession().toLowerCase() === dismissed) writeLinkReferralToSession("");
+  }, [dismissedReferralCode, draftLoading, fromHistoryPop, location.search, referralQuery, selectedPackage.title, stripRefQueryParam]);
 
   useEffect(() => {
     const prevTitle = prevPackageRef.current;
     const nextTitle = selectedPackage.title;
-    if (prevTitle && prevTitle !== nextTitle) {
+    if (restoringDraftPackageRef.current) {
+      restoringDraftPackageRef.current = false;
+    } else if (prevTitle && prevTitle !== nextTitle) {
       const prevPkgData = prevPackageDataRef.current;
       if (
         prevPkgData &&
@@ -1216,30 +1224,28 @@ export default function BookingForm() {
       if (storedDraft) {
         const parsed = JSON.parse(storedDraft);
         setDrafts(parsed.packages || {});
+        const pkgs = parsed.packages && typeof parsed.packages === "object" ? parsed.packages : null;
         const key = getDraftKey(selectedPackage);
-        const draftForPkg =
-          (parsed.packages && parsed.packages[key]) ||
-          (parsed.lastTitle && parsed.packages && parsed.packages[parsed.lastTitle]) ||
-          null;
+        const exactDraft = pkgs && Object.hasOwn(pkgs, key) ? pkgs[key] : null;
+        const hasExplicitPackage = Boolean(location.state?.bookingPackage?.title || location.state?.bookingData?.packageTitle || resolveKnownPackageTitle(new URLSearchParams(location.search).get("package") || ""));
+        const lastDraft = !hasExplicitPackage && parsed.lastTitle && pkgs && Object.hasOwn(pkgs, parsed.lastTitle) ? pkgs[parsed.lastTitle] : null;
+        const draftForPkg = hasExplicitPackage || persistedPackage ? exactDraft : lastDraft || exactDraft;
         if (draftForPkg) {
           if (draftForPkg.form) setForm(normalizeForm(draftForPkg.form));
           if (draftForPkg.selectedPackage) {
+            if (getDraftKey(draftForPkg.selectedPackage) !== selectedPackage.title) restoringDraftPackageRef.current = true;
             setPersistedPackage(draftForPkg.selectedPackage);
           }
-          const checkoutCodes = draftForPkg.checkoutCodes;
-          if (checkoutCodes && typeof checkoutCodes === "object") {
-            const referralCode = stripReservedCode(checkoutCodes.referral?.code);
-            const couponCode = stripReservedCode(checkoutCodes.coupon?.code);
-            const dismissedCode = stripReservedCode(checkoutCodes.dismissedReferralCode);
-            setDismissedReferralCode(dismissedCode);
-            if (referralCode || couponCode) {
-              setRestoredCodeCandidates({
-                referralCode,
-                couponCode,
-                dismissedCode,
-              });
-            }
-          }
+          const cc = draftForPkg.checkoutCodes && typeof draftForPkg.checkoutCodes === "object" ? draftForPkg.checkoutCodes : null;
+          const draftRef = cc?.referral === null ? "" : stripReservedCode(cc?.referral?.code) || stripReservedCode(draftForPkg.appliedReferral?.code) || stripReservedCode(draftForPkg.referralCode);
+          const draftCoupon = cc?.coupon === null ? "" : stripReservedCode(cc?.coupon?.code) || stripReservedCode(draftForPkg.appliedCoupon?.code) || stripReservedCode(draftForPkg.couponCode);
+          let storedHoldId = "";
+          try { storedHoldId = JSON.parse(sessionStorage.getItem("my_slot_hold") || "null")?.holdId || ""; } catch {}
+          const pay = readStoredCheckoutBooking(), paySync = Boolean(pay?.code && String(pay.packageTitle || "").trim() === getDraftKey(draftForPkg.selectedPackage || selectedPackage) && (!pay.slotHoldId || pay.slotHoldId === storedHoldId));
+          const referralCode = paySync ? stripReservedCode(pay.referralCode) : draftRef, couponCode = paySync ? stripReservedCode(pay.couponCode) : draftCoupon;
+          const dismissedCode = paySync && !referralCode ? stripReservedCode(cc?.dismissedReferralCode) || draftRef : stripReservedCode(cc?.dismissedReferralCode);
+          setDismissedReferralCode(dismissedCode);
+          if (referralCode || couponCode) setRestoredCodeCandidates({ referralCode, couponCode, dismissedCode });
           setPreventHoldAutoload(false);
         }
       }
@@ -1276,12 +1282,14 @@ export default function BookingForm() {
     persistDraft({
       form: { ...form },
       selectedPackage: { ...selectedPackage },
-      checkoutCodes: {
-        referral: safeReferral,
-        coupon: safeCoupon,
-        dismissedReferralCode: String(dismissedCode || "").trim(),
-      },
+      checkoutCodes: { referral: safeReferral, coupon: safeCoupon, dismissedReferralCode: String(dismissedCode || "").trim() },
+      referralCode: "", couponCode: "", appliedReferral: null, appliedCoupon: null,
     });
+    const pay = readStoredCheckoutBooking();
+    const liveHold = currentHoldRef.current;
+    if (pay && liveHold?.holdId && pay.slotHoldId === liveHold.holdId && pay.slotHoldToken === liveHold.holdToken) {
+      writeStoredCheckoutBooking({ ...pay, referralCode: safeReferral?.code || "", couponCode: safeCoupon?.code || "" });
+    }
   };
 
   const clearDraftForPackage = (pkgKey) => {
@@ -1290,9 +1298,10 @@ export default function BookingForm() {
       if (!current) return;
       const parsed = { lastTitle: null, packages: {}, ...JSON.parse(current) };
       if (parsed.packages && parsed.packages[pkgKey]) {
-        const selectedPackage = parsed.packages[pkgKey]?.selectedPackage;
-        if (selectedPackage?.title) {
-          parsed.packages[pkgKey] = { selectedPackage };
+        const rest = { ...parsed.packages[pkgKey] };
+        delete rest.form;
+        if (rest.selectedPackage?.title || Object.keys(rest).length > 0) {
+          parsed.packages[pkgKey] = rest;
           parsed.lastTitle = pkgKey;
         } else {
           delete parsed.packages[pkgKey];
@@ -1655,18 +1664,7 @@ export default function BookingForm() {
     setCodeError("");
   };
 
-  const storeReferralSession = (code) => {
-    try {
-      const safe = normalizeLinkReferral(code);
-      if (safe) {
-        sessionStorage.setItem(REFERRAL_STORAGE_KEY, safe);
-      } else {
-        sessionStorage.removeItem(REFERRAL_STORAGE_KEY);
-      }
-    } catch {
-      console.error("Failed to persist referral session");
-    }
-  };
+  const storeReferralSession = writeLinkReferralToSession;
 
   const applyResolvedReferral = (referral) => {
     const safeReferral = sanitizeReferralForCheckout(referral);
@@ -1795,7 +1793,7 @@ export default function BookingForm() {
           if (result?.unavailable) {
             unavailableCode = sourceCode;
             if (sourceType === "referral") {
-              autoReferralAttemptRef.current = `${selectedPackage.title}:${sourceCode.toLowerCase()}`;
+              autoReferralAttemptRef.current = `${selectedPackage.title}:${myHold?.holdId || ""}:${sourceCode.toLowerCase()}`;
             }
             return;
           }
@@ -1832,7 +1830,8 @@ export default function BookingForm() {
       };
 
       const referralCode = restoredCodeCandidates.referralCode;
-      if (referralCode) {
+      const dismissedReferral = (restoredCodeCandidates.dismissedCode || "").toLowerCase();
+      if (referralCode && referralCode.toLowerCase() !== dismissedReferral) {
         const result = await resolveCheckoutCode(
           referralCode,
           selectedPackage.title
@@ -1856,12 +1855,8 @@ export default function BookingForm() {
       setAppliedCoupon(nextCoupon);
       setDismissedReferralCode(nextDismissedCode);
       if (!unavailableCode) {
-        storeReferralSession(nextReferral?.code || "");
-        persistCheckoutCodes({
-          referral: nextReferral,
-          coupon: nextCoupon,
-          dismissedCode: nextDismissedCode,
-        });
+        if (referralCode && !nextReferral && readReferralFromSession().toLowerCase() === referralCode.toLowerCase()) storeReferralSession("");
+        persistCheckoutCodes({ referral: nextReferral, coupon: nextCoupon, dismissedCode: nextDismissedCode });
       }
       setRestoredCodeCandidates(null);
 
@@ -1903,17 +1898,16 @@ export default function BookingForm() {
     }
 
     const storedReferral = readReferralFromSession();
-    const autoCode = referralQuery.code || storedReferral;
-    if (
-      !autoCode ||
-      autoCode.toLowerCase() === dismissedReferralCode.toLowerCase()
-    ) {
-      return;
-    }
+    const pay = readStoredCheckoutBooking();
+    const checkoutRef = pay && String(pay.packageTitle || "").trim() === selectedPackage.title && (!myHold?.holdId || !pay.slotHoldId || pay.slotHoldId === myHold.holdId)
+      ? stripReservedCode(pay.referralCode) : "";
+    const autoCode = storedReferral || checkoutRef || (fromHistoryPop ? "" : referralQuery.code);
+    if (!autoCode || autoCode.toLowerCase() === dismissedReferralCode.toLowerCase()) return;
 
-    const attemptKey = `${selectedPackage.title}:${autoCode.toLowerCase()}`;
+    const attemptKey = `${selectedPackage.title}:${myHold?.holdId || ""}:${autoCode.toLowerCase()}`;
     if (autoReferralAttemptRef.current === attemptKey) return;
     autoReferralAttemptRef.current = attemptKey;
+    const isPassiveCandidate = Boolean(storedReferral) || !checkoutRef;
     let active = true;
     let settled = false;
     setValidatingCode(true);
@@ -1925,41 +1919,32 @@ export default function BookingForm() {
           const nextCoupon = sanitizeCouponForCheckout(appliedCoupon);
           if (!result?.unavailable) {
             setDismissedReferralCode(autoCode);
-            storeReferralSession("");
-            persistCheckoutCodes({
-              referral: null,
-              coupon: nextCoupon,
-              dismissedCode: autoCode,
-            });
+            if (readReferralFromSession().toLowerCase() === autoCode.toLowerCase()) storeReferralSession("");
+            persistCheckoutCodes({ referral: null, coupon: nextCoupon, dismissedCode: autoCode });
           }
           setCodeEntryOpen(true);
           setCodeInput(result?.unavailable ? autoCode : "");
           setCodeError(result?.unavailable ? CODE_VALIDATION_UNAVAILABLE_MESSAGE : INVALID_CHECKOUT_CODE_MESSAGE);
           return;
         }
+        const dropPassive = () => {
+          if (readReferralFromSession().toLowerCase() === autoCode.toLowerCase()) storeReferralSession("");
+          if (referralQuery.code && referralQuery.code.toLowerCase() === autoCode.toLowerCase()) stripRefQueryParam();
+        };
         if (result.type === "coupon") {
           const safeCoupon = sanitizeCouponForCheckout(result.value);
-          if (
-            !safeCoupon ||
-            (safeCoupon.canCombineWithReferral === false && appliedReferral)
-          ) {
-            return;
-          }
+          if (!safeCoupon) return;
+          if (appliedCoupon && isPassiveCandidate) return dropPassive();
+          if (safeCoupon.canCombineWithReferral === false && appliedReferral) return;
           setAppliedCoupon(safeCoupon);
-          persistCheckoutCodes({
-            referral: sanitizeReferralForCheckout(appliedReferral),
-            coupon: safeCoupon,
-            dismissedCode: dismissedReferralCode,
-          });
+          persistCheckoutCodes({ referral: sanitizeReferralForCheckout(appliedReferral), coupon: safeCoupon, dismissedCode: dismissedReferralCode });
           return;
         }
 
         const safeReferral = sanitizeReferralForCheckout(result.value);
         if (!safeReferral) return;
-        const nextCoupon =
-          appliedCoupon?.canCombineWithReferral === false
-            ? null
-            : sanitizeCouponForCheckout(appliedCoupon);
+        if (appliedCoupon?.canCombineWithReferral === false && isPassiveCandidate) return dropPassive();
+        const nextCoupon = appliedCoupon?.canCombineWithReferral === false ? null : sanitizeCouponForCheckout(appliedCoupon);
         setAppliedReferral(safeReferral);
         setAppliedCoupon(nextCoupon);
         storeReferralSession(safeReferral.code || autoCode);
@@ -1979,10 +1964,12 @@ export default function BookingForm() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    appliedCoupon,
     appliedReferral,
     dismissedReferralCode,
     draftLoading,
     hasActiveHold,
+    myHold?.holdId,
     isPaymentPendingHold,
     referralQuery.code,
     restoredCodeCandidates,

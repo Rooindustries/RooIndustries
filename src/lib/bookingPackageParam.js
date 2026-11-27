@@ -6,7 +6,7 @@ import { useBookingDialogPending } from "./bookingDialogHold";
 import { reportRequestError } from "./clientRequest";
 import { HOME_SECTION_DATA_KEYS, fetchHomeSectionData, readHomeSectionData } from "./homeSectionData";
 
-const { TOP_PACKAGE_PUBLIC_TITLE, findPackageBySlug, getPackageSlug } = packagePricing;
+const { TOP_PACKAGE_PUBLIC_TITLE, findPackageBySlug, getPackageSlug, normalizePackageSlug } = packagePricing;
 const PACKAGES = HOME_SECTION_DATA_KEYS.packagesList;
 const DEFAULT_PACKAGE_TITLE = "Performance Vertex Overhaul";
 const BOOKABLE_TITLES = ["Vertex Essentials", DEFAULT_PACKAGE_TITLE, TOP_PACKAGE_PUBLIC_TITLE];
@@ -15,7 +15,7 @@ const DEFAULT_SLUG = getPackageSlug(DEFAULT_PACKAGE_TITLE);
 const PRICES_ERROR = "We couldn't load package prices. Check your connection and try again.";
 
 const slugFromSearch = (search) => {
-  const slug = String(new URLSearchParams(search || "").get("package") || "").trim().toLowerCase();
+  const slug = normalizePackageSlug(new URLSearchParams(search || "").get("package") || "");
   return TITLE_BY_SLUG.has(slug) ? slug : "";
 };
 

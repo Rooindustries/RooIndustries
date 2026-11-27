@@ -15,20 +15,34 @@ const granted = () => readConsent() === "granted";
 
 const projectKey = () => cleanOutsideValue(process.env.NEXT_PUBLIC_POSTHOG_KEY || DEFAULT_KEY);
 
-const deliver = (current) => ({ id, event, properties, attribution, path, at }) => {
-  const booking = COMPLETED_BOOKING.test(event);
-  if (booking && INTERNAL_ID.test(properties.event_id || "")) client.identify(properties.event_id);
-  const labels = booking ? sales.salesEventProperties(attribution ?? null) : current;
-  const page = { $current_url: `${window.location.origin}${path}`, $pathname: path };
-  const options = { uuid: id, timestamp: new Date(at), transport: "sendBeacon" };
-  client.capture(event, { ...labels, ...properties, ...page }, options);
-};
+const deliver =
+  (current) =>
+  ({ id, event, properties, explicitAttribution, attribution, landing, path, at }) => {
+    const booking = COMPLETED_BOOKING.test(event);
+    if (booking && INTERNAL_ID.test(properties?.event_id || "")) {
+      client.identify(properties.event_id);
+    }
+    let labels = current;
+    if (booking || explicitAttribution) {
+      labels = sales.salesEventProperties(attribution ?? null);
+    } else if (landing) {
+      const scoped = sales.attributionForLandingSnapshot(landing);
+      if (scoped?.journeyId) client.useJourney(scoped.journeyId);
+      labels = scoped ? sales.salesEventProperties(scoped) : current;
+    }
+    const page = { $current_url: `${window.location.origin}${path}`, $pathname: path };
+    const options = { uuid: id, timestamp: new Date(at), transport: "sendBeacon" };
+    client.capture(event, { ...labels, ...properties, ...page }, options);
+  };
 
 const flush = () => {
   if (!client) return;
   const items = takePostHogQueue();
   if (!items.length) return;
-  const current = sales.salesEventProperties(sales.journeySalesAttribution());
+  const allScoped = items.every(
+    (item) => item.landing || item.explicitAttribution || COMPLETED_BOOKING.test(item.event)
+  );
+  const current = allScoped ? {} : sales.salesEventProperties(sales.journeySalesAttribution());
   if (current.journey_id) client.useJourney(current.journey_id);
   items.forEach(deliver(current));
 };

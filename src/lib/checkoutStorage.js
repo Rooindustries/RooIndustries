@@ -138,12 +138,3 @@ export const readLinkReferralFromSession = () => {
     return "";
   }
 };
-
-export const rememberReferralFromSearch = (search) => {
-  if (typeof window === "undefined") return;
-  const code = normalizeLinkReferral(new URLSearchParams(search || "").get("ref") || "");
-  if (!code) return;
-  try {
-    window.sessionStorage.setItem(REFERRAL_SESSION_STORAGE_KEY, code);
-  } catch {}
-};

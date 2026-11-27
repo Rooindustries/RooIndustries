@@ -13,6 +13,8 @@ const storedChoice = (storage) => {
   }
 };
 
+export const readSharedConsent = () => storedChoice("localStorage");
+
 export const readConsent = () => {
   if (typeof window === "undefined") return "unset";
   if (pageChoice && storedChoice("localStorage") !== pageChoice.over) pageChoice = null;

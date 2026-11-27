@@ -138,6 +138,10 @@
       "js": 3072,
       "css": 1024
     },
+    "src/App.jsx -> ./components/ReservationBanner": {
+      "js": 5120,
+      "css": 1024
+    },
     "src/App.jsx -> ./legacyPages/About": {
       "js": 5120,
       "css": 1024
@@ -179,7 +183,7 @@
       "css": 1024
     },
     "src/App.jsx -> ./legacyPages/Payment": {
-      "js": 61440,
+      "js": 62464,
       "css": 1024
     },
     "src/App.jsx -> ./legacyPages/PrivacyPolicy": {
@@ -250,6 +254,14 @@
       "js": 8192,
       "css": 1024
     },
+    "src/components/PayPalPanelSlot.jsx -> ./PayPalMethodPanel": {
+      "js": 2048,
+      "css": 1024
+    },
+    "src/components/SalesTelemetry.tsx -> ../lib/pendingArrival": {
+      "js": 3072,
+      "css": 1024
+    },
     "src/components/SupabaseSocialLogin.jsx -> ../lib/supabaseBrowser": {
       "js": 68608,
       "css": 1024
@@ -263,11 +275,11 @@
       "css": 1024
     },
     "src/lib/analyticsModules.js -> ./postHogOutbox": {
-      "js": 2048,
+      "js": 5120,
       "css": 1024
     },
     "src/lib/analyticsModules.js -> ./salesTracking": {
-      "js": 9216,
+      "js": 10240,
       "css": 1024
     },
     "src/lib/checkoutAnalytics.js -> ./bookingAnalytics": {
@@ -303,7 +315,11 @@
       "css": 1024
     },
     "src/next/AppClientRuntime.jsx -> ../lib/postHogOutbox": {
-      "js": 2048,
+      "js": 5120,
+      "css": 1024
+    },
+    "src/next/AppClientRuntime.jsx -> ../lib/rememberReferral": {
+      "js": 4096,
       "css": 1024
     },
     "src/next/AppClientRuntime.jsx -> ./ConsentRuntime": {

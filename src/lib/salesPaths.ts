@@ -7,7 +7,7 @@ export const SALES_PATHS = new Set([
 
 export const salesPath = (pathname: string) => {
   if (SALES_PATHS.has(pathname)) return pathname;
-  return pathname === "/upgrade-xoc" || pathname.startsWith("/upgrade/") ? "/upgrade" : "";
+  return pathname === "/upgrade" || pathname === "/upgrade-xoc" || pathname.startsWith("/upgrade/") ? "/upgrade" : "";
 };
 
 const analyticsPath = (pathname: string) => {

@@ -1030,7 +1030,19 @@ test.describe("waiting list", () => {
     expect(Object.values(salesLabels(booked))).not.toContain("launch");
     const views = named(seen, "$pageview").filter(fromTab(seen, page));
     expect(views.length).toBeGreaterThan(0);
-    for (const view of views) expect(view.properties).toMatchObject({ campaign_source: "launch", campaign: "spring" });
+    for (const view of views) {
+      expect(view.properties.campaign_source).toBeUndefined();
+      expect(view.properties.campaign).toBeUndefined();
+    }
+    await page.goto("/about");
+    await expect.poll(
+      () => named(seen, "$pageview").filter(fromTab(seen, page)).find((ev) => ev.properties?.$pathname === "/about"),
+      { timeout: 20000 },
+    ).toBeTruthy();
+    const afterView = named(seen, "$pageview")
+      .filter(fromTab(seen, page))
+      .find((ev) => ev.properties?.$pathname === "/about");
+    expect(afterView.properties).toMatchObject({ campaign_source: "launch", campaign: "spring" });
   });
 
   test("a booking whose receipt has no campaign reaches PostHog with none, and a visit keeps the browser's", async ({
@@ -1354,6 +1366,1077 @@ test.describe("waiting list", () => {
     await expect.poll(() => outbox(page)).toBeNull();
     await other.close();
   });
+
+  test("untagged CTA queued before a later tagged page never inherits the later campaign", async ({
+    page, context, posthog: seen, baseURL, productionHost,
+  }) => {
+    const vercel = await recordVercel(context);
+    const salesHold = await holdChunks(
+      page,
+      { origin: productionHost.origin, fetchOrigin: productionHost.loopback },
+      (body) => body.includes("roo_attr_last") && body.includes("has_fbclid"),
+    );
+    await page.goto("/packages", { waitUntil: "domcontentloaded" });
+    await expect.poll(() => salesHold.held, { timeout: 20000 }).toBe(true);
+    await acceptCookies(page);
+    await seeDetails(page);
+    await expect.poll(() => outbox(page)).toContain("view_item");
+
+    const laterTab = await context.newPage();
+    await laterTab.goto("/?utm_source=later_meta&utm_campaign=later_spring", {
+      waitUntil: "domcontentloaded",
+    });
+    await expect.poll(
+      () => pageviews(seen).some((url) => url === `${baseURL}/`),
+      { timeout: 20000 },
+    ).toBe(true);
+    await expect.poll(async () => {
+      const c = (await context.cookies()).find(({ name }) => name === "roo_attr_last");
+      return c ? JSON.parse(Buffer.from(c.value, "base64url").toString("utf8"))?.lastTouch?.campaign : null;
+    }, { timeout: 20000 }).toBe("later_spring");
+
+    salesHold.release();
+    await expect.poll(() => named(seen, "view_item").length, { timeout: 20000 }).toBe(1);
+    await expect.poll(() => Boolean(vercel("view_item")), { timeout: 20000 }).toBe(true);
+
+    const phView = named(seen, "view_item")[0].properties;
+    expect(phView.campaign_source).toBeUndefined();
+    expect(phView.campaign).toBeUndefined();
+    expect(phView.landing_path).toBe("/packages");
+    const vaView = vercel("view_item");
+    expect(vaView.campaign_source).toBeUndefined();
+    expect(vaView.campaign).toBeUndefined();
+    const homePv = seen.events.find(
+      (ev) => ev.event === "$pageview" && ev.properties?.$pathname === "/",
+    );
+    expect(homePv?.properties?.campaign_source).toBe("later_meta");
+    expect(homePv?.properties?.campaign).toBe("later_spring");
+    await laterTab.close();
+  });
+
+  test("queued PostHog events keep landing context out of outbox, match /upgrade/max canonically, and clear landings on flush", async ({
+    page, posthog: seen, productionHost,
+  }) => {
+    await page.goto("/packages");
+    await acceptCookies(page);
+    await expect.poll(() => pageviews(seen).length, { timeout: 20000 }).toBeGreaterThan(0);
+
+    const phHold = await holdPostHog(page, productionHost);
+    await page.goto("/upgrade/max?utm_source=yt_upgrade&utm_campaign=max_push", {
+      waitUntil: "domcontentloaded",
+    });
+    await expect.poll(() => outbox(page), { timeout: 20000 }).toEqual(
+      expect.arrayContaining(["$pageview", "service_visit"]),
+    );
+
+    const rawOutbox = await outboxEntries(page);
+    for (const item of rawOutbox) {
+      expect(item.landing).toBeUndefined();
+      expect(item.attribution).toBeUndefined();
+    }
+    const landings = await page.evaluate(() =>
+      JSON.parse(sessionStorage.getItem("roo_posthog_outbox_landings") || "null"),
+    );
+    const pvItem = rawOutbox.find((item) => item.event === "$pageview");
+    const visitItem = rawOutbox.find((item) => item.event === "service_visit");
+    expect(landings?.[pvItem.id]).toMatchObject({
+      landingPath: "/upgrade",
+      campaign: { source: "yt_upgrade", campaign: "max_push" },
+    });
+    expect(landings?.[visitItem.id]).toMatchObject({
+      landingPath: "/upgrade",
+      campaign: { source: "yt_upgrade", campaign: "max_push" },
+    });
+
+    phHold.release();
+    await expect.poll(
+      () => seen.events.some((ev) => ev.uuid === pvItem.id) && seen.events.some((ev) => ev.uuid === visitItem.id),
+      { timeout: 20000 },
+    ).toBe(true);
+    const pv = seen.events.find((ev) => ev.uuid === pvItem.id);
+    expect(pv.properties.$pathname).toBe("/upgrade");
+    expect(pv.properties.landing_path).toBe("/upgrade");
+    expect(pv.properties.campaign_source).toBe("yt_upgrade");
+    expect(pv.properties.campaign).toBe("max_push");
+    const visit = seen.events.find((ev) => ev.uuid === visitItem.id);
+    expect(visit.properties.landing_path).toBe("/upgrade");
+    expect(visit.properties.campaign_source).toBe("yt_upgrade");
+    expect(visit.properties.campaign).toBe("max_push");
+    await expect.poll(
+      () => page.evaluate(() => sessionStorage.getItem("roo_posthog_outbox_landings")),
+    ).toBeNull();
+  });
+
+  test("queued untagged click keeps the campaign current when clicked after a third campaign arrives", async ({
+    page, posthog: seen, productionHost,
+  }) => {
+    const phHold = await holdPostHog(page, productionHost);
+    await page.goto("/?utm_source=first-touch&utm_campaign=first-campaign", { waitUntil: "domcontentloaded" });
+    await acceptCookies(page);
+    await expect.poll(async () => {
+      const c = (await page.context().cookies()).find(({ name }) => name === "roo_attr_last");
+      return c ? JSON.parse(Buffer.from(c.value, "base64url").toString("utf8")).lastTouch?.source : null;
+    }, { timeout: 20000 }).toBe("first-touch");
+
+    await page.goto("/reviews?utm_source=second-touch&utm_campaign=second-campaign", {
+      waitUntil: "domcontentloaded",
+    });
+    await expect.poll(async () => {
+      const c = (await page.context().cookies()).find(({ name }) => name === "roo_attr_last");
+      return c ? JSON.parse(Buffer.from(c.value, "base64url").toString("utf8")).lastTouch?.source : null;
+    }, { timeout: 20000 }).toBe("second-touch");
+
+    await page.goto("/packages", { waitUntil: "domcontentloaded" });
+    await seeDetails(page);
+    await expect.poll(() => outbox(page)).toContain("view_item");
+    const clicked = (await outboxEntries(page)).find((item) => item.event === "view_item");
+
+    await page.goto("/?utm_source=third-touch&utm_campaign=third-campaign", { waitUntil: "domcontentloaded" });
+    await expect.poll(async () => {
+      const c = (await page.context().cookies()).find(({ name }) => name === "roo_attr_last");
+      return c ? JSON.parse(Buffer.from(c.value, "base64url").toString("utf8")).lastTouch?.source : null;
+    }, { timeout: 20000 }).toBe("third-touch");
+
+    phHold.release();
+    await expect.poll(() => seen.events.some((ev) => ev.uuid === clicked.id), { timeout: 20000 }).toBe(true);
+    const delivered = seen.events.find((ev) => ev.uuid === clicked.id);
+    expect(delivered.properties.campaign_source).toBe("second-touch");
+    expect(delivered.properties.campaign).toBe("second-campaign");
+    expect(delivered.properties.first_source).toBe("first-touch");
+    const finalCookie = (await page.context().cookies()).find(({ name }) => name === "roo_attr_last");
+    expect(JSON.parse(Buffer.from(finalCookie.value, "base64url").toString("utf8")).lastTouch?.source).toBe(
+      "third-touch",
+    );
+  });
+
+  test("queued PostHog click keeps the pending campaign current when clicked after a later pending touch overwrites it", async ({
+    page, posthog: seen, baseURL, productionHost,
+  }) => {
+    const phHold = await holdPostHog(page, productionHost);
+    await page.goto("/packages", { waitUntil: "domcontentloaded" });
+    await acceptCookies(page);
+    await expect.poll(() => outbox(page)).toContain("$pageview");
+
+    const now = Date.now();
+    const journeyId = "66666666-6666-4666-8666-666666666666";
+    const oldTouch = { capturedAt: new Date(now - 60_000).toISOString(), landingPath: "/", source: "persisted-prior" };
+    await page.context().addCookies([
+      { name: "roo_attr", value: Buffer.from(JSON.stringify({ version: 2, journeyId, firstTouch: oldTouch })).toString("base64url"), url: baseURL },
+      { name: "roo_attr_last", value: Buffer.from(JSON.stringify({ journeyId, lastTouch: oldTouch })).toString("base64url"), url: baseURL },
+    ]);
+    await page.evaluate((capturedAt) => {
+      sessionStorage.setItem("roo_pending_arrival_touch", JSON.stringify({
+        landingPath: "/reviews",
+        capturedAt,
+        referrerHost: "",
+        campaign: { source: "first-pending", campaign: "first-pending-campaign" },
+        referral: "",
+        ignoreUrlReferral: false,
+      }));
+    }, new Date(now - 10_000).toISOString());
+
+    await seeDetails(page);
+    await expect.poll(() => outbox(page)).toContain("view_item");
+    const clicked = (await outboxEntries(page)).find((item) => item.event === "view_item");
+
+    await page.goto("/reviews?utm_source=later-pending&utm_campaign=later-pending-campaign", {
+      waitUntil: "domcontentloaded",
+    });
+    await expect.poll(async () => {
+      const c = (await page.context().cookies()).find(({ name }) => name === "roo_attr_last");
+      return c ? JSON.parse(Buffer.from(c.value, "base64url").toString("utf8"))?.lastTouch?.source : null;
+    }).toBe("later-pending");
+
+    phHold.release();
+    await expect.poll(() => seen.events.some((ev) => ev.uuid === clicked.id), { timeout: 20000 }).toBe(true);
+    const delivered = seen.events.find((ev) => ev.uuid === clicked.id);
+    expect(delivered.properties.campaign_source).toBe("first-pending");
+    expect(delivered.properties.campaign).toBe("first-pending-campaign");
+    expect(delivered.properties.landing_path).toBe("/reviews");
+  });
+
+  test("slow attribution on a first tagged visit keeps one canonical journey across page view and package click", async ({
+    page, posthog: seen, productionHost,
+  }) => {
+    const salesHold = await holdChunk(page, productionHost, "first_campaign");
+    await page.goto("/packages?utm_source=first-tagged&utm_campaign=first-campaign", {
+      waitUntil: "domcontentloaded",
+    });
+    await expect.poll(() => salesHold.held, { timeout: 20000 }).toBe(true);
+    await expect.poll(
+      () => page.evaluate(() => sessionStorage.getItem("roo_pending_arrival_touch") || ""),
+      { timeout: 20000 },
+    ).toContain("first-tagged");
+
+    await acceptCookies(page);
+    await seeDetails(page);
+    await expect.poll(() => outbox(page), { timeout: 20000 }).toEqual(
+      expect.arrayContaining(["$pageview", "view_item"]),
+    );
+    expect(await journeyOf(page)).toBeUndefined();
+
+    salesHold.release();
+    await expect.poll(() => journeyOf(page), { timeout: 20000 }).toBeTruthy();
+    const journeyId = await journeyOf(page);
+    await expect.poll(
+      () => named(seen, "$pageview").length > 0 && named(seen, "view_item").length > 0,
+      { timeout: 20000 },
+    ).toBe(true);
+
+    const pv = named(seen, "$pageview").at(-1);
+    const click = named(seen, "view_item").at(-1);
+    for (const ev of [pv, click]) {
+      expect(ev.properties.distinct_id).toBe(journeyId);
+      expect(ev.properties.journey_id).toBe(journeyId);
+      expect(ev.properties.campaign_source).toBe("first-tagged");
+      expect(ev.properties.campaign).toBe("first-campaign");
+      expect(ev.properties.first_campaign).toBe("first-campaign");
+    }
+  });
+
+  test("clicks in an older tab join the saved journey after a second tab saves attribution", async ({
+    page, context, posthog: seen, productionHost,
+  }) => {
+    const vercel = await recordVercel(context);
+    const salesHold = await holdChunk(page, productionHost, "first_campaign");
+    await page.goto("/packages", { waitUntil: "domcontentloaded" });
+    await expect.poll(() => salesHold.held, { timeout: 20000 }).toBe(true);
+    await acceptCookies(page);
+    await expect.poll(() => outbox(page), { timeout: 20000 }).toContain("$pageview");
+    expect(await journeyOf(page)).toBeUndefined();
+
+    const other = await context.newPage();
+    await other.goto("/reviews?utm_source=later-tab&utm_campaign=later-campaign", {
+      waitUntil: "domcontentloaded",
+    });
+    await expect.poll(async () => {
+      const c = (await context.cookies()).find(({ name }) => name === "roo_attr_last");
+      return c ? JSON.parse(Buffer.from(c.value, "base64url").toString("utf8"))?.lastTouch?.source : null;
+    }, { timeout: 20000 }).toBe("later-tab");
+    const tabBJourney = await journeyOf(page);
+    expect(tabBJourney).toBeTruthy();
+
+    await seeDetails(page);
+    await seeDetails(page);
+    await expect.poll(
+      async () => (await outbox(page))?.filter((name) => name === "view_item").length ?? 0,
+      { timeout: 20000 },
+    ).toBe(2);
+    const queued = await outboxEntries(page);
+    const pvId = queued.find((item) => item.event === "$pageview").id;
+    const clickIds = queued.filter((item) => item.event === "view_item").map((item) => item.id);
+
+    salesHold.release();
+    await expect.poll(
+      () => [pvId, ...clickIds].every((id) => seen.events.some((ev) => ev.uuid === id)),
+      { timeout: 20000 },
+    ).toBe(true);
+    await expect.poll(async () => {
+      const c = (await context.cookies()).find(({ name }) => name === "roo_attr");
+      return c ? JSON.parse(Buffer.from(c.value, "base64url").toString("utf8"))?.firstTouch?.landingPath : null;
+    }, { timeout: 20000 }).toBe("/packages");
+    await expect.poll(() => vercel("view_item")?.journey_id, { timeout: 20000 }).toBe(tabBJourney);
+
+    const pv = seen.events.find((ev) => ev.uuid === pvId);
+    expect(pv.properties.distinct_id).toBe(tabBJourney);
+    expect(pv.properties.journey_id).toBe(tabBJourney);
+    for (const id of clickIds) {
+      const ev = seen.events.find((item) => item.uuid === id);
+      expect(ev.properties.distinct_id).toBe(tabBJourney);
+      expect(ev.properties.journey_id).toBe(tabBJourney);
+      expect(ev.properties.campaign_source).toBe("later-tab");
+      expect(ev.properties.campaign).toBe("later-campaign");
+    }
+    const lastCookie = (await context.cookies()).find(({ name }) => name === "roo_attr_last");
+    expect(JSON.parse(Buffer.from(lastCookie.value, "base64url").toString("utf8")).journeyId).toBe(tabBJourney);
+    await other.close();
+  });
+
+  test("delayed PostHog startup on an older tagged tab preserves a newer tab campaign through payment start", async ({
+    page, context, flow, posthog: seen, productionHost,
+  }) => {
+    const vercel = await recordVercel(context);
+    const salesHold = await holdChunk(page, productionHost, "first_campaign");
+    await page.goto("/packages?utm_source=earlier-tab&utm_campaign=earlier-campaign", {
+      waitUntil: "domcontentloaded",
+    });
+    await expect.poll(() => salesHold.held, { timeout: 20000 }).toBe(true);
+    await acceptCookies(page);
+    await expect.poll(() => outbox(page), { timeout: 20000 }).toContain("$pageview");
+    expect(await journeyOf(page)).toBeUndefined();
+
+    const tabB = await context.newPage();
+    await tabB.goto("/reviews?utm_source=later-tab&utm_campaign=later-campaign", {
+      waitUntil: "domcontentloaded",
+    });
+    await expect.poll(async () => {
+      const c = (await context.cookies()).find(({ name }) => name === "roo_attr_last");
+      return c ? JSON.parse(Buffer.from(c.value, "base64url").toString("utf8"))?.lastTouch?.campaign : null;
+    }, { timeout: 20000 }).toBe("later-campaign");
+    const tabBJourney = await journeyOf(page);
+
+    await seeDetails(page);
+    await seeDetails(page);
+    await expect.poll(
+      async () => (await outboxEntries(page)).filter((item) => item.event === "view_item").length,
+      { timeout: 15000 },
+    ).toBe(2);
+    const queued = await outboxEntries(page);
+    const queuedIds = queued.filter((item) => item.event === "$pageview" || item.event === "view_item").map((item) => item.id);
+
+    salesHold.release();
+    await expect.poll(
+      () => queuedIds.every((id) => seen.events.some((ev) => ev.uuid === id)),
+      { timeout: 20000 },
+    ).toBe(true);
+    for (const id of queuedIds) {
+      const ev = seen.events.find((item) => item.uuid === id);
+      expect(ev?.properties?.journey_id).toBe(tabBJourney);
+      expect(ev?.properties?.campaign_source).toBe("earlier-tab");
+      expect(ev?.properties?.campaign).toBe("earlier-campaign");
+    }
+    await expect.poll(() => vercel("view_item")?.journey_id, { timeout: 20000 }).toBe(tabBJourney);
+    await expect.poll(async () => {
+      const c = (await context.cookies()).find(({ name }) => name === "roo_attr");
+      return c ? JSON.parse(Buffer.from(c.value, "base64url").toString("utf8"))?.firstTouch?.campaign : null;
+    }, { timeout: 20000 }).toBe("earlier-campaign");
+
+    const decode = (name) => {
+      const c = context.cookies().then((list) => list.find((item) => item.name === name));
+      return c.then((item) => (item ? JSON.parse(Buffer.from(item.value, "base64url").toString("utf8")) : null));
+    };
+    expect((await decode("roo_attr"))?.firstTouch?.campaign).toBe("earlier-campaign");
+    expect((await decode("roo_attr_last"))?.lastTouch?.campaign).toBe("later-campaign");
+    expect((await decode("roo_attr_last"))?.journeyId).toBe(tabBJourney);
+
+    const tabC = await context.newPage();
+    await tabC.goto("/packages", { waitUntil: "domcontentloaded" });
+    await seeDetails(tabC);
+    await tabC.getByRole("link", { name: /Book Now/ }).first().click();
+    await expect(tabC).toHaveURL((url) => url.pathname === "/booking");
+    await reachPayment(tabC);
+    await tabC.getByRole("button", { name: "Pay your way", exact: true }).click();
+    await expect(tabC).toHaveURL(/\/__test\/checkout-handoff$/);
+
+    const startBody = flow.startBodies().at(-1)?.bookingPayload?.salesAttribution;
+    expect(startBody?.journeyId).toBe(tabBJourney);
+    expect(startBody?.firstTouch?.campaign).toBe("earlier-campaign");
+    expect(startBody?.lastTouch?.campaign).toBe("later-campaign");
+    await tabC.close();
+    await tabB.close();
+  });
+
+  test("stripping an ignored coupon from the payment URL keeps a newer tab campaign", async ({
+    page, context, flow, posthog: seen,
+  }) => {
+    const decode = async (name) => {
+      const c = (await context.cookies()).find((item) => item.name === name);
+      return c ? JSON.parse(Buffer.from(c.value, "base64url").toString("utf8")) : null;
+    };
+    await page.goto("/about", { waitUntil: "domcontentloaded" });
+    await acceptCookies(page);
+
+    const futureExpiry = new Date(Date.now() + 20 * 60 * 1000).toISOString();
+    const state = {
+      packageTitle: "Performance Vertex Overhaul", packagePrice: "$84.99",
+      email: "a@example.invalid", discord: "user_a", specs: "pc", mainGame: "CS2",
+      localTimeZone: "Asia/Kolkata", startTimeUTC: `${flow.state.slots[0].date}T04:30:00.000Z`,
+      displayDate: flow.state.slots[0].date, displayTime: "10:00 AM",
+      slotHoldId: "hold-passive-utm", slotHoldToken: "tok-passive-utm", slotHoldExpiresAt: futureExpiry,
+      couponCode: "save20",
+    };
+    let releasePassive;
+    const passiveSeen = new Promise((resolve) => {
+      page.route("**/api/ref/validateCoupon*", async (route) => {
+        const code = (new URL(route.request().url()).searchParams.get("code") || "").toLowerCase();
+        if (code === "passivea") {
+          resolve();
+          await new Promise((r) => { releasePassive = r; });
+          return route.fulfill({ json: { ok: true, coupon: { code: "passivea", discountType: "percent", discountPercent: 10, canCombineWithReferral: true } } });
+        }
+        if (code === "save20") {
+          return route.fulfill({ json: { ok: true, coupon: { code: "save20", discountType: "percent", discountPercent: 20, canCombineWithReferral: true } } });
+        }
+        return route.fulfill({ json: { ok: false, reason: "not_found" } });
+      });
+    });
+    await page.route("**/api/ref/validateReferral*", (route) =>
+      route.fulfill({ json: { ok: false, reason: "not_found" } }),
+    );
+    await page.evaluate((checkout) => {
+      sessionStorage.setItem("checkout_booking_state", JSON.stringify(checkout));
+      sessionStorage.setItem("referral_session", "passivea");
+    }, state);
+
+    await page.goto("/payment?ref=passivea&utm_source=earlier-tab&utm_campaign=earlier-campaign", {
+      waitUntil: "domcontentloaded",
+    });
+    await passiveSeen;
+    await expect.poll(async () => (await decode("roo_attr_last"))?.lastTouch?.campaign, { timeout: 20000 })
+      .toBe("earlier-campaign");
+    await expect.poll(
+      () => named(seen, "$pageview").some((ev) => ev.properties.$pathname === "/payment"),
+      { timeout: 20000 },
+    ).toBe(true);
+
+    const tabB = await context.newPage();
+    await tabB.goto("/reviews?utm_source=later-tab&utm_campaign=later-campaign", {
+      waitUntil: "domcontentloaded",
+    });
+    await expect.poll(async () => (await decode("roo_attr_last"))?.lastTouch?.campaign, { timeout: 20000 })
+      .toBe("later-campaign");
+    const laterSaved = await decode("roo_attr_last");
+
+    releasePassive();
+    await expect.poll(() => new URL(page.url()).searchParams.has("ref"), { timeout: 20000 }).toBe(false);
+    expect(new URL(page.url()).searchParams.get("utm_campaign")).toBe("earlier-campaign");
+    await expect(page.locator("#payment-coupon-code")).toHaveValue("save20");
+    await settleIdle(page);
+
+    const afterStrip = await decode("roo_attr_last");
+    expect(afterStrip?.lastTouch?.campaign).toBe("later-campaign");
+    expect(afterStrip?.lastTouch?.capturedAt).toBe(laterSaved?.lastTouch?.capturedAt);
+
+    const tabC = await context.newPage();
+    await tabC.goto("/packages", { waitUntil: "domcontentloaded" });
+    await tabC.getByRole("link", { name: /Book Now/ }).first().click();
+    await expect(tabC).toHaveURL((url) => url.pathname === "/booking");
+    await reachPayment(tabC, "11:00 AM");
+    await tabC.getByRole("button", { name: "Pay your way", exact: true }).click();
+    await expect(tabC).toHaveURL(/\/__test\/checkout-handoff$/);
+
+    const startAttr = flow.startBodies().at(-1)?.bookingPayload?.salesAttribution;
+    expect(startAttr?.lastTouch?.campaign).toBe("later-campaign");
+    expect(startAttr?.lastTouch?.capturedAt).toBe(laterSaved?.lastTouch?.capturedAt);
+    await tabC.close();
+    await tabB.close();
+  });
+
+  for (const returnAction of ["close", "back"]) {
+    test(`returning to an earlier tagged packages page via ${returnAction} keeps a newer tab campaign`, async ({
+      page, context, flow, posthog: seen,
+    }) => {
+      const decode = async (name) => {
+        const c = (await context.cookies()).find((item) => item.name === name);
+        return c ? JSON.parse(Buffer.from(c.value, "base64url").toString("utf8")) : null;
+      };
+      await page.goto("/about", { waitUntil: "domcontentloaded" });
+      await acceptCookies(page);
+      await page.goto("/packages?utm_source=earlier-tab&utm_campaign=earlier-campaign", {
+        waitUntil: "domcontentloaded",
+      });
+      await expect.poll(async () => (await decode("roo_attr_last"))?.lastTouch?.campaign, { timeout: 20000 })
+        .toBe("earlier-campaign");
+      await expect.poll(
+        () => named(seen, "$pageview").some((ev) => ev.properties.$pathname === "/packages"),
+        { timeout: 20000 },
+      ).toBe(true);
+
+      await page.getByRole("link", { name: /Book Now/ }).first().click();
+      await expect(page).toHaveURL((url) => url.pathname === "/booking");
+      await expect(page.getByRole("dialog")).toBeVisible();
+
+      const tabB = await context.newPage();
+      await tabB.goto("/reviews?utm_source=later-tab&utm_campaign=later-campaign", {
+        waitUntil: "domcontentloaded",
+      });
+      await expect.poll(async () => (await decode("roo_attr_last"))?.lastTouch?.campaign, { timeout: 20000 })
+        .toBe("later-campaign");
+      const laterSaved = await decode("roo_attr_last");
+
+      if (returnAction === "close") {
+        await page.getByRole("dialog").getByRole("button", { name: "Close" }).click();
+      } else {
+        await page.goBack();
+      }
+      await expect(page).toHaveURL(/\/packages\?utm_source=earlier-tab&utm_campaign=earlier-campaign$/);
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await settleIdle(page);
+
+      const afterReturn = await decode("roo_attr_last");
+      expect(afterReturn?.lastTouch?.campaign).toBe("later-campaign");
+      expect(afterReturn?.lastTouch?.capturedAt).toBe(laterSaved?.lastTouch?.capturedAt);
+
+      const tabC = await context.newPage();
+      await tabC.goto("/packages", { waitUntil: "domcontentloaded" });
+      await tabC.getByRole("link", { name: /Book Now/ }).first().click();
+      await expect(tabC).toHaveURL((url) => url.pathname === "/booking");
+      await reachPayment(tabC, "11:00 AM");
+      await tabC.getByRole("button", { name: "Pay your way", exact: true }).click();
+      await expect(tabC).toHaveURL(/\/__test\/checkout-handoff$/);
+
+      const startAttr = flow.startBodies().at(-1)?.bookingPayload?.salesAttribution;
+      expect(startAttr?.lastTouch?.campaign).toBe("later-campaign");
+      expect(startAttr?.lastTouch?.capturedAt).toBe(laterSaved?.lastTouch?.capturedAt);
+      await tabC.close();
+      await tabB.close();
+    });
+  }
+
+  for (const holdSalesOnReload of [false, true]) {
+    test(`reloading a tagged payment page keeps a newer tab campaign at payment start (${holdSalesOnReload ? "chunk held" : "chunk loaded"})`, async ({
+      page, context, flow, productionHost,
+    }) => {
+      const decode = async (name) => {
+        const c = (await context.cookies()).find((item) => item.name === name);
+        return c ? JSON.parse(Buffer.from(c.value, "base64url").toString("utf8")) : null;
+      };
+      await page.goto("/about", { waitUntil: "domcontentloaded" });
+      await acceptCookies(page);
+      await page.goto("/packages", { waitUntil: "domcontentloaded" });
+      await page.getByRole("link", { name: /Book Now/ }).first().click();
+      await expect(page).toHaveURL((url) => url.pathname === "/booking");
+      await reachPayment(page);
+
+      await page.goto("/payment?utm_source=earlier-tab&utm_campaign=earlier-campaign", {
+        waitUntil: "domcontentloaded",
+      });
+      await expect(page.getByRole("heading", { name: "Complete Payment", exact: true })).toBeVisible();
+      await expect.poll(async () => (await decode("roo_attr_last"))?.lastTouch?.campaign, { timeout: 20000 })
+        .toBe("earlier-campaign");
+
+      const tabB = await context.newPage();
+      await tabB.goto("/reviews?utm_source=later-tab&utm_campaign=later-campaign", {
+        waitUntil: "domcontentloaded",
+      });
+      await expect.poll(async () => (await decode("roo_attr_last"))?.lastTouch?.campaign, { timeout: 20000 })
+        .toBe("later-campaign");
+      const laterSaved = await decode("roo_attr_last");
+
+      const salesHold = holdSalesOnReload ? await holdChunk(page, productionHost, "first_campaign") : null;
+      let salesLoaded = false;
+      const onChunkResponse = async (res) => {
+        if (salesLoaded || !res.ok() || !res.url().includes("/_next/static/chunks/")) return;
+        try {
+          if ((await res.text()).includes("first_campaign")) salesLoaded = true;
+        } catch {}
+      };
+      if (!holdSalesOnReload) page.on("response", onChunkResponse);
+      await page.reload({ waitUntil: "domcontentloaded" });
+      if (salesHold) await expect.poll(() => salesHold.held, { timeout: 20000 }).toBe(true);
+      else await expect.poll(() => salesLoaded, { timeout: 20000 }).toBe(true);
+      if (!holdSalesOnReload) page.off("response", onChunkResponse);
+      await expect(page.getByRole("heading", { name: "Complete Payment", exact: true })).toBeVisible();
+      expect(await page.evaluate(() => performance.getEntriesByType("navigation")[0]?.type)).toBe("reload");
+      expect((await decode("roo_attr_last"))?.lastTouch).toEqual(laterSaved?.lastTouch);
+
+      await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+      await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
+
+      const startAttr = flow.startBodies().at(-1)?.bookingPayload?.salesAttribution;
+      expect(startAttr?.lastTouch).toEqual(laterSaved?.lastTouch);
+      expect((await decode("roo_attr_last"))?.lastTouch).toEqual(laterSaved?.lastTouch);
+      salesHold?.release();
+      await tabB.close();
+    });
+  }
+
+  for (const returnAction of ["close", "back"]) {
+    test(`reloading Packages then returning from Booking via ${returnAction} keeps a newer tab campaign`, async ({
+      page, context,
+    }) => {
+      const decode = async (name) => {
+        const c = (await context.cookies()).find((item) => item.name === name);
+        return c ? JSON.parse(Buffer.from(c.value, "base64url").toString("utf8")) : null;
+      };
+      await page.goto("/packages?utm_source=earlier-tab&utm_campaign=earlier-campaign", {
+        waitUntil: "domcontentloaded",
+      });
+      await acceptCookies(page);
+      await expect.poll(async () => (await decode("roo_attr_last"))?.lastTouch?.campaign, { timeout: 20000 })
+        .toBe("earlier-campaign");
+      await page.reload({ waitUntil: "domcontentloaded" });
+      expect(await page.evaluate(() => performance.getEntriesByType("navigation")[0]?.type)).toBe("reload");
+
+      await page.getByRole("link", { name: /Book Now/ }).first().click();
+      await expect(page).toHaveURL((url) => url.pathname === "/booking");
+      await expect(page.getByRole("dialog")).toBeVisible();
+
+      const tabB = await context.newPage();
+      await tabB.goto("/reviews?utm_source=later-tab&utm_campaign=later-campaign", {
+        waitUntil: "domcontentloaded",
+      });
+      await expect.poll(async () => (await decode("roo_attr_last"))?.lastTouch?.campaign, { timeout: 20000 })
+        .toBe("later-campaign");
+      const laterSaved = await decode("roo_attr_last");
+
+      if (returnAction === "close") {
+        await page.getByRole("dialog").getByRole("button", { name: "Close" }).click();
+      } else {
+        await page.goBack();
+      }
+      await expect(page).toHaveURL(/\/packages\?utm_source=earlier-tab&utm_campaign=earlier-campaign$/);
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await settleIdle(page);
+
+      expect((await decode("roo_attr_last"))?.lastTouch).toEqual(laterSaved?.lastTouch);
+      await tabB.close();
+    });
+  }
+
+  test("a quota error on a full outbox rotates when 100 entries fit and preserves paired landings with zero orphans on write failure", async ({
+    page, posthog: seen, productionHost,
+  }) => {
+    const postHog = await holdPostHog(page, productionHost);
+    const longCampaign = `quota-old-${"x".repeat(80)}`;
+    const longQuery = new URLSearchParams({
+      utm_source: `src-${"a".repeat(80)}`,
+      utm_medium: `med-${"b".repeat(80)}`,
+      utm_campaign: longCampaign,
+      utm_content: `cnt-${"c".repeat(80)}`,
+      utm_term: `trm-${"d".repeat(80)}`,
+      fbclid: `fb-${"e".repeat(180)}`,
+      gclid: `gc-${"f".repeat(180)}`,
+    }).toString();
+    await page.goto(`/packages?${longQuery}`, { waitUntil: "domcontentloaded" });
+    await acceptCookies(page);
+    await seeDetails(page);
+    await expect.poll(() => outbox(page)).toContain("view_item");
+    const longLanding = await page.evaluate(() => {
+      const items = JSON.parse(sessionStorage.getItem("roo-posthog-outbox") || "[]");
+      const landings = JSON.parse(sessionStorage.getItem("roo_posthog_outbox_landings") || "{}");
+      const first = items.find((item) => item.event === "view_item");
+      return { first, landing: landings[first.id] };
+    });
+
+    await page.goto("/packages?utm_campaign=short", { waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("button", { name: "See What's Included" }).first()).toBeVisible();
+    await expect.poll(() => outbox(page).then((events) => events.filter((name) => name === "$pageview").length)).toBe(2);
+    await page.evaluate(({ first, landing }) => {
+      const base = first.at;
+      const keptItems = [{ id: first.id, event: "$pageview", path: "/packages", at: base }];
+      const keptLandings = { [first.id]: landing };
+      for (let i = 0; i < 99; i += 1) {
+        const id = `seed-${String(i).padStart(3, "0")}`;
+        keptItems.push({ id, event: "$pageview", path: "/packages", at: base });
+        keptLandings[id] = { ...landing, campaign: { campaign: "short" }, capturedAt: new Date(base).toISOString() };
+      }
+      sessionStorage.setItem("roo-posthog-outbox", JSON.stringify(keptItems));
+      sessionStorage.setItem("roo_posthog_outbox_landings", JSON.stringify(keptLandings));
+      const totalBudget = (sessionStorage.getItem("roo-posthog-outbox") || "").length +
+        (sessionStorage.getItem("roo_posthog_outbox_landings") || "").length;
+      window.__quotaMode = "fail-outbox";
+      window.__quotaHits = { outbox: 0, landings: 0 };
+      const orig = Storage.prototype.setItem;
+      Storage.prototype.setItem = function patchedSetItem(k, v) {
+        if (this === window.sessionStorage) {
+          if (window.__quotaMode === "fail-outbox" && k === "roo-posthog-outbox") {
+            window.__quotaHits.outbox += 1;
+            throw new DOMException("QuotaExceededError", "QuotaExceededError");
+          }
+          if (window.__quotaMode === "fail-landings" && k === "roo_posthog_outbox_landings") {
+            window.__quotaHits.landings += 1;
+            throw new DOMException("QuotaExceededError", "QuotaExceededError");
+          }
+          if (window.__quotaMode === "combined-cap" && (k === "roo-posthog-outbox" || k === "roo_posthog_outbox_landings")) {
+            const otherKey = k === "roo-posthog-outbox" ? "roo_posthog_outbox_landings" : "roo-posthog-outbox";
+            const otherLen = (window.sessionStorage.getItem(otherKey) || "").length;
+            if (v.length + otherLen > totalBudget) {
+              throw new DOMException("QuotaExceededError", "QuotaExceededError");
+            }
+          }
+        }
+        return orig.call(this, k, v);
+      };
+      window.__firstViewId = first.id;
+    }, longLanding);
+
+    const readPair = () => page.evaluate(() => {
+      const items = JSON.parse(sessionStorage.getItem("roo-posthog-outbox") || "[]");
+      const landings = JSON.parse(sessionStorage.getItem("roo_posthog_outbox_landings") || "{}");
+      return {
+        count: items.length,
+        landingCount: Object.keys(landings).length,
+        firstId: items[0]?.id,
+        expectedFirstId: window.__firstViewId,
+        firstCampaign: landings[items[0]?.id]?.campaign?.campaign || "",
+        hits: window.__quotaHits,
+      };
+    });
+
+    await seeDetails(page);
+    const afterOutboxFail = await readPair();
+    expect(afterOutboxFail).toEqual({
+      count: 100,
+      landingCount: 100,
+      firstId: afterOutboxFail.expectedFirstId,
+      expectedFirstId: afterOutboxFail.expectedFirstId,
+      firstCampaign: longCampaign,
+      hits: { outbox: 1, landings: 0 },
+    });
+
+    await page.evaluate(() => { window.__quotaMode = "fail-landings"; });
+    await seeDetails(page);
+    const afterLandingFail = await readPair();
+    expect(afterLandingFail).toEqual({
+      count: 100,
+      landingCount: 100,
+      firstId: afterLandingFail.expectedFirstId,
+      expectedFirstId: afterLandingFail.expectedFirstId,
+      firstCampaign: longCampaign,
+      hits: { outbox: 1, landings: 1 },
+    });
+
+    await page.evaluate(() => { window.__quotaMode = "combined-cap"; });
+    await seeDetails(page);
+    const firstViewId = await page.evaluate(() => window.__firstViewId);
+    await page.goto("/about", { waitUntil: "domcontentloaded" });
+    const afterRotate = await page.evaluate((oldId) => {
+      const items = JSON.parse(sessionStorage.getItem("roo-posthog-outbox") || "[]");
+      const landings = JSON.parse(sessionStorage.getItem("roo_posthog_outbox_landings") || "{}");
+      const queueIds = items.map((item) => String(item.id));
+      const landingKeys = Object.keys(landings);
+      return {
+        count: items.length,
+        landingCount: landingKeys.length,
+        hasNewViewItem: items.some((item) => item.event === "view_item" && item.id !== oldId),
+        oldEvicted: !items.some((item) => item.id === oldId),
+        everyPaired: items.every((item) => Boolean(landings[item.id])),
+        uniqueQueueIds: new Set(queueIds).size === queueIds.length,
+        landingsMatchQueue: landingKeys.length === queueIds.length && landingKeys.every((key) => queueIds.includes(key)),
+      };
+    }, firstViewId);
+    expect(afterRotate).toEqual({
+      count: 100,
+      landingCount: 100,
+      hasNewViewItem: true,
+      oldEvicted: true,
+      everyPaired: true,
+      uniqueQueueIds: true,
+      landingsMatchQueue: true,
+    });
+    postHog.release();
+    await expect.poll(() => named(seen, "view_item").length, { timeout: 20000 }).toBeGreaterThan(0);
+  });
+
+  test("pending attribution overlay wins over an older cookie while the cookie lock is held and pending storage is unavailable", async ({
+    page, context, flow,
+  }) => {
+    await page.goto("/about", { waitUntil: "domcontentloaded" });
+    await acceptCookies(page);
+    await page.goto("/packages?utm_source=older&utm_campaign=older-cookie", { waitUntil: "domcontentloaded" });
+    const cookieCampaign = async () => {
+      const c = (await context.cookies()).find((item) => item.name === "roo_attr_last");
+      return c ? JSON.parse(Buffer.from(c.value, "base64url").toString("utf8"))?.lastTouch?.campaign : "";
+    };
+    await expect.poll(cookieCampaign, { timeout: 20000 }).toBe("older-cookie");
+
+    const holder = await context.newPage();
+    await holder.goto("/about", { waitUntil: "domcontentloaded" });
+    await holder.evaluate(() => new Promise((ready) => {
+      navigator.locks.request("roo_sales_attribution_cookie", () => new Promise((release) => {
+        window.__releaseAttrLock = release;
+        ready();
+      }));
+    }));
+
+    await page.addInitScript(() => {
+      const orig = Storage.prototype.setItem;
+      Storage.prototype.setItem = function patchedSetItem(k, v) {
+        if (this === window.sessionStorage && k === "roo_pending_arrival_touch") {
+          throw new DOMException("QuotaExceededError", "QuotaExceededError");
+        }
+        return orig.call(this, k, v);
+      };
+    });
+    await page.goto("/packages?utm_source=newer&utm_campaign=newer-overlay", { waitUntil: "domcontentloaded" });
+    await expect.poll(
+      () => page.evaluate(() => ({
+        overlay: window.__rooAttrOverlay?.lastTouch?.campaign || "",
+        pending: sessionStorage.getItem("roo_pending_arrival_touch"),
+      })),
+      { timeout: 20000 },
+    ).toEqual({ overlay: "newer-overlay", pending: null });
+
+    await page.getByRole("link", { name: /Book Now/ }).first().click();
+    await expect(page).toHaveURL((url) => url.pathname === "/booking");
+    await reachPayment(page);
+    await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+    await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
+    expect(flow.startBodies().at(-1)?.bookingPayload?.salesAttribution?.lastTouch?.campaign).toBe("newer-overlay");
+    expect(await cookieCampaign()).toBe("older-cookie");
+
+    await holder.evaluate(() => window.__releaseAttrLock?.());
+    await holder.close();
+  });
+
+  test("a session-storage read error keeps cookie attribution intact when payment start times out", async ({
+    page, context, flow, productionHost,
+  }) => {
+    await page.goto("/about", { waitUntil: "domcontentloaded" });
+    await acceptCookies(page);
+    await page.goto("/packages?utm_campaign=before-booking", { waitUntil: "domcontentloaded" });
+    await page.getByRole("link", { name: /Book Now/ }).first().click();
+    await expect(page).toHaveURL((url) => url.pathname === "/booking");
+    await reachPayment(page);
+
+    const tabB = await context.newPage();
+    await tabB.goto("/reviews?utm_campaign=newest-cookie", { waitUntil: "domcontentloaded" });
+    await expect.poll(
+      async () => {
+        const c = (await context.cookies()).find((item) => item.name === "roo_attr_last");
+        return c ? JSON.parse(Buffer.from(c.value, "base64url").toString("utf8"))?.lastTouch?.campaign : "";
+      },
+      { timeout: 20000 },
+    ).toBe("newest-cookie");
+
+    const hold = await holdChunk(page, productionHost, "first_campaign");
+    let readFaults = 0;
+    await page.exposeFunction("__recordSalesAttrReadFault", () => { readFaults += 1; });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect.poll(() => hold.held, { timeout: 20000 }).toBe(true);
+    await page.evaluate(() => {
+      const orig = Storage.prototype.getItem;
+      Storage.prototype.getItem = function patchedGetItem(k) {
+        if (this === window.sessionStorage && k === "sales_attribution") {
+          window.__recordSalesAttrReadFault?.();
+          throw new DOMException("SecurityError", "SecurityError");
+        }
+        return orig.call(this, k);
+      };
+    });
+    await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+    await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
+    expect(readFaults).toBeGreaterThan(0);
+    expect(flow.startBodies().at(-1)?.bookingPayload?.salesAttribution?.lastTouch?.campaign).toBe("newest-cookie");
+    hold.release();
+    await tabB.close();
+  });
+
+  test("payment timeout fallback does not write session attribution while the cookie lock is held", async ({
+    page, context, flow, productionHost,
+  }) => {
+    await page.goto("/packages", { waitUntil: "domcontentloaded" });
+    await page.getByRole("link", { name: /Book Now/ }).first().click();
+    await expect(page).toHaveURL((url) => url.pathname === "/booking");
+    await reachPayment(page);
+
+    const holder = await context.newPage();
+    await holder.goto("/about", { waitUntil: "domcontentloaded" });
+    await holder.evaluate(() => new Promise((ready) => {
+      navigator.locks.request("roo_sales_attribution_cookie", () => new Promise((release) => {
+        window.__releaseAttrLock = release;
+        ready();
+      }));
+    }));
+
+    const hold = await holdChunk(page, productionHost, "first_campaign");
+    await page.goto("/payment?utm_source=timeout&utm_campaign=timeout-lock", { waitUntil: "domcontentloaded" });
+    await expect.poll(() => hold.held, { timeout: 20000 }).toBe(true);
+    await page.evaluate(() => {
+      sessionStorage.removeItem("sales_attribution");
+      document.cookie = "roo_attr=; Path=/; Max-Age=0";
+      document.cookie = "roo_attr_last=; Path=/; Max-Age=0";
+    });
+
+    await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+    await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
+    expect(flow.startBodies().at(-1)?.bookingPayload?.salesAttribution?.lastTouch?.campaign).toBe("timeout-lock");
+    expect(await page.evaluate(() => sessionStorage.getItem("sales_attribution"))).toBeNull();
+
+    await holder.evaluate(() => window.__releaseAttrLock?.());
+    hold.release();
+    await holder.close();
+  });
+
+  for (const mode of ["loaded-on-click", "timeout"]) {
+    test(`untagged checkout sends identical null attribution (${mode})`, async ({
+      page, flow, productionHost,
+    }) => {
+      await page.goto("/packages", { waitUntil: "domcontentloaded" });
+      await page.getByRole("link", { name: /Book Now/ }).first().click();
+      await expect(page).toHaveURL((url) => url.pathname === "/booking");
+      await reachPayment(page);
+
+      const holdLoaded = await holdChunk(page, productionHost, "first_campaign");
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await expect.poll(() => holdLoaded.held, { timeout: 20000 }).toBe(true);
+      await page.evaluate(() => {
+        sessionStorage.removeItem("sales_attribution");
+        sessionStorage.removeItem("roo_pending_arrival_touch");
+      });
+      let chunkResolved = false;
+      if (mode === "loaded-on-click") {
+        await page.exposeFunction("__releaseSalesChunkOnClick", () => {
+          holdLoaded.release();
+          chunkResolved = true;
+        });
+        await page.getByRole("button", { name: "Pay your way", exact: true }).evaluate((btn) => {
+          btn.addEventListener("click", () => { queueMicrotask(() => window.__releaseSalesChunkOnClick()); }, { once: true });
+        });
+      }
+      await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+      await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
+      if (mode === "loaded-on-click") expect(chunkResolved).toBe(true);
+      expect(flow.startBodies().at(-1)?.bookingPayload?.salesAttribution).toBeNull();
+      holdLoaded.release();
+    });
+  }
+
+  test("pageshow restore does not persist a booking mark whose outbox write failed", async ({
+    page, productionHost,
+  }) => {
+    const postHog = await holdPostHog(page, productionHost);
+    await page.goto("/about", { waitUntil: "domcontentloaded" });
+    await acceptCookies(page);
+    await page.goto("/packages", { waitUntil: "domcontentloaded" });
+    await expect.poll(() => outbox(page)).toContain("service_visit");
+    await page.evaluate(() => {
+      sessionStorage.removeItem("roo-posthog-counted");
+      window.__outboxRejected = 0;
+      const orig = Storage.prototype.setItem;
+      Storage.prototype.setItem = function patchedSetItem(k, v) {
+        if (this === window.sessionStorage && k === "roo-posthog-outbox" && String(v).includes("service_visit")) {
+          window.__outboxRejected += 1;
+          throw new DOMException("QuotaExceededError", "QuotaExceededError");
+        }
+        return orig.call(this, k, v);
+      };
+    });
+    await page.getByRole("link", { name: /Book Now/ }).first().click();
+    await expect(page).toHaveURL((url) => url.pathname === "/booking");
+    await expect.poll(() => page.evaluate(() => window.__outboxRejected)).toBeGreaterThan(0);
+    expect(await page.evaluate(() => sessionStorage.getItem("roo-posthog-counted"))).toBeNull();
+    await page.evaluate(() => {
+      const ev = new Event("pageshow");
+      Object.defineProperty(ev, "persisted", { value: true });
+      window.dispatchEvent(ev);
+    });
+    await page.evaluate(() => new Promise((r) => setTimeout(r, 150)));
+    expect(await page.evaluate(() => sessionStorage.getItem("roo-posthog-counted"))).toBeNull();
+    postHog.release();
+  });
+
+  for (const releaseBeforeTimeout of [true, false]) {
+    test(`chunk load and timeout both reuse a journey saved during the payment-start wait (${releaseBeforeTimeout ? "loaded" : "timeout"})`, async ({
+      page, context, flow, productionHost,
+    }) => {
+      const decode = async (name) => {
+        const c = (await context.cookies()).find((item) => item.name === name);
+        return c ? JSON.parse(Buffer.from(c.value, "base64url").toString("utf8")) : null;
+      };
+      await page.goto("/about", { waitUntil: "domcontentloaded" });
+      await acceptCookies(page);
+      await page.goto("/packages", { waitUntil: "domcontentloaded" });
+      await page.getByRole("link", { name: /Book Now/ }).first().click();
+      await expect(page).toHaveURL((url) => url.pathname === "/booking");
+      await reachPayment(page);
+      await context.clearCookies();
+      await page.evaluate(() => {
+        const checkout = JSON.parse(sessionStorage.getItem("checkout_booking_state") || "null");
+        if (checkout) {
+          delete checkout.salesAttribution;
+          sessionStorage.setItem("checkout_booking_state", JSON.stringify(checkout));
+        }
+        sessionStorage.removeItem("sales_attribution");
+        sessionStorage.removeItem("roo_pending_arrival_touch");
+        delete window.__rooAttrOverlay;
+      });
+      const tabB = await context.newPage();
+      const hold = await holdChunk(page, productionHost, "first_campaign");
+      await page.addInitScript(() => {
+        const orig = window.setTimeout;
+        window.setTimeout = (fn, ms, ...args) => orig(fn, ms === 300 ? 4000 : ms, ...args);
+      });
+      await page.goto("/payment?utm_campaign=click-a", { waitUntil: "domcontentloaded" });
+      await expect.poll(() => hold.held, { timeout: 20000 }).toBe(true);
+      await context.clearCookies();
+      await page.evaluate(() => {
+        sessionStorage.removeItem("sales_attribution");
+        sessionStorage.removeItem("roo_pending_arrival_touch");
+        delete window.__rooAttrOverlay;
+      });
+      const beforeStarts = flow.startBodies().length;
+      await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+      await tabB.goto("/reviews?utm_campaign=peer-b", { waitUntil: "domcontentloaded" });
+      await expect.poll(async () => (await decode("roo_attr_last"))?.lastTouch?.campaign, { timeout: 20000 }).toBe("peer-b");
+      expect(flow.startBodies().length).toBe(beforeStarts);
+      const peerJourney = (await decode("roo_attr_last"))?.journeyId;
+      if (releaseBeforeTimeout) hold.release();
+      await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
+      const sent = flow.startBodies().at(-1)?.bookingPayload?.salesAttribution;
+      hold.release();
+      await tabB.close();
+      expect(sent?.lastTouch?.campaign).toBe("click-a");
+      expect(sent?.journeyId).toBe(peerJourney);
+    });
+  }
+
+  for (const releaseBeforeTimeout of [true, false]) {
+    test(`inverted cookie pair is rejected consistently across chunk load and timeout (${releaseBeforeTimeout ? "loaded" : "timeout"})`, async ({
+      page, context, flow, productionHost, baseURL,
+    }) => {
+      const b64u = (obj) => Buffer.from(JSON.stringify(obj), "utf8").toString("base64url");
+      const badId = "11111111-1111-4111-8111-111111111111";
+      const goodId = "22222222-2222-4222-8222-222222222222";
+      await page.goto("/about", { waitUntil: "domcontentloaded" });
+      await acceptCookies(page);
+      await page.goto("/packages", { waitUntil: "domcontentloaded" });
+      await page.getByRole("link", { name: /Book Now/ }).first().click();
+      await expect(page).toHaveURL((url) => url.pathname === "/booking");
+      await reachPayment(page);
+      await context.clearCookies();
+      await page.evaluate(() => {
+        const checkout = JSON.parse(sessionStorage.getItem("checkout_booking_state") || "null");
+        if (checkout) {
+          delete checkout.salesAttribution;
+          sessionStorage.setItem("checkout_booking_state", JSON.stringify(checkout));
+        }
+        sessionStorage.removeItem("sales_attribution");
+        sessionStorage.removeItem("roo_pending_arrival_touch");
+        delete window.__rooAttrOverlay;
+      });
+      const hold = await holdChunk(page, productionHost, "first_campaign");
+      await page.addInitScript(() => {
+        const orig = window.setTimeout;
+        window.setTimeout = (fn, ms, ...args) => orig(fn, ms === 300 ? 1500 : ms, ...args);
+      });
+      await page.goto("/payment?utm_campaign=click-a", { waitUntil: "domcontentloaded" });
+      await expect.poll(() => hold.held, { timeout: 20000 }).toBe(true);
+      await context.clearCookies();
+      await page.evaluate(() => {
+        sessionStorage.removeItem("sales_attribution");
+        sessionStorage.removeItem("roo_pending_arrival_touch");
+        delete window.__rooAttrOverlay;
+      });
+      await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+      await context.addCookies([
+        {
+          name: "roo_attr",
+          value: b64u({
+            version: 2,
+            journeyId: badId,
+            firstTouch: { capturedAt: "2026-11-02T00:00:00.000Z", landingPath: "/packages", campaign: "bad-first" },
+            lastTouch: { capturedAt: "2026-11-02T00:00:00.000Z", landingPath: "/packages", campaign: "bad-first" },
+          }),
+          url: baseURL,
+        },
+        {
+          name: "roo_attr_last",
+          value: b64u({
+            version: 2,
+            journeyId: badId,
+            lastTouch: { capturedAt: "2026-11-01T00:00:00.000Z", landingPath: "/packages", campaign: "bad-last" },
+          }),
+          url: baseURL,
+        },
+      ]);
+      await page.evaluate((id) => {
+        sessionStorage.setItem("sales_attribution", JSON.stringify({
+          version: 2,
+          journeyId: id,
+          firstTouch: { capturedAt: "2026-11-03T00:00:00.000Z", landingPath: "/reviews", campaign: "good-tab" },
+          lastTouch: { capturedAt: "2026-11-03T00:00:00.000Z", landingPath: "/reviews", campaign: "good-tab" },
+        }));
+      }, goodId);
+      if (releaseBeforeTimeout) hold.release();
+      await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
+      const sent = flow.startBodies().at(-1)?.bookingPayload?.salesAttribution;
+      hold.release();
+      expect(sent?.lastTouch?.campaign).toBe("click-a");
+      expect(sent?.journeyId).toBe(goodId);
+    });
+  }
 });
 
 const localTest = bookingTest.extend(posthogFixtures);
