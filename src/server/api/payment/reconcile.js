@@ -15,17 +15,18 @@ import { retryContactMessages } from "../../contact/contactMessages.js";
 
 import { resolveSupabaseRuntimePolicy } from "../../supabase/runtime.js";
 
-const cleanupExpiredSupabaseHolds = async ({ generation, limit = 25 }) => {
+const cleanupExpiredSupabaseHolds = async ({ generation, limit = 25, includePaymentHolds = true }) => {
   const client = createSupabaseAdminClient();
   const { data, error } = await client.rpc(
     "roo_cleanup_expired_supabase_holds",
     {
       p_cutover_generation: generation,
       p_limit: Math.max(1, Math.min(Number(limit) || 25, 25)),
+      p_include_payment_holds: includePaymentHolds !== false,
     }
   );
   if (error) throw error;
-  return data || { expired_holds: 0, removed_slot_claims: 0 };
+  return { ...(data || { expired_holds: 0, removed_slot_claims: 0 }), ...(includePaymentHolds === false ? { paymentHoldsSkipped: true, reason: "reconcile_run_incomplete" } : {}) };
 };
 
 export default async function handler(req, res) {
@@ -74,18 +75,20 @@ export default async function handler(req, res) {
       summary[name] = {pending:true,errorCode:String(error?.code || "RECONCILIATION_FAILED").slice(0,128)};
     } finally {clearTimeout(timer);}
   };
-  let paymentResult;
+  let paymentResult = null;
   await duty("paymentSessions",async () => {
     client = createPaymentBackendClient("supabase");
-    paymentResult = await reconcilePaymentSessions({req,backend:"supabase",client});
-    return paymentResult.body?.summary || {};
+    const result = await reconcilePaymentSessions({req,backend:"supabase",client});
+    return { __paymentResult: result };
   });
+  if (summary.paymentSessions?.__paymentResult) {
+    paymentResult = summary.paymentSessions.__paymentResult;
+    summary.paymentSessions = paymentResult.body?.summary || {};
+  }
   if(paymentResult?.body?.summary)Object.assign(summary,paymentResult.body.summary);
-  const canRunHoldCleanup = paymentResult?.httpStatus === 200 && paymentResult?.body?.summary?.reconcileRunCompleted !== false;
+  const canRunPaymentHoldCleanup = paymentResult?.httpStatus === 200 && paymentResult?.body?.summary?.reconcileRunCompleted !== false;
   await Promise.all([
-    canRunHoldCleanup
-      ? duty("expiredSupabaseHoldCleanup",() => cleanupExpiredSupabaseHolds({generation:policy.commerceFailoverGeneration}))
-      : Promise.resolve().then(() => { summary.expiredSupabaseHoldCleanup = { skipped: true, reason: "reconcile_run_incomplete", expired_holds: 0, removed_slot_claims: 0 }; }),
+    duty("expiredSupabaseHoldCleanup",() => cleanupExpiredSupabaseHolds({generation:policy.commerceFailoverGeneration,includePaymentHolds:canRunPaymentHoldCleanup})),
     duty("referralEmailRecovery",() => reconcileReferralEmailDispatches({limit:10})),
     duty("credentialRecovery",() => reconcileCredentialOperations({limit:10})),
     duty("rateLimitBucketsCleaned",() => cleanupExpiredRateLimitBuckets()),

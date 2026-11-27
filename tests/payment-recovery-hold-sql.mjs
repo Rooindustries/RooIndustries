@@ -197,16 +197,18 @@ test('legacy unverified reversal reverification handles missing/blank/sentinel t
   await cleanFencedState();
   const cases = [
     { label: 'verified', ts: undefined, overrides: { refund_status: 'full', refunds: [{ refund_id: 'rev_ok_1', amount: 2995, currency: 'USD', status: 'succeeded' }] }, expectState: 'refunded', expectVerified: true },
-    { label: 'won_dispute', ts: '', overrides: { disputes: [{ dispute_id: 'rev_won_1', dispute_stage: 'dispute', dispute_status: 'dispute_won', amount: '29.95' }] }, expectState: 'succeeded', expectVerified: false },
+    { label: 'won_dispute', ts: '', overrides: { disputes: [{ dispute_id: 'rev_won_1', currency: 'USD', dispute_stage: 'dispute', dispute_status: 'dispute_won', amount: '29.95' }] }, expectState: 'succeeded', expectVerified: false },
     { label: 'unavailable', ts: '9999-12-31T23:59:59.999Z', lookupFail: true, overrides: {}, expectState: 'refunded', expectVerified: false },
   ];
   for (const c of cases) {
     fixture.setProviderLookupFailure(Boolean(c.lookupFail));
     const checkout = await startCheckout();
     const paymentId = `payment_${checkout.record.providerOrderId}`;
-    const ov = c.overrides.refunds
-      ? { ...c.overrides, refunds: c.overrides.refunds.map(r => ({ ...r, payment_id: paymentId })) }
-      : c.overrides;
+    const ov = {
+      ...c.overrides,
+      ...(c.overrides.refunds ? { refunds: c.overrides.refunds.map(r => ({ ...r, payment_id: paymentId })) } : {}),
+      ...(c.overrides.disputes ? { disputes: c.overrides.disputes.map(d => ({ ...d, payment_id: paymentId })) } : {}),
+    };
     fixture.setPaymentAmountOverrides(ov);
     const patch = {
       status: 'needs_recovery',
@@ -243,7 +245,7 @@ test('HTTP reconcile-cleanup rows (i)..(viii): fenced blocks, batch overflow, ov
   const cronA = await cron();
   fixture.setRequestHook(null);
   assert.equal(cronA.status, 503, JSON.stringify(cronA));
-  assert.equal(cronA.body.summary.expiredSupabaseHoldCleanup.skipped, true);
+  assert.equal(cronA.body.summary.expiredSupabaseHoldCleanup.paymentHoldsSkipped, true);
   assert.equal((await holdFor(checkoutI.payload)).phase, 'payment_pending');
   const [blockI] = await fixture.database.sql`select b.run_id, r.state, r.fenced_seq from commerce.reconcile_hold_cleanup_blocks b join commerce.reconcile_cleanup_runs r on r.run_id = b.run_id where b.payment_record_id = ${checkoutI.record._id}`;
   assert.equal(blockI.state, 'failed');
@@ -318,7 +320,9 @@ test('HTTP reconcile-cleanup rows (i)..(viii): fenced blocks, batch overflow, ov
 
   const checkoutIV = await startCheckout();
   await ageHoldPast24h(checkoutIV.payload.slotHoldId, 26);
-  const runAfterFetch = await spawnKillWorker('after_fetch', checkoutIV.record._id);
+  const runAfterFetch = await spawnKillWorker('after_fetch');
+  const [blockIV] = await fixture.database.sql`select run_id, payment_record_id from commerce.reconcile_hold_cleanup_blocks where run_id = ${runAfterFetch}::uuid and payment_record_id = ${checkoutIV.record._id}`;
+  assert.ok(blockIV, 'Expected kill worker to register cleanup block for checkoutIV');
   await fixture.database.sql`update commerce.reconcile_cleanup_runs set lease_expires_at = clock_timestamp() - interval '5 seconds' where run_id = ${runAfterFetch}::uuid`;
   const [{ cleanup_iv: cIV }] = await fixture.database.sql`select public.roo_cleanup_expired_supabase_holds(0, 100) as cleanup_iv`;
   const [rAfter] = await fixture.database.sql`select state, fenced_seq from commerce.reconcile_cleanup_runs where run_id = ${runAfterFetch}::uuid`;
@@ -383,6 +387,8 @@ test('HTTP reconcile-cleanup rows (i)..(viii): fenced blocks, batch overflow, ov
     nextRecoveryAt: '9999-12-31T23:59:59.999Z',
   }).commit();
   await ageHoldPast24h(checkoutVI.payload.slotHoldId, 26);
+  const activeHoldVI = await fixture.hold();
+  await ageHoldPast24h(activeHoldVI.slotHoldId, 2);
   fixture.setPaymentAmountOverrides({ status: 'succeeded' });
   let failOwnerWrite = true;
   fixture.setRequestHook(async (phase, req) => {
@@ -394,8 +400,9 @@ test('HTTP reconcile-cleanup rows (i)..(viii): fenced blocks, batch overflow, ov
   const cronVI = await cron();
   fixture.setRequestHook(null);
   assert.equal(cronVI.status, 503, JSON.stringify(cronVI));
-  assert.equal(cronVI.body.summary.expiredSupabaseHoldCleanup.skipped, true);
+  assert.equal(cronVI.body.summary.expiredSupabaseHoldCleanup.paymentHoldsSkipped, true);
   assert.equal((await holdFor(checkoutVI.payload)).phase, 'payment_pending');
+  assert.equal((await holdFor(activeHoldVI)).phase, 'expired');
 
   await cleanFencedState();
   const checkoutVII = await startCheckout();
@@ -463,8 +470,21 @@ test('3 forced-order Postgres lock-alignment and post-lock-recheck rows protect 
     await sql`update migration.source_documents set payload = jsonb_set(payload, '{providerPaymentState}', '"succeeded"'::jsonb) where legacy_sanity_id = ${c1.record._id}`;
   });
   await advReady;
-  const cleanup1Promise = fixture.database.sql`select public.roo_cleanup_expired_supabase_holds(0, 100) as res`;
-  await new Promise(r => setTimeout(r, 150));
+  const cleanup1Promise = fixture.database.sql`select public.roo_cleanup_expired_supabase_holds(0, 100) as res`.execute();
+  const waitDeadline = Date.now() + 5000;
+  let waitingOnAdvisory = false;
+  while (Date.now() < waitDeadline) {
+    const waiters = await fixture.database.sql`
+      select pid from pg_stat_activity
+      where wait_event_type = 'Lock' and wait_event = 'advisory'
+        and query like '%roo_cleanup_expired_supabase_holds%'`;
+    if (waiters.length > 0) {
+      waitingOnAdvisory = true;
+      break;
+    }
+    await new Promise(r => setTimeout(r, 25));
+  }
+  assert.equal(waitingOnAdvisory, true, 'Cleanup query did not block on advisory lock');
   releaseAdvisory();
   await txAdv;
   const [{ res: r1 }] = await cleanup1Promise;
@@ -484,9 +504,17 @@ test('3 forced-order Postgres lock-alignment and post-lock-recheck rows protect 
     await rowHeld;
   });
   await rowReady;
-  const [{ res: r2 }] = await fixture.database.sql`select public.roo_cleanup_expired_supabase_holds(0, 100) as res`;
-  releaseRowLock();
-  await txRow;
+  let r2;
+  try {
+    r2 = await fixture.database.sql.begin(async s => {
+      await s`set local statement_timeout = '5s'`;
+      const [{ res }] = await s`select public.roo_cleanup_expired_supabase_holds(0, 100) as res`;
+      return res;
+    });
+  } finally {
+    releaseRowLock();
+    await txRow;
+  }
   assert.equal(r2.expired_holds, 0);
   assert.equal((await holdFor(c2.payload)).phase, 'payment_pending');
   await fixture.commerce.patch(c2.record._id).set({ providerPaymentState: 'succeeded' }).commit();

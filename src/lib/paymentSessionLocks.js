@@ -86,15 +86,12 @@ export const allocatePaymentSessionSeq = () => {
 };
 
 export const isAffirmativeTerminalRelease = (http200, data = {}) => {
-  if (http200 !== true) return false;
+  if (http200 !== true || data?.cleanupPending === true || data?.manualReviewRequired === true) return false;
   const st = String(data?.status || "").trim().toLowerCase();
-  if (data?.cancelled === true || st === "failed" || st === "abandoned") {
-    return data?.terminalOutcomeComplete === true && data?.cleanupPending !== true && data?.manualReviewRequired !== true;
+  if (data?.cancelled === true || st === "failed" || st === "abandoned" || st === "refunded") {
+    return data?.terminalOutcomeComplete === true;
   }
-  if (st === "booked" || st === "email_partial" || st === "refunded") {
-    return data?.cleanupPending !== true && data?.manualReviewRequired !== true && data?.terminalOutcomeComplete !== false;
-  }
-  return false;
+  return (st === "booked" || st === "email_partial") && data?.terminalOutcomeComplete !== false;
 };
 
 export const commitPaymentSessionState = (session, { seq = 0, scopeKey = "" } = {}) => {

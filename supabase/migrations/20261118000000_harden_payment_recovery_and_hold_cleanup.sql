@@ -18,6 +18,7 @@ create table if not exists commerce.reconcile_hold_cleanup_blocks (
   primary key (payment_record_id, run_id)
 );
 create index if not exists idx_reconcile_hold_cleanup_blocks_run_id on commerce.reconcile_hold_cleanup_blocks (run_id);
+create index if not exists idx_reconcile_cleanup_runs_running_lease on commerce.reconcile_cleanup_runs (lease_expires_at) where state = 'running';
 revoke all on sequence commerce.reconcile_fence_seq from public, anon, authenticated;
 grant usage, select on sequence commerce.reconcile_fence_seq to service_role;
 revoke all on table commerce.reconcile_cleanup_runs, commerce.reconcile_hold_cleanup_blocks from public, anon, authenticated;
@@ -49,21 +50,23 @@ returns boolean language sql immutable set search_path = '' as $$
       and lower(coalesce(p_status, '')) = 'needs_recovery' and not commerce.has_verified_reversal(p_payload))) is true;
 $$;
 
-create or replace function commerce.has_active_late_capture_watch(p_payload jsonb)
-returns boolean language sql immutable set search_path = '' as $$
-  select (jsonb_typeof(p_payload->'lateCaptureWatchUntil') = 'string' and btrim(p_payload->>'lateCaptureWatchUntil', E' \t\r\n') <> '') is true;
-$$;
-
 create or replace function commerce.safe_payload_timestamptz(p_payload jsonb, p_key text)
 returns timestamptz language plpgsql immutable set search_path = '' as $$
-declare v_raw text;
+declare v_raw text; v_ts timestamptz;
 begin
   if p_payload is null or jsonb_typeof(p_payload->p_key) <> 'string' then return null; end if;
   v_raw := btrim(p_payload->>p_key, E' \t\r\n');
-  if v_raw = '' then return null; end if;
-  return v_raw::timestamptz;
+  if v_raw = '' or v_raw !~ '^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$' then return null; end if;
+  v_ts := v_raw::timestamptz;
+  if not pg_catalog.isfinite(v_ts) then return null; end if;
+  return v_ts;
 exception when others then return null;
 end;
+$$;
+
+create or replace function commerce.has_active_late_capture_watch(p_payload jsonb)
+returns boolean language sql immutable set search_path = '' as $$
+  select commerce.safe_payload_timestamptz(p_payload, 'lateCaptureWatchUntil') is not null;
 $$;
 
 create or replace function commerce.dodo_cleanup_allowed(p_payload jsonb, p_now timestamptz, p_dodo_enabled boolean)
@@ -82,8 +85,7 @@ returns boolean language sql immutable set search_path = '' as $$
     or (not commerce.has_verified_reversal(p_payload) and (
       lower(coalesce(p_status, '')) in ('captured', 'captured_client', 'captured_webhook', 'verified_server', 'finalizing', 'booked', 'email_partial')
       or lower(coalesce(p_payload->>'verificationState', '')) = 'server_verified'
-      or lower(coalesce(p_payload->>'providerPaymentState', '')) = 'succeeded'
-      or commerce.is_pending_or_partial_dodo_state(p_payload->>'providerPaymentState')
+      or lower(coalesce(p_payload->>'providerPaymentState', '')) in ('succeeded', 'processing', 'requires_merchant_action', 'requires_capture', 'partially_captured', 'partially_captured_and_capturable')
       or nullif(btrim(coalesce(p_payload->>'captureClaimedAt', '')), '') is not null))) is true;
 $$;
 
@@ -135,9 +137,10 @@ $$;
 
 create or replace function public.roo_start_reconcile_cleanup_run(p_lease_seconds integer default 180)
 returns jsonb language plpgsql security definer set search_path = '' as $$
-declare v_now timestamptz := clock_timestamp(); v_lease timestamptz; v_run_id uuid;
+declare v_now timestamptz; v_lease timestamptz; v_run_id uuid;
 begin
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('cms-reference-integrity', 0));
+  v_now := clock_timestamp();
   perform commerce.expire_timed_out_reconcile_runs(v_now);
   v_lease := v_now + make_interval(secs => greatest(1, least(coalesce(p_lease_seconds, 180), 900)));
   insert into commerce.reconcile_cleanup_runs (state, lease_expires_at, started_at) values ('running', v_lease, v_now) returning run_id into v_run_id;
@@ -147,9 +150,10 @@ $$;
 
 create or replace function public.roo_begin_reconcile_record_inspection(p_run_id uuid, p_payment_record_id text)
 returns jsonb language plpgsql security definer set search_path = '' as $$
-declare v_now timestamptz := clock_timestamp(); v_seq bigint;
+declare v_now timestamptz; v_seq bigint;
 begin
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('cms-reference-integrity', 0));
+  v_now := clock_timestamp();
   perform commerce.expire_timed_out_reconcile_runs(v_now);
   if not exists (select 1 from commerce.reconcile_cleanup_runs where run_id = p_run_id and state = 'running' and lease_expires_at > v_now) then
     return jsonb_build_object('ok', false, 'reason', 'run_not_active');
@@ -164,9 +168,10 @@ $$;
 
 create or replace function public.roo_clear_reconcile_cleanup_block(p_run_id uuid, p_payment_record_id text, p_conclusive_provider_evidence boolean default false)
 returns jsonb language plpgsql security definer set search_path = '' as $$
-declare v_now timestamptz := clock_timestamp(); v_started_seq bigint; v_fenced_cleared integer := 0;
+declare v_now timestamptz; v_started_seq bigint; v_fenced_cleared integer := 0;
 begin
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('cms-reference-integrity', 0));
+  v_now := clock_timestamp();
   perform commerce.expire_timed_out_reconcile_runs(v_now);
   if not exists (select 1 from commerce.reconcile_cleanup_runs where run_id = p_run_id and state = 'running' and lease_expires_at > v_now) then
     return jsonb_build_object('ok', false, 'reason', 'run_not_active');
@@ -178,6 +183,11 @@ begin
     where b.run_id = r.run_id and b.payment_record_id = p_payment_record_id
       and r.state in ('failed', 'timed_out') and r.fenced_seq is not null and v_started_seq > r.fenced_seq;
     get diagnostics v_fenced_cleared = row_count;
+  elsif v_started_seq is not null then
+    update commerce.reconcile_hold_cleanup_blocks b set blocked_at = v_now
+    from commerce.reconcile_cleanup_runs r
+    where b.run_id = r.run_id and b.payment_record_id = p_payment_record_id
+      and r.state in ('failed', 'timed_out');
   end if;
   return jsonb_build_object('ok', true, 'fenced_cleared', v_fenced_cleared);
 end;
@@ -185,9 +195,10 @@ $$;
 
 create or replace function public.roo_fail_reconcile_cleanup_run(p_run_id uuid)
 returns jsonb language plpgsql security definer set search_path = '' as $$
-declare v_now timestamptz := clock_timestamp(); v_fenced_seq bigint;
+declare v_now timestamptz; v_fenced_seq bigint;
 begin
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('cms-reference-integrity', 0));
+  v_now := clock_timestamp();
   perform commerce.expire_timed_out_reconcile_runs(v_now);
   update commerce.reconcile_cleanup_runs
   set state = 'failed', finished_at = v_now, fenced_seq = coalesce(fenced_seq, nextval('commerce.reconcile_fence_seq'))
@@ -198,14 +209,18 @@ $$;
 
 create or replace function public.roo_complete_reconcile_cleanup_run(p_run_id uuid)
 returns jsonb language plpgsql security definer set search_path = '' as $$
-declare v_now timestamptz := clock_timestamp(); v_state text; v_lease timestamptz; v_remaining integer := 0; v_fenced_seq bigint;
+declare v_now timestamptz; v_state text; v_lease timestamptz; v_remaining integer := 0; v_fenced_seq bigint;
 begin
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('cms-reference-integrity', 0));
+  v_now := clock_timestamp();
   perform commerce.expire_timed_out_reconcile_runs(v_now);
   select state, lease_expires_at into v_state, v_lease from commerce.reconcile_cleanup_runs where run_id = p_run_id;
   select count(*)::integer into v_remaining from commerce.reconcile_hold_cleanup_blocks where run_id = p_run_id;
   if v_state = 'running' and v_lease > v_now and v_remaining = 0 then
     update commerce.reconcile_cleanup_runs set state = 'completed', finished_at = v_now where run_id = p_run_id;
+    delete from commerce.reconcile_cleanup_runs r
+    where r.state <> 'running' and r.run_id <> p_run_id and r.finished_at <= v_now - interval '1 hour'
+      and not exists (select 1 from commerce.reconcile_hold_cleanup_blocks b where b.run_id = r.run_id);
     return jsonb_build_object('ok', true, 'completed', true, 'remaining_blocks', 0);
   end if;
   if v_state = 'running' then
@@ -227,9 +242,10 @@ begin
   execute format($fn$
 create or replace function public.roo_fetch_recovery_payment_documents(p_backend text, p_statuses text[], p_refunded_status text, p_booked_status text, p_abandoned_status text, p_now timestamptz, p_limit integer default 50, p_dodo_enabled boolean default true, p_run_id uuid default null)
 returns jsonb language plpgsql volatile security definer set search_path = '' as $body$
-declare v_now timestamptz := clock_timestamp(); v_result jsonb := '[]'::jsonb; v_limit integer := greatest(1, least(coalesce(p_limit, 50), 100));
+declare v_now timestamptz; v_result jsonb := '[]'::jsonb; v_limit integer := greatest(1, least(coalesce(p_limit, 50), 100));
 begin
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('cms-reference-integrity', 0));
+  v_now := clock_timestamp();
   perform commerce.expire_timed_out_reconcile_runs(v_now);
   if p_run_id is not null and not exists (select 1 from commerce.reconcile_cleanup_runs where run_id = p_run_id and state = 'running' and lease_expires_at > v_now) then
     raise exception 'reconcile_run_not_active' using errcode = 'P0001';
@@ -281,11 +297,13 @@ $fn$, v_terminal, v_due);
 end;
 $migration$;
 
-create or replace function public.roo_fetch_owner_review_dodo_documents(p_run_id uuid, p_now timestamptz default clock_timestamp(), p_limit integer default 20)
+create or replace function public.roo_fetch_owner_review_dodo_documents(p_run_id uuid, p_now timestamptz default null, p_limit integer default 20)
 returns jsonb language plpgsql volatile security definer set search_path = '' as $$
-declare v_now timestamptz := clock_timestamp(); v_limit integer := greatest(1, least(coalesce(p_limit, 20), 100)); v_due_cutoff timestamptz := coalesce(p_now, v_now) - interval '1 hour'; v_result jsonb := '[]'::jsonb;
+declare v_now timestamptz; v_limit integer := greatest(1, least(coalesce(p_limit, 20), 100)); v_due_cutoff timestamptz; v_result jsonb := '[]'::jsonb;
 begin
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('cms-reference-integrity', 0));
+  v_now := clock_timestamp();
+  v_due_cutoff := coalesce(p_now, v_now) - interval '1 hour';
   perform commerce.expire_timed_out_reconcile_runs(v_now);
   if p_run_id is not null and not exists (select 1 from commerce.reconcile_cleanup_runs where run_id = p_run_id and state = 'running' and lease_expires_at > v_now) then
     raise exception 'reconcile_run_not_active' using errcode = 'P0001';
@@ -305,15 +323,16 @@ begin
     select legacy_sanity_id, sort_id, payload, tier, sort_ts from (
       select legacy_sanity_id, sort_id, payload,
         case when fenced_blocked_at is not null and has_payment_hold then 0
-          when pstate in ('refunded', 'disputed') and not ((payload->'providerReversalVerified' = 'true'::jsonb) is true) then 1
+          when pstate in ('refunded', 'disputed') and not ((payload->'providerReversalVerified' = 'true'::jsonb) is true)
+            and (checked_at is null or checked_at <= v_due_cutoff or checked_at >= '2090-01-01T00:00:00Z'::timestamptz) then 1
           when (pstate = 'unknown' or commerce.is_pending_or_partial_dodo_state(pstate)) and checked_at is not null and checked_at <= v_due_cutoff then 2
           when pstate = 'succeeded' and checked_at is not null and checked_at <= v_due_cutoff then 3 else 9 end as tier,
         case when fenced_blocked_at is not null and has_payment_hold then fenced_blocked_at else coalesce(checked_at, '-infinity'::timestamptz) end as sort_ts
       from base
     ) ranked where tier < 9
   ),
-  top_priority as (select * from eligible where tier in (0, 1) order by tier asc, sort_ts asc, sort_id asc limit v_limit),
-  reserved_succeeded as (select * from eligible where tier = 3 order by sort_ts asc, sort_id asc limit greatest(0, least(4, v_limit - (select count(*) from top_priority)))),
+  reserved_succeeded as (select * from eligible where tier = 3 order by sort_ts asc, sort_id asc limit least(4, v_limit)),
+  top_priority as (select * from eligible where tier in (0, 1) order by tier asc, sort_ts asc, sort_id asc limit greatest(0, v_limit - (select count(*) from reserved_succeeded))),
   unconfirmed_fill as (select * from eligible where tier = 2 order by sort_ts asc, sort_id asc limit greatest(0, v_limit - (select count(*) from top_priority) - (select count(*) from reserved_succeeded))),
   extra_succeeded as (select * from eligible where tier = 3 and legacy_sanity_id not in (select legacy_sanity_id from reserved_succeeded) order by sort_ts asc, sort_id asc limit greatest(0, v_limit - (select count(*) from top_priority) - (select count(*) from reserved_succeeded) - (select count(*) from unconfirmed_fill))),
   picked as (select * from top_priority union all select * from unconfirmed_fill union all select * from reserved_succeeded union all select * from extra_succeeded),
@@ -326,21 +345,31 @@ begin
 end;
 $$;
 
-create or replace function public.roo_cleanup_expired_supabase_holds(p_cutover_generation integer, p_limit integer default 100)
+drop function if exists public.roo_cleanup_expired_supabase_holds(integer, integer);
+create or replace function public.roo_cleanup_expired_supabase_holds(p_cutover_generation integer, p_limit integer default 100, p_include_payment_holds boolean default true)
 returns jsonb language plpgsql security definer set search_path = '' as $$
 declare
   v_candidate record; v_claim_existed boolean; v_expired_holds integer := 0; v_removed_slot_claims integer := 0;
   v_mutation_result jsonb; v_payment_legacy_id text; v_payment_status text; v_payment_payload jsonb;
-  v_has_active_run boolean := false; v_now timestamptz := clock_timestamp();
+  v_has_active_run boolean := false; v_now timestamptz;
 begin
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('cms-reference-integrity', 0));
+  v_now := clock_timestamp();
   if coalesce(p_cutover_generation, -1) < 0 then raise exception 'invalid cutover generation' using errcode = '22023'; end if;
   if coalesce(p_limit, 0) < 1 or p_limit > 500 then raise exception 'cleanup limit must be between 1 and 500' using errcode = '22023'; end if;
   perform migration.assert_commerce_write_fence(p_cutover_generation);
   perform commerce.expire_timed_out_reconcile_runs(v_now);
   delete from commerce.reconcile_hold_cleanup_blocks b using commerce.reconcile_cleanup_runs r
   where b.run_id = r.run_id and r.state in ('failed', 'timed_out')
-    and not exists (select 1 from commerce.slot_holds h join commerce.payment_records p on p.id = h.payment_record_id where p.legacy_sanity_id = b.payment_record_id and h.phase = 'payment');
+    and (not exists (select 1 from commerce.slot_holds h join commerce.payment_records p on p.id = h.payment_record_id where p.legacy_sanity_id = b.payment_record_id and h.phase = 'payment')
+      or (b.blocked_at <= v_now - interval '24 hours'
+        and not exists (select 1 from commerce.payment_records p join migration.source_documents s on s.legacy_sanity_id = p.legacy_sanity_id
+          where p.legacy_sanity_id = b.payment_record_id and not s.tombstoned and p.provider = 'dodo'
+            and nullif(btrim(coalesce(s.payload->>'bookingId', '')), '') is null
+            and nullif(btrim(coalesce(s.payload->>'providerOrderId', '')), '') is not null)));
+  delete from commerce.reconcile_cleanup_runs r
+  where r.state <> 'running' and r.finished_at <= v_now - interval '1 hour'
+    and not exists (select 1 from commerce.reconcile_hold_cleanup_blocks b where b.run_id = r.run_id);
   select exists (select 1 from commerce.reconcile_cleanup_runs where state = 'running' and lease_expires_at > v_now) into v_has_active_run;
 
   for v_candidate in
@@ -348,7 +377,7 @@ begin
     from commerce.slot_holds hold join migration.source_documents source on source.legacy_sanity_id = hold.legacy_sanity_id
     where hold.cutover_generation = p_cutover_generation
       and ((hold.phase = 'active' and hold.expires_at <= v_now)
-        or (not v_has_active_run and hold.phase = 'payment' and hold.expires_at <= v_now - interval '24 hours'
+        or (coalesce(p_include_payment_holds, true) and not v_has_active_run and hold.phase = 'payment' and hold.expires_at <= v_now - interval '24 hours'
           and not exists (
             select 1 from commerce.payment_records payment
             left join migration.source_documents payment_source on payment_source.legacy_sanity_id = payment.legacy_sanity_id and payment_source.document_type = 'paymentRecord' and not payment_source.tombstoned
@@ -403,8 +432,13 @@ end;
 $$;
 drop trigger if exists trg_sync_source_document_payload_revision on migration.source_documents;
 create trigger trg_sync_source_document_payload_revision before insert or update on migration.source_documents for each row execute function migration.sync_source_document_payload_revision();
-update migration.source_documents set payload = coalesce(payload, '{}'::jsonb) || jsonb_build_object('_rev', source_revision)
-where coalesce(source_revision, '') <> '' and coalesce(payload->>'_rev', '') is distinct from source_revision;
+do $backfill_rev$
+begin
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('cms-reference-integrity', 0));
+  update migration.source_documents set payload = coalesce(payload, '{}'::jsonb) || jsonb_build_object('_rev', source_revision)
+  where coalesce(source_revision, '') <> '' and coalesce(payload->>'_rev', '') is distinct from source_revision;
+end;
+$backfill_rev$;
 
 do $grants$
 declare fn text;
@@ -417,7 +451,7 @@ begin
     'commerce.exhausted_resume_is_due(jsonb,timestamptz,timestamptz)', 'commerce.expire_timed_out_reconcile_runs(timestamptz)', 'public.roo_start_reconcile_cleanup_run(integer)',
     'public.roo_begin_reconcile_record_inspection(uuid,text)', 'public.roo_clear_reconcile_cleanup_block(uuid,text,boolean)', 'public.roo_fail_reconcile_cleanup_run(uuid)',
     'public.roo_complete_reconcile_cleanup_run(uuid)', 'public.roo_fetch_owner_review_dodo_documents(uuid,timestamptz,integer)',
-    'public.roo_fetch_recovery_payment_documents(text,text[],text,text,text,timestamptz,integer,boolean,uuid)', 'public.roo_cleanup_expired_supabase_holds(integer,integer)'
+    'public.roo_fetch_recovery_payment_documents(text,text[],text,text,text,timestamptz,integer,boolean,uuid)', 'public.roo_cleanup_expired_supabase_holds(integer,integer,boolean)'
   ] loop
     execute format('revoke all on function %s from public, anon, authenticated, service_role', fn);
     execute format('grant execute on function %s to service_role', fn);
@@ -436,3 +470,5 @@ begin
     E'\n  delete from commerce.payment_upgrade_locks lock\n  using migration.source_documents source\n  where source.legacy_sanity_id = lock.legacy_sanity_id\n    and source.tombstoned\n    and source.legacy_sanity_id = any(p_document_ids);\n\n  return jsonb_build_object(\n    ''released_holds'', v_holds');
 end;
 $cleanup_locks$;
+
+notify pgrst, 'reload schema';

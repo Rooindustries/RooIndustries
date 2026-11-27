@@ -79,6 +79,14 @@ test("resume, check status, and change payment method clear only on HTTP 200 wit
   await expect(page.getByText("Missing completion flag.")).toBeVisible();
   expect(await page.evaluate(() => sessionStorage.getItem("payment_session_state"))).not.toBeNull();
 
+  statusResponse = {
+    status: 200,
+    json: { ok: true, status: "refunded", providerPaymentState: "refunded", cleanupPending: false, manualReviewRequired: false, recoveryReason: "Refund missing completion flag." },
+  };
+  await page.getByRole("button", { name: "Check payment status", exact: true }).click();
+  await expect(page.getByText("Refund missing completion flag.")).toBeVisible();
+  expect(await page.evaluate(() => sessionStorage.getItem("payment_session_state"))).not.toBeNull();
+
   await page.getByRole("button", { name: "Change payment method", exact: true }).click();
   await expect(page.getByText("Cancel pending.")).toBeVisible();
   expect(await page.evaluate(() => sessionStorage.getItem("payment_session_state"))).not.toBeNull();

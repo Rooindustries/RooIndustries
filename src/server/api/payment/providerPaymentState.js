@@ -109,11 +109,14 @@ const recordsCheckedBetween = async (client, states, limit, { before, after }) =
 };
 
 const legacyUnverifiedReversals = async (client, limit) => {
+  const dueBefore = new Date(Date.now() - OWNER_REVIEW_STATE_CHECK_MS).toISOString();
   const records = await client.fetch(
     `*[_type == $type && provider == $provider
       && providerPaymentState in ["refunded", "disputed"]
-      && providerReversalVerified != true][0...${limit}]`,
-    { type: PAYMENT_RECORD_TYPE, provider: "dodo" }
+      && providerReversalVerified != true
+      && (!defined(providerStateCheckedAt) || providerStateCheckedAt == ""
+        || providerStateCheckedAt <= $dueBefore || providerStateCheckedAt >= "2090-01-01T00:00:00Z")][0...${limit}]`,
+    { type: PAYMENT_RECORD_TYPE, provider: "dodo", dueBefore }
   );
   return Array.isArray(records) ? records : [];
 };
@@ -139,18 +142,19 @@ const selectOwnerReviewBatch = async (client, runId) => {
     });
     return Array.isArray(rows) ? rows : [];
   }
-  const legacy = await legacyUnverifiedReversals(client, OWNER_REVIEW_BATCH_SIZE);
-  const remaining = Math.max(0, OWNER_REVIEW_BATCH_SIZE - legacy.length);
-  const unconfirmedLimit = Math.max(0, remaining - SUCCEEDED_RESERVED_SLOTS);
-  const unconfirmed = unconfirmedLimit > 0 ? await dueRecords(client, UNCONFIRMED_PROVIDER_STATES, unconfirmedLimit) : [];
-  const succeededLimit = Math.max(0, remaining - unconfirmed.length);
-  const succeeded = succeededLimit > 0 ? await dueRecords(client, ["succeeded"], succeededLimit) : [];
+  const succeeded = await dueRecords(client, ["succeeded"], SUCCEEDED_RESERVED_SLOTS);
+  const nonReservedBudget = Math.max(0, OWNER_REVIEW_BATCH_SIZE - succeeded.length);
+  const legacy = nonReservedBudget > 0 ? await legacyUnverifiedReversals(client, nonReservedBudget) : [];
+  const remaining = Math.max(0, nonReservedBudget - legacy.length);
+  const unconfirmed = remaining > 0 ? await dueRecords(client, UNCONFIRMED_PROVIDER_STATES, remaining) : [];
+  const extraLimit = Math.max(0, remaining - unconfirmed.length);
+  const extraSucceeded = extraLimit > 0 ? await dueRecords(client, ["succeeded"], SUCCEEDED_RESERVED_SLOTS + extraLimit) : [];
   const seen = new Set();
-  return [...legacy, ...unconfirmed, ...succeeded].filter((r) => {
+  return [...legacy, ...unconfirmed, ...succeeded, ...extraSucceeded].filter((r) => {
     if (!r?._id || seen.has(r._id)) return false;
     seen.add(r._id);
     return true;
-  });
+  }).slice(0, OWNER_REVIEW_BATCH_SIZE);
 };
 
 const evaluateOwnerReviewUpdate = (record, inspection) => {

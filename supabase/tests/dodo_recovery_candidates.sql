@@ -27,7 +27,7 @@ do $$ declare result jsonb; enabled boolean; begin
 foreach enabled in array array[true,false] loop
 update migration.source_documents set payload=jsonb_set(payload,'{providerRecoveryTerminal}',to_jsonb(enabled)) where legacy_sanity_id like 'dodo-%';
 result:=public.roo_fetch_recovery_payment_documents('supabase',array['needs_recovery','email_partial'],'refunded','booked','abandoned','2026-09-10T12:00:00Z',50,enabled);
-if jsonb_array_length(result)<>1 or ((result->0)-'_rev')<>'{"_id":"paypal-eligible","providerRecoveryTerminal":false}'::jsonb then raise exception 'Eligible payment starved: %',result; end if;
+if result is null or jsonb_array_length(result)<>1 or ((result->0)-'_rev')<>'{"_id":"paypal-eligible","providerRecoveryTerminal":false}'::jsonb then raise exception 'Eligible payment starved: %',result; end if;
 end loop;
 update migration.source_documents set payload=jsonb_set(payload,'{providerRecoveryTerminal}','true') where legacy_sanity_id like 'dodo-%';
 if jsonb_array_length(public.roo_fetch_recovery_payment_documents('supabase',array['needs_recovery'],'refunded','booked','abandoned','2026-09-10T12:00:00Z',50))<>1 then raise exception 'Legacy named arguments incompatible'; end if;
@@ -42,19 +42,24 @@ insert into migration.source_documents(legacy_sanity_id,payload)
 select legacy_sanity_id,jsonb_build_object('_id',legacy_sanity_id,'providerRecoveryTerminal',true,'requiresReschedule',id='reschedule-sync') from commerce.payment_records where id in ('refund-sync','partial-sync','release-sync','email-sync','reschedule-sync');
 do $$ declare result jsonb; begin
 result:=public.roo_fetch_recovery_payment_documents('supabase',array['needs_recovery','email_partial'],'refunded','booked','abandoned','2026-09-10T12:00:00Z',50,false);
-if jsonb_array_length(result)<>6 or not result @> '[{"_id":"paypal-eligible"},{"_id":"refund-sync"},{"_id":"partial-sync"},{"_id":"release-sync"},{"_id":"email-sync"},{"_id":"reschedule-sync"}]' then raise exception 'Local recovery was lost: %',result; end if;
+if result is null or jsonb_array_length(result)<>6 or not result @> '[{"_id":"paypal-eligible"},{"_id":"refund-sync"},{"_id":"partial-sync"},{"_id":"release-sync"},{"_id":"email-sync"},{"_id":"reschedule-sync"}]' then raise exception 'Local recovery was lost: %',result; end if;
 if has_function_privilege('anon','public.roo_fetch_recovery_payment_documents(text,text[],text,text,text,timestamptz,integer,boolean,uuid)','execute') or has_function_privilege('authenticated','public.roo_fetch_recovery_payment_documents(text,text[],text,text,text,timestamptz,integer,boolean,uuid)','execute') then raise exception 'RPC privileges widened'; end if;
 if not has_function_privilege('service_role','public.roo_fetch_recovery_payment_documents(text,text[],text,text,text,timestamptz,integer,boolean,uuid)','execute') then raise exception 'Service role cannot recover'; end if;
 if commerce.payment_protects_expired_hold('started', '{}'::jsonb) is distinct from false then raise exception 'Unpaid missing fields must return explicit false'; end if;
 if commerce.payment_protects_expired_hold('started', '{"providerPaymentState":"partially_captured"}'::jsonb) is distinct from true then raise exception 'partially_captured must protect hold'; end if;
 if commerce.payment_protects_expired_hold('started', '{"providerPaymentState":"processing"}'::jsonb) is distinct from true then raise exception 'processing must protect hold'; end if;
+if commerce.payment_protects_expired_hold('started', '{"providerPaymentState":"requires_capture"}'::jsonb) is distinct from true then raise exception 'requires_capture must protect hold'; end if;
+if commerce.payment_protects_expired_hold('started', '{"providerPaymentState":"requires_customer_action"}'::jsonb) is distinct from false then raise exception 'requires_customer_action must not protect hold past 24h'; end if;
 if commerce.payment_protects_expired_hold('needs_recovery', '{"providerPaymentState":"refunded","providerReversalVerified":true,"recoveryOwnerReviewRequired":true}'::jsonb) is distinct from true then raise exception 'owner review must protect hold even when verified refunded'; end if;
 if commerce.payment_protects_expired_hold('needs_recovery', '{"providerPaymentState":"refunded"}'::jsonb) is distinct from true then raise exception 'legacy unverified reversal must protect hold'; end if;
 if commerce.payment_protects_expired_hold('needs_recovery', '{"providerPaymentState":"refunded","providerReversalVerified":true}'::jsonb) is distinct from false then raise exception 'verified reversal without review should not protect hold'; end if;
 if commerce.payment_protects_expired_hold('needs_recovery', '{"provider":"dodo","resourceReleasePending":true,"recoveryReason":"resource_release_exhausted"}'::jsonb) is distinct from true then raise exception 'exhausted cleanup must protect hold'; end if;
-if commerce.has_active_late_capture_watch('{"lateCaptureWatchUntil":false}'::jsonb) then raise exception 'JSON false watch admitted'; end if;
-if commerce.has_active_late_capture_watch('{"lateCaptureWatchUntil":"\t\r\n "}'::jsonb) then raise exception 'Whitespace watch admitted'; end if;
-if not commerce.has_active_late_capture_watch('{"lateCaptureWatchUntil":"2026-10-01T00:00:00Z"}'::jsonb) then raise exception 'Valid watch rejected'; end if;
+if commerce.has_active_late_capture_watch('{"lateCaptureWatchUntil":false}'::jsonb) is distinct from false then raise exception 'JSON false watch admitted'; end if;
+if commerce.has_active_late_capture_watch('{"lateCaptureWatchUntil":"\t\r\n "}'::jsonb) is distinct from false then raise exception 'Whitespace watch admitted'; end if;
+if commerce.has_active_late_capture_watch('{"lateCaptureWatchUntil":"-infinity"}'::jsonb) is distinct from false then raise exception 'Negative infinity watch admitted'; end if;
+if commerce.has_active_late_capture_watch('{"lateCaptureWatchUntil":"infinity"}'::jsonb) is distinct from false then raise exception 'Infinity watch admitted'; end if;
+if commerce.has_active_late_capture_watch('{"lateCaptureWatchUntil":"now"}'::jsonb) is distinct from false then raise exception 'Relative now watch admitted'; end if;
+if commerce.has_active_late_capture_watch('{"lateCaptureWatchUntil":"2026-10-01T00:00:00Z"}'::jsonb) is distinct from true then raise exception 'Valid watch rejected'; end if;
 end $$;
 insert into commerce.payment_records(id,legacy_sanity_id,status,provider,backend_owner,updated_at,next_recovery_at,resource_release_pending)
 values ('ex-cleanup','ex-cleanup','needs_recovery','dodo','supabase','2026-09-11T00:00:00Z','9999-12-31T23:59:59.999Z',true),
@@ -66,11 +71,11 @@ insert into migration.source_documents(legacy_sanity_id,payload) values
 ('ex-overlap','{"_id":"ex-overlap","provider":"dodo","reconciliationRecoveryTerminal":true,"resourceReleasePending":true,"providerPaymentState":"processing","providerRecoveryTerminal":false}'::jsonb);
 do $$ declare result jsonb; begin
 result:=public.roo_fetch_recovery_payment_documents('supabase',array['needs_recovery','email_partial'],'refunded','booked','abandoned','2026-09-10T12:00:00Z',50,false);
-if not (result @> '[{"_id":"ex-cleanup"}]') then raise exception 'Dodo-disabled exhausted cleanup lost: %',result; end if;
+if result is null or not (result @> '[{"_id":"ex-cleanup"}]') then raise exception 'Dodo-disabled exhausted cleanup lost: %',result; end if;
 if result @> '[{"_id":"ex-live"}]' then raise exception 'Dodo-disabled must exclude exhausted live state: %',result; end if;
 if result @> '[{"_id":"ex-overlap"}]' then raise exception 'Dodo-disabled must exclude non-deadline pending cleanup: %',result; end if;
 result:=public.roo_fetch_recovery_payment_documents('supabase',array['needs_recovery','email_partial'],'refunded','booked','abandoned','2026-09-10T12:00:00Z',50,true);
-if not (result @> '[{"_id":"ex-cleanup"}]' and result @> '[{"_id":"ex-live"}]' and result @> '[{"_id":"ex-overlap"}]') then raise exception 'Dodo-enabled exhausted resume lost: %',result; end if;
+if result is null or not (result @> '[{"_id":"ex-cleanup"}]' and result @> '[{"_id":"ex-live"}]' and result @> '[{"_id":"ex-overlap"}]') then raise exception 'Dodo-enabled exhausted resume lost: %',result; end if;
 end $$;
 select 'Dodo recovery migration checks passed' as result;
 

@@ -1,7 +1,7 @@
 import { getPaymentRecordById } from "./paymentRecord.js";
 import { observedProviderState } from "./providerPaymentState.js";
 import { settledDodoPaymentState } from "./dodoProvider.js";
-import { ALL_PENDING_AND_PARTIAL_DODO_STATES } from "./paymentRecoveryState.js";
+import { ALL_PENDING_AND_PARTIAL_DODO_STATES, hasPreservedOwnerReview } from "./paymentRecoveryState.js";
 import { logSafeError } from "../../safeErrorLog.js";
 
 export const RESUMABLE_WATCH_REASONS = [
@@ -29,7 +29,7 @@ const hasPreservedOwnerReviewGroq = `(
 
 export const isCleanupPendingGroq = `(resourceReleasePending == true && !(${hasPreservedOwnerReviewGroq}))`;
 
-export const dodoCleanupAllowedGroq = `($dodoEnabled == true || !(providerPaymentState in ${PENDING_DODO_GROQ}) || (defined(lateCaptureWatchUntil) && lateCaptureWatchUntil != "" && lateCaptureWatchUntil <= $now))`;
+export const dodoCleanupAllowedGroq = `($dodoEnabled == true || !(providerPaymentState in ${PENDING_DODO_GROQ}) || (defined(lateCaptureWatchUntil) && defined(dateTime(lateCaptureWatchUntil)) && dateTime(lateCaptureWatchUntil) <= dateTime($now)))`;
 
 export const exhaustedPendingCleanupGroq = `(
   provider == "dodo"
@@ -128,6 +128,42 @@ export const isExhaustedWatch = (record) =>
   !!record.lateCaptureWatchUntil && record.providerRecoveryTerminal !== true &&
   record.recoveryOwnerReviewRequired !== true && record.resourceReleasePending !== true &&
   record.refundRequiresBookingSync !== true && record.providerRefundDetailsMissing !== true;
+
+const SENTINEL_RECOVERY_MS = Date.parse("2090-01-01T00:00:00Z");
+
+const isExhaustedResumeDue = (record, nowMs = Date.now()) => {
+  const next = String(record?.nextRecoveryAt || "").trim();
+  if (!next) return true;
+  const parsed = Date.parse(next);
+  return !Number.isFinite(parsed) || parsed <= nowMs || parsed >= SENTINEL_RECOVERY_MS;
+};
+
+const isDodoCleanupAllowed = (record, { dodoEnabled = true, nowMs = Date.now() } = {}) => {
+  if (dodoEnabled === true) return true;
+  const ps = String(record?.providerPaymentState || "").trim();
+  if (!ALL_PENDING_AND_PARTIAL_DODO_STATES.has(ps)) return true;
+  const watchMs = Date.parse(String(record?.lateCaptureWatchUntil || "").trim());
+  return Number.isFinite(watchMs) && watchMs <= nowMs;
+};
+
+export const isExhaustedResumableDodo = (record, { dodoEnabled = true, nowMs = Date.now() } = {}) => {
+  if (!record || record.provider !== "dodo" || record.reconciliationRecoveryTerminal !== true ||
+      record.providerRecoveryTerminal === true || hasPreservedOwnerReview(record)) {
+    return false;
+  }
+  const ps = String(record.providerPaymentState || "").trim();
+  const st = String(record.status || "").trim().toLowerCase();
+  if (record.resourceReleasePending === true && isDodoCleanupAllowed(record, { dodoEnabled, nowMs }) &&
+      isExhaustedResumeDue(record, nowMs)) {
+    return true;
+  }
+  if (dodoEnabled === true && record.resourceReleasePending !== true &&
+      ALL_PENDING_AND_PARTIAL_DODO_STATES.has(ps) && isExhaustedResumeDue(record, nowMs)) {
+    return true;
+  }
+  return dodoEnabled === true && (st === "failed" || st === "abandoned") &&
+    Boolean(String(record.lateCaptureWatchUntil || "").trim());
+};
 
 export const holdLostToPayment = (hold, record) =>
   ["paypal", "razorpay", "dodo"].includes(record.provider) && !!hold &&

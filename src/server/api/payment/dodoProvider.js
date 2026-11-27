@@ -11,6 +11,7 @@ const RECOGNIZED_DODO_PAYMENT_STATUSES = new Set([
   "requires_capture", "partially_captured", "partially_captured_and_capturable",
 ]);
 const UNRESOLVED_DISPUTE_STATUSES = new Set(["dispute_opened", "dispute_challenged"]);
+const ALLOWED_DISPUTE_STAGES = new Set(["pre_dispute", "dispute", "pre_arbitration"]);
 const ALLOWED_DISPUTE_STATUSES = new Set([
   "dispute_opened", "dispute_challenged", "dispute_won", "dispute_cancelled",
   "dispute_lost", "dispute_accepted", "dispute_expired",
@@ -162,7 +163,8 @@ export const validateDodoReversalDetails = async ({ payment, hydrateRefund = ret
     const id = String(d?.dispute_id || "").trim();
     const stage = typeof d?.dispute_stage === "string" ? d.dispute_stage.trim() : "";
     const status = String(d?.dispute_status || "").trim();
-    if (!id || seenDisputes.has(id) || !stage || !ALLOWED_DISPUTE_STATUSES.has(status) || !isPositiveSdkAmountString(d?.amount)) {
+    if (!id || seenDisputes.has(id) || d?.payment_id !== payment.payment_id || d?.currency !== payment.currency ||
+        !ALLOWED_DISPUTE_STAGES.has(stage) || !ALLOWED_DISPUTE_STATUSES.has(status) || !isPositiveSdkAmountString(d?.amount)) {
       return { ok: false, reason: "dodo_refund_details_incomplete" };
     }
     seenDisputes.add(id);
@@ -178,7 +180,7 @@ export const validateDodoReversalDetails = async ({ payment, hydrateRefund = ret
     if (String(r?.status || "").trim().toLowerCase() !== "succeeded") continue;
     let amount = r?.amount;
     const inlineOk = Number.isSafeInteger(amount) && amount > 0 &&
-      (!r.payment_id || r.payment_id === payment.payment_id) && (!r.currency || r.currency === DODO_CURRENCY);
+      r.payment_id === payment.payment_id && r.currency === DODO_CURRENCY;
     if (!inlineOk) {
       let hydrated;
       try { hydrated = await hydrateRefund(id); } catch { return { ok: false, reason: "dodo_refund_details_incomplete" }; }

@@ -3,7 +3,7 @@ set statement_timeout = '120s';
 
 drop trigger if exists trg_sync_source_document_payload_revision on migration.source_documents;
 drop function if exists migration.sync_source_document_payload_revision();
-drop function if exists public.roo_fetch_owner_review_dodo_documents(uuid, timestamptz, integer), public.roo_complete_reconcile_cleanup_run(uuid), public.roo_fail_reconcile_cleanup_run(uuid), public.roo_clear_reconcile_cleanup_block(uuid, text, boolean), public.roo_begin_reconcile_record_inspection(uuid, text), public.roo_start_reconcile_cleanup_run(integer), commerce.expire_timed_out_reconcile_runs(timestamptz), public.roo_fetch_recovery_payment_documents(text, text[], text, text, text, timestamptz, integer, boolean, uuid);
+drop function if exists public.roo_fetch_owner_review_dodo_documents(uuid, timestamptz, integer), public.roo_complete_reconcile_cleanup_run(uuid), public.roo_fail_reconcile_cleanup_run(uuid), public.roo_clear_reconcile_cleanup_block(uuid, text, boolean), public.roo_begin_reconcile_record_inspection(uuid, text), public.roo_start_reconcile_cleanup_run(integer), commerce.expire_timed_out_reconcile_runs(timestamptz), public.roo_fetch_recovery_payment_documents(text, text[], text, text, text, timestamptz, integer, boolean, uuid), public.roo_cleanup_expired_supabase_holds(integer, integer, boolean);
 
 do $rollback_fetch$
 declare
@@ -13,21 +13,65 @@ declare
   v_agg text := case when has_watch_resume then $a$jsonb_agg(payload order by coalesce(commerce.exhausted_late_capture_watch_needs_resume(payload), false), updated_at, legacy_sanity_id)$a$ else $a$jsonb_agg(payload order by updated_at, legacy_sanity_id)$a$ end;
 begin
   execute format($fn$
-create or replace function public.roo_fetch_recovery_payment_documents(p_backend text, p_statuses text[], p_refunded_status text, p_booked_status text, p_abandoned_status text, p_now timestamptz, p_limit integer default 50, p_dodo_enabled boolean default true)
-returns jsonb language sql stable security definer set search_path = '' as $body$
+create or replace function public.roo_fetch_recovery_payment_documents(
+  p_backend text,
+  p_statuses text[],
+  p_refunded_status text,
+  p_booked_status text,
+  p_abandoned_status text,
+  p_now timestamptz,
+  p_limit integer default 50,
+  p_dodo_enabled boolean default true
+)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = ''
+as $body$
   with candidates as (
     select payment.legacy_sanity_id, payment.updated_at, source.payload
-    from commerce.payment_records payment join migration.source_documents source on source.legacy_sanity_id = payment.legacy_sanity_id
-    where not source.tombstoned and %s
-      and not (coalesce(source.payload->'providerRecoveryTerminal', 'false'::jsonb) = 'true'::jsonb and coalesce(source.payload->>'providerRecoveryTerminalReason', '') in ('payment_currency_mismatch', 'payment_currency_invalid'))
-      and (lower(btrim(payment.status)) not in ('email_partial', lower(btrim(p_booked_status))) or payment.refund_requires_booking_sync or payment.resource_release_pending or coalesce(source.payload->>'requiresReschedule', 'false') = 'true' or not exists (select 1 from commerce.bookings booking where (booking.id = payment.booking_id or booking.legacy_sanity_id = source.payload->>'bookingId') and commerce.booking_confirmation_is_inactive(booking.id)))
-      and (payment.provider != 'dodo' or (p_dodo_enabled and coalesce(source.payload->>'providerRecoveryTerminal', 'false') != 'true') or payment.refund_requires_booking_sync or payment.resource_release_pending or (payment.status = 'email_partial' and source.payload->>'requiresReschedule' = 'true') or (payment.status in ('email_partial', lower(p_booked_status)) and payment.email_dispatch_required))
-      and (payment.status = any(coalesce(p_statuses, '{}'::text[])) or payment.refund_requires_booking_sync or (payment.status = lower(p_booked_status) and payment.email_dispatch_required) or (payment.status = lower(p_abandoned_status) and (payment.resource_release_pending or payment.late_capture_watch_until is not null)))
+    from commerce.payment_records payment
+    join migration.source_documents source
+      on source.legacy_sanity_id = payment.legacy_sanity_id
+    where not source.tombstoned
+      and %s
+      and not (coalesce(source.payload->'providerRecoveryTerminal', 'false'::jsonb) = 'true'::jsonb
+        and coalesce(source.payload->>'providerRecoveryTerminalReason', '')
+          in ('payment_currency_mismatch', 'payment_currency_invalid'))
+      and (
+        lower(btrim(payment.status)) not in ('email_partial', lower(btrim(p_booked_status)))
+        or payment.refund_requires_booking_sync
+        or payment.resource_release_pending
+        or coalesce(source.payload->>'requiresReschedule', 'false') = 'true'
+        or not exists (
+          select 1 from commerce.bookings booking
+          where (booking.id = payment.booking_id
+            or booking.legacy_sanity_id = source.payload->>'bookingId')
+            and commerce.booking_confirmation_is_inactive(booking.id)
+        )
+      )
+      and (
+        payment.provider != 'dodo'
+        or (p_dodo_enabled and coalesce(source.payload->>'providerRecoveryTerminal', 'false') != 'true')
+        or (payment.refund_requires_booking_sync)
+        or payment.resource_release_pending
+        or (payment.status = 'email_partial' and source.payload->>'requiresReschedule' = 'true')
+        or (payment.status in ('email_partial', lower(p_booked_status)) and payment.email_dispatch_required)
+      )
+      and (
+        payment.status = any(coalesce(p_statuses, '{}'::text[]))
+        or (payment.refund_requires_booking_sync)
+        or (payment.status = lower(p_booked_status) and payment.email_dispatch_required)
+        or (payment.status = lower(p_abandoned_status)
+          and (payment.resource_release_pending or payment.late_capture_watch_until is not null))
+      )
       and %s
     order by coalesce(payment.next_recovery_at, '-infinity'::timestamptz), payment.updated_at, payment.id
     limit greatest(1, least(coalesce(p_limit, 50), 100))
   )
-  select coalesce(%s, '[]'::jsonb) from candidates;
+  select coalesce(%s, '[]'::jsonb)
+  from candidates;
 $body$;
 $fn$, v_terminal, v_due, v_agg);
 end;
@@ -170,3 +214,5 @@ begin
   if strpos(v, v_block) > 0 then execute replace(v, v_block, ''); end if;
 end;
 $rollback_locks$;
+
+notify pgrst, 'reload schema';

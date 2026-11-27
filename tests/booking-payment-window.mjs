@@ -541,7 +541,7 @@ test('a payment still going through when recovery gives up keeps its slot once D
   assert.equal(hold.paymentRecordId, checkout.record._id);
   assert.equal(await isOffered(checkout.payload), false);
   assert.equal((await secondVisitor(checkout.payload)).status, 409);
-  assert.equal((await fixture.commerce.getDocument(checkout.record._id)).providerPaymentState, 'unknown');
+  assert.equal((await fixture.commerce.getDocument(checkout.record._id)).providerPaymentState, 'processing');
   await addStaleRecheckRecords(checkout, 260);
   await addStaleRecheckRecords(checkout, 260, { label: 'review', state: 'succeeded' });
   await addStaleRecheckRecords(checkout, 300, { label: 'waiting', expiresAt: new Date().toISOString() });
@@ -551,10 +551,12 @@ test('a payment still going through when recovery gives up keeps its slot once D
     clockShiftMs += 60 * 60_000;
     for (let run = 0; run < 12; run += 1) assert.ok([200, 503].includes((await cron()).status));
   }
-  assert.equal((await fixture.commerce.getDocument(checkout.record._id)).providerPaymentState, 'succeeded');
+  const recoveredDoc = await fixture.commerce.getDocument(checkout.record._id);
+  assert.equal(recoveredDoc.providerPaymentState, 'succeeded');
+  assert.equal(recoveredDoc.status, 'booked');
   await holdRunsOut(checkout, 25 * 60 * 60_000);
   assert.equal((await cron()).status, 200);
-  assert.equal((await holdFor(checkout.payload)).phase, 'payment_pending');
+  assert.equal((await holdFor(checkout.payload)).phase, 'consumed');
   assert.equal((await secondVisitor(checkout.payload)).status, 409);
 });
 
@@ -882,7 +884,36 @@ test('a payment that lost its dispute by expiry keeps its slot when amount misma
   const fullSubunits = Math.round(checkout.record.pricingSnapshot.netAmount * 100);
   fixture.setPaymentAmountOverrides({
     total_amount: fullSubunits,
-    disputes: [{ dispute_id: 'window_dispute', dispute_stage: 'dispute', dispute_status: 'dispute_expired', amount: String(checkout.record.pricingSnapshot.netAmount) }],
+    disputes: [{
+      dispute_id: 'window_dispute_unbound',
+      payment_id: 'payment_other_checkout',
+      currency: 'USD',
+      dispute_stage: 'dispute',
+      dispute_status: 'dispute_expired',
+      amount: String(checkout.record.pricingSnapshot.netAmount),
+    }],
+  });
+  clockShiftMs += 2 * 60 * 60_000;
+  assert.equal((await cron()).status, 200);
+  const unboundDoc = await fixture.commerce.getDocument(checkout.record._id);
+  assert.equal(unboundDoc.providerPaymentState, 'succeeded');
+  assert.equal(unboundDoc.providerReversalVerified, false);
+
+  await stopRecovery(checkout, {
+    status: 'needs_recovery',
+    providerPaymentState: 'succeeded',
+    providerStateCheckedAt: '2000-01-01T00:00:00.000Z',
+  });
+  fixture.setPaymentAmountOverrides({
+    total_amount: fullSubunits,
+    disputes: [{
+      dispute_id: 'window_dispute',
+      payment_id: `payment_${checkout.record.providerOrderId}`,
+      currency: 'USD',
+      dispute_stage: 'dispute',
+      dispute_status: 'dispute_expired',
+      amount: String(checkout.record.pricingSnapshot.netAmount),
+    }],
   });
   clockShiftMs += 2 * 60 * 60_000;
   assert.equal((await cron()).status, 200);

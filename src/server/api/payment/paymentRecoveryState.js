@@ -44,7 +44,7 @@ export const hasVerifiedReversal = (r = {}) => {
   return (ps === "refunded" || ps === "disputed") && r.providerReversalVerified === true;
 };
 
-const hasPreservedOwnerReview = (r = {}) =>
+export const hasPreservedOwnerReview = (r = {}) =>
   hasExplicitOwnerReview(r) ||
   (String(r.provider || "").trim().toLowerCase() === "dodo" &&
     r.providerRecoveryTerminal === true &&
