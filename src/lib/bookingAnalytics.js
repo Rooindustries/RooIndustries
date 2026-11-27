@@ -43,3 +43,5 @@ export const trackBookingOnce = (receipt, booking) => {
     sendOnce(`meta_purchase_tracked:${receipt.eventId}`, () => trackPaidPurchaseOnMeta(receipt));
   }
 };
+
+export { countCheckoutStart } from "./checkoutStartCount";

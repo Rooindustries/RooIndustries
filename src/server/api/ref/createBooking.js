@@ -31,14 +31,8 @@ import {
 } from "./bookingEmailDispatchToken.js";
 import providerConfig from "../payment/providerConfig.js";
 import {
-  DEFAULT_PAYPAL_CURRENCY,
-  DEFAULT_RAZORPAY_CURRENCY,
-  toSubunits,
-  getPayPalCredentials,
-  resolveRazorpayCredentials,
-  verifyPayPalOrder,
-  verifyRazorpayPayment,
-  verifyRazorpaySignature,
+  currencyDecimals, getPayPalCurrency, getPayPalCredentials, getRazorpayCurrency,
+  resolveRazorpayCredentials, toSubunits, verifyPayPalOrder, verifyRazorpayPayment, verifyRazorpaySignature,
 } from "../payment/providerClients.js";
 import {
   buildBookingSeedKey,
@@ -160,7 +154,7 @@ const buildBookingSuccessResponse = ({
   return body;
 };
 
-const toMoney = (value) => {
+const toMoney = (value, currency = "USD") => {
   const normalized =
     typeof value === "string"
       ? value.trim().replace(/,/g, "").replace(/[$€£₹]/g, "").trim()
@@ -173,7 +167,7 @@ const toMoney = (value) => {
   }
   const parsed = Number(normalized);
   if (!Number.isFinite(parsed)) return 0;
-  return +parsed.toFixed(2);
+  return +parsed.toFixed(currencyDecimals(currency));
 };
 
 const resolvePaymentRecordStatus = (emailDispatch = {}) =>
@@ -606,8 +600,8 @@ export default async function handler(req, res) {
         couponCode: bookingDoc.couponCode || couponCode || "",
         currency:
           normalizedProvider === "paypal"
-            ? DEFAULT_PAYPAL_CURRENCY
-            : DEFAULT_RAZORPAY_CURRENCY,
+            ? getPayPalCurrency()
+            : getRazorpayCurrency(),
       });
       const resolvedEmailDispatch =
         emailDispatch ||
@@ -718,15 +712,15 @@ export default async function handler(req, res) {
           (normalizedProvider === "paypal"
             ? {
                 orderId: providerOrderId,
-                currency: DEFAULT_PAYPAL_CURRENCY,
+                currency: getPayPalCurrency(),
                 clientId: String(
                   availableProviders?.paypal?.clientId || ""
                 ).trim(),
               }
             : {
                 orderId: providerOrderId,
-                currency: DEFAULT_RAZORPAY_CURRENCY,
-                amount: Math.round(resolvedNetAmount * 100),
+                currency: getRazorpayCurrency(),
+                amount: toSubunits(resolvedNetAmount, getRazorpayCurrency()),
                 key: String(
                   resolveRazorpayCredentials()?.keyId || ""
                 ).trim(),
@@ -749,7 +743,7 @@ export default async function handler(req, res) {
       if (partialRefund?.refundStatus === "partial" && partialRefund.provider === normalizedProvider) {
         const currencies = new Set(partialRefund.refunds.map(refund => refund.currency).filter(Boolean));
         if (currencies.size > 1) throw Object.assign(new Error("Refund currencies do not agree."), { status: 409, code: "refund_currency_mismatch" });
-        const refundCurrency = resolvePaymentCurrency(existingRecord || {}, { booking: bookingDoc, refund: { currency: currencies.size ? [...currencies][0] : undefined }, fallback: normalizedProvider === "paypal" ? DEFAULT_PAYPAL_CURRENCY : DEFAULT_RAZORPAY_CURRENCY });
+        const refundCurrency = resolvePaymentCurrency(existingRecord || {}, { booking: bookingDoc, refund: { currency: currencies.size ? [...currencies][0] : undefined }, fallback: normalizedProvider === "paypal" ? getPayPalCurrency() : getRazorpayCurrency() });
         const refunds = new Map((existingRecord?.refunds || []).map(refund => [refund.providerRefundId, refund]));
         for (const refund of partialRefund.refunds) {
           const previous = refunds.get(refund.id);
@@ -947,7 +941,7 @@ export default async function handler(req, res) {
               grossAmount: internalPaymentRecord?.pricingSnapshot?.grossAmount,
               netAmount: internalPaymentRecord?.pricingSnapshot?.netAmount,
             } : {}),
-            ...(packagePrice !== undefined ? { grossAmount: toMoney(packagePrice) } : {}),
+            ...(!isInternalPaymentFinalization && packagePrice !== undefined ? { grossAmount: toMoney(packagePrice) } : {}),
             ...(paymentRecordId ? { paymentRecordId } : {}),
             paypalOrderId,
             razorpayOrderId,
@@ -1278,6 +1272,7 @@ export default async function handler(req, res) {
           referralCode,
           couponCode,
           paymentProvider,
+          currency: originalOrderId ? "" : paymentProvider === "razorpay" ? getRazorpayCurrency() : paymentProvider === "paypal" ? getPayPalCurrency() : "",
           client: writeClient,
           upgradeContext,
         });
@@ -1333,7 +1328,10 @@ export default async function handler(req, res) {
         error: "The server quote still requires payment.",
       });
     }
-    const resolvedPackagePrice = `$${effectiveGrossAmount.toFixed(2)}`;
+    const resolvedCurrency = String(frozenPricing?.currency || resolvedPricing?.currency ||
+      (paymentProvider === "paypal" ? getPayPalCurrency() : paymentProvider === "razorpay" ? getRazorpayCurrency() : "USD")).trim().toUpperCase() || "USD";
+    const resolvedPackagePrice = resolvedCurrency === "USD" ? `$${effectiveGrossAmount.toFixed(2)}`
+      : `${effectiveGrossAmount.toFixed(currencyDecimals(resolvedCurrency))} ${resolvedCurrency}`;
 
     let verifiedPayerEmail = payerEmail;
 
@@ -1380,7 +1378,7 @@ export default async function handler(req, res) {
           orderId: razorpayOrderId,
           paymentId: razorpayPaymentId,
           expectedAmount: effectiveNetAmount,
-          expectedCurrency: DEFAULT_RAZORPAY_CURRENCY,
+          expectedCurrency: resolvedCurrency || getRazorpayCurrency(),
         });
 
         if (!paymentVerification.ok) {
@@ -1422,7 +1420,7 @@ export default async function handler(req, res) {
         const paypalVerification = await verifyPayPalOrder({
           orderId: paypalOrderId,
           expectedAmount: effectiveNetAmount,
-          expectedCurrency: DEFAULT_PAYPAL_CURRENCY,
+          expectedCurrency: resolvedCurrency || getPayPalCurrency(),
         });
         if (!paypalVerification.ok) {
           logSafeError("PayPal verification rejected", {
@@ -1609,6 +1607,7 @@ export default async function handler(req, res) {
       message: resolvedMessage,
       packageTitle,
       packagePrice: resolvedPackagePrice,
+      currency: resolvedCurrency,
       status: normalizedStatus,
       ...(verifiedPartialRefund ? { paymentRefundVerification: verifiedPartialRefund } : {}),
       paymentProvider,

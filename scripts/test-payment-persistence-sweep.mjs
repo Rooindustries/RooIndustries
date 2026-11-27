@@ -386,7 +386,7 @@ try{
     providerHook=async(request,req,res)=>{
       let body;
       if(provider==='razorpay'&&request.path.startsWith('/v1/orders?'))body={items:[]};
-      else if(request.method==='POST'&&request.path===(provider==='paypal'?'/v2/checkout/orders':'/v1/orders'))body=provider==='paypal'?{id:'order-fixture',status:'CREATED'}:{id:'order-fixture',currency:'USD',amount,receipt:request.body.receipt,status:'created'};
+      else if(request.method==='POST'&&request.path===(provider==='paypal'?'/v2/checkout/orders':'/v1/orders'))body=provider==='paypal'?{id:'order-fixture',status:'CREATED',purchase_units:[{amount:{currency_code:'USD',value}}]}:{id:'order-fixture',currency:'USD',amount,receipt:request.body.receipt,status:'created'};
       else if(provider==='dodo'&&request.method==='GET'&&request.path==='/products/pdt_fixture')body={product_id:'pdt_fixture',is_recurring:false,price:{type:'one_time_price',currency:'USD',pay_what_you_want:true,tax_inclusive:false,purchasing_power_parity:false,discount:0,price:0}};
       else if(provider==='dodo'&&request.method==='POST'&&request.path==='/checkouts')body={session_id:'order-fixture',checkout_url:'https://test.checkout.dodopayments.com/session/fixture'};
       else return false;
@@ -963,11 +963,16 @@ try{
   for(const provider of ['paypal','razorpay'])await run(`currency-configured-${provider}-start-finalize-rebuild`,async()=>{
     const currency=provider==='paypal'?providers.DEFAULT_PAYPAL_CURRENCY:providers.DEFAULT_RAZORPAY_CURRENCY,expected=providers.toSubunits(9.99,currency);
     assert.equal(currency,provider==='paypal'?'EUR':'KWD','Run this scenario with --currency-config');
-    const input=await startInput();input.provider=provider;let orderRequest;
+    const input=await startInput();input.provider=provider;
+    const {buildQuoteFingerprint}=await import('../src/server/api/payment/paymentRecord.js');
+    const {resolvePaymentQuote}=await import('../src/server/api/ref/pricing.js');
+    const q=await resolvePaymentQuote({...input.bookingPayload,currency,client:commerce});
+    input.quoteFingerprint=buildQuoteFingerprint({bookingPayload:input.bookingPayload,quote:q,currency});
+    let orderRequest;
     providerHook=async(request,req,res)=>{
       if(provider==='razorpay'&&request.path.startsWith('/v1/orders?')){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({items:[]}));return true;}
       if(request.method!=='POST'||request.path!==(provider==='paypal'?'/v2/checkout/orders':'/v1/orders'))return false;
-      orderRequest=request.body;res.writeHead(201,{'content-type':'application/json'});res.end(JSON.stringify(provider==='paypal'?{id:'order-fixture',status:'CREATED'}:{id:'order-fixture',currency,amount:expected,receipt:request.body.receipt,status:'created'}));return true;
+      orderRequest=request.body;res.writeHead(201,{'content-type':'application/json'});res.end(JSON.stringify(provider==='paypal'?{id:'order-fixture',status:'CREATED',purchase_units:[{amount:{currency_code:currency,value:providers.formatMoneyValue(9.99,currency)}}]}:{id:'order-fixture',currency,amount:expected,receipt:request.body.receipt,status:'created'}));return true;
     };
     const started=await requestFlow('start',{body:input});assert.equal(started.status,200,JSON.stringify(started));
     const payment=(await commerce.fetch('*[_type == "paymentRecord"]'))[0],id=payment._id;
@@ -1005,7 +1010,7 @@ try{
     const currency=provider==='paypal'?'EUR':'KWD',expected=providers.toSubunits(9.99,currency);assert.equal(provider==='paypal'?providers.DEFAULT_PAYPAL_CURRENCY:providers.DEFAULT_RAZORPAY_CURRENCY,'USD','This proves recovery after configuration has changed');
     await seed(provider,'started',{record:{bookingId:'',providerOrderId:'',providerPaymentId:'',providerPublicData:{},pricingSnapshot:{netAmount:9.99,currency},createdAt:new Date(originalNow()-600000).toISOString(),updatedAt:new Date(originalNow()-600000).toISOString(),orderCreationLeaseExpiresAt:'',orderState:'needs_recovery'}});let requestCurrency;
     providerHook=async(request,req,res)=>{
-      if(provider==='paypal'&&request.method==='POST'&&request.path==='/v2/checkout/orders'){requestCurrency=request.body.purchase_units[0].amount.currency_code;res.writeHead(201,{'content-type':'application/json'});res.end(JSON.stringify({id:'order-fixture',status:'CREATED'}));return true;}
+      if(provider==='paypal'&&request.method==='POST'&&request.path==='/v2/checkout/orders'){requestCurrency=request.body.purchase_units[0].amount.currency_code;res.writeHead(201,{'content-type':'application/json'});res.end(JSON.stringify({id:'order-fixture',status:'CREATED',purchase_units:[{amount:{currency_code:currency,value:'9.99'}}]}));return true;}
       if(provider==='razorpay'&&request.path.startsWith('/v1/orders?')){requestCurrency='KWD';res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({items:[{id:'order-fixture',receipt:'fixture-key',amount:expected,currency,status:'created'}]}));return true;}
       if(provider==='paypal'&&request.path==='/v2/checkout/orders/order-fixture'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({id:'order-fixture',status:'CREATED',purchase_units:[{amount:{currency_code:currency,value:'9.99'}}]}));return true;}
       if(provider==='razorpay'&&request.path==='/v1/orders/order-fixture/payments'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({items:[]}));return true;}

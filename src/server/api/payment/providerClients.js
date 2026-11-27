@@ -21,11 +21,14 @@ export const getPayPalCredentials = () => ({
   clientSecret: env("PAYPAL_CLIENT_SECRET"),
 });
 
-export const DEFAULT_RAZORPAY_CURRENCY = env("RAZORPAY_CURRENCY").toUpperCase() || "USD";
+export const getRazorpayCurrency = () => env("RAZORPAY_CURRENCY").toUpperCase() || "USD";
+export const getPayPalCurrency = () => firstEnv("PAYPAL_CURRENCY", "RAZORPAY_CURRENCY").toUpperCase() || "USD";
+export const DEFAULT_RAZORPAY_CURRENCY = getRazorpayCurrency();
+export const DEFAULT_PAYPAL_CURRENCY = getPayPalCurrency();
 
-export const DEFAULT_PAYPAL_CURRENCY = firstEnv("PAYPAL_CURRENCY", "RAZORPAY_CURRENCY").toUpperCase() || "USD";
+export const currencyDecimals = (currency = "USD") => Math.round(Math.log10(toSubunits(1, currency)));
 
-export const toMoney = (value) => {
+export const toMoney = (value, currency = "USD") => {
   const normalized =
     typeof value === "string"
       ? value.trim().replace(/,/g, "").replace(/[$€£₹]/g, "").trim()
@@ -38,7 +41,15 @@ export const toMoney = (value) => {
   }
   const parsed = Number(normalized);
   if (!Number.isFinite(parsed)) return 0;
-  return +parsed.toFixed(2);
+  return +parsed.toFixed(currencyDecimals(currency));
+};
+
+export const formatMoneyValue = (amount, currency = "USD") => toMoney(amount, currency).toFixed(currencyDecimals(currency));
+
+export const assertRazorpayAmountIncrement = (amount, currency = getRazorpayCurrency()) => {
+  if (toSubunits(1, currency) === 1000 && toSubunits(amount, currency) % 10 !== 0) {
+    throw Object.assign(new Error("Razorpay requires 3-decimal currency amounts in multiples of 0.010."), { status: 400, code: "razorpay_amount_increment_invalid" });
+  }
 };
 
 export const toSubunits = (amount, currency = "USD") => {
@@ -82,10 +93,10 @@ const getRazorpayAuthorization = (credentials) =>
     "base64"
   )}`;
 
-const normalizeRazorpayOrder = ({ order = {}, credentials, currency, receipt }) => ({
+const normalizeRazorpayOrder = ({ order = {}, credentials, receipt }) => ({
   orderId: String(order.id || "").trim(),
   amount: Number(order.amount || 0),
-  currency: String(order.currency || currency).trim().toUpperCase(),
+  currency: String(order.currency || "").trim().toUpperCase(),
   key: credentials.keyId,
   receipt: String(order.receipt || receipt || "").trim(),
 });
@@ -93,7 +104,7 @@ const normalizeRazorpayOrder = ({ order = {}, credentials, currency, receipt }) 
 export const inspectRazorpayOrderByReceipt = async ({
   receipt,
   amount,
-  currency = DEFAULT_RAZORPAY_CURRENCY,
+  currency = getRazorpayCurrency(),
   credentials = resolveRazorpayCredentials(),
 }) => {
   if (!credentials.enabled || !receipt) {
@@ -169,11 +180,14 @@ export const verifyRazorpaySignature = ({
 
 export const createRazorpayOrder = async ({
   amount,
-  currency = DEFAULT_RAZORPAY_CURRENCY,
+  currency = getRazorpayCurrency(),
   notes = {},
   receipt = `booking_${Date.now()}`,
   lookupOnly = false,
 }) => {
+  const expectedCurrency = String(currency || "").trim().toUpperCase();
+  assertRazorpayAmountIncrement(amount, expectedCurrency);
+  const expectedAmount = toSubunits(amount, expectedCurrency);
   const credentials = resolveRazorpayCredentials();
   if (!credentials.enabled) {
     const missingCredentials = !credentials.keyId || !credentials.keySecret;
@@ -264,12 +278,11 @@ export const createRazorpayOrder = async ({
     throw error;
   }
 
-  return normalizeRazorpayOrder({
-    order,
-    credentials,
-    currency,
-    receipt: stableReceipt,
-  });
+  const normalized = normalizeRazorpayOrder({ order, credentials, receipt: stableReceipt });
+  if (!normalized.currency || normalized.currency !== expectedCurrency || !Number.isSafeInteger(normalized.amount) || normalized.amount !== expectedAmount) {
+    throw Object.assign(new Error("Razorpay returned an order with mismatched currency or amount."), { status: 502, code: "razorpay_order_mismatch" });
+  }
+  return normalized;
 };
 
 export const inspectRazorpayOrder = async ({ orderId }) => {
@@ -372,7 +385,7 @@ export const verifyRazorpayPayment = async ({
   orderId,
   paymentId,
   expectedAmount,
-  expectedCurrency = DEFAULT_RAZORPAY_CURRENCY,
+  expectedCurrency = getRazorpayCurrency(),
 }) => {
   const credentials = resolveRazorpayCredentials();
   if (!credentials.enabled) {
@@ -551,11 +564,13 @@ export const getPayPalToken = async () => {
 
 export const createPayPalOrder = async ({
   amount,
-  currency = DEFAULT_PAYPAL_CURRENCY,
+  currency = getPayPalCurrency(),
   description = "",
   customId = "",
   requestId = "",
 }) => {
+  const expectedCurrency = String(currency || "").trim().toUpperCase();
+  const expectedAmount = toSubunits(amount, expectedCurrency);
   const tokenResult = await getPayPalToken();
   if (!tokenResult.ok) {
     const error = new Error(tokenResult.reason || "PayPal token unavailable");
@@ -570,6 +585,7 @@ export const createPayPalOrder = async ({
     headers: {
       Authorization: `Bearer ${tokenResult.token}`,
       "Content-Type": "application/json",
+      Prefer: "return=representation",
       ...(requestId ? { "PayPal-Request-Id": String(requestId).trim() } : {}),
     },
     body: JSON.stringify({
@@ -579,8 +595,8 @@ export const createPayPalOrder = async ({
           description,
           ...(customId ? { custom_id: customId } : {}),
           amount: {
-            currency_code: currency,
-            value: toMoney(amount).toFixed(2),
+            currency_code: expectedCurrency,
+            value: formatMoneyValue(amount, expectedCurrency),
           },
         },
       ],
@@ -597,10 +613,18 @@ export const createPayPalOrder = async ({
     throw error;
   }
 
-  return {
-    orderId: String(data.id),
-    currency,
-  };
+  let units = Array.isArray(data.purchase_units) && data.purchase_units.length > 0 ? data.purchase_units : null;
+  if (!units) {
+    const lookup = await fetch(`${getPayPalBaseUrl()}/v2/checkout/orders/${encodeURIComponent(String(data.id))}`, { signal: AbortSignal.timeout(8000), headers: { Authorization: `Bearer ${tokenResult.token}` } });
+    const details = lookup.ok ? await lookup.json().catch(() => ({})) : {};
+    if (String(details?.id || "").trim() === String(data.id).trim()) units = Array.isArray(details.purchase_units) ? details.purchase_units : null;
+  }
+  const unit = Array.isArray(units) && units.length === 1 ? units[0] : null;
+  const retCur = String(unit?.amount?.currency_code || "").trim().toUpperCase(), retAmt = parseMoneySubunits(unit?.amount?.value, expectedCurrency);
+  if (!unit || retCur !== expectedCurrency || !retAmt || retAmt !== expectedAmount) {
+    throw Object.assign(new Error("PayPal returned an order with missing or mismatched amount or currency."), { status: 502, code: "paypal_order_mismatch" });
+  }
+  return { orderId: String(data.id), currency: expectedCurrency, amount: expectedAmount };
 };
 
 const inspectPayPalDetails = (details = {}) => {
@@ -682,7 +706,7 @@ export const verifyPayPalOrder = async ({
   orderId,
   expectedPaymentId = "",
   expectedAmount,
-  expectedCurrency = DEFAULT_PAYPAL_CURRENCY,
+  expectedCurrency = getPayPalCurrency(),
 }) => {
   const tokenResult = await getPayPalToken();
   if (!tokenResult.ok) {

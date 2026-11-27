@@ -22,7 +22,7 @@ function PayPalCheckout({ useReducerHook, children }) {
     </div>
   );
 }
-export default function PayPalMethodPanel({ paypalClientId, children }) {
+export default function PayPalMethodPanel({ paypalClientId, currency = "USD", children }) {
   const [paypalSdk, setPaypalSdk] = useState(() => cachedPaypalSdk);
   const [loadFailed, setLoadFailed] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -40,8 +40,13 @@ export default function PayPalMethodPanel({ paypalClientId, children }) {
   }, [loadAttempt, paypalSdk]);
   if (loadFailed) return <PayPalLoadError onRetry={() => setLoadAttempt((count) => count + 1)} />;
   if (!paypalSdk) return <PayPalLoading />;
+  const resolvedCurrency = /^[A-Z]{3}$/.test(String(currency || "").trim().toUpperCase())
+    ? String(currency || "").trim().toUpperCase() : "USD";
   return (
-    <paypalSdk.PayPalScriptProvider options={{ "client-id": paypalClientId, currency: "USD", intent: "capture" }}>
+    <paypalSdk.PayPalScriptProvider
+      key={resolvedCurrency}
+      options={{ "client-id": paypalClientId, currency: resolvedCurrency, intent: "capture" }}
+    >
       <PayPalCheckout useReducerHook={paypalSdk.usePayPalScriptReducer}>
         {children(paypalSdk.PayPalButtons)}
       </PayPalCheckout>

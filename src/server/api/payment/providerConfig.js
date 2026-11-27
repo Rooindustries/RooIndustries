@@ -161,6 +161,10 @@ const resolveRazorpayMode = (keyId = "") => {
   return "unknown";
 };
 
+const DODO_CURRENCY = "USD";
+const resolveRazorpayCurrency = () => env("RAZORPAY_CURRENCY").toUpperCase() || "USD";
+const resolvePayPalCurrency = () => firstEnv("PAYPAL_CURRENCY", "RAZORPAY_CURRENCY").toUpperCase() || "USD";
+
 const resolvePaymentProviders = () => {
   const runtimePolicy = resolvePaymentRuntimePolicy();
 
@@ -193,7 +197,7 @@ const resolvePaymentProviders = () => {
       .every((key) => !!env(key)) && allowProviderModeInRuntime(dodoMode, runtimePolicy);
 
   return {
-    dodo: { enabled: dodoEnabled, mode: dodoMode },
+    dodo: { enabled: dodoEnabled, mode: dodoMode, currency: DODO_CURRENCY },
     runtime: runtimePolicy.runtime,
     previewPaymentsEnabled: runtimePolicy.previewPaymentsEnabled,
     livePaymentsEnabled: runtimePolicy.livePaymentsEnabled,
@@ -201,6 +205,7 @@ const resolvePaymentProviders = () => {
     razorpay: {
       enabled: razorpayEnabled,
       mode: razorpayMode,
+      currency: resolveRazorpayCurrency(),
       ...(razorpayCheckoutDisabled
         ? { disabledReason: "merchant_profile_update" }
         : {}),
@@ -208,6 +213,7 @@ const resolvePaymentProviders = () => {
     paypal: {
       enabled: paypalEnabled,
       mode: paypalMode,
+      currency: resolvePayPalCurrency(),
       clientId: paypalEnabled ? paypalClientId : "",
     },
   };
@@ -223,6 +229,7 @@ const resolveServerPaymentSessionsEnabled = () =>
     .toLowerCase() !== "0";
 
 module.exports = {
+  DODO_CURRENCY,
   allowProviderModeInRuntime,
   isTruthyEnv,
   normalizeRuntimePolicy,
@@ -230,10 +237,12 @@ module.exports = {
   resolveLivePaymentsEnabled,
   resolveDodoProductId,
   resolveDodoProductIds,
+  resolvePayPalCurrency,
   resolvePayPalMode,
   resolvePaymentProviders,
   resolvePaymentRuntimePolicy,
   resolvePreviewPaymentsEnabled,
+  resolveRazorpayCurrency,
   resolveRazorpayMode,
   resolveRuntime,
   resolveServerPaymentSessionsEnabled,

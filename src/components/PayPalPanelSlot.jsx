@@ -6,9 +6,9 @@ export default function PayPalPanelSlot(props) {
   useEffect(() => {
     if (Panel || step < 0) return;
     let active = true;
-    import("./PayPalMethodPanel").then((m) => {
-      cached = m.default;
-      if (active) setPanel(() => m.default);
+    import("../lib/paymentCheckoutHold").then((m) => {
+      cached = m.PayPalMethodPanel;
+      if (active) setPanel(() => m.PayPalMethodPanel);
     }).catch(() => active && setStep(-step));
     return () => { active = false; };
   }, [step, Panel]);

@@ -1,4 +1,8 @@
 import { buildBrowserCompletionBody } from "./bookingSummary.js";
+import { buildLockedSessionPayload as buildLockedSession, buildProviderPayloadForRecord as buildProviderPayloadFromRecord, buildStatusLockExtension, buildUpgradeLockConflictError } from "./lockedSession.js";
+import { computePaymentRecoveryFlags } from "./paymentRecoveryState.js";
+import { resolveCompatibleQuoteFingerprint, resolveQuoteRequestCurrency, validateUpgradeQuoteProvider } from "./quoteCompatibility.js";
+import { commitAtomicDodoRequiresPaymentMethodCancel } from "./dodoCancel.js";
 import envValue from "../../supabase/envValue.cjs";
 import { calculateCreatorCommission, originalBookingCommission } from "../../referrals/commissionMoney.js";
 import { isTerminalDisputeStatus, resolveDisputeReferralAccounting } from "../../referrals/disputeAccounting.js";
@@ -23,6 +27,7 @@ import crypto from "crypto";
 import { sanitizeSalesAttribution } from "../../../lib/salesAttribution.ts";
 import * as refAttr from "../ref/validateRefAttribution.js";
 import * as retryFlow from "./startPrePricingRetry.js";
+const { buildQuotePayload, buildQuotePayloadFromSnapshot } = retryFlow;
 import { validateBookingContact } from "../../../lib/bookingContactValidation.js";
 import { buildSalesReceipt } from "./salesReceipt.ts";
 import { getSafeErrorCode, logSafeError } from "../../safeErrorLog.js";
@@ -39,7 +44,7 @@ import { getBookingSettings, isSlotAllowedForPackage } from "../../booking/slotP
 import { issueHoldToken, verifyHoldToken } from "../../booking/holdToken.js";
 import { isBookingBlockingStatus } from "../../booking/bookingStatus.js";
 import providerConfig from "./providerConfig.js";
-import { createPayPalOrder, createRazorpayOrder, DEFAULT_PAYPAL_CURRENCY, DEFAULT_RAZORPAY_CURRENCY, getPayPalRefundCaptureId, inspectPayPalCapture, inspectPayPalOrder, inspectRazorpayOrder, inspectRazorpayPayment, parseMoneySubunits, toSubunits, verifyPayPalOrder, verifyPayPalWebhookSignature, verifyRazorpayPayment, verifyRazorpaySignature, verifyRazorpayWebhookSignature } from "./providerClients.js";
+import { assertRazorpayAmountIncrement, createPayPalOrder, createRazorpayOrder, getPayPalCurrency, getPayPalRefundCaptureId, getRazorpayCurrency, inspectPayPalCapture, inspectPayPalOrder, inspectRazorpayOrder, inspectRazorpayPayment, parseMoneySubunits, toSubunits, verifyPayPalOrder, verifyPayPalWebhookSignature, verifyRazorpayPayment, verifyRazorpaySignature, verifyRazorpayWebhookSignature } from "./providerClients.js";
 import {
   createPaymentAccessToken,
   isPaymentAccessTokenRecordMatch,
@@ -487,8 +492,8 @@ const buildRecordPricingFingerprint = ({
     currency:
       String(currency || "").trim().toUpperCase() ||
       (String(provider || "").trim().toLowerCase() === "paypal"
-        ? DEFAULT_PAYPAL_CURRENCY
-        : DEFAULT_RAZORPAY_CURRENCY),
+        ? getPayPalCurrency()
+        : getRazorpayCurrency()),
   });
 
 const isUpgradeCreditReview = (record = {}) =>
@@ -560,6 +565,8 @@ const buildPublicFailure = ({
         ? { code: normalizedCode }
         : {}),
       ...(clientError && error?.claimedSession ? { claimedSession: error.claimedSession } : {}),
+      ...(clientError && error?.completedUpgrade ? { completedUpgrade: error.completedUpgrade } : {}),
+      ...(clientError && error?.lockedSession ? { lockedSession: error.lockedSession } : {}),
     },
   };
 };
@@ -568,6 +575,7 @@ const buildPublicStatusBody = (record = {}) => ({
   ok: true,
   status: String(record.status || "").trim(),
   provider: String(record.provider || "").trim(),
+  providerPaymentState: String(record.providerPaymentState || "").trim(),
   bookingId: String(record.bookingId || "").trim(),
   recoveryReason: getPublicRecoveryMessage(record),
   nextRecoveryAt: record.reconciliationRecoveryTerminal === true
@@ -581,8 +589,7 @@ const buildPublicStatusBody = (record = {}) => ({
   emailDispatch: buildPublicEmailDispatch(record.emailDispatch),
   emailDispatchToken: String(record.emailDispatchToken || "").trim(),
   analyticsReceipt: buildSalesReceipt(record),
-  ...(isUpgradeCreditReview(record) && record.recoveryReason === "upgrade_credit_changed_after_quote"
-    ? { manualReviewRequired: true } : {}),
+  ...computePaymentRecoveryFlags(record),
 });
 
 const buildUpgradeCreditReviewResult = (record) => {
@@ -623,39 +630,15 @@ const issuePaymentAccessTokenForRecord = (record = {}) =>
     expirySeconds: resolvePaymentAccessTtlSeconds(),
   });
 
+const buildLockedSessionPayload = (record = {}, quoteCompatibility = null) =>
+  buildLockedSession({ record, issueToken: issuePaymentAccessTokenForRecord, buildQuoteFromSnapshot: buildQuotePayloadFromSnapshot, quoteCompatibility });
+
 const isTrustedRecoverySource = (source = "") =>
   source === "client" || source === "webhook" || source === "reconcile";
 
 const canFinalizeAbandonedRecord = ({ status = "", source = "" }) =>
   String(status || "").trim().toLowerCase() === PAYMENT_STATUS_ABANDONED &&
   isTrustedRecoverySource(String(source || "").trim().toLowerCase());
-
-const buildProviderPayloadFromRecord = (record = {}) => {
-  const provider = String(record.provider || "").trim().toLowerCase();
-  if (provider === "dodo") return { ...record.providerPublicData, orderId: record.providerOrderId };
-  if (provider === "razorpay") {
-    return {
-      orderId: String(record.providerOrderId || "").trim(),
-      key: String(record.providerPublicData?.key || "").trim(),
-      currency:
-        String(record.providerPublicData?.currency || "").trim().toUpperCase() ||
-        DEFAULT_RAZORPAY_CURRENCY,
-      amount: Number(record.providerPublicData?.amount || 0),
-    };
-  }
-
-  if (provider === "paypal") {
-    return {
-      orderId: String(record.providerOrderId || "").trim(),
-      currency:
-        String(record.providerPublicData?.currency || "").trim().toUpperCase() ||
-        DEFAULT_PAYPAL_CURRENCY,
-      clientId: String(record.providerPublicData?.clientId || "").trim(),
-    };
-  }
-
-  return {};
-};
 
 const getLegacyBookingByProviderData = async ({
   client,
@@ -760,7 +743,7 @@ const mirrorLegacyBookingToPaymentRecord = async ({
   const existing = await getPaymentRecordById(client, paymentRecordId);
   try {
     currency = resolvePaymentCurrency(existing || {}, { booking,
-      fallback: normalizedProvider === "paypal" ? DEFAULT_PAYPAL_CURRENCY : DEFAULT_RAZORPAY_CURRENCY });
+      fallback: normalizedProvider === "paypal" ? getPayPalCurrency() : getRazorpayCurrency() });
   } catch {
     return null;
   }
@@ -861,12 +844,12 @@ const mirrorLegacyBookingToPaymentRecord = async ({
         (normalizedProvider === "paypal"
           ? {
               orderId: String(providerOrderId || booking.paypalOrderId || "").trim(),
-              currency: DEFAULT_PAYPAL_CURRENCY,
+              currency: getPayPalCurrency(),
               clientId: String(resolvePaymentProviders()?.paypal?.clientId || "").trim(),
             }
           : {
               orderId: String(providerOrderId || booking.razorpayOrderId || "").trim(),
-              currency: DEFAULT_RAZORPAY_CURRENCY,
+              currency: getRazorpayCurrency(),
             })),
       currency,
     },
@@ -1003,7 +986,7 @@ const verifyProviderCapture = async ({
 
   let currency;
   try {
-    currency = resolvePaymentCurrency(record, { fallback: provider === "paypal" ? DEFAULT_PAYPAL_CURRENCY : provider === "razorpay" ? DEFAULT_RAZORPAY_CURRENCY : "USD" });
+    currency = resolvePaymentCurrency(record, { fallback: provider === "paypal" ? getPayPalCurrency() : provider === "razorpay" ? getRazorpayCurrency() : "USD" });
   } catch (error) {
     return { ok: false, retryable: false, reason: error.code };
   }
@@ -2783,7 +2766,7 @@ const createProviderOrderForRecord = async (
   const bookingPayload = sanitizeBookingPayload(record.bookingPayload);
   const pricing = normalizeObject(record.pricingSnapshot);
   const amount = Number(pricing.netAmount || 0);
-  const currency = resolvePaymentCurrency(record, { fallback: provider === "paypal" ? DEFAULT_PAYPAL_CURRENCY : provider === "razorpay" ? DEFAULT_RAZORPAY_CURRENCY : "USD" });
+  const currency = resolvePaymentCurrency(record, { fallback: provider === "paypal" ? getPayPalCurrency() : provider === "razorpay" ? getRazorpayCurrency() : "USD" });
   const idempotencyKey = String(record.providerIdempotencyKey || "").trim();
 
   if (provider === "dodo") {
@@ -2855,6 +2838,7 @@ const createOrReusePaymentRecordForStart = async ({
     provider,
     bookingPayload,
     quote,
+    currency: quote.currency,
   });
 
   const baseSessionScope = buildPaymentSessionScope({
@@ -2967,6 +2951,7 @@ const createOrReusePaymentRecordForStart = async ({
     bookingSeedKey,
     pricingFingerprint,
     quoteFingerprint,
+    quoteFingerprintVersion: 2,
     sessionScope,
     startClaimId,
     providerIdempotencyKey,
@@ -2982,7 +2967,7 @@ const createOrReusePaymentRecordForStart = async ({
     },
     pricingSnapshot: buildPricingSnapshot(quote, resolvePaymentCurrency({ bookingPayload,
       pricingSnapshot: { currency: quote.currency },
-      providerPublicData: { currency: provider === "paypal" ? DEFAULT_PAYPAL_CURRENCY : provider === "razorpay" ? DEFAULT_RAZORPAY_CURRENCY : "USD" } })),
+      providerPublicData: { currency: provider === "free" ? (quote.currency || "USD") : provider === "paypal" ? getPayPalCurrency() : provider === "razorpay" ? getRazorpayCurrency() : "USD" } })),
     ...(upgradeIntentSnapshot ? { upgradeIntentSnapshot } : {}),
     holdSnapshot: {
       slotHoldId: bookingPayload.slotHoldId || "",
@@ -3063,23 +3048,28 @@ const createOrReusePaymentRecordForStart = async ({
     creditSources: isUpgrade ? quote.upgradeContext.creditSources : [],
   });
 
-  if (isUpgrade && ![PAYMENT_STATUS_STARTED, PAYMENT_STATUS_BOOKED, PAYMENT_STATUS_EMAIL_PARTIAL].includes(record.status)) {
-    throw Object.assign(new Error("The previous upgrade checkout is closed. Please start a new upgrade."), {
-      status: 409, code: "upgrade_checkout_closed",
+  const reusedClaim = record._id && record.startClaimId && record.createdAt !== createdAt
+    ? await getDocumentById({ client, id: record.startClaimId, type: record.startClaimId.startsWith("paymentUpgradeLock.") ? PAYMENT_UPGRADE_LOCK_TYPE : PAYMENT_START_CLAIM_TYPE })
+    : null;
+  const recordCompat = resolveCompatibleQuoteFingerprint({ record, claim: reusedClaim });
+  if (isUpgrade) {
+    const conflict = buildUpgradeLockConflictError({
+      record, bookingPayload, sessionScope,
+      buildLockedSession: (rec) => buildLockedSessionPayload(rec, recordCompat),
+      allowedReuseStatuses: [PAYMENT_STATUS_STARTED, PAYMENT_STATUS_BOOKED, PAYMENT_STATUS_EMAIL_PARTIAL],
     });
+    if (conflict) throw conflict;
   }
-
-  if (isUpgrade && (record.bookingPayload.originalOrderId !== bookingPayload.originalOrderId ||
-      record.bookingPayload.email !== bookingPayload.email ||
-      record.bookingPayload.packageTitle !== bookingPayload.packageTitle)) {
-    throw Object.assign(new Error("Another upgrade is already using this booking's credit."), {
-      status: 409, code: "upgrade_already_in_progress",
+  if (!recordCompat.quoteFingerprintValid) {
+    throw Object.assign(new Error("This payment session cannot be resumed. Check its status instead."), {
+      status: 409, code: "quote_fingerprint_invalid", lockedSession: buildLockedSessionPayload(record, recordCompat),
     });
   }
 
   retryFlow.assertMatchingClaimedSession({
-    record, provider, quoteFingerprint,
+    record, provider, quoteFingerprint, recordCompat,
     buildProviderPayloadFromRecord, buildRefreshedHoldBody, issuePaymentAccessTokenForRecord,
+    buildLockedSession: buildLockedSessionPayload,
   });
   if (provider === "free" || String(record.providerOrderId || "").trim()) {
     return { record, checkoutCreated: false };
@@ -3093,6 +3083,7 @@ const createOrReusePaymentRecordForStart = async ({
     const error = new Error("This payment session is already creating its provider order.");
     error.status = 409;
     error.code = "provider_order_creation_in_progress";
+    error.lockedSession = buildLockedSessionPayload(current, recordCompat);
     throw error;
   }
 
@@ -3180,7 +3171,7 @@ export const startPaymentSession = async ({
 
   try {
     let contact = {};
-    let hold = null, scope = "", existing = null;
+    let hold = null, scope = "", existing = null, existingClaim = null;
     if (!String(rawBookingPayload.originalOrderId || "").trim()) {
       const holdId = String(rawBookingPayload.slotHoldId || "").trim();
       hold = holdId ? await getHoldById(client, holdId) : null;
@@ -3188,13 +3179,13 @@ export const startPaymentSession = async ({
         bookingPayload: rawBookingPayload,
         holdNonce: hold?.holdNonce || "",
       });
-      const claim = await getDocumentById({
+      existingClaim = await getDocumentById({
         client,
         id: buildPaymentStartClaimId(scope),
         type: PAYMENT_START_CLAIM_TYPE,
       });
-      existing = claim?.paymentRecordId
-        ? await getPaymentRecordById(client, claim.paymentRecordId)
+      existing = existingClaim?.paymentRecordId
+        ? await getPaymentRecordById(client, existingClaim.paymentRecordId)
         : null;
       if (!existing?._id) contact = validateBookingContact(rawBookingPayload);
     }
@@ -3235,17 +3226,22 @@ export const startPaymentSession = async ({
       const baseScope = buildPaymentSessionScope({ bookingPayload, holdNonce: "" });
       scope = `${baseScope}:${String(upgradeIntentSnapshot.intentId || "").trim()}`;
       existing = await getPaymentRecordById(client, buildPaymentSessionRecordId(scope));
+      existingClaim = existing?.startClaimId
+        ? await getDocumentById({ client, id: existing.startClaimId, type: PAYMENT_UPGRADE_LOCK_TYPE })
+        : null;
     }
 
     const submittedQuoteFingerprint = String(requestBody.quoteFingerprint || "").trim();
     const providers = resolvePaymentProviders();
     const prePricingRetry = await retryFlow.tryPrePricingRetryStart({
-      client, existing, scope, submittedQuoteFingerprint, requestedProvider, bookingPayload, hold, providers,
+      client, existing, claim: existingClaim, scope, submittedQuoteFingerprint, requestedProvider, bookingPayload, hold, providers,
       assertStartableHold, buildRefreshedHoldBody, buildProviderPayloadFromRecord, buildPublicStatusBody,
-      buildBrowserCompletionBody, issuePaymentAccessTokenForRecord, finalizePaymentRecordInternal,
+      buildBrowserCompletionBody, buildLockedSession: buildLockedSessionPayload,
+      issuePaymentAccessTokenForRecord, finalizePaymentRecordInternal,
     });
     if (prePricingRetry) return prePricingRetry;
 
+    const { currency: requestedCurrency } = resolveQuoteRequestCurrency({ providers, requestedProvider, originalOrderId: bookingPayload.originalOrderId });
     const quote = authorizedFreeCheckout
       ? {
           paymentProvider: "free",
@@ -3271,68 +3267,41 @@ export const startPaymentSession = async ({
           referralId: bookingPayload.referralId || "",
           referralCode: bookingPayload.referralCode || "",
           couponCode: bookingPayload.couponCode || "",
+          currency: requestedCurrency,
           client,
         });
-    const currentQuoteFingerprint = buildQuoteFingerprint({
-      bookingPayload,
-      quote,
-    });
+    const quoteProvider = String(quote.paymentProvider || "").trim().toLowerCase();
+    const quoteCurrency = bookingPayload.originalOrderId
+      ? String(quote.currency || "USD").trim().toUpperCase() || "USD"
+      : String(quote.currency || requestedCurrency || "USD").trim().toUpperCase() || "USD";
+    const pricedQuote = { ...quote, currency: quoteCurrency };
+    const upgradeProvErr = bookingPayload.originalOrderId && quoteProvider !== "free"
+      ? validateUpgradeQuoteProvider({ providers, requestedProvider, quoteCurrency }) : null;
+    if (upgradeProvErr) return { httpStatus: upgradeProvErr.status, body: { ok: false, code: upgradeProvErr.code, error: upgradeProvErr.error } };
+    const currentQuoteFingerprint = buildQuoteFingerprint({ bookingPayload, quote: pricedQuote, currency: quoteCurrency });
     if (
       !authorizedFreeCheckout &&
       ((!submittedQuoteFingerprint && !isLegacyCheckoutCompatibilityOpen()) ||
-        (submittedQuoteFingerprint &&
-          submittedQuoteFingerprint !== currentQuoteFingerprint))
+        (submittedQuoteFingerprint && submittedQuoteFingerprint !== currentQuoteFingerprint))
     ) {
       return {
         httpStatus: 409,
         body: {
-          ok: false,
-          error: "The checkout price changed. Please review the updated total.",
-          code: submittedQuoteFingerprint
-            ? "quote_fingerprint_mismatch"
-            : "quote_fingerprint_required",
-          quote: retryFlow.buildQuotePayload(quote),
-          quoteFingerprint: currentQuoteFingerprint,
+          ok: false, error: "The checkout price changed. Please review the updated total.",
+          code: submittedQuoteFingerprint ? "quote_fingerprint_mismatch" : "quote_fingerprint_required",
+          currency: quoteCurrency, quote: buildQuotePayload(pricedQuote), quoteFingerprint: currentQuoteFingerprint, providers,
         },
       };
     }
-    const quoteProvider = String(quote.paymentProvider || "").trim().toLowerCase();
     let provider = "";
-
     if (quoteProvider === "free") {
-      if (requestedProvider === "free" || !requestedProvider) {
-        provider = "free";
-      } else {
-        return {
-          httpStatus: 400,
-          body: {
-            ok: false,
-            error: "Free checkout cannot be started with a paid provider.",
-          },
-        };
-      }
+      if (requestedProvider && requestedProvider !== "free") return { httpStatus: 400, body: { ok: false, error: "Free checkout cannot be started with a paid provider." } };
+      provider = "free";
     } else {
-      if (requestedProvider === "free") {
-        return {
-          httpStatus: 400,
-          body: {
-            ok: false,
-            error: "Paid quotes cannot be forced into the free checkout path.",
-          },
-        };
-      }
+      if (requestedProvider === "free") return { httpStatus: 400, body: { ok: false, error: "Paid quotes cannot be forced into the free checkout path." } };
       provider = requestedProvider || "";
     }
-
-    if (!provider) {
-      return {
-        httpStatus: 400,
-        body: {
-          ok: false,
-          error: "A payment provider is required to start checkout.",
-        },
-      };
-    }
+    if (!provider) return { httpStatus: 400, body: { ok: false, error: "A payment provider is required to start checkout." } };
 
     if (provider !== "free" && provider !== "paypal" && provider !== "razorpay" && provider !== "dodo") {
       return {
@@ -3361,6 +3330,7 @@ export const startPaymentSession = async ({
     if (provider === "dodo" && !providers?.dodo?.enabled) {
       return { httpStatus: 400, body: { ok: false, error: "Dodo Payments is not available in this environment." } };
     }
+    if (provider === "razorpay" && quoteProvider !== "free") assertRazorpayAmountIncrement(pricedQuote.effectiveNetAmount, quoteCurrency);
 
     const { holdDoc } = await assertStartableHold({ client, bookingPayload });
     const validatedAttribution = await refAttr.resolveValidatedServerSalesAttribution({
@@ -3374,7 +3344,7 @@ export const startPaymentSession = async ({
       bookingPayload,
       rawBookingPayload,
       holdDoc,
-      quote,
+      quote: pricedQuote,
       quoteFingerprint: currentQuoteFingerprint,
       upgradeIntentSnapshot,
       prepareCouponReservation,
@@ -3402,7 +3372,8 @@ export const startPaymentSession = async ({
         body: {
           ...await buildBrowserCompletionBody({ client, record: refreshed, body: buildPublicStatusBody(refreshed) }),
           provider,
-          quote: retryFlow.buildQuotePayload(quote),
+          currency: quoteCurrency,
+          quote: buildQuotePayload(pricedQuote),
           quoteFingerprint: currentQuoteFingerprint,
           providerPayload: {},
           paymentAccessToken,
@@ -3429,7 +3400,8 @@ export const startPaymentSession = async ({
         body: {
           ...await buildBrowserCompletionBody({ client, record: refreshed, body: finalized.response }),
           provider,
-          quote: retryFlow.buildQuotePayload(quote),
+          currency: quoteCurrency,
+          quote: buildQuotePayload(pricedQuote),
           quoteFingerprint: currentQuoteFingerprint,
           sessionExpiresAt: String(refreshed.sessionExpiresAt || "").trim(),
           refreshedHold: buildRefreshedHoldBody(refreshed),
@@ -3442,12 +3414,14 @@ export const startPaymentSession = async ({
       httpStatus: 200,
       body: {
         ok: true,
-        status: PAYMENT_STATUS_STARTED,
+        status: refreshed.status || PAYMENT_STATUS_STARTED,
         checkoutCreated,
         bookingSummary: null,
         provider,
-        quote: retryFlow.buildQuotePayload(quote),
+        currency: quoteCurrency,
+        quote: buildQuotePayload(pricedQuote),
         quoteFingerprint: currentQuoteFingerprint,
+        providerOrderReady: Boolean(String(refreshed.providerOrderId || "").trim()),
         providerPayload: buildProviderPayloadFromRecord(refreshed),
         paymentAccessToken,
         sessionExpiresAt: String(refreshed.sessionExpiresAt || "").trim(),
@@ -3613,6 +3587,7 @@ export const cancelPaymentSession = async ({
     };
   }
 
+  const inspectedRev = record._rev;
   const inspection = await inspectProviderOrderForRecovery(record);
   if (inspection.state === "captured") {
     const finalized = await finalizePaymentRecordInternal({
@@ -3646,6 +3621,15 @@ export const cancelPaymentSession = async ({
             : "Payment approval is already in progress. Close the provider checkout before changing methods.",
       },
     };
+  }
+
+  if (record.provider === "dodo" && String(inspection.payment?.status || "").trim().toLowerCase() === "requires_payment_method") {
+    return commitAtomicDodoRequiresPaymentMethodCancel({
+      client, record, inspectedRev, inspection, getHoldById, getPaymentRecordById, getDocumentById,
+      loadCouponReservationHandlers, prepareCouponRelease, appendCouponRelease, isFutureIso,
+      lateCaptureWatchUntil: getFutureIso(LATE_CAPTURE_WATCH_HOURS * 60 * 60),
+      nextRecoveryAt: getFutureIso(60 * 60), now: nowIso(), hasKnownCapture, isConflictError, buildPublicStatusBody,
+    });
   }
 
   const holdId = String(record?.bookingPayload?.slotHoldId || "").trim();
@@ -3842,6 +3826,7 @@ export const cancelPaymentSession = async ({
       return {
         httpStatus: 200,
         body: {
+          ...buildPublicStatusBody({ ...record, status: PAYMENT_STATUS_ABANDONED, resourceReleasePending: false }),
           ok: true,
           status: PAYMENT_STATUS_ABANDONED,
           cancelled: true,
@@ -4402,9 +4387,18 @@ export const getPaymentStatus = async ({
       fallbackMessage: "Payment status is temporarily unavailable.",
     });
   }
+  const startClaimId = String(resolved.record.startClaimId || "").trim();
+  const claim = startClaimId ? await getDocumentById({ client, id: startClaimId, type: startClaimId.startsWith("paymentUpgradeLock.") ? PAYMENT_UPGRADE_LOCK_TYPE : PAYMENT_START_CLAIM_TYPE }) : null;
+  const compat = resolveCompatibleQuoteFingerprint({ record: resolved.record, claim });
   return retryFlow.buildPaymentStatusResponse({
     client, record: resolved.record, buildPublicStatusBody,
     buildProviderPayloadFromRecord, buildBrowserCompletionBody,
+    statusExtra: {
+      ...buildStatusLockExtension(resolved.record),
+      quote: buildQuotePayloadFromSnapshot(resolved.record),
+      quoteFingerprint: compat.quoteFingerprint,
+      quoteFingerprintValid: compat.quoteFingerprintValid,
+    },
   });
 };
 

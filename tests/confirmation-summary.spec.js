@@ -209,14 +209,14 @@ for (const kind of ["paid", "free", "status recovery", "session replay", "captur
         await page.route("**/api/payment/start", route => route.fulfill({ json: { ...body, provider: "free" } }));
         await page.getByRole("button", { name: "Confirm Free Booking", exact: true }).click();
       } else {
-        await page.route("**/api/payment/start", route => route.fulfill({ json: kind === "session replay" ? { ...body, provider: "dodo" } : { ok: true, status: "started", paymentAccessToken: "fixture-payment", providerPayload: { checkoutUrl: `${new URL(page.url()).origin}/__test/checkout-handoff` } } }));
+        await page.route("**/api/payment/start", route => route.fulfill({ json: kind === "session replay" ? { ...body, provider: "dodo" } : { ok: true, status: "started", paymentAccessToken: "fixture-payment", providerPayload: { checkoutUrl: `${new URL(page.url()).origin}/__test/checkout-handoff`, dodoReturnTag: "fixture-dodo-tag" } } }));
         if (kind === "captured cancel") await page.route("**/api/payment/cancel", route => route.fulfill({ json: { ...body, captured: true, cancelled: false } }));
         if (kind === "status recovery") await page.route("**/api/payment/status", route => route.fulfill({ json: body }));
         await page.getByRole("button", { name: "Pay your way", exact: true }).click();
         if (kind !== "session replay") {
           await expect(page).toHaveURL(/checkout-handoff/);
           await page.route("**/api/payment/finalize", route => route.fulfill({ status: kind === "status recovery" ? 202 : 200, json: kind === "status recovery" ? { ok: true, status: "finalizing" } : body }));
-          await page.goto(kind === "captured cancel" ? "/payment?dodo_cancel=1" : "/payment?dodo_return=1");
+          await page.goto(kind === "captured cancel" ? "/payment?dodo_cancel=1&dodo_session=fixture-dodo-tag" : "/payment?dodo_return=1&dodo_session=fixture-dodo-tag");
 
         }
       }

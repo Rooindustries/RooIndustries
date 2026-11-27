@@ -1,6 +1,6 @@
 import { normalizeLinkReferral } from "./refShape.js";
 import packagePricing from "./packagePricing";
-import { BOOKING_DRAFT_STORAGE_KEY, readLinkReferralFromSession, readStoredCheckoutBooking, stripReservedCode } from "./checkoutStorage";
+import { BOOKING_DRAFT_STORAGE_KEY, extractTokenNonce, readLinkReferralFromSession, readSessionJson, readStoredCheckoutBooking, stripReservedCode } from "./checkoutStorage";
 import { salesPath } from "./salesPaths";
 const { getPackageSlug, resolveKnownPackageTitle } = packagePricing;
 const isObj = (v) => Boolean(v) && typeof v === "object" && !Array.isArray(v);
@@ -15,15 +15,28 @@ export const stripRefFromSearch = (search = "") => {
   params.delete("ref");
   return params.toString() ? `?${params}` : "";
 };
-const readDraftObj = () => { try { return JSON.parse(sessionStorage.getItem(BOOKING_DRAFT_STORAGE_KEY) || "null"); } catch { return null; } };
+const isTerminalPay = (b) => {
+  const term = readSessionJson("roo_terminal_reservations");
+  if (!term) return false;
+  const o = trim(b.originalOrderId), p = trim(b.packageTitle), e = trim(b.email).toLowerCase(), h = trim(b.slotHoldId || b.holdId), t = trim(b.startTimeUTC);
+  const d = o ? { k: "u", o, i: extractTokenNonce(b.upgradeIntentToken || b.upgradeIntentId), p, e }
+    : h || t ? { k: "b", h, n: extractTokenNonce(b.slotHoldToken || b.holdToken), p, t, e } : 0;
+  if (!d) return false;
+  if (o) return Boolean(term[JSON.stringify(d)]);
+  const rot = (h && readSessionJson("roo_hold_rotations")) || {};
+  for (let c = d.n, seen = {}; ; seen[c] = 1, c = rot[`${h}:${c}`]) {
+    if (term[JSON.stringify({ ...d, n: c })]) return true;
+    if (!c || seen[c] || !rot[`${h}:${c}`]) return false;
+  }
+};
 const draftRef = (d) =>
   d?.checkoutCodes?.referral === null ? "" : stripReservedCode(d?.checkoutCodes?.referral?.code) || stripReservedCode(d?.appliedReferral?.code) || stripReservedCode(d?.referralCode);
 export const readExistingCheckoutReferral = (pkg = "", { pathname = "", search = "" } = {}) => {
   if (typeof window === "undefined") return "";
   const loc = window.location, sessionRef = readLinkReferralFromSession(), usr = window.history?.state?.usr;
-  const pay = isObj(usr?.bookingData) ? usr.bookingData : readStoredCheckoutBooking();
+  const pay = [usr?.bookingData, readStoredCheckoutBooking()].find((b) => isObj(b) && !isTerminalPay(b)) || null;
   if ((pathname || loc.pathname) === "/payment") return stripReservedCode(pay?.referralCode) || sessionRef;
-  const draft = readDraftObj(), pkgs = isObj(draft?.packages) ? draft.packages : {};
+  const draft = readSessionJson(BOOKING_DRAFT_STORAGE_KEY), pkgs = isObj(draft?.packages) ? draft.packages : {};
   const knownTitle = resolveKnownPackageTitle(new URLSearchParams(search || loc.search).get("package") || ""), slug = knownTitle ? getPackageSlug(knownTitle) : "";
   const title = trim(pkg) || trim(usr?.bookingPackage?.title || usr?.bookingData?.packageTitle) || (slug ? Object.keys(pkgs).find((k) => getPackageSlug(k) === slug) || knownTitle : trim(draft?.lastTitle));
   const payMatch = title && pay && trim(pay.packageTitle) === title, payR = payMatch ? stripReservedCode(pay.referralCode) : "";

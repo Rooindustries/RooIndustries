@@ -968,8 +968,9 @@ export async function registerAttributionScenarios(ctx) {
         globalThis.fetch = (input, init = {}) => {
           const url = new URL(typeof input === "string" || input instanceof URL ? String(input) : input.url);
           if (url.pathname === "/v2/checkout/orders" && init.method === "POST") {
-            created.push(JSON.parse(init.body));
-            return Promise.resolve(Response.json({ id: orderId, status: "CREATED" }, { status: 201 }));
+            const payload = JSON.parse(init.body);
+            created.push(payload);
+            return Promise.resolve(Response.json({ id: orderId, status: "CREATED", purchase_units: payload.purchase_units }, { status: 201 }));
           }
           if (url.pathname === `/v2/checkout/orders/${orderId}` && (!init.method || init.method === "GET")) {
             return Promise.resolve(Response.json({ id: orderId, status: "CREATED", purchase_units: [{ amount: { currency_code: "USD", value: "9.99" } }] }, { status: 200 }));

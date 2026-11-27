@@ -3,6 +3,7 @@ import useUpgradeEligibility, { fetchUpgradeInfo } from "../lib/useUpgradeEligib
 import { useNavigate, useParams } from "react-router-dom";
 import { CLIENT_REQUEST_TIMEOUT_MS, reportRequestError, requestTimeoutError } from "../lib/clientRequest";
 import { getPublicContent } from "../lib/publicContentClient";
+import { formatCheckoutAmount, normalizeCurrencyCode } from "../lib/checkoutMoney";
 import packageContent from "../lib/packageContent";
 import packagePricing from "../lib/packagePricing";
 
@@ -210,6 +211,7 @@ export default function UpgradeLink() {
       booking.displayTime ||
       (utcStart ? formatLocalTime(utcStart, clientTimeZone) : "");
 
+    const upgradeCurrency = normalizeCurrencyCode(upgradeInfo.currency || "USD");
     const bookingData = {
       discord: booking.discord || "",
       email: upgradeInfo.requestInput.email,
@@ -218,7 +220,7 @@ export default function UpgradeLink() {
       message: booking.message || "",
 
       packageTitle: `${targetPackage.title} (Upgrade)`,
-      packagePrice: `$${upgradePrice.toFixed(2)}`,
+      packagePrice: formatCheckoutAmount(upgradePrice, upgradeCurrency, { includeCurrency: upgradeCurrency !== "USD" }),
       status: "pending",
 
       displayDate,
@@ -228,6 +230,7 @@ export default function UpgradeLink() {
 
       originalOrderId: booking._id,
       upgradeIntentToken: String(upgradeInfo.upgradeIntentToken || "").trim(),
+      acceptedQuoteCurrency: upgradeCurrency,
     };
 
     try {
@@ -240,6 +243,7 @@ export default function UpgradeLink() {
   }
 
   const targetPackage = upgradeInfo?.targetPackage;
+  const upgradeCurrency = normalizeCurrencyCode(upgradeInfo?.currency || "USD");
   const upgradePrice =
     upgradeInfo && typeof upgradeInfo.upgradePrice === "number"
       ? upgradeInfo.upgradePrice
@@ -361,7 +365,7 @@ export default function UpgradeLink() {
             <div className="flex justify-between gap-4">
               <span className="text-ink-secondary">You already paid</span>
               <span className="font-semibold text-success-text text-right">
-                ${upgradeInfo.originalPaid.toFixed(2)}
+                {formatCheckoutAmount(upgradeInfo.originalPaid, upgradeCurrency, { includeCurrency: upgradeCurrency !== "USD" })}
               </span>
             </div>
             <div className="flex justify-between gap-4">
@@ -369,8 +373,9 @@ export default function UpgradeLink() {
                 Full {targetPackage?.title || "package"} price
               </span>
               <span className="font-semibold text-accent text-right">
-                {targetPackage?.priceString ||
-                  `$${targetPackage?.price?.toFixed(2) || "0.00"}`}
+                {upgradeCurrency === "USD" && targetPackage?.priceString
+                  ? targetPackage.priceString
+                  : formatCheckoutAmount(targetPackage?.price || 0, upgradeCurrency, { includeCurrency: upgradeCurrency !== "USD" })}
               </span>
             </div>
             <div className="h-px w-full bg-line-soft my-3" />
@@ -379,7 +384,7 @@ export default function UpgradeLink() {
                 Upgrade price
               </span>
               <span className="text-2xl font-extrabold text-success-text">
-                ${upgradePrice?.toFixed(2)}
+                {upgradePrice !== null ? formatCheckoutAmount(upgradePrice, upgradeCurrency, { includeCurrency: upgradeCurrency !== "USD" }) : ""}
               </span>
             </div>
           </div>

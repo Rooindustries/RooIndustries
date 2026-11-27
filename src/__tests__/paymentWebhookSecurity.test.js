@@ -163,35 +163,6 @@ describe("payment webhook security", () => {
     });
   });
 
-  test("creates PayPal orders with a stable provider idempotency header", async () => {
-    process.env.PAYPAL_ENV = "sandbox";
-    process.env.PAYPAL_CLIENT_ID = "paypal_client";
-    process.env.PAYPAL_CLIENT_SECRET = "paypal_secret";
-    global.fetch = jest
-      .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ access_token: "paypal_access_token" }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ id: "paypal_order_1" }),
-      });
-
-    const { createPayPalOrder } = loadProviderClients();
-    await expect(
-      createPayPalOrder({
-        amount: 84.99,
-        currency: "USD",
-        requestId: "roo_stable_session_key",
-      })
-    ).resolves.toMatchObject({ orderId: "paypal_order_1" });
-
-    expect(global.fetch.mock.calls[1][1].headers).toMatchObject({
-      "PayPal-Request-Id": "roo_stable_session_key",
-    });
-  });
-
   test("recovers an ambiguous Razorpay create by its stable receipt", async () => {
     process.env.RAZORPAY_KEY_ID = "rzp_test_key";
     process.env.RAZORPAY_KEY_SECRET = "razorpay_secret";

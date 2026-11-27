@@ -97,7 +97,7 @@ const startCheckout = async (page, flow) => {
 const payAndReturn = async (page, flow) => {
   await startCheckout(page, flow);
   await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
-  await page.goto("/payment?dodo_return=1");
+  await page.goto("/payment?dodo_return=1&dodo_session=fixture-dodo-tag");
   await expect(page).toHaveURL(/\/payment-success$/);
   await expect(page.getByRole("heading", { name: "Payment Successful", exact: true })).toBeVisible();
 };

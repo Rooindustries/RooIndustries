@@ -155,7 +155,7 @@ async function returnFromPaymentOver(page, flow, background, search = "") {
   await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
   await page.evaluate(([pathname, search]) => sessionStorage.setItem("flow_background_location",
     JSON.stringify({ pathname, search, hash: "" })), [background, search]);
-  await page.goto("/payment?dodo_return=1", { waitUntil: "domcontentloaded" });
+  await page.goto("/payment?dodo_return=1&dodo_session=fixture-dodo-tag", { waitUntil: "domcontentloaded" });
   await expect.poll(() => Boolean(finalizeRoute)).toBe(true);
   await expect(page.getByRole("heading", { level: 2, name: "Complete Payment", exact: true })).toBeVisible();
 }
@@ -285,7 +285,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
           await new Promise(resolve => setTimeout(resolve, delay));
           await route.fallback();
         });
-        await page.goto("/payment?dodo_return=1", { waitUntil: "domcontentloaded" });
+        await page.goto("/payment?dodo_return=1&dodo_session=fixture-dodo-tag", { waitUntil: "domcontentloaded" });
         await expect.poll(() => Boolean(finalizeRoute)).toBe(true);
         await expect(page.getByRole("heading", { level: 2, name: "Complete Payment", exact: true })).toBeVisible();
         await expect(page.getByText("Price confirmed for this session.", { exact: true })).toBeVisible();

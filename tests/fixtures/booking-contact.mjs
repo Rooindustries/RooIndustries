@@ -160,6 +160,7 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
       '/api/holdSlot': '../../src/server/booking/holdSlot.js',
       '/api/releaseHold': '../../src/server/booking/releaseHold.js',
       '/api/bookingAvailability': '../../src/server/booking/availability.js',
+      '/api/payment/providers': '../../src/server/api/payment/providers.js',
       '/api/payment/start': '../../src/server/api/payment/start.js',
       '/api/payment/quote': '../../src/server/api/payment/quote.js',
       '/api/payment/finalize': '../../src/server/api/payment/finalize.js',
@@ -207,6 +208,10 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
         discountType: 'percent', discountPercent, canCombineWithReferral: true,
         timesUsed: 0, activeReservations: 0, maxUses: 0, backendOwner: 'supabase', cutoverGeneration: 0 });
     }
+    const get = async (route, headers = {}) => {
+      const response = await fetch(`${base}${route}`, { method: 'GET', headers: { origin: base, ...headers } });
+      return { status: response.status, body: await response.json() };
+    };
     const post = async (route, body, token = '', headers = {}) => {
       globalThis.__rooRateLimitBuckets?.clear();
       const response = await fetch(`${base}${route}`, { method: 'POST', headers: {
@@ -300,7 +305,7 @@ export async function createBookingContactFixture({ artifactName = 'booking-cont
       paymentRefunds.set(paymentId, refunds);
       return dodoWebhook(paymentId, 'refund.succeeded', eventId);
     };
-    return { post, start, hold, snapshot, recordFor, seedUpgrade, commerce, content, database, dateSlots, details, evidence, save, stop,
+    return { get, post, start, hold, snapshot, recordFor, seedUpgrade, commerce, content, database, dateSlots, details, evidence, save, stop,
       setPaymentTax, setPaymentTaxInclusive, setPaymentAmountOverrides, refundPayment, dodoWebhook,
       setEmailFailure(value) { emailFailure = value; },
       setCheckoutPaymentStarted(value) { checkoutPaymentStarted = value; },

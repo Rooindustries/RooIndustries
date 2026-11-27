@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { formatCheckoutAmount, normalizeCurrencyCode } from "../lib/checkoutMoney";
 import { reportRequestError } from "../lib/clientRequest";
 import useUpgradeEligibility, { fetchUpgradeInfo } from "../lib/useUpgradeEligibility";
 import { useNavigate } from "react-router-dom";
@@ -115,7 +116,8 @@ export default function UpgradeXoc() {
       booking.displayTime ||
       (utcStart ? formatLocalTime(utcStart, clientTimeZone) : "");
 
-      const bookingData = {
+    const upgradeCurrency = normalizeCurrencyCode(upgradeInfo.currency || "USD");
+    const bookingData = {
         discord: booking.discord || "",
         email: upgradeInfo.requestInput.email,
         specs: booking.specs || "",
@@ -123,7 +125,7 @@ export default function UpgradeXoc() {
         message: booking.message || "",
 
       packageTitle: `${xoc.title} (Upgrade)`,
-      packagePrice: `$${upgradePrice.toFixed(2)}`,
+      packagePrice: formatCheckoutAmount(upgradePrice, upgradeCurrency, { includeCurrency: upgradeCurrency !== "USD" }),
       status: "pending",
 
       displayDate,
@@ -133,6 +135,7 @@ export default function UpgradeXoc() {
 
       originalOrderId: booking._id,
       upgradeIntentToken: String(upgradeInfo.upgradeIntentToken || "").trim(),
+      acceptedQuoteCurrency: upgradeCurrency,
     };
 
     try {
@@ -144,6 +147,7 @@ export default function UpgradeXoc() {
     navigate("/payment", { state: { bookingData } });
   }
 
+  const upgradeCurrency = normalizeCurrencyCode(upgradeInfo?.currency || "USD");
   const upgradePrice =
     upgradeInfo && typeof upgradeInfo.upgradePrice === "number"
       ? upgradeInfo.upgradePrice
@@ -256,7 +260,7 @@ export default function UpgradeXoc() {
             <div className="flex justify-between gap-4">
               <span className="text-ink-secondary">You already paid</span>
               <span className="font-semibold text-success-text text-right">
-                ${upgradeInfo.originalPaid.toFixed(2)}
+                {formatCheckoutAmount(upgradeInfo.originalPaid, upgradeCurrency, { includeCurrency: upgradeCurrency !== "USD" })}
               </span>
             </div>
             <div className="flex justify-between gap-4">
@@ -264,8 +268,9 @@ export default function UpgradeXoc() {
                 Full Performance Vertex Max price
               </span>
               <span className="font-semibold text-accent text-right">
-                {upgradeInfo.xoc.priceString ||
-                  `$${upgradeInfo.xoc.price.toFixed(2)}`}
+                {upgradeCurrency === "USD" && upgradeInfo.xoc.priceString
+                  ? upgradeInfo.xoc.priceString
+                  : formatCheckoutAmount(upgradeInfo.xoc.price, upgradeCurrency, { includeCurrency: upgradeCurrency !== "USD" })}
               </span>
             </div>
             <div className="h-px w-full bg-line-soft my-3" />
@@ -274,7 +279,7 @@ export default function UpgradeXoc() {
                 Upgrade price
               </span>
               <span className="text-2xl font-extrabold text-success-text">
-                ${upgradePrice?.toFixed(2)}
+                {upgradePrice !== null ? formatCheckoutAmount(upgradePrice, upgradeCurrency, { includeCurrency: upgradeCurrency !== "USD" }) : ""}
               </span>
             </div>
           </div>

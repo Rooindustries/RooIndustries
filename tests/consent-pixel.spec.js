@@ -179,7 +179,7 @@ const payAndReturn = async (page, flow) => {
   await flow.payment();
   await page.getByRole("button", { name: "Pay your way", exact: true }).click();
   await expect(page).toHaveURL(/\/__test\/checkout-handoff$/);
-  await page.goto("/payment?dodo_return=1", { waitUntil: "domcontentloaded" });
+  await page.goto("/payment?dodo_return=1&dodo_session=fixture-dodo-tag", { waitUntil: "domcontentloaded" });
 };
 
 const restingY = (page) => page.evaluate(() => new Promise((resolve) => {

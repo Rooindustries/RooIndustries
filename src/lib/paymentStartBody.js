@@ -4,7 +4,7 @@ import { chooseFirstTouchRef } from "./refEntry.js";
 import { getCurrentArrivalSnapshot, snapRawAttr } from "./loadPostHog";
 import { mergeJourneyMonotonic, resolveFrozenJourney } from "./campaignSanitizer";
 
-const checkoutStartCount = lazyModule(() => import("./checkoutStartCount"));
+const checkoutStartCount = lazyModule(() => import("./bookingAnalytics"));
 export const snapPaymentStart = () => {
   const raw = snapRawAttr();
   try { raw.r = window.__rooReadRef?.() ?? null; } catch { raw.r = null; }

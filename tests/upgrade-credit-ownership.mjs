@@ -124,16 +124,56 @@ test('upgrade credit stays verified and belongs to one checkout', { timeout: 900
       result.records = await startsFor(scenario);
       assert.equal(result.records.length, 1, 'Concurrent requests spent the original credit twice');
       assert.equal(evidence.providerRequests.filter(request => request.path === '/checkouts').length - before, 1);
-      const retried = await fixture.start(await freshIntent(scenario));
+      const winnerPayload = result.starts[0].status === 200 ? scenario.payload : secondPayload;
+      const retriedSame = await fixture.start(winnerPayload);
+      assert.equal(retriedSame.status, 200, JSON.stringify(retriedSame));
+      assert.equal(retriedSame.body.status, 'started');
+      assert.equal(retriedSame.body.providerPayload.orderId, successful[0].body.providerPayload.orderId);
+      const record = await paymentFor(retriedSame);
+      assert.equal(typeof record.providerPublicData?.dodoReturnTag, 'string');
+      assert.equal(record.providerPublicData.dodoReturnTag.length, 24);
+      assert.equal(retriedSame.body.providerPayload.dodoReturnTag, record.providerPublicData.dodoReturnTag);
+      const thirdPayload = await freshIntent(scenario);
+      const blockedSecond = await fixture.start(thirdPayload);
+      assert.equal(blockedSecond.status, 409, JSON.stringify(blockedSecond));
+      assert.equal(blockedSecond.body.code, 'upgrade_already_in_progress');
+      assert.equal(blockedSecond.body.quote, undefined);
+      assert.equal(blockedSecond.body.lockedSession.upgradeIntentId, record.upgradeIntentSnapshot.intentId);
+      assert.equal(blockedSecond.body.lockedSession.providerOrderReady, true);
+      const statusBefore = await post('/api/payment/status', {}, retriedSame.body.paymentAccessToken);
+      assert.equal(statusBefore.status, 200);
+      assert.equal(statusBefore.body.providerOrderReady, true);
+      assert.equal(statusBefore.body.providerPayload.dodoReturnTag, record.providerPublicData.dodoReturnTag);
+      assert.ok(statusBefore.body.providerPayload.checkoutUrl);
+      await commerce.patch(record._id).set({ dodoAttemptObserved: true }).commit();
+      const statusObserved = await post('/api/payment/status', {}, retriedSame.body.paymentAccessToken);
+      assert.equal(statusObserved.status, 200);
+      assert.equal(statusObserved.body.providerPayload.checkoutUrl, undefined);
+      await commerce.patch(record._id).unset(['dodoAttemptObserved', 'providerPublicData.dodoReturnTag']).commit();
+      const statusLegacy = await post('/api/payment/status', {}, retriedSame.body.paymentAccessToken);
+      assert.equal(statusLegacy.status, 200);
+      assert.equal(statusLegacy.body.providerPayload.dodoReturnTag, undefined);
+      fixture.setCheckoutPaymentStarted(false);
+      let cancelled;
+      try {
+        cancelled = await post('/api/payment/cancel', {}, blockedSecond.body.lockedSession.paymentAccessToken);
+      } finally {
+        fixture.setCheckoutPaymentStarted(true);
+      }
+      assert.equal(cancelled.status, 200, JSON.stringify(cancelled));
+      const retried = await fixture.start(thirdPayload);
       assert.equal(retried.status, 200, JSON.stringify(retried));
-      assert.equal(retried.body.providerPayload.orderId, successful[0].body.providerPayload.orderId);
       result.retried = retried;
-      const record = await paymentFor(retried);
+      const secondRecord = await paymentFor(retried);
       result.finalize = await post('/api/payment/finalize', {}, retried.body.paymentAccessToken);
       assert.equal(result.finalize.status, 200, JSON.stringify(result.finalize));
-      result.replay = await fixture.dodoWebhook(`payment_${record.providerOrderId}`, 'payment.succeeded', 'ownership_replay');
+      const alreadyTargetRes = await post('/api/payment/quote', { bookingPayload: secondPayload });
+      assert.equal(alreadyTargetRes.status, 409, JSON.stringify(alreadyTargetRes));
+      assert.equal(alreadyTargetRes.body.code, 'already_target');
+      assert.equal(alreadyTargetRes.body.completedUpgrade.bookingId, result.finalize.body.bookingId);
+      result.replay = await fixture.dodoWebhook(`payment_${secondRecord.providerOrderId}`, 'payment.succeeded', 'ownership_replay');
       assert.equal(result.replay.status, 200);
-      result.bookings = await commerce.fetch('*[_type == "booking" && paymentRecordId == $id]', { id: record._id });
+      result.bookings = await commerce.fetch('*[_type == "booking" && paymentRecordId == $id]', { id: secondRecord._id });
       assert.equal(result.bookings.length, 1);
     });
     await check('different target packages cannot open parallel credit checkouts', async result => {
@@ -468,9 +508,17 @@ test('upgrade credit stays verified and belongs to one checkout', { timeout: 900
         const providerStarts = evidence.providerRequests.filter(request => request.path === '/checkouts').length;
         result.replay = await fixture.start(scenario.payload);
         result.fresh = await fixture.start(nextPayload);
+        const expectActiveLock = status !== 'unexpected';
         for (const response of [result.replay, result.fresh]) {
           assert.equal(response.status, 409, JSON.stringify(response));
-          assert.equal(response.body.code, 'upgrade_checkout_closed');
+          assert.equal(response.body.code, expectActiveLock ? 'upgrade_already_in_progress' : 'upgrade_checkout_closed');
+          assert.equal(response.body.quote, undefined);
+          if (expectActiveLock) {
+            assert.equal(response.body.lockedSession.upgradeIntentId, record.upgradeIntentSnapshot.intentId);
+            assert.equal(response.body.lockedSession.providerOrderReady, true);
+          } else {
+            assert.equal(response.body.lockedSession, undefined);
+          }
         }
         assert.equal(isDeepStrictEqual(before, await fixture.snapshot()), true);
         assert.equal(evidence.providerRequests.filter(request => request.path === '/checkouts').length, providerStarts);
@@ -515,6 +563,52 @@ test('upgrade credit stays verified and belongs to one checkout', { timeout: 900
       result.bookings = await commerce.fetch('*[_type == "booking" && paymentRecordId == $id]', { id: record._id });
       assert.equal(result.bookings.length, 1);
       assert.equal(result.bookings[0].originalOrderId, scenario.booking._id);
+    });
+    await check('providers endpoint exposes configured currencies and runtime policy', async result => {
+      const saved = {
+        VERCEL_ENV: process.env.VERCEL_ENV,
+        ENABLE_PREVIEW_PAYMENTS: process.env.ENABLE_PREVIEW_PAYMENTS,
+        ALLOW_LIVE_PAYMENTS_IN_PREVIEW: process.env.ALLOW_LIVE_PAYMENTS_IN_PREVIEW,
+        ALLOW_LIVE_PAYMENTS_IN_DEVELOPMENT: process.env.ALLOW_LIVE_PAYMENTS_IN_DEVELOPMENT,
+        RAZORPAY_KEY_ID: process.env.RAZORPAY_KEY_ID,
+        RAZORPAY_KEY_SECRET: process.env.RAZORPAY_KEY_SECRET,
+        PAYPAL_CLIENT_ID: process.env.PAYPAL_CLIENT_ID,
+        PAYPAL_CLIENT_SECRET: process.env.PAYPAL_CLIENT_SECRET,
+        PAYPAL_ENV: process.env.PAYPAL_ENV,
+        DISABLE_RAZORPAY_CHECKOUT: process.env.DISABLE_RAZORPAY_CHECKOUT,
+      };
+      try {
+        process.env.VERCEL_ENV = 'production';
+        process.env.RAZORPAY_KEY_ID = 'rzp_live_fixture';
+        process.env.RAZORPAY_KEY_SECRET = 'rzp_secret_fixture';
+        process.env.PAYPAL_ENV = 'live';
+        process.env.PAYPAL_CLIENT_ID = 'pp_live_client';
+        process.env.PAYPAL_CLIENT_SECRET = 'pp_live_secret';
+        process.env.DISABLE_RAZORPAY_CHECKOUT = '1';
+        const prod = await fixture.get('/api/payment/providers');
+        assert.equal(prod.status, 200);
+        assert.equal(prod.body.providers.dodo.currency, 'USD');
+        assert.equal(prod.body.providers.paypal.enabled, true);
+        assert.equal(prod.body.providers.paypal.currency, 'USD');
+        assert.equal(prod.body.providers.razorpay.enabled, false);
+        assert.equal(prod.body.providers.razorpay.disabledReason, 'merchant_profile_update');
+        assert.equal(prod.body.providers.razorpay.currency, 'USD');
+        process.env.VERCEL_ENV = 'preview';
+        delete process.env.ENABLE_PREVIEW_PAYMENTS;
+        delete process.env.ALLOW_LIVE_PAYMENTS_IN_PREVIEW;
+        delete process.env.DISABLE_RAZORPAY_CHECKOUT;
+        const prev = await fixture.get('/api/payment/providers');
+        assert.equal(prev.status, 200);
+        assert.equal(prev.body.providers.razorpay.enabled, false);
+        assert.equal(prev.body.providers.paypal.enabled, false);
+        result.prod = prod.body.providers;
+        result.prev = prev.body.providers;
+      } finally {
+        for (const [k, v] of Object.entries(saved)) {
+          if (v === undefined) delete process.env[k];
+          else process.env[k] = v;
+        }
+      }
     });
     await check('all requests stayed in local fixtures', async () => assert.deepEqual(evidence.blocked, []));
   } finally {

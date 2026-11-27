@@ -112,14 +112,14 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await flow.payment();
       await page.getByRole("button", { name: "Pay your way", exact: true }).click();
       await expect(page.getByRole("heading", { name: "Fixture provider checkout", exact: true })).toBeVisible();
-      const { orderId } = answered("/api/payment/start").at(-1).body.providerPayload;
+      const { orderId, dodoReturnTag } = answered("/api/payment/start").at(-1).body.providerPayload;
       const confirmations = [];
       await context.route(/\/api\/payment\/finalize(?:\?|$)/, async route => {
         const both = await Promise.all([forward(route.request()), native.paymentSucceeded(orderId, "race")]);
         confirmations.push(...both);
         return fulfillJson(route, both[0]);
       });
-      await page.goto("/payment?dodo_return=1");
+      await page.goto(`/payment?dodo_return=1&dodo_session=${encodeURIComponent(dodoReturnTag)}`);
       await expect(page.getByRole("heading", { level: 1, name: "Payment Successful", exact: true })).toBeVisible();
       const bookings = await native.bookingsAt(slot.startTimeUTC);
       expect(bookings).toHaveLength(1);

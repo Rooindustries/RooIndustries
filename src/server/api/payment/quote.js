@@ -3,6 +3,8 @@ const {
   resolvePaymentQuote,
 } = require("../ref/pricing.js");
 const { resolvePaymentProviders } = require("./providerConfig.js");
+const { resolveQuoteRequestCurrency, validateUpgradeQuoteProvider } = require("./quoteCompatibility.js");
+const { assertRazorpayAmountIncrement } = require("./providerClients.js");
 const { buildQuoteFingerprint } = require("./paymentRecord.js");
 const { verifyUpgradeIntentToken } = require("../ref/upgradeIntentToken.js");
 const {
@@ -94,25 +96,41 @@ module.exports = async function handler(req, res) {
       });
     }
 
+    const providers = resolvePaymentProviders();
+    const requestedProvider = String(requestBody.provider || bookingPayload.paymentProvider || "").trim().toLowerCase();
+    const reqCur = resolveQuoteRequestCurrency({ providers, requestedProvider, originalOrderId, requireEnabled: true });
+    if (reqCur.error) return res.status(reqCur.error.status).json({ ok: false, code: reqCur.error.code, error: reqCur.error.error });
+
     const resolvedQuote = await resolvePaymentQuote({
       packageTitle,
       originalOrderId,
       referralId,
       referralCode: safeReferralCode,
       couponCode,
+      currency: reqCur.currency,
       pricingInputs: combined.pricingInputs,
     });
-    const providers = resolvePaymentProviders();
     const isFree = resolvedQuote.paymentProvider === "free";
+    const quoteCurrency = originalOrderId
+      ? String(resolvedQuote.currency || "USD").trim().toUpperCase() || "USD"
+      : String(resolvedQuote.currency || reqCur.currency || "USD").trim().toUpperCase() || "USD";
+    const upgradeErr = originalOrderId && !isFree
+      ? validateUpgradeQuoteProvider({ providers, requestedProvider, quoteCurrency, requireAnyEnabled: true }) : null;
+    if (upgradeErr) return res.status(upgradeErr.status).json({ ok: false, code: upgradeErr.code, error: upgradeErr.error });
+    if (requestedProvider === "razorpay" && !isFree) assertRazorpayAmountIncrement(resolvedQuote.effectiveNetAmount, quoteCurrency);
+
     const quoteFingerprint = buildQuoteFingerprint({
       bookingPayload,
-      quote: resolvedQuote,
+      quote: { ...resolvedQuote, currency: quoteCurrency },
+      currency: quoteCurrency,
     });
 
     return res.status(200).json({
       ok: true,
+      currency: quoteCurrency,
       quoteFingerprint,
       quote: {
+        currency: quoteCurrency,
         grossAmount: resolvedQuote.effectiveGrossAmount,
         discountAmount: resolvedQuote.effectiveDiscountAmount,
         discountPercent: resolvedQuote.effectiveDiscountPercent,
@@ -129,13 +147,16 @@ module.exports = async function handler(req, res) {
       },
       providers: isFree
         ? {
+            dodo: { enabled: false, mode: providers.dodo.mode, currency: providers.dodo.currency },
             razorpay: {
               enabled: false,
               mode: providers.razorpay.mode,
+              currency: providers.razorpay.currency,
             },
             paypal: {
               enabled: false,
               mode: providers.paypal.mode,
+              currency: providers.paypal.currency,
               clientId: "",
             },
           }
@@ -152,6 +173,9 @@ module.exports = async function handler(req, res) {
           : "Failed to quote payment.",
       ...(clientError && String(error?.code || "").trim()
         ? { code: error.code }
+        : {}),
+      ...(clientError && error?.completedUpgrade
+        ? { completedUpgrade: error.completedUpgrade }
         : {}),
     });
   }

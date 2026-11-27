@@ -1,5 +1,6 @@
 import { createDataClient as createClient } from "../../data/documentClient.js";
 import { resolveUpgradeContext } from "./pricing.js";
+import { toMoney } from "../payment/providerClients.js";
 import { getClientAddress, requireRateLimit } from "./rateLimit.js";
 import packageContent from "../../../lib/packageContent.js";
 import packagePricing from "../../../lib/packagePricing.js";
@@ -16,9 +17,6 @@ const {
 } = packagePricing;
 
 const client = createClient({}, { domain: "commerce" });
-
-const parseMoney = (value) =>
-  parseFloat(String(value || "").replace(/[^0-9.]/g, "")) || 0;
 
 const normalizeSlug = (value) => {
   if (!value) return "";
@@ -288,9 +286,10 @@ export default async function handler(req, res) {
       packageTitle: targetPackage.title,
       client,
     });
-    const targetPriceNum = parseMoney(upgradeContext.targetPackage.price);
+    const currency = upgradeContext.currency || "USD";
+    const targetPriceNum = toMoney(upgradeContext.targetPackage.price, currency);
     const originalPaid = upgradeContext.totalPaid;
-    const upgradePrice = Math.max(0, +upgradeContext.upgradePrice.toFixed(2));
+    const upgradePrice = Math.max(0, toMoney(upgradeContext.upgradePrice, currency));
 
     const packagePayload = {
       title: upgradeContext.targetPackage.title,
@@ -327,20 +326,24 @@ export default async function handler(req, res) {
         : null,
       targetPackage: packagePayload,
       xoc: packagePayload,
+      currency,
       originalPaid,
       upgradePrice,
       upgradeIntentToken,
     });
   } catch (err) {
     const status = Number(err?.status) || 500;
+    const clientError = status >= 400 && status < 500;
     const message =
-      status >= 400 && status < 500
+      clientError
         ? err?.message || "Unable to resolve upgrade pricing."
         : "Server error while computing upgrade price.";
     logSafeError("Upgrade lookup failed", err);
     return res.status(status).json({
       ok: false,
       error: message,
+      ...(clientError && err?.code ? { code: err.code } : {}),
+      ...(clientError && err?.completedUpgrade ? { completedUpgrade: err.completedUpgrade } : {}),
     });
   }
 }

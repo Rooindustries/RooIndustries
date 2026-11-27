@@ -1,7 +1,9 @@
 import { verifyHoldToken } from "../../booking/holdToken.js";
 import envValue from "../../supabase/envValue.cjs";
 import { logSafeWarn } from "../../safeErrorLog.js";
+import { resolvePaymentCurrency } from "../ref/bookingRefunds.js";
 import { getPaymentRecordById } from "./paymentRecord.js";
+import { resolveCompatibleQuoteFingerprint } from "./quoteCompatibility.js";
 const { resolveStoreBackend } = envValue;
 const num = (v) => Number(v || 0);
 const str = (v) => String(v || "").trim();
@@ -9,6 +11,7 @@ const lower = (v) => str(v).toLowerCase();
 export const buildQuotePayload = (q = {}) => {
   const isFree = lower(q.paymentProvider) === "free";
   return {
+    currency: q.currency === "" ? "" : str(q.currency || "USD").toUpperCase() || "USD",
     grossAmount: num(q.effectiveGrossAmount), discountAmount: num(q.effectiveDiscountAmount),
     discountPercent: num(q.effectiveDiscountPercent), netAmount: isFree ? 0 : num(q.effectiveNetAmount),
     isFree, referralDiscountPercent: num(q.referralDiscountPercent),
@@ -21,8 +24,10 @@ export const buildQuotePayload = (q = {}) => {
 export const buildQuotePayloadFromSnapshot = (record = {}) => {
   const s = record.pricingSnapshot && typeof record.pricingSnapshot === "object" ? record.pricingSnapshot : {};
   const isFree = lower(record.provider) === "free";
+  let currency = "";
+  try { currency = resolvePaymentCurrency(record, { fallback: "" }); } catch {}
   return buildQuotePayload({
-    ...s, effectiveGrossAmount: s.grossAmount, effectiveDiscountAmount: s.discountAmount,
+    ...s, currency, effectiveGrossAmount: s.grossAmount, effectiveDiscountAmount: s.discountAmount,
     effectiveDiscountPercent: s.discountPercent, effectiveNetAmount: isFree ? 0 : s.netAmount,
     paymentProvider: isFree ? "free" : "paid", effectiveCommissionPercent: s.commissionPercent,
   });
@@ -40,16 +45,18 @@ const buildClaimedSession = (c, rec) => {
   };
 };
 export const assertMatchingClaimedSession = (c) => {
-  const { record, provider, quoteFingerprint } = c;
+  const { record, provider, quoteFingerprint, recordCompat } = c;
+  const effectiveFp = recordCompat ? recordCompat.quoteFingerprint : record?.quoteFingerprint;
   const mismatch = lower(record?.provider) !== provider
     ? { code: "payment_provider_already_claimed", message: "This reservation already has a payment provider selected." }
-    : record?.quoteFingerprint && String(record.quoteFingerprint) !== String(quoteFingerprint)
+    : effectiveFp && String(effectiveFp) !== String(quoteFingerprint)
       ? { code: "payment_quote_already_claimed", message: "This reservation is already bound to a different quote." }
       : null;
   if (!mismatch) return;
   const error = Object.assign(new Error(mismatch.message), { status: 409, code: mismatch.code });
   const claimed = buildClaimedSession(c, record);
   if (claimed) error.claimedSession = claimed;
+  if (c.buildLockedSession) error.lockedSession = c.buildLockedSession(record, recordCompat);
   throw error;
 };
 export const canRestoreUnpaidRecovery = (record, inspection = null) => {
@@ -99,8 +106,9 @@ export const buildAbandonedCancelResponse = (ctx) => completeOrUnavailable(async
 });
 export const buildPaymentStatusResponse = (ctx) => {
   const base = ctx.buildPublicStatusBody(ctx.record);
-  const body = lower(ctx.record?.status) === "started" && str(ctx.record?.providerOrderId)
-    ? { ...base, providerPayload: ctx.buildProviderPayloadFromRecord(ctx.record) } : base;
+  const payload = lower(ctx.record?.status) === "started" && str(ctx.record?.providerOrderId)
+    ? { providerPayload: ctx.buildProviderPayloadFromRecord(ctx.record) } : {};
+  const body = { ...base, ...payload, ...(ctx.statusExtra || {}) };
   return runBrowserCompletion({ ...ctx, body });
 };
 export const buildNotPayableStartResponse = async (ctx) => {
@@ -115,11 +123,31 @@ export const buildNotPayableStartResponse = async (ctx) => {
   };
 };
 export const tryPrePricingRetryStart = async (ctx) => {
-  const { client, existing, scope, submittedQuoteFingerprint: fp, requestedProvider: reqProvider } = ctx;
-  const { bookingPayload, hold, finalizePaymentRecordInternal: finalize } = ctx;
-  const matches = existing?._id && fp && String(existing.sessionScope || "") === scope &&
-    str(existing.quoteFingerprint) === fp;
-  if (!matches) return null;
+  const { client, existing, claim = null, scope, submittedQuoteFingerprint: fp, requestedProvider: reqProvider } = ctx;
+  const { bookingPayload, hold, finalizePaymentRecordInternal: finalize, buildLockedSession } = ctx;
+  if (!existing?._id || String(existing.sessionScope || "") !== scope) return null;
+  if (!bookingPayload.originalOrderId) {
+    const valid = Boolean(hold && bookingPayload.slotHoldToken && verifyHoldToken({
+      token: bookingPayload.slotHoldToken, holdId: bookingPayload.slotHoldId,
+      startTimeUTC: hold.startTimeUTC || bookingPayload.startTimeUTC, holdNonce: hold.holdNonce || "",
+      backend: resolveStoreBackend(hold.backendOwner || existing.backendOwner),
+      cutoverGeneration: num(hold.cutoverGeneration), ignoreExpiry: true,
+    }));
+    if (!valid) return null;
+  }
+  const compat = resolveCompatibleQuoteFingerprint({ record: existing, claim });
+  if (!compat.quoteFingerprintValid) {
+    return {
+      httpStatus: 409,
+      body: {
+        ok: false, code: "quote_fingerprint_invalid",
+        error: "This payment session cannot be resumed. Check its status instead.",
+        ...(buildLockedSession ? { lockedSession: buildLockedSession(existing, compat) } : {}),
+      },
+    };
+  }
+  const fpMatch = Boolean(fp) && (compat.quoteFingerprint === fp || (compat.migratedFromLegacy && str(existing.quoteFingerprint) === fp));
+  if (!fpMatch) return null;
   let rec = existing;
   const status = lower(rec.status), provider = lower(rec.provider);
   const providerOk = provider === "free" ? !reqProvider || reqProvider === "free" : reqProvider === provider;
@@ -129,19 +157,12 @@ export const tryPrePricingRetryStart = async (ctx) => {
     : Boolean(ctx.providers?.[provider]?.enabled);
   if (status === "started" && provider !== "free" && !enabled) return null;
   if (!bookingPayload.originalOrderId) {
-    const valid = Boolean(hold && bookingPayload.slotHoldToken && verifyHoldToken({
-      token: bookingPayload.slotHoldToken, holdId: bookingPayload.slotHoldId,
-      startTimeUTC: hold.startTimeUTC || bookingPayload.startTimeUTC, holdNonce: hold.holdNonce || "",
-      backend: resolveStoreBackend(hold.backendOwner || rec.backendOwner),
-      cutoverGeneration: num(hold.cutoverGeneration), ignoreExpiry: true,
-    }));
-    if (!valid) return null;
     await ctx.assertStartableHold({ client, bookingPayload });
     rec = await getPaymentRecordById(client, existing._id);
     if (!rec || lower(rec.status) !== status) return null;
   }
   const shared = {
-    provider, quote: buildQuotePayloadFromSnapshot(rec), quoteFingerprint: fp,
+    provider, currency: compat.currency, quote: buildQuotePayloadFromSnapshot(rec), quoteFingerprint: compat.quoteFingerprint,
     sessionExpiresAt: str(rec.sessionExpiresAt), refreshedHold: ctx.buildRefreshedHoldBody(rec),
   };
   if (status === "started" && provider === "free") {
@@ -151,7 +172,13 @@ export const tryPrePricingRetryStart = async (ctx) => {
   }
   if (status === "started" && !str(rec.providerOrderId)) {
     const error = "This payment session is already creating its provider order.";
-    return { httpStatus: 409, body: { ok: false, code: "provider_order_creation_in_progress", error } };
+    return {
+      httpStatus: 409,
+      body: {
+        ok: false, code: "provider_order_creation_in_progress", error,
+        ...(buildLockedSession ? { lockedSession: buildLockedSession(rec, compat) } : {}),
+      },
+    };
   }
   const paymentAccessToken = provider === "free" ? "" : ctx.issuePaymentAccessTokenForRecord(rec);
   if (status === "started") {
