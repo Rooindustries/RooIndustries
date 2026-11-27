@@ -1,31 +1,14 @@
 export const ALL_PENDING_AND_PARTIAL_DODO_STATES = new Set([
-  "processing",
-  "requires_payment_method",
-  "requires_customer_action",
-  "requires_merchant_action",
-  "requires_confirmation",
-  "requires_capture",
-  "partially_captured",
-  "partially_captured_and_capturable",
+  "processing", "requires_payment_method", "requires_customer_action", "requires_merchant_action",
+  "requires_confirmation", "requires_capture", "partially_captured", "partially_captured_and_capturable",
 ]);
 
 const REVIEW_REASONS = new Set([
-  "captured_payment_release_requires_review",
-  "late_capture_watch_unverified_owner_review",
-  "resource_release_exhausted_owner_review",
+  "captured_payment_release_requires_review", "late_capture_watch_unverified_owner_review", "resource_release_exhausted_owner_review",
 ]);
-const UPGRADE_REASONS = new Set([
-  "upgrade_credit_changed_after_quote",
-  "upgrade_credit_unverified",
-]);
+const UPGRADE_REASONS = new Set(["upgrade_credit_changed_after_quote", "upgrade_credit_unverified"]);
 const CAPTURED_STATUSES = new Set([
-  "booked",
-  "email_partial",
-  "captured_client",
-  "captured_webhook",
-  "finalizing",
-  "verified_server",
-  "refunded",
+  "booked", "email_partial", "captured_client", "captured_webhook", "finalizing", "verified_server", "refunded",
 ]);
 
 const hasExplicitOwnerReview = (r = {}) => {

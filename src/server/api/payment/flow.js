@@ -6140,9 +6140,9 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
     const alreadyFullRefund =
       record.status === PAYMENT_STATUS_REFUNDED ||
       String(record.refundState || "").trim().toLowerCase() === "full";
-    const disputeReversalNeedsUpdate = disputeVerified
+    const disputeReversalNeedsUpdate = !alreadyFullRefund && (disputeVerified
       ? record.providerPaymentState !== "disputed" || record.providerReversalVerified !== true
-      : !alreadyFullRefund && (record.providerReversalVerified === true || record.providerPaymentState === "disputed");
+      : record.providerReversalVerified === true || record.providerPaymentState === "disputed");
     const unchanged = record.dodoDisputeActive === disputed && sameDisputes &&
       record.providerRecoveryTerminal === !!terminalDispute && !missingReferralAccounting &&
       !disputeReversalNeedsUpdate;
@@ -6212,7 +6212,7 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
         return guarded.set(boundToWatchDeadline(record, {
           dodoDisputeActive: disputed,
           dodoDisputes,
-          ...(disputeVerified
+          ...(!alreadyFullRefund && disputeVerified
             ? { providerPaymentState: "disputed", providerReversalVerified: true }
             : !alreadyFullRefund && (record.providerReversalVerified === true || record.providerPaymentState === "disputed")
               ? {
@@ -6307,7 +6307,7 @@ export const refreshDodoPayment = async ({ client, record, payment = null, sourc
   const priorProcessedAmount = (Array.isArray(record.refunds) ? record.refunds : [])
     .filter((entry) => entry?.status === "processed" && !incomingRefundIds.has(entry.providerRefundId))
     .reduce((sum, entry) => sum + Number(entry.amountInSubunits || 0), 0);
-  if ((rawRefundStatus === "full" && succeededRefundAmount !== payment.total_amount) ||
+  if ((rawRefundStatus === "full" && (succeededRefundAmount !== payment.total_amount || priorProcessedAmount + succeededRefundAmount !== payment.total_amount)) ||
       (rawRefundStatus === "partial" && (!(succeededRefundAmount > 0 && succeededRefundAmount < payment.total_amount) ||
         priorProcessedAmount + succeededRefundAmount >= payment.total_amount)) ||
       succeededRefundAmount > payment.total_amount ||

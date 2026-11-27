@@ -56,7 +56,7 @@ declare v_raw text; v_ts timestamptz;
 begin
   if p_payload is null or jsonb_typeof(p_payload->p_key) <> 'string' then return null; end if;
   v_raw := btrim(p_payload->>p_key, E' \t\r\n');
-  if v_raw = '' or v_raw !~ '^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$' then return null; end if;
+  if v_raw = '' or v_raw !~ '^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$' then return null; end if;
   v_ts := v_raw::timestamptz;
   if not pg_catalog.isfinite(v_ts) then return null; end if;
   return v_ts;

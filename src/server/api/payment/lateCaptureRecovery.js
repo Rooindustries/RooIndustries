@@ -31,34 +31,11 @@ export const isCleanupPendingGroq = `(resourceReleasePending == true && !(${hasP
 
 export const dodoCleanupAllowedGroq = `($dodoEnabled == true || !(providerPaymentState in ${PENDING_DODO_GROQ}) || (defined(lateCaptureWatchUntil) && defined(dateTime(lateCaptureWatchUntil)) && dateTime(lateCaptureWatchUntil) <= dateTime($now)))`;
 
-export const exhaustedPendingCleanupGroq = `(
-  provider == "dodo"
-  && reconciliationRecoveryTerminal == true
-  && resourceReleasePending == true
-  && providerRecoveryTerminal != true
-  && !(${hasPreservedOwnerReviewGroq})
-  && ${dodoCleanupAllowedGroq}
-)`;
+export const exhaustedPendingCleanupGroq = `(provider == "dodo" && reconciliationRecoveryTerminal == true && resourceReleasePending == true && providerRecoveryTerminal != true && !(${hasPreservedOwnerReviewGroq}) && ${dodoCleanupAllowedGroq})`;
 
-export const exhaustedLiveDodoStateGroq = `(
-  $dodoEnabled == true
-  && provider == "dodo"
-  && reconciliationRecoveryTerminal == true
-  && resourceReleasePending != true
-  && providerRecoveryTerminal != true
-  && !(${hasPreservedOwnerReviewGroq})
-  && providerPaymentState in ${PENDING_DODO_GROQ}
-)`;
+export const exhaustedLiveDodoStateGroq = `($dodoEnabled == true && provider == "dodo" && reconciliationRecoveryTerminal == true && resourceReleasePending != true && providerRecoveryTerminal != true && !(${hasPreservedOwnerReviewGroq}) && providerPaymentState in ${PENDING_DODO_GROQ})`;
 
-export const exhaustedCleanupWatchActiveGroq = `(
-  $dodoEnabled == true
-  && provider == "dodo"
-  && reconciliationRecoveryTerminal == true
-  && providerRecoveryTerminal != true
-  && !(${hasPreservedOwnerReviewGroq})
-  && lower(status) in ["failed", "abandoned"]
-  && defined(dateTime(lateCaptureWatchUntil))
-)`;
+export const exhaustedCleanupWatchActiveGroq = `($dodoEnabled == true && provider == "dodo" && reconciliationRecoveryTerminal == true && providerRecoveryTerminal != true && !(${hasPreservedOwnerReviewGroq}) && lower(status) in ["failed", "abandoned"] && defined(dateTime(lateCaptureWatchUntil)))`;
 
 export const exhaustedResumeDueGroq = `(!defined(nextRecoveryAt) || nextRecoveryAt == "" || (defined(dateTime(nextRecoveryAt)) && (dateTime(nextRecoveryAt) <= dateTime($now) || dateTime(nextRecoveryAt) >= dateTime("2090-01-01T00:00:00Z"))))`;
 
@@ -138,7 +115,7 @@ const isExhaustedResumeDue = (record, nowMs = Date.now()) => {
   return !Number.isFinite(parsed) || parsed <= nowMs || parsed >= SENTINEL_RECOVERY_MS;
 };
 
-const STRICT_ISO_TS_RE = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/;
+const STRICT_ISO_TS_RE = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 
 const isDodoCleanupAllowed = (record, { dodoEnabled = true, nowMs = Date.now() } = {}) => {
   if (dodoEnabled === true) return true;
