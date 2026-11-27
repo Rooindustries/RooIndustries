@@ -58,6 +58,7 @@ const evidence={checkedAt:new Date().toISOString(),productionRequests:0,scenario
 let fixture,server,origin,commerce,documents,flow,access,sql,providers,a1Ui;
 let recoveryDefinitionBeforeMigration;
 const recoveryMigration = '20261109000000_resume_exhausted_late_capture_watches.sql';
+const hardenRecoveryMigration = '20261118000000_harden_payment_recovery_and_hold_cleanup.sql';
 evidence.sourceEdition='current source';
 let razorpayRefunds=[];
 let dodoPayment,dodoRefund,paypalOrder,paypalCapture,razorpayPayment,verificationStatus,verificationDisconnect,providerHook;
@@ -258,11 +259,13 @@ try{
   server.listen(0,host);await once(server,'listening');origin=`http://${host}:${server.address().port}`;
   const { createSweepPostgresFixture } = await import('./lib/sweep-postgres-fixture.mjs');
   fixture = await createSweepPostgresFixture({ fullMigrationChain: fullChain,
-    excludedMigrations: fullChain ? [recoveryMigration] : [] });
+    excludedMigrations: fullChain ? [recoveryMigration, hardenRecoveryMigration] : [] });
   sql = fixture.sql;
   if (fullChain) {
     recoveryDefinitionBeforeMigration = (await sql`select pg_get_functiondef('public.roo_fetch_recovery_payment_documents(text,text[],text,text,text,timestamptz,integer,boolean)'::regprocedure) as value`)[0].value;
     await fixture.apply(recoveryMigration);
+    await fixture.apply(hardenRecoveryMigration);
+    await new Promise(resolve => setTimeout(resolve, 200));
   }
   if (!fullChain) await fixture.apply('20261005000500_project_booking_payment_currency_subunits.sql');
   if (!fullChain) await fixture.apply('20261013000000_skip_review_only_recovery_rows.sql');
@@ -1604,58 +1607,70 @@ try{
       const name = recoveryMigration;
       const migrationSql = fs.readFileSync(path.join(process.cwd(), 'supabase/migrations', name), 'utf8');
       const rollbackSql = fs.readFileSync(path.join(process.cwd(), 'supabase/rollbacks', name), 'utf8');
+      const hardenMigrationSql = fs.readFileSync(path.join(process.cwd(), 'supabase/migrations', hardenRecoveryMigration), 'utf8');
+      const hardenRollbackSql = fs.readFileSync(path.join(process.cwd(), 'supabase/rollbacks', hardenRecoveryMigration), 'utf8');
       const baselineHash = crypto.createHash('sha256').update(recoveryDefinitionBeforeMigration).digest('hex');
-      await seed('paypal', 'abandoned', { record: { bookingId: '', providerPaymentId: '',
-        recoveryReason: 'paypal_lookup_failed_404', reconciliationRecoveryTerminal: true,
-        recoveryAttemptCount: 12, recoveryFailureCount: 12,
-        nextRecoveryAt: '9999-12-31T23:59:59.999Z',
-        lateCaptureWatchUntil: new Date(originalNow() + 3600000).toISOString() } });
-      for (let i = 0; i < 50; i++) await commerce.create({ _id: `paymentRecord.due-${i}`, _type: 'paymentRecord', provider: 'paypal', status: 'needs_recovery', backendOwner: 'supabase', cutoverGeneration: 0, providerOrderId: `due-order-${i}`, nextRecoveryAt: '' });
-      const full = await candidates();
-      assert.equal(full.length, 50);
-      assert.ok(!full.includes(recordId));
-      await commerce.delete('paymentRecord.due-49');
-      const spare = await candidates();
-      assert.equal(spare.length, 50);
-      assert.equal(spare.at(-1), recordId);
-      for (let i = 0; i < 49; i++) await commerce.delete(`paymentRecord.due-${i}`);
-      providerHook = async (request, req, res) => {
-        if (request.path !== '/v2/checkout/orders/order-fixture') return false;
-        res.writeHead(404, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ name: 'RESOURCE_NOT_FOUND' }));
-        return true;
-      };
-      const migratedDefinition = await definition();
-      await fixture.apply(name, migrationSql);
-      assert.equal(await definition(), migratedDefinition);
-      const { RESUMABLE_WATCH_REASONS, isExhaustedWatch } = await import('../src/server/api/payment/lateCaptureRecovery.js');
-      const base = await record();
-      for (const reason of RESUMABLE_WATCH_REASONS) {
-        const payload = { ...base, provider: reason.split('_')[0], recoveryReason: reason };
-        const [result] = await sql`select commerce.exhausted_late_capture_watch_needs_resume(${sql.json(payload)}) as value`;
-        assert.equal(result.value, true, reason);
-        assert.equal(isExhaustedWatch(payload), true, reason);
-      }
-      for (const change of [{ recoveryReason: 'paypal_status_VOIDED' }, { recoveryFailureCount: '12' }, { reconciliationRecoveryTerminal: 'true' }, { provider: 'free' }]) {
-        const payload = { ...base, ...change };
-        const [result] = await sql`select commerce.exhausted_late_capture_watch_needs_resume(${sql.json(payload)}) as value`;
-        assert.equal(result.value, false, JSON.stringify(change));
-        assert.equal(isExhaustedWatch(payload), false, JSON.stringify(change));
-      }
-      await fixture.apply(name, rollbackSql);
-      assert.equal(crypto.createHash('sha256').update(await definition()).digest('hex'), baselineHash);
-      assert.equal(await helper(), null);
-      await fixture.apply(name, migrationSql);
-      assert.equal(await definition(), migratedDefinition);
-      await fixture.apply(name, rollbackSql);
-      assert.equal(crypto.createHash('sha256').update(await definition()).digest('hex'), baselineHash);
+      await fixture.apply(hardenRecoveryMigration, hardenRollbackSql);
+      await new Promise(resolve => setTimeout(resolve, 200));
       try {
+        await seed('paypal', 'abandoned', { record: { bookingId: '', providerPaymentId: '',
+          recoveryReason: 'paypal_lookup_failed_404', reconciliationRecoveryTerminal: true,
+          recoveryAttemptCount: 12, recoveryFailureCount: 12,
+          nextRecoveryAt: '9999-12-31T23:59:59.999Z',
+          lateCaptureWatchUntil: new Date(originalNow() + 3600000).toISOString() } });
+        for (let i = 0; i < 50; i++) await commerce.create({ _id: `paymentRecord.due-${i}`, _type: 'paymentRecord', provider: 'paypal', status: 'needs_recovery', backendOwner: 'supabase', cutoverGeneration: 0, providerOrderId: `due-order-${i}`, nextRecoveryAt: '' });
+        const full = await candidates();
+        assert.equal(full.length, 50);
+        assert.ok(!full.includes(recordId));
+        await commerce.delete('paymentRecord.due-49');
+        const spare = await candidates();
+        assert.equal(spare.length, 50);
+        assert.equal(spare.at(-1), recordId);
+        for (let i = 0; i < 49; i++) await commerce.delete(`paymentRecord.due-${i}`);
+        providerHook = async (request, req, res) => {
+          if (request.path !== '/v2/checkout/orders/order-fixture') return false;
+          res.writeHead(404, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ name: 'RESOURCE_NOT_FOUND' }));
+          return true;
+        };
+        const migratedDefinition = await definition();
+        await fixture.apply(name, migrationSql);
+        assert.equal(await definition(), migratedDefinition);
+        const { RESUMABLE_WATCH_REASONS, isExhaustedWatch } = await import('../src/server/api/payment/lateCaptureRecovery.js');
+        const base = await record();
+        for (const reason of RESUMABLE_WATCH_REASONS) {
+          const payload = { ...base, provider: reason.split('_')[0], recoveryReason: reason };
+          const [result] = await sql`select commerce.exhausted_late_capture_watch_needs_resume(${sql.json(payload)}) as value`;
+          assert.equal(result.value, true, reason);
+          assert.equal(isExhaustedWatch(payload), true, reason);
+        }
+        for (const change of [{ recoveryReason: 'paypal_status_VOIDED' }, { recoveryFailureCount: '12' }, { reconciliationRecoveryTerminal: 'true' }, { provider: 'free' }]) {
+          const payload = { ...base, ...change };
+          const [result] = await sql`select commerce.exhausted_late_capture_watch_needs_resume(${sql.json(payload)}) as value`;
+          assert.equal(result.value, false, JSON.stringify(change));
+          assert.equal(isExhaustedWatch(payload), false, JSON.stringify(change));
+        }
+        await fixture.apply(name, rollbackSql);
+        assert.equal(crypto.createHash('sha256').update(await definition()).digest('hex'), baselineHash);
+        assert.equal(await helper(), null);
+        await fixture.apply(name, migrationSql);
+        assert.equal(await definition(), migratedDefinition);
+        await fixture.apply(name, rollbackSql);
+        assert.equal(crypto.createHash('sha256').update(await definition()).digest('hex'), baselineHash);
+        await fixture.apply(hardenRecoveryMigration, hardenMigrationSql);
+        await new Promise(resolve => setTimeout(resolve, 200));
         const before = await snapshot();
         const rolledBack = await requestFlow('reconcile');
+        assert.equal(rolledBack.status, 200, JSON.stringify(rolledBack));
+        assert.equal(rolledBack.body.summary.reconcileRunCompleted, true);
         assert.equal(rolledBack.body.summary.scanned, 0);
         assert.deepEqual(await snapshot(), before);
       } finally {
-        await fixture.apply(name, fs.readFileSync(path.join(process.cwd(), 'supabase/migrations', name), 'utf8'));
+        await fixture.apply(hardenRecoveryMigration, hardenRollbackSql);
+        await fixture.apply(name, migrationSql);
+        await fixture.apply(hardenRecoveryMigration, hardenMigrationSql);
+        await new Promise(resolve => setTimeout(resolve, 200));
+        assert.notEqual(await helper(), null);
       }
       const restored = await requestFlow('reconcile');
       assert.equal(restored.body.summary.scanned, 1);
@@ -1667,7 +1682,11 @@ try{
       const rollback = path.join(process.cwd(), 'supabase/rollbacks', recoveryMigration);
       const migrationSql = fs.readFileSync(migration, 'utf8');
       const rollbackSql = fs.readFileSync(rollback, 'utf8');
+      const hardenMigrationSql = fs.readFileSync(path.join(process.cwd(), 'supabase/migrations', hardenRecoveryMigration), 'utf8');
+      const hardenRollbackSql = fs.readFileSync(path.join(process.cwd(), 'supabase/rollbacks', hardenRecoveryMigration), 'utf8');
       const baselineHash = crypto.createHash('sha256').update(recoveryDefinitionBeforeMigration).digest('hex');
+      await fixture.apply(hardenRecoveryMigration, hardenRollbackSql);
+      await new Promise(resolve => setTimeout(resolve, 200));
       const migratedDefinition = await definition();
       try {
         const driftedMigration = migratedDefinition.replace('updated_at, legacy_sanity_id)', 'updated_at, legacy_sanity_id asc)');
@@ -1701,6 +1720,8 @@ try{
         await sql.unsafe(recoveryDefinitionBeforeMigration);
         if (await helper()) await sql.unsafe('drop function commerce.exhausted_late_capture_watch_needs_resume(jsonb)');
         await fixture.apply(recoveryMigration, migrationSql);
+        await fixture.apply(hardenRecoveryMigration, hardenMigrationSql);
+        await new Promise(resolve => setTimeout(resolve, 200));
       }
       return { atomicOnError: true };
     });

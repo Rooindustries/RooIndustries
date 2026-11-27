@@ -844,7 +844,7 @@ test("Resume checkout scrubs a saved Dodo URL on manualReviewRequired, rejects 5
       return route.fulfill({ status: 503, json: { ok: false, error: "Temporary status outage." } });
     }
     return route.fulfill({
-      json: { ok: true, status: "refunded", provider: "dodo", recoveryReason: "This payment has been refunded." },
+      json: { ok: true, status: "refunded", provider: "dodo", terminalOutcomeComplete: true, recoveryReason: "This payment has been refunded." },
     });
   });
 
@@ -2050,7 +2050,7 @@ test("Dodo Change payment method clears session and hold on 409 failed and 409 r
 test("Dodo Change payment method clears session and hold on 409 refunded", async ({ page, flow }) => {
   await page.route("**/api/payment/cancel", route => route.fulfill({
     status: 409,
-    json: { ok: false, status: "refunded", error: "This payment session can no longer be changed." },
+    json: { ok: false, status: "refunded", terminalOutcomeComplete: true, error: "This payment session can no longer be changed." },
   }));
   await setupLockedDodo(page, flow, "dodo-cancel409-refunded-pat");
   const changeBtn = page.getByRole("button", { name: "Change payment method", exact: true });

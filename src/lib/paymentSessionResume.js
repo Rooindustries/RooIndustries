@@ -82,7 +82,7 @@ export async function runResumePaymentSession(ctx) {
   );
   const resumedStatus = normalizeCode(data?.status);
   const act = paymentActionRef.current;
-  const affirmativeRelease = ["refunded", "failed", "abandoned"].includes(resumedStatus) && isAffirmativeTerminalRelease(response.ok, data);
+  const affirmativeRelease = ["refunded", "failed", "abandoned"].includes(resumedStatus) && isAffirmativeTerminalRelease(response.status === 200, data);
   const completedBooking = response.ok && (resumedStatus === "booked" || resumedStatus === "email_partial") && data?.cleanupPending !== true && data?.manualReviewRequired !== true;
   if (affirmativeRelease || completedBooking) markReservationTerminal(resumeScopeKey, resumedStatus);
   if (affirmativeRelease) {
@@ -206,7 +206,7 @@ export async function runCheckPaymentStatus(ctx) {
       body: "{}",
     });
     const status = normalizeCode(data?.status);
-    const affirmative = ["failed", "abandoned", "refunded"].includes(status) && isAffirmativeTerminalRelease(response.ok, data);
+    const affirmative = ["failed", "abandoned", "refunded"].includes(status) && isAffirmativeTerminalRelease(response.status === 200, data);
     const completedBooking = response.ok && (status === "booked" || status === "email_partial") && data?.cleanupPending !== true && data?.manualReviewRequired !== true;
     if (affirmative || completedBooking) markReservationTerminal(scopeKey, status);
     if (affirmative) {
@@ -292,7 +292,7 @@ export async function runChangePaymentMethod(ctx) {
     const stillActiveLock = tokenCurrent() && (!liveBeforeRelease?.paymentAccessToken || extractPaymentLockId(liveBeforeRelease.paymentAccessToken) === lockId);
     const status = normalizeCode(data?.status);
     const isTerminal409 = response.status === 409 && (status === "failed" || status === "refunded") && isAffirmativeTerminalRelease(true, data);
-    const affirmative = isAffirmativeTerminalRelease(response.ok, data);
+    const affirmative = isAffirmativeTerminalRelease(response.status === 200, data);
     const completedBooking = Boolean(data?.captured && (status === "booked" || status === "email_partial") && data?.cleanupPending !== true && data?.manualReviewRequired !== true);
     if (affirmative || isTerminal409 || completedBooking) markReservationTerminal(scopeKey, status);
     if (!stillActiveLock) {
@@ -312,25 +312,13 @@ export async function runChangePaymentMethod(ctx) {
       if (cancelCurrent()) showBanner("info", data?.recoveryReason || "Your payment was received and is being finalized.", { persistent: Boolean(data?.cleanupPending || data?.manualReviewRequired) });
       return;
     }
-    if (!response.ok || data?.cancelled !== true || !affirmative) {
+    if (response.status !== 200 || !affirmative || (data?.cancelled !== true && status !== "failed" && status !== "abandoned")) {
       if (!cancelCurrent()) return;
       if (isTerminal409) {
         releasePaymentSessionLock({ token, scopeKey, seq: cancelSeq });
         const handled = clearPaymentSession(status, token, { alreadyReleased: true, reason: data?.recoveryReason });
         operation.token = "";
         if (handled) return;
-      }
-      if (affirmative && status === "abandoned") {
-        const owns = flow.ownsHold(activeSession);
-        const nextCheckout = owns && canWriteRefreshedHold(data?.refreshedHold, initialHoldId, initialHoldNonce) ? flow.applyReleasedHold(data?.refreshedHold) : null;
-        if (!owns || nextCheckout) {
-          releasePaymentSessionLock({ token, scopeKey, seq: cancelSeq });
-          clearPaymentSession("", token, { alreadyReleased: true });
-          operation.token = "";
-          flow.clearDodoNav(nextCheckout);
-          showBanner("success", "Payment method released. Choose a payment method below.");
-          return;
-        }
       }
       throw new Error(data?.error || data?.recoveryReason || "The payment method could not be changed.");
     }
@@ -411,7 +399,7 @@ export async function runFinalizeSessionCheckout(ctx) {
       if (isNonResumablePaymentData(data)) flow.scrubPayload(paymentAccessToken, data);
       if (!response.ok) throw new Error(data?.error || "Unable to load payment status.");
       const st = normalizeCode(data?.status);
-      if (data?.manualReviewRequired === true || ["booked", "email_partial", "refunded", "failed", "abandoned"].includes(st)) return data;
+      if (data?.manualReviewRequired === true || ["booked", "email_partial", "refunded", "failed", "abandoned"].includes(st)) return { ...data, _httpStatus: response.status };
       const rem = deadline - Date.now();
       if (rem > 0) await new Promise((r) => setTimeout(r, Math.min(pollIntervalMs, rem)));
     }
@@ -426,7 +414,7 @@ export async function runFinalizeSessionCheckout(ctx) {
     });
     const status = normalizeCode(data?.status);
     const isFinalizedStatus = status === "booked" || status === "email_partial";
-    const affirmative = !isFinalizedStatus && ["failed", "abandoned", "refunded"].includes(status) && isAffirmativeTerminalRelease(response.ok, data);
+    const affirmative = !isFinalizedStatus && ["failed", "abandoned", "refunded"].includes(status) && isAffirmativeTerminalRelease(response.status === 200, data);
     if (scopeKey && (affirmative || (response.ok && isFinalizedStatus && data?.cleanupPending !== true && data?.manualReviewRequired !== true))) {
       markReservationTerminal(scopeKey, status);
     }
@@ -463,7 +451,7 @@ export async function runFinalizeSessionCheckout(ctx) {
         await navigateToConfirmation("paid", settled, operation);
         return settled;
       }
-      if (isAffirmativeTerminalRelease(true, settled)) {
+      if (isAffirmativeTerminalRelease(settled?._httpStatus === 200, settled)) {
         if (scopeKey) markReservationTerminal(scopeKey, settledStatus);
         return finishTerminal(settled, settledStatus, "Payment could not be finalized.");
       }

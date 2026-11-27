@@ -1,6 +1,7 @@
 import { getPaymentRecordById } from "./paymentRecord.js";
 import { observedProviderState } from "./providerPaymentState.js";
 import { settledDodoPaymentState } from "./dodoProvider.js";
+import { ALL_PENDING_AND_PARTIAL_DODO_STATES, hasPreservedOwnerReview } from "./paymentRecoveryState.js";
 import { logSafeError } from "../../safeErrorLog.js";
 
 export const RESUMABLE_WATCH_REASONS = [
@@ -10,15 +11,92 @@ export const RESUMABLE_WATCH_REASONS = [
   "razorpay_lookup_exception",
 ];
 
+const PENDING_DODO_GROQ = JSON.stringify([...ALL_PENDING_AND_PARTIAL_DODO_STATES]);
+
+const hasExplicitOwnerReviewGroq = `(
+  recoveryOwnerReviewRequired == true
+  || recoveryReason in ["captured_payment_release_requires_review", "late_capture_watch_unverified_owner_review", "resource_release_exhausted_owner_review"]
+  || providerRecoveryTerminalReason == "dodo_refund_details_incomplete"
+  || (lower(status) == "needs_recovery" && reconciliationRecoveryTerminal == true && recoveryReason in ["upgrade_credit_changed_after_quote", "upgrade_credit_unverified"])
+)`;
+
+const hasVerifiedReversalGroq = `(providerPaymentState in ["refunded", "disputed"] && providerReversalVerified == true)`;
+
+const hasPreservedOwnerReviewGroq = `(
+  ${hasExplicitOwnerReviewGroq}
+  || (provider == "dodo" && providerRecoveryTerminal == true && lower(status) == "needs_recovery" && !(${hasVerifiedReversalGroq}))
+)`;
+
+export const isCleanupPendingGroq = `(resourceReleasePending == true && !(${hasPreservedOwnerReviewGroq}))`;
+
+export const dodoCleanupAllowedGroq = `($dodoEnabled == true || !(providerPaymentState in ${PENDING_DODO_GROQ}) || (defined(lateCaptureWatchUntil) && defined(dateTime(lateCaptureWatchUntil)) && dateTime(lateCaptureWatchUntil) <= dateTime($now)))`;
+
+export const exhaustedPendingCleanupGroq = `(provider == "dodo" && reconciliationRecoveryTerminal == true && resourceReleasePending == true && providerRecoveryTerminal != true && !(${hasPreservedOwnerReviewGroq}) && ${dodoCleanupAllowedGroq})`;
+
+export const exhaustedLiveDodoStateGroq = `($dodoEnabled == true && provider == "dodo" && reconciliationRecoveryTerminal == true && resourceReleasePending != true && providerRecoveryTerminal != true && !(${hasPreservedOwnerReviewGroq}) && providerPaymentState in ${PENDING_DODO_GROQ})`;
+
+export const exhaustedCleanupWatchActiveGroq = `($dodoEnabled == true && provider == "dodo" && reconciliationRecoveryTerminal == true && providerRecoveryTerminal != true && !(${hasPreservedOwnerReviewGroq}) && lower(status) in ["failed", "abandoned"] && defined(dateTime(lateCaptureWatchUntil)))`;
+
+export const exhaustedResumeDueGroq = `(!defined(nextRecoveryAt) || nextRecoveryAt == "" || (defined(dateTime(nextRecoveryAt)) && (dateTime(nextRecoveryAt) <= dateTime($now) || dateTime(nextRecoveryAt) >= dateTime("2090-01-01T00:00:00Z"))))`;
+
 export const exhaustedWatchQuery = `(provider in ["paypal", "razorpay", "dodo"] && lower(status) == $abandonedStatus
   && reconciliationRecoveryTerminal == true && recoveryReason in $resumableWatchReasons
   && recoveryFailureCount == 12 && nextRecoveryAt == "9999-12-31T23:59:59.999Z"
   && defined(lateCaptureWatchUntil) && lateCaptureWatchUntil != ""
-  && coalesce(providerRecoveryTerminal, false) == false
-  && coalesce(recoveryOwnerReviewRequired, false) == false
-  && coalesce(resourceReleasePending, false) == false
-  && coalesce(refundRequiresBookingSync, false) == false
-  && coalesce(providerRefundDetailsMissing, false) == false)`;
+  && providerRecoveryTerminal != true
+  && recoveryOwnerReviewRequired != true
+  && resourceReleasePending != true
+  && refundRequiresBookingSync != true
+  && providerRefundDetailsMissing != true)`;
+
+export const RECOVERY_RECORDS_GROQ = `*[_type == $type
+  && (
+    reconciliationRecoveryTerminal != true
+    || ${exhaustedWatchQuery}
+    || ${exhaustedPendingCleanupGroq}
+    || ${exhaustedLiveDodoStateGroq}
+    || ${exhaustedCleanupWatchActiveGroq}
+  )
+  && !(providerRecoveryTerminal == true
+    && providerRecoveryTerminalReason in $terminalCurrencyReasons)
+  && (
+    provider != "dodo"
+    || ($dodoEnabled && providerRecoveryTerminal != true)
+    || refundRequiresBookingSync == true
+    || (${isCleanupPendingGroq} && ${dodoCleanupAllowedGroq})
+    || ${exhaustedPendingCleanupGroq}
+    || ${exhaustedLiveDodoStateGroq}
+    || (lower(status) == $emailPartialStatus && requiresReschedule == true)
+    || (lower(status) in [$emailPartialStatus, $bookedStatus] && emailDispatchRequired == true)
+  )
+  && (
+    lower(status) in $statuses
+    || refundRequiresBookingSync == true
+    || (lower(status) == $bookedStatus && emailDispatchRequired == true)
+    || (
+      lower(status) in [$abandonedStatus, "failed"]
+      && (
+        (${isCleanupPendingGroq} && (provider != "dodo" || ${dodoCleanupAllowedGroq}))
+        || defined(dateTime(lateCaptureWatchUntil))
+      )
+    )
+    || ${exhaustedPendingCleanupGroq}
+    || ${exhaustedLiveDodoStateGroq}
+  )
+  && (
+    !defined(nextRecoveryAt)
+    || nextRecoveryAt == ""
+    || nextRecoveryAt <= $now
+    || ${exhaustedWatchQuery}
+    || (${exhaustedPendingCleanupGroq} && ${exhaustedResumeDueGroq})
+    || (${exhaustedLiveDodoStateGroq} && ${exhaustedResumeDueGroq})
+  )
+] | order(
+  select((${exhaustedPendingCleanupGroq}) || (${exhaustedLiveDodoStateGroq}) => 0, 1) asc,
+  coalesce(nextRecoveryAt, "") asc,
+  coalesce(updatedAt, "") asc,
+  _id asc
+)[0...50]`;
 
 export const isExhaustedWatch = (record) =>
   ["paypal", "razorpay", "dodo"].includes(record.provider) && String(record.status || "").toLowerCase() === "abandoned" &&
@@ -27,6 +105,46 @@ export const isExhaustedWatch = (record) =>
   !!record.lateCaptureWatchUntil && record.providerRecoveryTerminal !== true &&
   record.recoveryOwnerReviewRequired !== true && record.resourceReleasePending !== true &&
   record.refundRequiresBookingSync !== true && record.providerRefundDetailsMissing !== true;
+
+const SENTINEL_RECOVERY_MS = Date.parse("2090-01-01T00:00:00Z");
+
+const isExhaustedResumeDue = (record, nowMs = Date.now()) => {
+  const next = String(record?.nextRecoveryAt || "").trim();
+  if (!next) return true;
+  const parsed = Date.parse(next);
+  return !Number.isFinite(parsed) || parsed <= nowMs || parsed >= SENTINEL_RECOVERY_MS;
+};
+
+const STRICT_ISO_TS_RE = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+
+const isDodoCleanupAllowed = (record, { dodoEnabled = true, nowMs = Date.now() } = {}) => {
+  if (dodoEnabled === true) return true;
+  const ps = String(record?.providerPaymentState || "").trim();
+  if (!ALL_PENDING_AND_PARTIAL_DODO_STATES.has(ps)) return true;
+  const rawWatch = typeof record?.lateCaptureWatchUntil === "string" ? record.lateCaptureWatchUntil.trim() : "";
+  if (!STRICT_ISO_TS_RE.test(rawWatch)) return false;
+  const watchMs = Date.parse(rawWatch);
+  return Number.isFinite(watchMs) && watchMs <= nowMs;
+};
+
+export const isExhaustedResumableDodo = (record, { dodoEnabled = true, nowMs = Date.now() } = {}) => {
+  if (!record || record.provider !== "dodo" || record.reconciliationRecoveryTerminal !== true ||
+      record.providerRecoveryTerminal === true || hasPreservedOwnerReview(record)) {
+    return false;
+  }
+  const ps = String(record.providerPaymentState || "").trim();
+  const st = String(record.status || "").trim().toLowerCase();
+  if (record.resourceReleasePending === true && isDodoCleanupAllowed(record, { dodoEnabled, nowMs }) &&
+      isExhaustedResumeDue(record, nowMs)) {
+    return true;
+  }
+  if (dodoEnabled === true && record.resourceReleasePending !== true &&
+      ALL_PENDING_AND_PARTIAL_DODO_STATES.has(ps) && isExhaustedResumeDue(record, nowMs)) {
+    return true;
+  }
+  return dodoEnabled === true && (st === "failed" || st === "abandoned") &&
+    Boolean(String(record.lateCaptureWatchUntil || "").trim());
+};
 
 export const holdLostToPayment = (hold, record) =>
   ["paypal", "razorpay", "dodo"].includes(record.provider) && !!hold &&
@@ -71,6 +189,7 @@ export const webhookFinalizationResult = (finalized) => {
     ? { httpStatus: 503, body: { ...finalized.response, ok: false }, retryWebhook: true }
     : { httpStatus: finalized.httpStatus, body: finalized.response };
 };
+
 export const hasObservedCapture = (inspection) => inspection.state === "captured" &&
   (!inspection.payment || settledDodoPaymentState(inspection.payment) === "succeeded");
 
