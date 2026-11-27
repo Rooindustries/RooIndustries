@@ -349,7 +349,12 @@ export const createCheckoutFlow = (ctx) => {
     paymentActionRef.current.seq += 1;
     const cur = readStoredPaymentSession() || paymentView.session;
     if (cur?.paymentAccessToken !== token) return;
-    persistPaymentSession({ ...cur, providerPayload: cur.providerPayload?.taxInclusive === false ? { taxInclusive: false } : {}, result: { ...(cur.result || {}), ...(data || {}) } });
+    const nextResult = { ...(cur.result || {}), ...(data || {}) };
+    const pq = cur.result?.quote, nq = data?.quote;
+    if (pq && nq && Number(pq.grossAmount) === Number(nq.grossAmount) && Number(pq.netAmount) === Number(nq.netAmount) && (!pq.currency || !nq.currency || str(pq.currency).toUpperCase() === str(nq.currency).toUpperCase())) {
+      nextResult.quote = { ...pq, ...nq };
+    }
+    persistPaymentSession({ ...cur, providerPayload: cur.providerPayload?.taxInclusive === false ? { taxInclusive: false } : {}, result: nextResult });
   };
   const applyReleasedHold = (hold) => writeHold(hold, "holding", ctx.packagePrice);
   const beginCancel = (createPaymentOperation, blocked, existingOp = null) => {

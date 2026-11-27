@@ -3,13 +3,23 @@ import {
   stripDodoReturnFromHistory,
 } from "./checkoutSessionGuard";
 import {
-  allocatePaymentSessionSeq, commitPaymentSessionState, doesLiveHoldMatchLineage,
-  fetchPaymentJson, isAffirmativeTerminalRelease, releasePaymentSessionLock, verifyProviderLaunchPayload,
+  allocatePaymentSessionSeq, canWriteRefreshedHold, commitPaymentSessionState,
+  fetchPaymentJson, isAffirmativeTerminalRelease, readLiveSlotHold, releasePaymentSessionLock, verifyProviderLaunchPayload,
 } from "./paymentSessionLocks";
 import { markReservationTerminal } from "./reservationScope";
 
 const normalizeCode = (v) => String(v || "").trim().toLowerCase();
 const str = (v) => String(v || "").trim();
+
+const mergeSessionResult = (prev, next) => {
+  const merged = { ...(prev || {}), ...(next || {}) };
+  if (prev?.quote && typeof prev.quote === "object" && next?.quote && typeof next.quote === "object") {
+    const pCur = str(prev.quote.currency).toUpperCase(), nCur = str(next.quote.currency).toUpperCase();
+    const sameTotals = Number(prev.quote.grossAmount) === Number(next.quote.grossAmount) && Number(prev.quote.netAmount) === Number(next.quote.netAmount) && (!pCur || !nCur || pCur === nCur);
+    merged.quote = sameTotals ? { ...prev.quote, ...next.quote } : next.quote;
+  }
+  return merged;
+};
 
 const runTrackedStart = async (pendingRef, setPending, provider, run) => {
   const entry = { provider };
@@ -133,7 +143,7 @@ export async function runResumePaymentSession(ctx) {
       ...storedActive,
       providerPayload: nextPayload,
       providerOrderReady: true,
-      result: { ...(storedActive.result || {}), ...data },
+      result: mergeSessionResult(storedActive.result, data),
     }, { seq: statusSeq, scopeKey: resumeScopeKey });
     if (!updated) return { terminal: true, stale: true };
     persistPaymentSession(updated, true);
@@ -146,7 +156,7 @@ export async function runResumePaymentSession(ctx) {
     ...storedActive,
     providerPayload: preservedPayload,
     providerOrderReady: data?.providerOrderReady ?? storedActive.providerOrderReady,
-    result: { ...(storedActive.result || {}), ...(data || {}) },
+    result: mergeSessionResult(storedActive.result, data),
   }, { seq: statusSeq, scopeKey: resumeScopeKey });
   if (updated) persistPaymentSession(updated, true);
   if (data?.providerOrderReady === false) {
@@ -220,7 +230,7 @@ export async function runCheckPaymentStatus(ctx) {
       ...activeSession,
       providerPayload: { ...(activeSession.providerPayload || {}), ...(data?.providerPayload || {}) },
       providerOrderReady: data?.providerOrderReady ?? activeSession.providerOrderReady,
-      result: { ...(activeSession.result || {}), ...(data || {}) },
+      result: mergeSessionResult(activeSession.result, data),
     }, { seq: statusSeq, scopeKey });
     if (next) persistPaymentSession(next, true);
     showBanner("info", data?.providerOrderReady === false ? "Checkout is still preparing. Check again shortly." : "Your payment session is ready. Click 'Resume checkout' to continue.", { persistent: true });
@@ -232,15 +242,16 @@ export async function runCheckPaymentStatus(ctx) {
 
 export async function runChangePaymentMethod(ctx) {
   const {
-    cancel, currentScopeKeyRef, bookingData, sessionHold, fetchJson = fetchPaymentJson, setCancellingPayment,
+    cancel, currentScopeKeyRef, fetchJson = fetchPaymentJson, setCancellingPayment,
     navigateToConfirmation, showBanner, clearPaymentSession, paymentActionRef, paymentMountedRef,
     manualCodeAllowedRef, flow,
   } = ctx;
   const { activeSession, paymentAccessToken: token, operation, tokenCurrent, cancelCurrent } = cancel;
   const scopeKey = activeSession.scopeKey || currentScopeKeyRef.current;
   const lockId = extractPaymentLockId(token);
-  const initialHoldId = str(sessionHold?.slotHoldId || bookingData?.slotHoldId);
-  const initialHoldNonce = str(sessionHold?.slotHoldToken || bookingData?.slotHoldToken);
+  const liveHoldAtCancel = readLiveSlotHold();
+  const initialHoldId = str(liveHoldAtCancel?.holdId);
+  const initialHoldNonce = str(liveHoldAtCancel?.holdToken);
   const cancelSeq = allocatePaymentSessionSeq();
   manualCodeAllowedRef.current = false;
   setCancellingPayment(true);
@@ -284,7 +295,7 @@ export async function runChangePaymentMethod(ctx) {
       }
       if (affirmative && status === "abandoned") {
         const owns = flow.ownsHold(activeSession);
-        const nextCheckout = owns && (!initialHoldId || doesLiveHoldMatchLineage(initialHoldId, initialHoldNonce)) ? flow.applyReleasedHold(data?.refreshedHold) : null;
+        const nextCheckout = owns && canWriteRefreshedHold(data?.refreshedHold, initialHoldId, initialHoldNonce) ? flow.applyReleasedHold(data?.refreshedHold) : null;
         if (!owns || nextCheckout) {
           releasePaymentSessionLock({ token, scopeKey, seq: cancelSeq });
           clearPaymentSession("", token, { alreadyReleased: true });
@@ -296,7 +307,7 @@ export async function runChangePaymentMethod(ctx) {
       }
       throw new Error(data?.error || data?.recoveryReason || "The payment method could not be changed.");
     }
-    const canRotate = flow.ownsHold(activeSession) && (!initialHoldId || doesLiveHoldMatchLineage(initialHoldId, initialHoldNonce));
+    const canRotate = flow.ownsHold(activeSession) && canWriteRefreshedHold(data?.refreshedHold, initialHoldId, initialHoldNonce);
     const refreshedCheckout = canRotate ? flow.applyReleasedHold(data.refreshedHold || null) : null;
     if (!cancelCurrent()) return;
     releasePaymentSessionLock({ token, scopeKey, seq: cancelSeq });
