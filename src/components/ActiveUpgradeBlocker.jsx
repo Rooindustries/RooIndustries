@@ -64,7 +64,7 @@ export default function ActiveUpgradeBlocker({
         releasePaymentSessionLock({ token, scopeKey: blockScope, seq: actionSeq });
       }
       if (!stillCurrent()) return;
-      if (doneOk && (status === "booked" || status === "email_partial")) {
+      if (completedBooking) {
         onBooked({
           bookingId: data.bookingId || "",
           packageTitle: blockingUpgradeSession.packageTitle || packageTitle,

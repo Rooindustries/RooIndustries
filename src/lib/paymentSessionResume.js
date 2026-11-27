@@ -114,6 +114,7 @@ export async function runResumePaymentSession(ctx) {
     return { ...storedActive, providerPayload: {}, result: data, terminal: true };
   }
   if (resumedStatus === "booked" || resumedStatus === "email_partial") {
+    if (data?.cleanupPending === true) { showBanner("info", data.recoveryReason || "Payment is still being verified.", { persistent: true }); return { ...storedActive, result: data, terminal: true }; }
     await navigateToConfirmation("paid", data, operation);
     return { ...storedActive, result: data, terminal: true };
   }
@@ -214,6 +215,7 @@ export async function runCheckPaymentStatus(ctx) {
       return data;
     }
     if (response.ok && (status === "booked" || status === "email_partial")) {
+      if (data?.cleanupPending === true) { showBanner("info", data.recoveryReason || "Payment is still being verified.", { persistent: true }); return data; }
       await navigateToConfirmation("paid", data, operation);
       return data;
     }
@@ -224,6 +226,12 @@ export async function runCheckPaymentStatus(ctx) {
     if (!response.ok) throw new Error(data?.error || "Unable to load payment status. Please try again.");
     if (isNonResumablePaymentData(data)) {
       showBanner("info", data?.recoveryReason || "Checkout is being recovered. Check the payment status shortly.", { persistent: true });
+      return data;
+    }
+    const storedOrd = str(activeSession.providerPayload?.orderId), liveOrd = str(data?.providerPayload?.orderId);
+    const storedTag = str(activeSession.providerPayload?.dodoReturnTag || activeSession.dodoReturnTag), liveTag = str(data?.providerPayload?.dodoReturnTag);
+    if (activeSession.provider === "dodo" && ((storedOrd && liveOrd && storedOrd !== liveOrd) || (storedTag && liveTag && storedTag !== liveTag))) {
+      showBanner("error", "This payment session cannot be reopened right now. Click 'Change payment method'.", { persistent: true });
       return data;
     }
     const next = commitPaymentSessionState({
@@ -278,11 +286,11 @@ export async function runChangePaymentMethod(ctx) {
     if (isNonResumablePaymentData(data)) flow.scrubPayload(token, data);
     if (wasLatest) cancel.syncSeq();
     if (data?.captured) {
-      if (status === "booked" || status === "email_partial") {
+      if ((status === "booked" || status === "email_partial") && data?.cleanupPending !== true && data?.manualReviewRequired !== true) {
         await navigateToConfirmation("paid", data, operation);
         return;
       }
-      if (cancelCurrent()) showBanner("info", "Your payment was received and is being finalized.");
+      if (cancelCurrent()) showBanner("info", data?.recoveryReason || "Your payment was received and is being finalized.", { persistent: Boolean(data?.cleanupPending || data?.manualReviewRequired) });
       return;
     }
     if (!response.ok || data?.cancelled !== true || !affirmative) {
@@ -337,7 +345,7 @@ export async function runFinalizeSessionCheckout(ctx) {
     pollTimeoutMs, pollIntervalMs, flow,
   } = ctx;
   if (!captured && !operation.current()) return null;
-  paymentActionRef.current.seq += 1;
+  if (!(captured && paymentActionRef.current.cancelling)) paymentActionRef.current.seq += 1;
   manualCodeAllowedRef.current = false;
   const storedAtCall = readStoredPaymentSessionState();
   const matchingStoredScope = storedAtCall?.paymentAccessToken && extractPaymentLockId(storedAtCall.paymentAccessToken) === extractPaymentLockId(paymentAccessToken) ? storedAtCall.scopeKey : "";
@@ -416,6 +424,7 @@ export async function runFinalizeSessionCheckout(ctx) {
       throw new Error(data?.error || "Unable to finalize payment.");
     }
     if (isFinalizedStatus) {
+      if (data?.cleanupPending === true) { showBanner("info", data.recoveryReason || "Payment is still being verified.", { persistent: true }); return data; }
       await navigateToConfirmation("paid", data, operation);
       return data;
     }
@@ -430,7 +439,8 @@ export async function runFinalizeSessionCheckout(ctx) {
         return settled;
       }
       if (settledStatus === "booked" || settledStatus === "email_partial") {
-        if (scopeKey && settled?.cleanupPending !== true) markReservationTerminal(scopeKey, settledStatus);
+        if (settled?.cleanupPending === true) { showBanner("info", settled.recoveryReason || "Payment is still being verified.", { persistent: true }); return settled; }
+        if (scopeKey) markReservationTerminal(scopeKey, settledStatus);
         await navigateToConfirmation("paid", settled, operation);
         return settled;
       }

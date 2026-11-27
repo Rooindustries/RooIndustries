@@ -553,6 +553,7 @@ export default function Payment({ hideFooter = false }) {
 
   useEffect(() => {
     if (lockedSessionQuote) {
+      lastQuoteKeyRef.current = "";
       setServerQuote(lockedSessionQuote);
       setQuoteFingerprint(String(paymentSession?.result?.quoteFingerprint || "locked-session").trim());
       setQuoteLoading(false);

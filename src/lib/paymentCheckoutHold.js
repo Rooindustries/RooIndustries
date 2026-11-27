@@ -2,7 +2,7 @@ import { fetchJsonWithTimeout } from "./clientRequest";
 import { extractTokenNonce } from "./checkoutConfirmation";
 import { CODE_VALIDATION_UNAVAILABLE_MESSAGE, formatCouponValue, sanitizeCouponForCheckout, sanitizeReferralForCheckout } from "./checkoutCodes";
 import { areSameLineageScopeKeys, clearDodoNavQuery, isNonResumablePaymentData, mergeLineageCheckout, ownsSessionHold, stripDodoReturnFromHistory, syncCheckoutRef, syncHistoryCheckoutBooking } from "./checkoutSessionGuard";
-import { fetchPaymentJson, STORAGE_SAVE_ERROR, verifyProviderLaunchPayload } from "./paymentSessionLocks";
+import { fetchPaymentJson, STORAGE_SAVE_CHANGE_ONLY_ERROR, STORAGE_SAVE_ERROR, verifyProviderLaunchPayload } from "./paymentSessionLocks";
 import { areSameLineageNonces, markReservationTerminal, recordHoldNonceRotation, reservationScopeKey } from "./reservationScope";
 
 export async function runPreApplyCheckoutCodes(c) {
@@ -155,8 +155,8 @@ export const runLegacyDodoStatusCheck = async ({ token, operation, fetchJson = f
     const { response, data } = await fetchJson("/api/payment/status", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: "{}" });
     if (!operation.current()) return;
     const st = str(data?.status).toLowerCase();
-    if (response.ok && (st === "booked" || st === "email_partial")) await onBooked(data, operation);
-    else if (response.ok && data?.manualReviewRequired === true) onManualReview(data.recoveryReason);
+    if (response.ok && (st === "booked" || st === "email_partial") && data?.cleanupPending !== true && data?.manualReviewRequired !== true) await onBooked(data, operation);
+    else if (response.ok && (data?.manualReviewRequired === true || data?.cleanupPending === true)) onManualReview(data.recoveryReason || "Payment is still being verified.");
     else if (response.ok && ["failed", "abandoned", "refunded"].includes(st) && data?.cleanupPending !== true && data?.manualReviewRequired !== true && (st === "refunded" ? data?.terminalOutcomeComplete !== false : data?.terminalOutcomeComplete === true)) onTerminalClear(st, token);
   } finally { if (operation.current()) setBusy(false); }
 };
@@ -288,8 +288,8 @@ export const runPayPalCreateOrder = async ({ paymentActionRef, startSessionCheck
   });
   if (!verified.ok) throw new Error(verified.reason);
   if (!writeStoredPaymentSession(session)) {
-    showBanner("error", STORAGE_SAVE_ERROR, { persistent: true });
-    throw new Error(STORAGE_SAVE_ERROR);
+    showBanner("error", STORAGE_SAVE_CHANGE_ONLY_ERROR, { persistent: true });
+    throw new Error(STORAGE_SAVE_CHANGE_ONLY_ERROR);
   }
   return verified.orderId;
 };
@@ -308,7 +308,7 @@ export const runRazorpayCheckout = async (c) => {
     const verified = verifyProviderLaunchPayload({ provider: "razorpay", payload: rzpSession.providerPayload, expectedAmount: rzpSession.result?.quote?.netAmount ?? c.finalAmount, expectedCurrency: rzpSession.result?.quote?.currency || c.displayQuoteCurrency });
     if (!verified.ok) { c.showBanner("error", verified.reason); return; }
     if (c.writeStoredPaymentSession && !c.writeStoredPaymentSession(rzpSession)) {
-      c.showBanner("error", STORAGE_SAVE_ERROR, { persistent: true });
+      c.showBanner("error", STORAGE_SAVE_CHANGE_ONLY_ERROR, { persistent: true });
       return;
     }
     const paymentAccessToken = rzpSession.paymentAccessToken;

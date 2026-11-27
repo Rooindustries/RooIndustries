@@ -60,7 +60,7 @@ export async function runNewPaymentStart(ctx) {
 
   const { response, data } = await fetchJson("/api/payment/start", { method: "POST", headers: { "Content-Type": "application/json" }, body });
   const moment = eventMoment(), responseStatus = str(data?.status).toLowerCase();
-  const booked = response.ok && data?.ok && ["booked", "email_partial"].includes(responseStatus);
+  const booked = response.ok && data?.ok && ["booked", "email_partial"].includes(responseStatus) && data?.cleanupPending !== true && data?.manualReviewRequired !== true;
   if (booked) trackConfirmedPurchase(data.analyticsReceipt);
   if (response.ok && data?.ok) {
     await countCheckoutStartOnce(data, provider, () => trackCheckoutSessionStarted({ packageTitle: bookingData.packageTitle, price: data.quote?.netAmount, provider, moment }));
@@ -207,7 +207,7 @@ export async function runNewPaymentStart(ctx) {
     persistPaymentSession(committed, true);
   }
   if (provider !== "free" && responseStatus && responseStatus !== "started") {
-    if (data?.manualReviewRequired === true) showBanner("info", data.recoveryReason, { persistent: true });
+    if (data?.manualReviewRequired === true || data?.cleanupPending === true) showBanner("info", data.recoveryReason || "Payment is still being verified.", { persistent: true });
     return { ...committed, terminal: true };
   }
   if (provider !== "free" && committed.providerOrderReady === false) {

@@ -5,12 +5,13 @@ import {
   areSameLineageScopeKeys, clearStoredPaymentSessionState, extractPaymentLockId,
   isPaymentLockReleased, readStoredPaymentSessionState, writeStoredPaymentSessionState,
 } from "./checkoutSessionGuard";
-import { areSameLineageNonces, readScopeMap, recordHoldNonceRotation, reservationScopeKey } from "./reservationScope";
+import { areSameLineageNonces, readScopeMap, recordHoldNonceRotation, reservationScopeKey, walkHoldRotations } from "./reservationScope";
 
-const WATERMARK_KEY = "roo_payment_session_watermarks", RELEASED_KEY = "roo_released_payment_locks";
+const WATERMARK_KEY = "roo_payment_session_watermarks", RELEASED_KEY = "roo_released_payment_locks", ROTATION_KEY = "roo_hold_rotations";
 let nextSessionSeq = 0;
 
 export const STORAGE_SAVE_ERROR = "Your browser could not save this payment session. Checkout has stayed here so you can check its status or change payment method. Allow browser storage and try again to open checkout.";
+export const STORAGE_SAVE_CHANGE_ONLY_ERROR = "Your browser could not save this payment session. Checkout has stayed here so you can change payment method. Allow browser storage and try again to open checkout.";
 
 export const fetchPaymentJson = async (url, options = {}, timeoutMs = 15_000) => {
   const controller = typeof AbortController === "function" ? new AbortController() : null;
@@ -143,18 +144,22 @@ export const doesLiveHoldMatchLineage = (initialHoldId, initialHoldNonce) => {
 };
 
 export const canWriteRefreshedHold = (refreshedHold, initialHoldId, initialHoldNonce) => {
-  const targetId = String(refreshedHold?.slotHoldId || "").trim();
+  const targetId = String(refreshedHold?.slotHoldId || "").trim(), targetN = extractTokenNonce(refreshedHold?.slotHoldToken);
   if (!targetId || !String(refreshedHold?.slotHoldToken || "").trim()) return false;
-  if (initialHoldId) return doesLiveHoldMatchLineage(initialHoldId, initialHoldNonce);
+  if (initialHoldId && !doesLiveHoldMatchLineage(initialHoldId, initialHoldNonce)) return false;
   const live = readLiveSlotHold();
-  if (!live?.holdId) return true;
+  if (!live?.holdId) return !initialHoldId;
   if (String(live.holdId).trim() !== targetId) return false;
-  const liveN = extractTokenNonce(live.holdToken), targetN = extractTokenNonce(refreshedHold.slotHoldToken);
-  return !liveN || !targetN || liveN === targetN || areSameLineageNonces(targetId, liveN, targetN);
+  const liveN = extractTokenNonce(live.holdToken);
+  if (liveN && targetN && targetN !== liveN && walkHoldRotations(targetId, targetN, readScopeMap(ROTATION_KEY), (n) => n === liveN)) return false;
+  return !liveN || !targetN || liveN === targetN || areSameLineageNonces(targetId, liveN, targetN) || Boolean(initialHoldId);
 };
 
 export const persistDetachedStartResult = ({ booking, data, provider, fingerprint, scopeKey, seq, initialHoldId, initialHoldNonce, readStoredCheckout, writeStoredCheckout }) => {
   if (!data?.paymentAccessToken || provider === "free") return null;
+  const latestCheckout = readStoredCheckout ? readStoredCheckout() : null;
+  const latestScope = latestCheckout ? reservationScopeKey(latestCheckout) : "";
+  if (latestScope && scopeKey && !areSameLineageScopeKeys(latestScope, scopeKey)) return null;
   const refreshedHold = data.refreshedHold || data.hold || null;
   if (!booking?.originalOrderId) {
     if (initialHoldId && !doesLiveHoldMatchLineage(initialHoldId, initialHoldNonce)) return null;
@@ -173,8 +178,7 @@ export const persistDetachedStartResult = ({ booking, data, provider, fingerprin
   if (refreshedHold?.slotHoldId && refreshedHold?.slotHoldToken && canWriteRefreshedHold(refreshedHold, initialHoldId, initialHoldNonce)) {
     recordHoldNonceRotation({ slotHoldId: refreshedHold.slotHoldId, fromNonce: initialHoldNonce || booking?.slotHoldToken || "", toNonce: refreshedHold.slotHoldToken });
     const expiresAt = refreshedHold.slotHoldExpiresAt || refreshedHold.expiresAt || "";
-    const latestCheckout = readStoredCheckout ? readStoredCheckout() : null;
-    if (latestCheckout && writeStoredCheckout && areSameLineageScopeKeys(reservationScopeKey(latestCheckout), scopeKey)) {
+    if (latestCheckout && writeStoredCheckout && areSameLineageScopeKeys(latestScope, scopeKey)) {
       writeStoredCheckout({ ...latestCheckout, slotHoldId: refreshedHold.slotHoldId, slotHoldToken: refreshedHold.slotHoldToken, slotHoldExpiresAt: expiresAt });
     }
     try {
