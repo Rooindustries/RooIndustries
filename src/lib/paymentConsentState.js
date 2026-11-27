@@ -117,14 +117,14 @@ export const computeManualDiscountRemoval = ({
   const cur = normalizeCurrencyCode(acceptedQuoteCurrency);
   const bdRef = String(bd.referralCode || "").trim().toLowerCase();
   const bdCpn = String(bd.couponCode || "").trim().toLowerCase();
-  if ((isRef && bdRef !== activeCode) || (!isRef && bdCpn !== activeCode)) {
+  const curRef = String(referral?.code || "").trim().toLowerCase();
+  const curCpn = String(coupon?.code || "").trim().toLowerCase();
+  if ((isRef && bdRef !== activeCode) || (!isRef && bdCpn !== activeCode) || curRef !== bdRef || curCpn !== bdCpn) {
     return { delta: 0, nextAcceptedQuoteTotal: acceptedQuoteTotal, nextBreakdown: bd };
   }
   const gross = Math.max(0, toMoney(bd.grossAmount ?? 0, cur));
   const netWith = Math.max(0, toMoney(bd.netAmount ?? 0, cur));
-  const keepOther = isRef
-    ? Boolean(coupon?.code && bdCpn && bdCpn === String(coupon.code).trim().toLowerCase())
-    : Boolean(referral?.code && bdRef && bdRef === String(referral.code).trim().toLowerCase());
+  const keepOther = isRef ? Boolean(bdCpn) : Boolean(bdRef);
   let remOtherDisc = 0;
   let netWithout;
   if (keepOther) {

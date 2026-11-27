@@ -297,7 +297,12 @@ export default function Payment({ hideFooter = false }) {
   const runConsentAction = (name, arg) => {
     const mod = consentModRef.current;
     if (mod) return mod.createPaymentConsentActions(consentCtxRef.current)[name](arg);
-    return loadConsentPanel().then((m) => { consentModRef.current = m; return m.createPaymentConsentActions(consentCtxRef.current)[name](arg); }).catch(() => {});
+    const scope = currentScopeKeyRef.current;
+    return loadConsentPanel().then((m) => {
+      consentModRef.current = m;
+      if (!paymentMountedRef.current || !areSameLineageScopeKeys(currentScopeKeyRef.current, scope)) return;
+      return m.createPaymentConsentActions(consentCtxRef.current)[name](arg);
+    }).catch(() => {});
   };
   const applyAuthoritativeQuote = (arg) => runConsentAction("applyAuthoritativeQuote", arg);
   const handleAcceptQuoteHold = (hold) => runConsentAction("handleAcceptQuoteHold", hold);
