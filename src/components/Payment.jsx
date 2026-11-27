@@ -463,11 +463,8 @@ export default function Payment({ hideFooter = false }) {
   );
   const dodoReopenBlocked =
     lockedProvider === "dodo" &&
-    (paymentSession?.providerOrderReady === false ||
-      paymentSession?.result?.providerOrderReady === false ||
-      paymentSession?.result?.cleanupPending === true ||
-      paymentSession?.result?.attemptStarted === true ||
-      !String(paymentSession?.providerPayload?.checkoutUrl || "").trim());
+    (paymentSession?.result?.cleanupPending === true ||
+      paymentSession?.result?.attemptStarted === true);
   useBookingDialogPending(!hydrated || !providersSettled || (Boolean(packageTitle) && !isForeignFingerprint && !usingUnresolvedFallback && !quoteSettled));
 
   const paymentMountedRef = useRef(true);

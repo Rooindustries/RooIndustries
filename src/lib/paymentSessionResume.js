@@ -85,6 +85,9 @@ export async function runResumePaymentSession(ctx) {
   }
   const resumeScopeKey = resolveSessionScopeKey(storedActive, currentScopeKeyRef?.current);
   const token = storedActive.paymentAccessToken;
+  const liveHoldAtStart = readLiveSlotHold();
+  const initialHoldId = str(liveHoldAtStart?.holdId);
+  const initialHoldNonce = str(liveHoldAtStart?.holdToken);
   const statusSeq = allocatePaymentSessionSeq();
   const resumeSeq = (paymentActionRef.current.seq += 1);
   const [outcomeMod, { response, data }] = await Promise.all([
@@ -106,7 +109,7 @@ export async function runResumePaymentSession(ctx) {
   if (affirmativeRelease) {
     const wasCurrent = operation.current() && !act.cancelling && resumeSeq === act.seq;
     const owns = Boolean(
-      checkoutMatches && (
+      checkoutMatches && flow.ownsHold(storedActive) && (
         outcomeMod.isLiveHoldOwnedBySession(storedActive, readLiveSlotHold()) ||
         outcomeMod.sessionOwnsCheckoutBooking(storedActive, readStoredCheckout?.()) ||
         outcomeMod.sessionOwnsCheckoutBooking(storedActive, bookingData)
@@ -116,7 +119,7 @@ export async function runResumePaymentSession(ctx) {
       ? outcomeMod.applyCancelRefreshedHold({
           activeSession: storedActive, refreshedHold: data?.refreshedHold || null,
           storedCheckout: readStoredCheckout?.(), liveHold: readLiveSlotHold(),
-          initialHoldId: "", initialHoldNonce: "", bookingData, packageTitle, packagePrice,
+          initialHoldId, initialHoldNonce, bookingData, packageTitle, packagePrice,
           setSessionHold, writeStoredCheckout,
         }).refreshedCheckout
       : null;
@@ -232,6 +235,9 @@ export async function runCheckPaymentStatus(ctx) {
   const token = str(activeSession?.paymentAccessToken);
   if (!token || !operation.current()) return null;
   const scopeKey = resolveSessionScopeKey(activeSession, currentScopeKeyRef?.current);
+  const liveHoldAtStart = readLiveSlotHold();
+  const initialHoldId = str(liveHoldAtStart?.holdId);
+  const initialHoldNonce = str(liveHoldAtStart?.holdToken);
   const statusSeq = allocatePaymentSessionSeq();
   setPaymentStatusBusy(true);
   try {
@@ -254,7 +260,7 @@ export async function runCheckPaymentStatus(ctx) {
         ? outcomeMod.applyCancelRefreshedHold({
             activeSession, refreshedHold: data?.refreshedHold || null,
             storedCheckout: readStoredCheckout?.(), liveHold: readLiveSlotHold(),
-            initialHoldId: "", initialHoldNonce: "", bookingData, packageTitle, packagePrice,
+            initialHoldId, initialHoldNonce, bookingData, packageTitle, packagePrice,
             setSessionHold, writeStoredCheckout,
           }).refreshedCheckout
         : null;
@@ -396,7 +402,6 @@ export async function runChangePaymentMethod(ctx) {
       operation.token = "";
       return;
     }
-    if (!cancelCurrent()) return;
     const { ownsCheckout, ownsLiveHold, refreshedCheckout } = outcomeMod.applyCancelRefreshedHold({
       activeSession, refreshedHold: data.refreshedHold || null, storedCheckout: readStoredCheckout(),
       liveHold: readLiveSlotHold(), initialHoldId, initialHoldNonce, bookingData, packageTitle,
@@ -437,6 +442,9 @@ export async function runFinalizeSessionCheckout(ctx) {
   const storedAtCall = readStoredPaymentSessionState();
   const resolvedSession = activeSession || (storedAtCall?.paymentAccessToken && extractPaymentLockId(storedAtCall.paymentAccessToken) === extractPaymentLockId(paymentAccessToken) ? storedAtCall : null);
   const scopeKey = str(explicitScopeKey) || resolveSessionScopeKey(resolvedSession, captured ? "" : currentScopeKeyRef?.current);
+  const liveHoldAtStart = readLiveSlotHold();
+  const initialHoldId = str(liveHoldAtStart?.holdId);
+  const initialHoldNonce = str(liveHoldAtStart?.holdToken);
   const finSeq = allocatePaymentSessionSeq();
   if (operation.current()) setPaymentStatusBusy(true);
 
@@ -448,7 +456,7 @@ export async function runFinalizeSessionCheckout(ctx) {
       ? outcomeMod.applyCancelRefreshedHold({
           activeSession: targetSession, refreshedHold: payload?.refreshedHold || null,
           storedCheckout: readStoredCheckout?.(), liveHold: readLiveSlotHold(),
-          initialHoldId: "", initialHoldNonce: "", bookingData, packageTitle, packagePrice,
+          initialHoldId, initialHoldNonce, bookingData, packageTitle, packagePrice,
           setSessionHold, writeStoredCheckout,
         }).refreshedCheckout
       : null;
