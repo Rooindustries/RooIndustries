@@ -31,7 +31,7 @@ export async function runNewPaymentStart(ctx) {
     setProviderConfig, selectQuoteProvider, showBanner, setSessionHold, showConfirmation, persistPaymentSession,
     stripReservedCode, writeStoredReferral, setReferral, setReferralInput, setCoupon, setCouponInput, setReferralError,
     setCouponError, paymentStartBody, countCheckoutStartOnce, eventMoment, trackCheckoutSessionStarted, trackConfirmedPurchase,
-    consentStateRef, onAuthoritativeQuote,
+    referralRef, couponRef, consentStateRef, onAuthoritativeQuote,
   } = ctx;
 
   if (quoteLoading || !startQuoteFp) throw new Error("Checkout price is still being confirmed. Please try again.");
@@ -157,9 +157,12 @@ export async function runNewPaymentStart(ctx) {
       publishPendingHold(claimed.refreshedHold, hasCodeFields ? { referralCode, couponCode, code: 1 } : null);
       if (hasCodeFields) {
         writeStoredReferral(referralCode);
-        setReferral(referralCode ? { code: referralCode, discountPercent: num(q?.referralDiscountPercent) } : null); setReferralInput(referralCode);
-        setCoupon(couponCode ? { code: couponCode, discountType: str(q?.couponDiscountType) || "percent", discountPercent: num(q?.couponDiscountPercent), discountValue: num(q?.couponDiscountValue), canCombineWithReferral: q?.canCombineWithReferral !== false } : null);
-        setCouponInput(couponCode); setReferralError(""); setCouponError("");
+        const nextRef = referralCode ? { code: referralCode, currentDiscountPercent: num(q?.referralDiscountPercent) } : null;
+        const nextCpn = couponCode ? { code: couponCode, discountType: str(q?.couponDiscountType) || "percent", discountPercent: num(q?.couponDiscountPercent), discountAmount: num(q?.couponDiscountValue), canCombineWithReferral: q?.canCombineWithReferral !== false } : null;
+        if (referralRef) referralRef.current = nextRef;
+        if (couponRef) couponRef.current = nextCpn;
+        setReferral(nextRef); setReferralInput(referralCode);
+        setCoupon(nextCpn); setCouponInput(couponCode); setReferralError(""); setCouponError("");
       }
       if (q) setServerQuote(q);
       const claimedFp = str(claimed.quoteFingerprint);

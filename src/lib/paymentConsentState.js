@@ -1,21 +1,43 @@
-import { removeBrowserStorage } from "./browserStorage";
 import { normalizeCurrencyCode, toMoney } from "./checkoutCodes";
 import { areSameLineageScopeKeys, mergeLineageCheckout, syncHistoryCheckoutBooking } from "./checkoutSessionGuard";
-import { clearBookingConfirmation, createBookingConfirmation } from "./confirmationReceipt";
-import { markReservationTerminal } from "./reservationScope";
 
-const parseFiniteMoney = (value) => {
-  if (typeof value === "number") return Number.isFinite(value) && value >= 0 ? value : null;
-  if (typeof value === "string" && value.trim() !== "") {
-    const num = Number(value);
-    return Number.isFinite(num) && num >= 0 ? num : null;
-  }
-  return null;
+const finiteNonNeg = (v) => {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? n : null;
 };
 
-const explicitCurrency = (value) => {
-  const code = String(value || "").trim().toUpperCase();
-  return /^[A-Z]{3}$/.test(code) ? normalizeCurrencyCode(code) : "";
+const explicitCur = (v) => {
+  const c = String(v || "").trim().toUpperCase();
+  return /^[A-Z]{3}$/.test(c) ? normalizeCurrencyCode(c) : "";
+};
+
+export const resolveInitialConsentBaseline = (b = {}) => {
+  const rawExp = finiteNonNeg(b?.expectedClientTotal), rawAcc = finiteNonNeg(b?.acceptedQuoteTotal);
+  const expCur = explicitCur(b?.expectedClientCurrency), accCur = explicitCur(b?.acceptedQuoteCurrency);
+  if (rawAcc === null && rawExp === null && b?.packagePrice) {
+    const c = accCur || expCur || "USD", a = Math.max(0, toMoney(b.packagePrice, c));
+    if (a > 0) return { expectedClientTotal: a, expectedClientCurrency: c, acceptedQuoteTotal: a, acceptedQuoteCurrency: c, acceptedServerQuoteBreakdown: null };
+  }
+  const eCur = expCur || accCur || (rawExp !== null ? "USD" : ""), aCur = accCur || expCur || (rawAcc !== null || rawExp !== null ? "USD" : "");
+  const eTot = rawExp !== null ? toMoney(rawExp, eCur || "USD") : null;
+  const aTot = rawAcc !== null ? toMoney(rawAcc, aCur || "USD") : (eTot !== null ? toMoney(eTot, aCur || "USD") : null);
+  return {
+    expectedClientTotal: eTot,
+    expectedClientCurrency: eTot !== null ? eCur || "USD" : "",
+    acceptedQuoteTotal: aTot,
+    acceptedQuoteCurrency: aTot !== null ? aCur || "USD" : "",
+    acceptedServerQuoteBreakdown: b?.acceptedServerQuoteBreakdown && typeof b.acceptedServerQuoteBreakdown === "object" ? b.acceptedServerQuoteBreakdown : null,
+  };
+};
+
+export const ensureConsentBaseline = (c) => {
+  const scope = c.currentScopeKeyRef.current;
+  if (!areSameLineageScopeKeys(c.consentScopeRef.current, scope)) {
+    c.consentScopeRef.current = scope;
+    c.consentStateRef.current = resolveInitialConsentBaseline(c.bookingData);
+  }
+  return c.consentStateRef.current;
 };
 
 export const buildConfirmedQuoteBreakdown = (
@@ -30,6 +52,12 @@ export const buildConfirmedQuoteBreakdown = (
   const couponDiscountPercent = Math.max(0, Number(quote.couponDiscountPercent ?? coupon?.discountPercent ?? 0) || 0);
   const rawType = String(quote.couponDiscountType || coupon?.discountType || "").trim().toLowerCase();
   const couponDiscountType = rawType === "fixed" || rawType === "percent" ? rawType : couponDiscountPercent > 0 ? "percent" : "fixed";
+  const serverFixedVal = finiteNonNeg(quote.couponDiscountValue);
+  const couponFixedAmount = couponDiscountType === "fixed"
+    ? (serverFixedVal !== null
+      ? toMoney(serverFixedVal, currency)
+      : (couponDiscountAmount < grossAmount ? couponDiscountAmount : null))
+    : 0;
   return {
     currency,
     grossAmount,
@@ -41,47 +69,8 @@ export const buildConfirmedQuoteBreakdown = (
     couponDiscountAmount,
     couponDiscountType,
     couponDiscountPercent,
-    couponFixedAmount: coupon?.discountType === "fixed"
-      ? Math.max(0, toMoney(coupon.discountAmount || 0, currency))
-      : couponDiscountType === "fixed"
-        ? couponDiscountAmount
-        : 0,
+    couponFixedAmount,
   };
-};
-
-export const resolveInitialConsentBaseline = (bookingData = {}) => {
-  if (!bookingData || typeof bookingData !== "object") {
-    return { expectedClientTotal: null, expectedClientCurrency: "", acceptedQuoteTotal: null, acceptedQuoteCurrency: "", acceptedServerQuoteBreakdown: null };
-  }
-  const rawExpected = parseFiniteMoney(bookingData.expectedClientTotal);
-  const rawAccepted = parseFiniteMoney(bookingData.acceptedQuoteTotal);
-  const expCur = explicitCurrency(bookingData.expectedClientCurrency);
-  const accCur = explicitCurrency(bookingData.acceptedQuoteCurrency);
-  if (bookingData.originalOrderId && rawAccepted === null && rawExpected === null && bookingData.packagePrice) {
-    const legacyCur = accCur || expCur || "USD";
-    const legacyAmt = Math.max(0, toMoney(bookingData.packagePrice, legacyCur));
-    return { expectedClientTotal: legacyAmt, expectedClientCurrency: legacyCur, acceptedQuoteTotal: legacyAmt, acceptedQuoteCurrency: legacyCur, acceptedServerQuoteBreakdown: null };
-  }
-  const expectedCur = expCur || accCur || (rawExpected !== null ? "USD" : "");
-  const acceptedCur = accCur || expCur || (rawAccepted !== null || rawExpected !== null ? "USD" : "");
-  const expectedTotal = rawExpected !== null ? toMoney(rawExpected, expectedCur || "USD") : null;
-  const acceptedTotal = rawAccepted !== null ? toMoney(rawAccepted, acceptedCur || "USD") : expectedTotal !== null ? toMoney(expectedTotal, acceptedCur || "USD") : null;
-  return {
-    expectedClientTotal: expectedTotal,
-    expectedClientCurrency: expectedTotal !== null ? expectedCur || "USD" : "",
-    acceptedQuoteTotal: acceptedTotal,
-    acceptedQuoteCurrency: acceptedTotal !== null ? acceptedCur || "USD" : "",
-    acceptedServerQuoteBreakdown: bookingData.acceptedServerQuoteBreakdown && typeof bookingData.acceptedServerQuoteBreakdown === "object" ? bookingData.acceptedServerQuoteBreakdown : null,
-  };
-};
-
-export const quoteExceedsAcceptedCeiling = ({ quote, acceptedQuoteTotal, acceptedQuoteCurrency }) => {
-  if (!quote || typeof quote !== "object" || acceptedQuoteTotal === null || !acceptedQuoteCurrency) return false;
-  const qCur = normalizeCurrencyCode(quote.currency || "USD");
-  const aCur = normalizeCurrencyCode(acceptedQuoteCurrency);
-  if (qCur !== aCur) return true;
-  const qNet = quote.isFree === true ? 0 : Math.max(0, toMoney(quote.netAmount ?? 0, qCur));
-  return qNet > toMoney(acceptedQuoteTotal, aCur);
 };
 
 export const reconcileAuthoritativeQuote = ({
@@ -140,13 +129,19 @@ export const computeManualDiscountRemoval = ({
   if (keepOther) {
     if (isRef) {
       const cpnType = String(bd.couponDiscountType || coupon?.discountType || "percent").toLowerCase();
-      const cpnPct = Number(bd.couponDiscountPercent || coupon?.discountPercent || 0);
-      const cpnFixed = Number(bd.couponFixedAmount || coupon?.discountAmount || bd.couponDiscountAmount || 0);
-      remOtherDisc = cpnType === "fixed"
-        ? Math.min(gross, Math.max(0, toMoney(cpnFixed, cur)))
-        : cpnPct > 0
+      if (cpnType === "fixed") {
+        const cpnFixed = finiteNonNeg(bd.couponFixedAmount);
+        if (cpnFixed === null) {
+          const nextBreakdown = { ...bd, referralCode: "", referralDiscountAmount: 0, referralDiscountPercent: 0 };
+          return { delta: 0, nextAcceptedQuoteTotal: acceptedQuoteTotal, nextBreakdown };
+        }
+        remOtherDisc = Math.min(gross, toMoney(cpnFixed, cur));
+      } else {
+        const cpnPct = Number(bd.couponDiscountPercent || coupon?.discountPercent || 0);
+        remOtherDisc = cpnPct > 0
           ? Math.min(gross, Math.max(0, toMoney(gross * (cpnPct / 100), cur)))
           : Math.min(gross, Math.max(0, toMoney(bd.couponDiscountAmount || 0, cur)));
+      }
     } else {
       const refPct = Number(bd.referralDiscountPercent || referral?.currentDiscountPercent || 0);
       remOtherDisc = refPct > 0
@@ -174,7 +169,7 @@ export const createPaymentConsentActions = (c) => {
   const applyAuthoritativeQuote = ({ quote, quoteVersion, quoteFingerprint: qFp, scopeKey }) => {
     if (!quote || !areSameLineageScopeKeys(c.currentScopeKeyRef.current, scopeKey)) return;
     if (quoteVersion !== undefined && quoteVersion !== c.quoteVersionRef.current) return;
-    const cur = c.consentStateRef.current;
+    const cur = ensureConsentBaseline(c);
     const rec = reconcileAuthoritativeQuote({
       quote, quoteVersion, quoteFingerprint: qFp, scopeKey,
       acceptedQuoteTotal: cur.acceptedQuoteTotal, acceptedQuoteCurrency: cur.acceptedQuoteCurrency,
@@ -190,6 +185,7 @@ export const createPaymentConsentActions = (c) => {
     }
   };
   const handleAcceptQuoteHold = (hold) => {
+    ensureConsentBaseline(c);
     if (!hold || c.quoteHoldRef.current !== hold || !areSameLineageScopeKeys(hold.scopeKey, c.currentScopeKeyRef.current) || hold.quoteVersion !== c.quoteVersionRef.current) return;
     if (hold.quoteFingerprint && c.quoteFingerprintRef.current && hold.quoteFingerprint !== c.quoteFingerprintRef.current) return;
     if (String(hold.referralCode || "").trim().toLowerCase() !== String(c.referralRef.current?.code || "").trim().toLowerCase()) return;
@@ -204,7 +200,7 @@ export const createPaymentConsentActions = (c) => {
     const isRef = slot === "referral";
     if (!c.manualCodeAllowedRef.current || c.checkingCode || !(isRef ? c.referral : c.coupon)) return;
     c.validationGenRef.current += 1; c.quoteVersionRef.current += 1; c.lastQuoteKeyRef.current = "";
-    const cur = c.consentStateRef.current;
+    const cur = ensureConsentBaseline(c);
     const removed = computeManualDiscountRemoval({ slot, acceptedQuoteTotal: cur.acceptedQuoteTotal, acceptedQuoteCurrency: cur.acceptedQuoteCurrency, acceptedServerQuoteBreakdown: cur.acceptedServerQuoteBreakdown, referral: c.referral, coupon: c.coupon });
     const extra = { acceptedQuoteTotal: removed.nextAcceptedQuoteTotal, acceptedQuoteCurrency: cur.acceptedQuoteCurrency, acceptedServerQuoteBreakdown: removed.nextBreakdown };
     c.consentStateRef.current = { ...cur, ...extra };
@@ -219,18 +215,97 @@ export const createPaymentConsentActions = (c) => {
     c.skipPreApplyKeyRef.current = `${c.activeReservationKeyRef.current}|${next.referralCode}|${next.couponCode}|${search}`;
     c.navigate({ pathname: loc.pathname, search, hash: loc.hash }, { replace: true, state: { ...latestNav, bookingData: next } });
   };
-  return { applyAuthoritativeQuote, handleAcceptQuoteHold, handleRemoveDiscount };
+  const changePaymentMethod = async (existingOp = null) => {
+    const blocked = c.paymentBusy || c.payingDodo || c.payingRzp || c.pendingStartCount > 0 || c.pendingStartsRef.current.length > 0;
+    let m;
+    try { m = await c.loadCheckoutHold(); } catch {
+      c.showBanner("error", "The payment method could not be changed. Please try again.", { persistent: true });
+      return;
+    }
+    const flow = m.createCheckoutFlow(c.checkoutFlowCtxRef.current);
+    const cancel = flow.beginCancel(c.createPaymentOperation, blocked, existingOp);
+    if (!cancel) return;
+    await m.runChangePaymentMethod({
+      ...c.checkoutFlowCtxRef.current, cancel, currentScopeKeyRef: c.currentScopeKeyRef, setCancellingPayment: c.setCancellingPayment,
+      navigateToConfirmation: c.navigateToConfirmation, showBanner: c.showBanner, clearPaymentSession: c.clearPaymentSession,
+      manualCodeAllowedRef: c.manualCodeAllowedRef, flow,
+    });
+  };
+  const checkPaymentStatus = async () => {
+    const activeSession = c.readStoredPaymentSession() || c.paymentSession;
+    const token = String(activeSession?.paymentAccessToken || "").trim();
+    if (!token || c.paymentStatusBusy || c.cancellingPayment || c.paymentActionRef.current.cancelling) return;
+    if (!(activeSession?.providerOrderReady === false || activeSession?.result?.providerOrderReady === false)) {
+      c.finalizeSessionCheckout({ paymentAccessToken: token, providerData: {} }).catch((error) =>
+        c.showBanner("error", error?.message || "Unable to load payment status. Please try again.")
+      );
+      return;
+    }
+    const operation = c.createPaymentOperation(token);
+    if (!operation.current()) return;
+    c.loadCheckoutHold()
+      .then((m) => operation.current() && m.runCheckPaymentStatus({
+        activeSession, operation, currentScopeKeyRef: c.currentScopeKeyRef, setPaymentStatusBusy: c.setPaymentStatusBusy,
+        navigateToConfirmation: c.navigateToConfirmation, showBanner: c.showBanner, clearPaymentSession: c.clearPaymentSession,
+        persistPaymentSession: c.persistPaymentSession, flow: m.createCheckoutFlow(c.checkoutFlowCtxRef.current),
+      }))
+      .catch((error) => { if (operation.current()) c.showBanner("error", error?.message || "Unable to load payment status. Please try again."); });
+  };
+  const validateCode = ({ slot, code }) => {
+    const isRef = slot === "referral", scopeKey = c.currentScopeKeyRef.current;
+    return c.loadCheckoutHold()
+      .then((m) => (isRef ? m.runValidateReferral : m.runValidateCoupon)(code, { ...c, scopeKey }, m.createCheckoutFlow(c.checkoutFlowCtxRef.current)))
+      .catch(() => {
+        if (c.currentScopeKeyRef.current === scopeKey) {
+          (isRef ? c.setReferralError : c.setCouponError)(isRef ? "We couldn't validate that referral code. Please try again." : "We couldn't validate that coupon code. Please try again.");
+        }
+      });
+  };
+  return { applyAuthoritativeQuote, handleAcceptQuoteHold, handleRemoveDiscount, changePaymentMethod, checkPaymentStatus, validateCode };
 };
 
-export const createConfirmationNavigationState = ({ responseBody = {}, baseState, scopeKey, holdExpiryHandledRef, writeStoredCheckout }) => {
-  const bookingId = String(responseBody?.bookingId || "").trim();
-  holdExpiryHandledRef.current = true;
-  markReservationTerminal(scopeKey, responseBody?.status || "booked");
-  writeStoredCheckout(null);
+export const fetchPaymentProviders = ({ req, hasPaypalClientId, paypalClientIdFromEnv, setProviderAvailabilityKnown, setProviderConfig, setProvidersSettled, isActive, isSuperseded }) =>
+  req
+    .then((res) => {
+      if (!isActive() || isSuperseded?.()) return;
+      if (!res?.ok) {
+        if (typeof window === "undefined") return;
+        const host = String(window.location.hostname || "").toLowerCase();
+        if ((host === "localhost" || host === "127.0.0.1") && hasPaypalClientId) {
+          setProviderConfig((prev) => ({ ...prev, paypal: { enabled: true, mode: "sandbox", clientId: prev?.paypal?.clientId || paypalClientIdFromEnv } }));
+        }
+        return;
+      }
+      const data = res.data;
+      if (!data?.ok || !data?.providers) return;
+      setProviderAvailabilityKnown(["dodo", "razorpay", "paypal"].every((p) => typeof data.providers[p]?.enabled === "boolean"));
+      setProviderConfig({
+        dodo: { enabled: !!data.providers?.dodo?.enabled, mode: data.providers?.dodo?.mode || "missing", currency: data.providers?.dodo?.currency || "USD" },
+        razorpay: { enabled: !!data.providers?.razorpay?.enabled, mode: data.providers?.razorpay?.mode || "unknown", currency: data.providers?.razorpay?.currency || "USD", disabledReason: String(data.providers?.razorpay?.disabledReason || "").trim() },
+        paypal: { enabled: !!data.providers?.paypal?.enabled, mode: data.providers?.paypal?.mode || "unknown", currency: data.providers?.paypal?.currency || "USD", clientId: String(data.providers?.paypal?.clientId || "").trim() },
+      });
+    })
+    .finally(() => { if (isActive()) setProvidersSettled(true); });
+
+export const runPayPalApprove = async (data, actions, c) => {
+  const activeSession = c.getActivePaymentSession("paypal");
+  const tokenScopeKey = activeSession?.scopeKey || c.currentScopeKeyRef.current;
+  const operation = c.createPaymentOperation(activeSession?.paymentAccessToken);
+  if (!activeSession?.paymentAccessToken || !operation.current() || !c.ensureSlotBeforeAction()) return;
+  c.paymentActionRef.current.seq += 1;
+  c.setPaymentStatusBusy(true);
   try {
-    removeBrowserStorage("sessionStorage", "my_slot_hold");
-    window.dispatchEvent(new CustomEvent("hold-state", { detail: null }));
-  } catch {}
-  if (!bookingId) { clearBookingConfirmation(); return baseState; }
-  return { ...(baseState || {}), bookingConfirmation: createBookingConfirmation(responseBody) };
+    const details = await actions.order.capture();
+    await c.finalizeSessionCheckout({
+      operation, captured: true, scopeKey: tokenScopeKey,
+      paymentAccessToken: String(activeSession.paymentAccessToken).trim(),
+      providerData: { paypalOrderId: details?.id || data?.orderID || "", payerEmail: details?.payer?.email_address || "" },
+    });
+  } catch {
+    if (!operation.current()) return;
+    console.error("PayPal booking finalization failed");
+    c.showBanner("error", "Payment succeeded but something went wrong saving your booking. Please contact support.");
+  } finally {
+    if (operation.current()) c.setPaymentStatusBusy(false);
+  }
 };

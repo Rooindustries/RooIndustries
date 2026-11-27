@@ -1,6 +1,7 @@
 import React from "react";
 import { formatCheckoutAmount } from "../lib/checkoutCodes";
-export { createConfirmationNavigationState, createPaymentConsentActions } from "../lib/paymentConsentState";
+export { countCheckoutStartOnce, paymentStartBody, snapPaymentStart } from "../lib/paymentStartBody";
+export { createPaymentConsentActions, ensureConsentBaseline, fetchPaymentProviders, runPayPalApprove } from "../lib/paymentConsentState";
 
 export default function PaymentConsentPanel({
   quoteHold,

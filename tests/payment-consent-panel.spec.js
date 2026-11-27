@@ -206,20 +206,23 @@ test("late quote after Manual Remove neither restores code nor resets removal au
   let holdPriorQuote = false;
   let releasePriorQuote;
   const priorQuoteGate = new Promise((resolve) => { releasePriorQuote = resolve; });
+  let markPriorQuoteEntered;
+  const priorQuoteEntered = new Promise((resolve) => { markPriorQuoteEntered = resolve; });
   let failQuote = false;
-  let quoteCount = 0;
 
   await flow.review();
   await flow.payment();
 
   await page.route("**/api/payment/quote", async (route) => {
-    quoteCount += 1;
     const body = route.request().postDataJSON() || {};
     if (failQuote) {
       return route.fulfill({ status: 500, json: { ok: false, error: "Quote unavailable" } });
     }
     if (body.referralCode === "friend" && body.couponCode === "save20") {
-      if (holdPriorQuote) await priorQuoteGate;
+      if (holdPriorQuote) {
+        markPriorQuoteEntered();
+        await priorQuoteGate;
+      }
       return route.fulfill({
         json: {
           ok: true,
@@ -271,13 +274,9 @@ test("late quote after Manual Remove neither restores code nor resets removal au
   await expect(page.getByText("$72.00 USD")).toBeVisible();
 
   holdPriorQuote = true;
-  const beforeRetryCount = quoteCount;
-  await page.evaluate(() => {
-    window.dispatchEvent(new Event("online"));
-  });
-  await page.locator("#payment-referral-code").fill("friend");
-  await page.locator("#payment-referral-code").locator("..").getByRole("button", { name: "Apply", exact: true }).click();
-  await expect.poll(() => quoteCount).toBeGreaterThanOrEqual(beforeRetryCount);
+  await page.reload();
+  await priorQuoteEntered;
+  await expect(page.getByRole("button", { name: "Remove referral code", exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Remove referral code", exact: true }).click();
   releasePriorQuote();
