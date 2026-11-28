@@ -49,7 +49,7 @@ test("tightened quote ceiling persists across reload and requires explicit accep
   });
 
   await page.reload();
-  await expect(page.getByText("$80.00 USD")).toBeVisible();
+  await expect(page.getByText("$80.00 USD", { exact: true })).toBeVisible();
   const tightened = await page.evaluate(() => JSON.parse(sessionStorage.getItem("checkout_booking_state") || "{}"));
   expect(tightened.acceptedQuoteTotal).toBe(80);
   expect(tightened.expectedClientTotal).toBe(100);
@@ -271,7 +271,7 @@ test("late quote after Manual Remove neither restores code nor resets removal au
   });
 
   await page.reload();
-  await expect(page.getByText("$72.00 USD")).toBeVisible();
+  await expect(page.getByText("$72.00 USD", { exact: true })).toBeVisible();
 
   holdPriorQuote = true;
   await page.reload();
@@ -352,7 +352,7 @@ test("fixed coupon missing both couponDiscountValue and couponDiscountAmount fai
   });
 
   await page.reload();
-  await expect(page.getByText("$72.00 USD")).toBeVisible();
+  await expect(page.getByText("$72.00 USD", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Remove referral code", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Remove coupon", exact: true })).toBeVisible();
   await expect.poll(() =>

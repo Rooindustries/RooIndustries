@@ -176,7 +176,7 @@ test("mixed-provider retry persists selectedQuoteProvider and ignores late respo
 
   await flow.review();
   await flow.payment();
-  await expect(page.getByText("$84.99 USD")).toBeVisible();
+  await expect(page.getByText("$84.99 USD", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: /Razorpay/i }).click();
   await expect.poll(() => startCount).toBe(1);
@@ -200,10 +200,10 @@ test("mixed-provider retry persists selectedQuoteProvider and ignores late respo
 
   await expect.poll(() => quoteBodies.some((b) => b.startTimeUTC === "2099-03-02T10:00:00.000Z")).toBe(true);
   releaseDelayedMismatch();
-  await expect(page.getByText("$84.99 USD")).toBeVisible();
+  await expect(page.getByText("$84.99 USD", { exact: true })).toBeVisible();
 
   await page.reload();
-  await expect(page.getByText("$84.99 USD")).toBeVisible();
+  await expect(page.getByText("$84.99 USD", { exact: true })).toBeVisible();
   const persistedProv = await page.evaluate(() => sessionStorage.getItem("roo_selected_quote_provider"));
   expect(persistedProv).toBeNull();
 });
