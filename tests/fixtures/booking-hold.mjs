@@ -322,7 +322,7 @@ export async function createBookingHoldFixture() {
     return { baseURL, post, get, hold, start, nextSlotDate, commerce, content, sql: database.sql, details, evidence, save, stop,
       setPaymentStatus, holdRunsOut, restoreClock, reconcile, paymentSucceeded, setPackageSlots, restoreSettings,
       paymentRecord, patchPaymentRecord, createBooking, setHoldPhase, snapshot, setSlots, slotAt, nearSlot, extraSlot, resetRateLimits, rateWindow, expireHold,
-      commandCount, setFault, clearFault };
+      commandCount, setFault, clearFault, setRequestHook: database.setRequestHook };
   } catch (error) { await stop(); throw error; }
 }
 

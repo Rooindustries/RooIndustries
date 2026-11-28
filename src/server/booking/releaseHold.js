@@ -12,6 +12,18 @@ const createReleaseClient = (backendOverride) =>
     { backendOverride, domain: "commerce" }
   );
 
+const fetchHoldById = async (client, holdId) => {
+  if (typeof client.getDocumentsByIds === "function") {
+    const docs = await client.getDocumentsByIds([holdId], {
+      documentTypes: ["slotHold"],
+    });
+    return docs.find((doc) => doc?._id === holdId) || null;
+  }
+  return client.fetch(`*[_type == "slotHold" && _id == $id][0]`, {
+    id: holdId,
+  });
+};
+
 export default async function handler(req, res) {
   if (String(req?.method || "").toUpperCase() !== "POST") {
     return res.status(405).json({ message: "Method not allowed" });
@@ -46,9 +58,7 @@ export default async function handler(req, res) {
   const client = createReleaseClient(backend);
 
   try {
-    const hold = await client.fetch(`*[_type == "slotHold" && _id == $id][0]`, {
-      id: holdId,
-    });
+    const hold = await fetchHoldById(client, holdId);
     if (!hold) {
       return res.status(404).json({ ok: false, message: "Hold not found" });
     }
@@ -83,7 +93,7 @@ export default async function handler(req, res) {
         expiresAt: releasedAt,
         holdNonce: crypto.randomUUID(),
       })
-      .commit({});
+      .commit({ baseDocument: hold });
     return res.status(200).json({ ok: true, message: "Hold released" });
   } catch (error) {
     if (Number(error?.statusCode || error?.status || 0) === 409) {
