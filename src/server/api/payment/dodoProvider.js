@@ -100,7 +100,8 @@ export const createDodoCheckout = async ({ record, lookupOnly = false }) => {
 };
 
 export const validateDodoCaptureCore = ({ record, payment }) => {
-  const fail = (reason) => ({ ok: false, captured: payment?.status === "succeeded", retryable: false, reason });
+  const captured = payment?.status === "succeeded";
+  const fail = (reason) => ({ ok: false, captured, retryable: false, reason });
   if (!payment?.payment_id || payment.checkout_session_id !== record.providerOrderId ||
       payment.metadata?.paymentRecordId !== record._id ||
       (record.providerPaymentId && record.providerPaymentId !== payment.payment_id)) {
@@ -109,6 +110,7 @@ export const validateDodoCaptureCore = ({ record, payment }) => {
   if (record.providerPublicData?.environment !== read("DODO_PAYMENTS_ENVIRONMENT")) {
     return fail("dodo_environment_mismatch");
   }
+  if (!captured) return { ok: true };
   if (payment.currency !== DODO_CURRENCY ||
       payment.currency !== record.providerPublicData?.currency) return fail("dodo_currency_mismatch");
   const addedTax = record.providerPublicData?.taxInclusive === false ? payment.tax ?? 0 : 0;
@@ -119,9 +121,8 @@ export const validateDodoCaptureCore = ({ record, payment }) => {
     return fail("dodo_amount_mismatch");
   }
   const cart = payment.product_cart;
-  if (payment.status === "succeeded" &&
-      (!Array.isArray(cart) || cart.length !== 1 || cart[0].quantity !== 1 ||
-      cart[0].product_id !== record.providerPublicData?.productId)) return fail("dodo_product_mismatch");
+  if (!Array.isArray(cart) || cart.length !== 1 || cart[0].quantity !== 1 ||
+      cart[0].product_id !== record.providerPublicData?.productId) return fail("dodo_product_mismatch");
   return { ok: true };
 };
 

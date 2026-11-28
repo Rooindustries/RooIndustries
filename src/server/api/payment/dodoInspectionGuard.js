@@ -7,10 +7,11 @@ import {
   hasActiveLateCaptureWatch,
 } from "./lateCaptureRecovery.js";
 import { PARTIAL_CAPTURE_DODO_STATES } from "./paymentFailureReason.js";
-import { ALL_PENDING_AND_PARTIAL_DODO_STATES, hasKnownCaptureRecord, hasPreservedOwnerReview } from "./paymentRecoveryState.js";
+import { ALL_PENDING_AND_PARTIAL_DODO_STATES, hasExplicitOwnerReview, hasKnownCaptureRecord, hasPreservedOwnerReview } from "./paymentRecoveryState.js";
 import {
   buildPaymentRecordEvent,
   getPaymentRecordById,
+  PAYMENT_RECORD_TYPE,
   PAYMENT_STATUS_ABANDONED,
   PAYMENT_STATUS_BOOKED,
   PAYMENT_STATUS_EMAIL_PARTIAL,
@@ -24,6 +25,7 @@ export const LATE_CAPTURE_WATCH_SECONDS = 24 * 60 * 60;
 export const NEVER_AGAIN = "9999-12-31T23:59:59.999Z";
 const SETTLED_STATUSES = [PAYMENT_STATUS_BOOKED, PAYMENT_STATUS_EMAIL_PARTIAL, PAYMENT_STATUS_REFUNDED];
 const MISMATCH_REASONS = ["dodo_payment_binding_mismatch", "dodo_session_mismatch"];
+const CAPTURE_ONLY_CHECK_REASONS = ["dodo_currency_mismatch", "dodo_amount_mismatch", "dodo_product_mismatch"];
 
 export const nowIso = () => new Date().toISOString();
 export const futureIso = (seconds) =>
@@ -307,5 +309,26 @@ export const resumeExhaustedDodoRecord = async ({ client, record, mode, dodoEnab
   } catch (error) {
     if (!isConflict(error)) throw error;
     return { ok: false, record: current };
+  }
+};
+
+export const resumeParkedDodoCaptureChecks = async ({ client, patchRecord }) => {
+  const parked = await client.fetch(
+    `*[_type == $type && provider == $provider && status == $status && providerRecoveryTerminal == $terminal && providerRecoveryTerminalReason in $reasons && reconciliationRecoveryTerminal in $open && recoveryOwnerReviewRequired in $open][0...50]`,
+    { type: PAYMENT_RECORD_TYPE, provider: "dodo", status: PAYMENT_STATUS_NEEDS_RECOVERY, terminal: true, reasons: CAPTURE_ONLY_CHECK_REASONS, open: [false, null] }
+  );
+  for (const record of Array.isArray(parked) ? parked : []) {
+    if (hasExplicitOwnerReview(record)) continue;
+    try {
+      await patchRecord({
+        client,
+        record,
+        set: { providerRecoveryTerminal: false, providerRecoveryTerminalReason: "", nextRecoveryAt: "" },
+        event: buildPaymentRecordEvent({ status: PAYMENT_STATUS_NEEDS_RECOVERY, source: "reconcile",
+          reason: "dodo_capture_check_park_resumed", data: { previousReason: record.providerRecoveryTerminalReason } }),
+      });
+    } catch (error) {
+      if (!isConflict(error)) throw error;
+    }
   }
 };

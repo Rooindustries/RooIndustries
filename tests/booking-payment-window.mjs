@@ -737,9 +737,9 @@ test('a payment that failed our checks while processing keeps its slot once Dodo
   const checkout = await startCheckoutBeforeExpiry();
   await holdRunsOut(checkout);
   assert.equal((await cron()).status, 200);
-  const closed = await fixture.commerce.getDocument(checkout.record._id);
-  assert.equal(closed.providerRecoveryTerminal, true);
-  assert.equal(closed.providerPaymentState, 'processing');
+  const pending = await fixture.commerce.getDocument(checkout.record._id);
+  assert.notEqual(pending.providerRecoveryTerminal, true);
+  assert.equal(pending.providerPaymentState, 'processing');
   fixture.setPaymentAmountOverrides({ status: 'succeeded', total_amount: 1 });
   const paid = await fixture.dodoWebhook(
     `payment_${checkout.record.providerOrderId}`,
@@ -756,7 +756,7 @@ test('a payment that failed our checks while processing keeps its slot once Dodo
 
 for (const [status, recorded] of [
   ['processing', 'processing'],
-  ['', 'unknown'],
+  ['', undefined],
 ]) {
   test(`the cron learns a "${status}" payment that failed our checks went through with no webhook`, async () => {
     fixture.setPaymentAmountOverrides({ status, total_amount: 1 });
@@ -998,7 +998,7 @@ test('a late processing webhook cannot undo a recorded success on a payment that
   fixture.setPaymentAmountOverrides({ status: 'processing', total_amount: 1 });
   assert.equal(
     (await fixture.dodoWebhook(paymentId, 'payment.processing', `window_order_late_${checkout.record._id}`)).status,
-    409,
+    503,
   );
   assert.equal((await fixture.commerce.getDocument(checkout.record._id)).providerPaymentState, 'succeeded');
   await holdRunsOut(checkout, 25 * 60 * 60_000);
