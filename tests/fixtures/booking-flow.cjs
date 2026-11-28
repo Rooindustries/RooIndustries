@@ -456,8 +456,13 @@ const productionHostFixtures = {
   }, { auto: true }],
 };
 
+const expectConfirmedTotal = async (page, total) => {
+  await expect(page.getByText(`${total} USD`, { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Updated checkout price" })).toHaveCount(0);
+};
+
 module.exports = {
-  test, expect, overhaulPrice, cookieBanner, declineCookies, acceptCookies, cookieSettingsReady, openCookieSettings,
+  test, expect, expectConfirmedTotal, overhaulPrice, cookieBanner, declineCookies, acceptCookies, cookieSettingsReady, openCookieSettings,
   settleIdle, bookingEventId, routePaidStart, checkoutStartCases, productionHostFixtures, openFreePayment,
   analyticsWaitLimitMs, recordCheckoutTimes, checkoutTimes, withinAnalyticsWait,
   installProductionOnlyScripts,

@@ -1,7 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const {
-  test, expect, cookieBanner, acceptCookies, declineCookies, settleIdle,
+  test, expect, expectConfirmedTotal, cookieBanner, acceptCookies, declineCookies, settleIdle,
 } = require("./fixtures/booking-flow.cjs");
 const { inspectChunks, holdChunks } = require("./fixtures/held-routes.cjs");
 
@@ -834,7 +834,7 @@ test("legacy promo-2026-11-24 is rejected on links, migrates from pre-PR stores,
   await expect(page).toHaveURL(/\/payment$/);
   await page.reload();
   await expect(page.locator("#payment-referral-code")).toHaveValue("promo-2026-11-24");
-  await expect(page.getByText("$76.49")).toBeVisible();
+  await expectConfirmedTotal(page, "$76.49");
 
   await page.goto("/payment?ref=friend");
   await expect(page.locator("#payment-referral-code")).toHaveValue("promo-2026-11-24");
@@ -845,8 +845,8 @@ test("legacy promo-2026-11-24 is rejected on links, migrates from pre-PR stores,
   await expect(page).toHaveURL(/\/payment$/);
   await page.reload();
   await expect(page.locator("#payment-referral-code")).toHaveValue("");
-  await expect(page.getByText("$84.99").first()).toBeVisible();
-  await expect(page.getByText("$76.49")).toHaveCount(0);
+  await expectConfirmedTotal(page, "$84.99");
+  await expect(page.getByText("$76.49 USD", { exact: true })).toHaveCount(0);
 });
 
 test("known ad ref tags never trigger code validation across routes and keep existing holds intact", async ({
@@ -981,7 +981,7 @@ test("unavailable referral lookup keeps code for retry across arrival and manual
     await page.goto("/payment");
     if (entry === "manual") {
       await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
-      await expect(page.getByText("$76.49")).toBeVisible();
+      await expectConfirmedTotal(page, "$76.49");
       refMode = "unavailable";
       await page.locator("#payment-referral-code").locator("..").getByRole("button", { name: "Apply", exact: true }).click();
     }
@@ -1445,7 +1445,7 @@ test("Back/Forward over booking keeps cleared referral empty, saved coupon keeps
   }, { slotDate: flow.state.slots[0].date, expiry: futureExpiry });
   await page.goto("/payment?ref=incoming-ref");
   await expect(page.locator("#payment-referral-code")).toHaveValue("friend");
-  await expect(page.getByText("$76.49")).toBeVisible();
+  await expectConfirmedTotal(page, "$76.49");
   expect(await storedReferral(page)).toBe("existing-tab-ref");
 
   const now = Date.now();
@@ -1763,7 +1763,7 @@ test("applying a referral after changing payment method keeps the refreshed hold
 
   await page.locator("#payment-referral-code").fill("friend");
   await page.locator("#payment-referral-code").locator("..").getByRole("button", { name: "Apply", exact: true }).click();
-  await expect(page.getByText("$76.49")).toBeVisible();
+  await expectConfirmedTotal(page, "$76.49");
 
   const beforeReload = await page.evaluate(() => ({
     storedToken: JSON.parse(sessionStorage.getItem("checkout_booking_state") || "{}").slotHoldToken,
@@ -1891,7 +1891,7 @@ test("in-flight referral validation finishing after Razorpay release keeps the r
   await expect(page.getByText("Payment method released. Choose a payment method below.")).toBeVisible();
 
   allowReply();
-  await expect(page.getByText("$76.49")).toBeVisible();
+  await expectConfirmedTotal(page, "$76.49");
   const afterApply = await page.evaluate(() => ({
     storage: JSON.parse(sessionStorage.getItem("checkout_booking_state") || "{}").slotHoldToken,
     history: window.history?.state?.usr?.bookingData?.slotHoldToken,

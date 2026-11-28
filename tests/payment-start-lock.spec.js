@@ -1,6 +1,6 @@
 const { evaluateBrowserTask } = require("./fixtures/browser-task.cjs");
 const {
-  test, expect, analyticsWaitLimitMs, recordCheckoutTimes, checkoutTimes, withinAnalyticsWait,
+  test, expect, expectConfirmedTotal, analyticsWaitLimitMs, recordCheckoutTimes, checkoutTimes, withinAnalyticsWait,
 } = require("./fixtures/booking-flow.cjs");
 const { holdChunks, holdRoute } = require("./fixtures/held-routes.cjs");
 
@@ -519,13 +519,13 @@ test("after a timed-out start that claimed the quote on the server, retry restor
   const coupon = page.locator("#payment-coupon-code");
   await coupon.fill("save20");
   await coupon.locator("..").getByRole("button", { name: "Apply", exact: true }).click();
-  await expect(page.getByText("$67.99")).toBeVisible();
+  await expectConfirmedTotal(page, "$67.99");
 
   await page.getByRole("button", { name: "Pay your way", exact: true }).click();
   const changeMethod = page.getByRole("button", { name: "Change payment method", exact: true });
   await expect(changeMethod).toBeVisible();
   await expect(page.getByRole("button", { name: "Resume checkout", exact: true })).toBeVisible();
-  await expect(page.getByText("$84.99").first()).toBeVisible();
+  await expect(page.getByText("$84.99 USD", { exact: true })).toBeVisible();
   await expect(coupon).toHaveValue("");
 
   await changeMethod.click();
@@ -534,7 +534,7 @@ test("after a timed-out start that claimed the quote on the server, retry restor
 
   await coupon.fill("save20");
   await coupon.locator("..").getByRole("button", { name: "Apply", exact: true }).click();
-  await expect(page.getByText("$67.99")).toBeVisible();
+  await expectConfirmedTotal(page, "$67.99");
   await page.getByRole("button", { name: "Pay your way", exact: true }).click();
   await expect(page).toHaveURL(/checkout-handoff$/);
   expect(submitted.at(-1)).toEqual({ token: "released-hold-token", fp: "fixture-quote-save20" });
@@ -614,7 +614,7 @@ test("after a conflict saves an in-progress Dodo claim with no URL yet, Resume c
   const coupon = page.locator("#payment-coupon-code");
   await coupon.fill("save20");
   await coupon.locator("..").getByRole("button", { name: "Apply", exact: true }).click();
-  await expect(page.getByText("$67.99")).toBeVisible();
+  await expectConfirmedTotal(page, "$67.99");
   await page.getByRole("button", { name: "Pay your way", exact: true }).click();
 
   const resume = page.getByRole("button", { name: "Resume checkout", exact: true });
