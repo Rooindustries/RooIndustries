@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import process from "node:process";
 import envValue from "../src/server/supabase/envValue.cjs";
+import { productionVersions } from "./lib/production-migration-versions.mjs";
 
 if (envValue.readEnvValue(process.env, "VERCEL_ENV").toLowerCase() !== "production") process.exit(0);
 
@@ -35,15 +36,14 @@ const validRow = (row) =>
 if (!Array.isArray(data) || !data.every(validRow)) block("Supabase returned an unexpected migration history.");
 
 const hostedByVersion = new Map(data.map((row) => [row.version, row.name]));
-const hostedNames = new Set(data.map((row) => row.name));
 const files = fs
   .readdirSync(new URL("../supabase/migrations/", import.meta.url))
   .filter((file) => file.endsWith(".sql"))
   .sort();
 const missing = files.flatMap((file) => {
-  const version = file.slice(0, 14);
+  const version = productionVersions.get(file.slice(0, 14)) ?? file.slice(0, 14);
   const name = file.slice(15, -4);
-  if (!hostedByVersion.has(version)) return hostedNames.has(name) ? [] : [file];
+  if (!hostedByVersion.has(version)) return [file];
   const hostedName = hostedByVersion.get(version);
   return hostedName === name ? [] : [`${file} (production records ${version} as ${hostedName})`];
 });

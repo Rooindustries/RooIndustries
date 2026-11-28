@@ -8,12 +8,15 @@ import { createSweepPostgresFixture, root } from '../scripts/lib/sweep-postgres-
 import { freeTcpPort } from '../scripts/lib/free-tcp-port.mjs';
 import { withNodeOption } from '../scripts/lib/node-options.mjs';
 import { productionRelease } from '../scripts/lib/payment-sweep-env-scenarios.mjs';
+import { productionVersions } from '../scripts/lib/production-migration-versions.mjs';
 
 const historyMigration = '20261128000000_expose_migration_history_to_service_role.sql';
 const files = fs.readdirSync(path.join(root, 'supabase/migrations')).filter(file => file.endsWith('.sql')).sort();
-const applied = files.map(file => ({ version: file.slice(0, 14), name: file.slice(15, -4) }));
+const rowFor = file => ({ version: productionVersions.get(file.slice(0, 14)) ?? file.slice(0, 14), name: file.slice(15, -4) });
+const applied = files.map(rowFor);
 const productionOnly = { version: '20261114113410', name: 'analytics_hex_readonly_views' };
-const without = (...missing) => applied.filter(row => !missing.includes(`${row.version}_${row.name}.sql`));
+const without = (...missing) => files.filter(file => !missing.includes(file)).map(rowFor);
+const legacy = '20260714000000_harden_tourney_external_authority.sql';
 const distDir = '.next-e2e-migration-gate';
 
 let fixture;
@@ -73,10 +76,10 @@ const assertBlocked = ({ status, output }, ...expected) => {
   assert.ok(!output.includes('> next build'), `next build started:\n${output}`);
 };
 
-test('a production build passes when every migration is in the history', async () => {
-  const legacy = '20260714000000_harden_tourney_external_authority.sql';
+test('a production build passes when every migration is in the history, legacy files under their recorded versions', async () => {
   assert.ok(files.includes(legacy));
-  await record([...without(legacy), { version: '20260714193833', name: 'harden_tourney_external_authority' }]);
+  assert.deepEqual(rowFor(legacy), { version: '20260714193833', name: 'harden_tourney_external_authority' });
+  await record(applied);
   const reads = historyReads();
   const result = await run('prebuild');
   assert.equal(result.status, 0, result.output);
@@ -99,6 +102,19 @@ test('a production build fails when a version is recorded under another name', a
   const file = '20261118000000_harden_payment_recovery_and_hold_cleanup.sql';
   await record([...without(file), { version: '20261118000000', name: 'other_name' }]);
   assertBlocked(await run('build'), `- ${file} (production records 20261118000000 as other_name)`);
+});
+
+test('a production build fails when a migration name is recorded only under another version', async () => {
+  const file = '20261118000000_harden_payment_recovery_and_hold_cleanup.sql';
+  await record([...without(file), { version: '20261117999999', name: 'harden_payment_recovery_and_hold_cleanup' }]);
+  assertBlocked(await run('build'), `- ${file}\n`);
+});
+
+test('a production build fails when a legacy file is missing from its recorded version or recorded there under another name', async () => {
+  await record(without(legacy));
+  assertBlocked(await run('build'), `- ${legacy}\n`);
+  await record([...without(legacy), { version: '20260714193833', name: 'other_name' }]);
+  assertBlocked(await run('build'), `- ${legacy} (production records 20260714193833 as other_name)`);
 });
 
 test('the history function is service-role only, returns only version and name, and its rollback and reapply round-trip on the full chain', async () => {
