@@ -15,6 +15,10 @@ export class CommerceStore {
       Number(client.cutoverGeneration ?? cutoverGeneration) || 0
     );
     this.commerceOnly = true;
+    if (typeof client.getDocumentsByIds === "function") {
+      this.getDocumentsByIds = (ids, options) =>
+        this.client.getDocumentsByIds(ids, options);
+    }
   }
 
   fetch(query, params) {

@@ -208,7 +208,13 @@ export const isVertexEssentialsPackageTitle = (title) =>
   normalizePackageKey(title).includes("vertex essential");
 
 export const resolvePackageSlotMap = (settings, packageTitle = "") => {
-  const normalizedSettings = normalizeBookingSettings(settings);
+  const normalizedSettings =
+    settings?.dateSlotMap &&
+    settings?.xocDateSlotMap &&
+    settings?.vertexEssentialsDateSlotMap &&
+    settings?.packageDateSlotMaps
+      ? settings
+      : normalizeBookingSettings(settings);
   const packageMap = getPackageTitleAliases(packageTitle)
     .map(normalizePackageKey)
     .map((packageTitleKey) =>
@@ -287,6 +293,59 @@ export const isSlotAllowedForPackage = ({
       ? exactWholeMinute && allowedMinutes.includes(minuteOfDay)
       : false,
   };
+};
+
+export const hydrateBookingSettings = async ({ settingsDoc, client } = {}) => {
+  if (!settingsDoc) {
+    throw new Error("Missing booking settings.");
+  }
+
+  const rawPackageDateSlots = Array.isArray(settingsDoc.packageDateSlots)
+    ? settingsDoc.packageDateSlots
+    : [];
+  const targetIds = [
+    ...new Set(
+      rawPackageDateSlots
+        .map((entry) => entry?.package?._ref)
+        .filter((value) => typeof value === "string" && value.trim())
+    ),
+  ];
+
+  if (!targetIds.length) {
+    return normalizeBookingSettings(settingsDoc);
+  }
+
+  const readClient = client || createRefReadClient();
+  const packages = [];
+  for (let index = 0; index < targetIds.length; index += 1000) {
+    const chunk = targetIds.slice(index, index + 1000);
+    const fetched =
+      typeof readClient.getDocumentsByIds === "function"
+        ? await readClient.getDocumentsByIds(chunk, { documentTypes: ["package"] })
+        : await readClient.fetch(`*[_type == "package" && _id in $ids]{_id,title}`, {
+            ids: chunk,
+          });
+    if (Array.isArray(fetched)) packages.push(...fetched);
+  }
+  const byId = new Map(packages.map((pkg) => [pkg?._id, pkg]));
+  const resolvedPackageDateSlots = rawPackageDateSlots.map((entry) => {
+    const ref = entry?.package?._ref;
+    if (typeof ref === "string") {
+      const target = byId.get(ref);
+      return {
+        ...entry,
+        package: target?._id && target?.title
+          ? { _id: target._id, title: target.title }
+          : null,
+      };
+    }
+    return entry;
+  });
+
+  return normalizeBookingSettings({
+    ...settingsDoc,
+    packageDateSlots: resolvedPackageDateSlots,
+  });
 };
 
 export const getBookingSettings = async ({ client } = {}) => {

@@ -719,3 +719,176 @@ test('booking rejects a coupon that cannot be combined with a referral', async (
   assert.deepEqual(response.body, { error: "This coupon can't be combined with a referral discount." });
   assert.deepEqual(await couponCall('rows', 'booking'), existing);
 });
+
+const measureRpcTrace = async (run) => {
+  const calls = [];
+  let inFlight = 0;
+  let waves = 0;
+  let maxConcurrency = 0;
+  fixture.setRequestHook(async (phase, request) => {
+    if (!String(request?.path || "").includes("/rest/v1/rpc/")) return;
+    if (phase === "before") {
+      if (inFlight === 0) waves += 1;
+      inFlight += 1;
+      maxConcurrency = Math.max(maxConcurrency, inFlight);
+      calls.push({
+        rpc: request.path.split("/rest/v1/rpc/")[1].split("?")[0],
+        mutations: Array.isArray(request.body?.p_mutations) ? request.body.p_mutations.length : 0,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 15));
+    } else if (phase === "after") {
+      inFlight = Math.max(0, inFlight - 1);
+    }
+  });
+  try {
+    const response = await run();
+    return { response, calls, waves, maxConcurrency };
+  } finally {
+    fixture.setRequestHook(null);
+  }
+};
+
+test("holdSlot and releaseHold stay within bounded Supabase RPC counts and sequential waves", () => withDatabaseLimiter(async () => {
+  const pkg = "Performance Vertex Overhaul";
+  const date1 = fixture.nextSlotDate();
+  const slot1 = `${date1}T04:30:00.000Z`;
+  const slot2 = `${date1}T05:30:00.000Z`;
+
+  const created = await measureRpcTrace(() =>
+    fixture.post("/api/holdSlot", { startTimeUTC: slot1, packageTitle: pkg }, "", { "x-forwarded-for": "192.0.2.71" })
+  );
+  assert.equal(created.response.status, 200);
+  assert.equal(created.calls.length, 5);
+  assert.equal(created.waves, 2);
+  assert.equal(created.maxConcurrency, 4);
+
+  const refreshed = await measureRpcTrace(() =>
+    fixture.post("/api/holdSlot", {
+      startTimeUTC: slot1,
+      packageTitle: pkg,
+      previousHoldId: created.response.body.holdId,
+      previousHoldToken: created.response.body.holdToken,
+    }, "", { "x-forwarded-for": "192.0.2.72" })
+  );
+  assert.equal(refreshed.response.status, 200);
+  assert.equal(refreshed.calls.length, 5);
+  assert.equal(refreshed.waves, 2);
+  assert.equal(refreshed.maxConcurrency, 4);
+
+  const switched = await measureRpcTrace(() =>
+    fixture.post("/api/holdSlot", {
+      startTimeUTC: slot2,
+      packageTitle: pkg,
+      previousHoldId: refreshed.response.body.holdId,
+      previousHoldToken: refreshed.response.body.holdToken,
+    }, "", { "x-forwarded-for": "192.0.2.73" })
+  );
+  assert.equal(switched.response.status, 200);
+  assert.equal(switched.calls.length, 5);
+  assert.equal(switched.waves, 2);
+  assert.equal(switched.maxConcurrency, 4);
+  assert.equal(switched.calls.find((c) => c.rpc === "roo_apply_commerce_document_mutations")?.mutations, 2);
+  const previousAfterSwitch = await fixture.commerce.getDocument(refreshed.response.body.holdId);
+  assert.equal(previousAfterSwitch.phase, "released");
+
+  const released = await measureRpcTrace(() =>
+    fixture.post("/api/releaseHold", {
+      holdId: switched.response.body.holdId,
+      holdToken: switched.response.body.holdToken,
+    }, "", { "x-forwarded-for": "192.0.2.74" })
+  );
+  assert.equal(released.response.status, 200);
+  assert.equal(released.calls.length, 3);
+  assert.equal(released.waves, 2);
+  assert.equal(released.maxConcurrency, 2);
+
+  const reclaimed = await measureRpcTrace(() =>
+    fixture.post("/api/holdSlot", { startTimeUTC: slot2, packageTitle: pkg }, "", { "x-forwarded-for": "192.0.2.75" })
+  );
+  assert.equal(reclaimed.response.status, 200);
+  assert.equal(reclaimed.calls.length, 5);
+  assert.equal(reclaimed.waves, 2);
+
+  const date2 = fixture.nextSlotDate();
+  await fixture.setPackageSlots(date2);
+  try {
+    const withPackageSlots = await measureRpcTrace(() =>
+      fixture.post("/api/holdSlot", { startTimeUTC: `${date2}T06:30:00.000Z`, packageTitle: pkg }, "", { "x-forwarded-for": "192.0.2.76" })
+    );
+    assert.equal(withPackageSlots.response.status, 200);
+    assert.equal(withPackageSlots.calls.length, 6);
+    assert.equal(withPackageSlots.waves, 3);
+  } finally {
+    await fixture.restoreSettings();
+  }
+}));
+
+test("switching slots still succeeds when previousHold concurrently changes or disappears", async () => {
+  for (const mode of ["payment_pending", "deleted"]) {
+    const original = await fixture.hold();
+    const targetStart = `${fixture.nextSlotDate()}T05:30:00.000Z`;
+    let injected = false;
+    fixture.setRequestHook(async (phase, request) => {
+      if (
+        !injected &&
+        phase === "before" &&
+        String(request?.path || "").endsWith("/roo_apply_commerce_document_mutations") &&
+        request.body?.p_mutations?.length === 2
+      ) {
+        injected = true;
+        if (mode === "payment_pending") {
+          await fixture.setHoldPhase(original.slotHoldId, "payment_pending");
+        } else {
+          await fixture.commerce.delete(original.slotHoldId);
+        }
+      }
+    });
+    let response;
+    try {
+      response = await fixture.post("/api/holdSlot", {
+        startTimeUTC: targetStart,
+        packageTitle: original.packageTitle,
+        previousHoldId: original.slotHoldId,
+        previousHoldToken: original.slotHoldToken,
+      });
+    } finally {
+      fixture.setRequestHook(null);
+    }
+    assert.equal(injected, true);
+    assert.equal(response.status, 200, JSON.stringify(response));
+    assert.equal((await fixture.commerce.getDocument(response.body.holdId)).phase, "active");
+    if (mode === "payment_pending") {
+      assert.equal((await fixture.commerce.getDocument(original.slotHoldId)).phase, "payment_pending");
+    } else {
+      assert.equal(await fixture.commerce.getDocument(original.slotHoldId), null);
+    }
+  }
+});
+
+test("releaseHold still rejects with 409 if the hold changes between read and patch commit", async () => {
+  const payload = await fixture.hold();
+  let injected = false;
+  fixture.setRequestHook(async (phase, request) => {
+    if (
+      !injected &&
+      phase === "before" &&
+      String(request?.path || "").endsWith("/roo_apply_commerce_document_mutations")
+    ) {
+      injected = true;
+      await fixture.setHoldPhase(payload.slotHoldId, "payment_pending");
+    }
+  });
+  let response;
+  try {
+    response = await fixture.post("/api/releaseHold", {
+      holdId: payload.slotHoldId,
+      holdToken: payload.slotHoldToken,
+    });
+  } finally {
+    fixture.setRequestHook(null);
+  }
+  assert.equal(injected, true);
+  assert.equal(response.status, 409, JSON.stringify(response));
+  assert.equal(response.body.message, "Hold changed before it could be released");
+  assert.equal((await fixture.commerce.getDocument(payload.slotHoldId)).phase, "payment_pending");
+});

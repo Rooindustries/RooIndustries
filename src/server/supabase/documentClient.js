@@ -199,6 +199,19 @@ const mutationRevision = (expectedRevision, currentRevision) => {
   return expectedRevision.trim();
 };
 
+const hasMatchingBaseDocument = (id, expectedRevision, baseDocument) =>
+  Boolean(
+    baseDocument &&
+      typeof baseDocument === "object" &&
+      !Array.isArray(baseDocument) &&
+      baseDocument._id === id &&
+      typeof baseDocument._type === "string" &&
+      baseDocument._type.trim() &&
+      typeof expectedRevision === "string" &&
+      expectedRevision.trim() &&
+      baseDocument._rev === expectedRevision
+  );
+
 const deleteRevision = (options) =>
   Object.prototype.hasOwnProperty.call(options || {}, "ifRevisionId")
     ? mutationRevision(options.ifRevisionId ?? null, "")
@@ -559,6 +572,18 @@ export class SupabaseDocumentClient {
     return documents?.[0] || null;
   }
 
+  async getDocumentsByIds(ids = [], { documentTypes = null } = {}) {
+    const normalizedIds = uniqueStrings(ids);
+    if (!normalizedIds.length) return [];
+    return this.dataset({
+      ...(Array.isArray(documentTypes) && documentTypes.length > 0
+        ? { documentTypes }
+        : {}),
+      ids: normalizedIds,
+      limit: Math.min(1000, normalizedIds.length),
+    });
+  }
+
   fetchAvailability() {
     if (!this.commerceOnly) {
       throw new Error("Typed availability is only available to commerce clients.");
@@ -684,7 +709,13 @@ export class SupabaseDocumentClient {
 
   async commitPatch(patch, options = {}) {
     mutationRevision(patch.expectedRevision, "");
-    const current = await this.fetch(`*[_id == $id][0]`, { id: patch.id });
+    const current = hasMatchingBaseDocument(
+      patch.id,
+      patch.expectedRevision,
+      options?.baseDocument
+    )
+      ? options.baseDocument
+      : await this.fetch(`*[_id == $id][0]`, { id: patch.id });
     if (!current) {
       const error = new Error("Document not found.");
       error.statusCode = 404;
@@ -707,11 +738,34 @@ export class SupabaseDocumentClient {
   }
 
   async commitTransaction(operations, options = {}) {
-    const operationIds = operations
-      .map((operation) => operation.patch?.id || operation.id || operation.document?._id)
-      .filter(Boolean);
-    const dataset = await this.dataset({ ids: uniqueStrings(operationIds), limit: 1000 });
-    const originals = new Map(dataset.map((document) => [document._id, document]));
+    const known =
+      options?.knownDocuments instanceof Map ? options.knownDocuments : null;
+    const originals = new Map();
+    const missingIds = [];
+    for (const operation of operations) {
+      const id = operation.patch?.id || operation.id || operation.document?._id;
+      if (!id) continue;
+      const hasKnown = Boolean(known && known.has(id));
+      const knownDoc = hasKnown ? known.get(id) : undefined;
+      const satisfied =
+        hasKnown &&
+        ((operation.type === "create" && knownDoc === null) ||
+          (operation.type === "patch" &&
+            hasMatchingBaseDocument(id, operation.patch?.expectedRevision, knownDoc)) ||
+          (operation.type === "delete" &&
+            hasMatchingBaseDocument(id, operation.expectedRevision, knownDoc)));
+      if (satisfied) {
+        if (knownDoc) originals.set(id, knownDoc);
+      } else {
+        missingIds.push(id);
+      }
+    }
+    const idsToFetch = uniqueStrings(missingIds);
+    if (idsToFetch.length > 0) {
+      const dataset = await this.dataset({ ids: idsToFetch, limit: 1000 });
+      for (const id of idsToFetch) originals.delete(id);
+      for (const document of dataset) originals.set(document._id, document);
+    }
     const documents = new Map(originals);
     const mutations = [];
     const pending = new Map();

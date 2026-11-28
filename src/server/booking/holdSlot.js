@@ -10,7 +10,9 @@ import {
   normalizeStartTimeUTC,
 } from "./slotIdentity.js";
 import {
+  BOOKING_SETTINGS_ID,
   getBookingSettings,
+  hydrateBookingSettings,
   isBookingBlockingStatus,
   isSlotAllowedForPackage,
 } from "./slotPolicy.js";
@@ -27,6 +29,9 @@ export const HOLD_DURATION_MS = 20 * 60 * 1000;
 const isConflict = (error) =>
   Number(error?.statusCode || error?.status || 0) === 409;
 
+const isNotFound = (error) =>
+  Number(error?.statusCode || error?.status || 0) === 404;
+
 const normalizeBookingList = (bookings) =>
   Array.isArray(bookings) ? bookings : bookings ? [bookings] : [];
 
@@ -42,7 +47,21 @@ const patchAtRevision = async (client, document, values, options = {}) => {
   if (document?._rev && typeof patch.ifRevisionId === "function") {
     patch = patch.ifRevisionId(document._rev);
   }
-  return patch.set(values).commit(options);
+  return patch.set(values).commit({
+    ...options,
+    ...(document?._rev ? { baseDocument: document } : {}),
+  });
+};
+
+const settle = (promise) =>
+  Promise.resolve(promise).then(
+    (value) => ({ ok: true, value }),
+    (error) => ({ ok: false, error })
+  );
+
+const unwrapSettled = (result) => {
+  if (!result?.ok) throw result?.error;
+  return result.value;
 };
 
 const issueResponse = ({
@@ -97,6 +116,8 @@ const releasePreviousHold = async ({
   previousHoldId,
   previousHoldToken,
   currentHoldId,
+  prefetchedHold,
+  prefetchedBackend,
 }) => {
   if (!previousHoldId || previousHoldId === currentHoldId || !previousHoldToken) {
     return;
@@ -115,15 +136,16 @@ const releasePreviousHold = async ({
       policy,
     });
     const client = createHoldClient(previousBackend);
-    const previousHold = await client.fetch(
-      `*[_type == "slotHold" && _id == $id][0]`,
-      { id: previousHoldId }
-    );
+    const previousHold =
+      prefetchedHold !== undefined && prefetchedBackend === previousBackend
+        ? prefetchedHold
+        : await client.fetch(
+            `*[_type == "slotHold" && _id == $id][0]`,
+            { id: previousHoldId }
+          );
     if (!previousHold?._id) return;
-    if (
-      String(previousHold.phase || "").trim().toLowerCase() ===
-      "payment_pending"
-    ) {
+    const phase = String(previousHold.phase || "").trim().toLowerCase();
+    if (phase === "payment_pending" || phase === "released") {
       return;
     }
     const validToken = verifyHoldToken({
@@ -131,8 +153,7 @@ const releasePreviousHold = async ({
       holdId: previousHoldId,
       startTimeUTC: previousHold.startTimeUTC,
       holdNonce: previousHold.holdNonce || "",
-      backend:
-        previousHold.backendOwner,
+      backend: previousHold.backendOwner,
       cutoverGeneration: Number(previousHold.cutoverGeneration || 0),
     });
     if (!validToken) return;
@@ -170,47 +191,157 @@ export default async function handler(req, res) {
   const { startTimeUTC, packageTitle, previousHoldId, previousHoldToken } =
     req.body || {};
   const clientAddress = getClientAddress(req);
-  if (
-    !(await requireRateLimit(res, {
-      key: `hold-slot:${clientAddress}`,
-      max: 20,
-      message: "Too many slot hold requests. Please try again later.",
-    }))
-  ) {
+  const normalizedStartTimeUTC = normalizeStartTimeUTC(startTimeUTC);
+  const validStartTime = Boolean(
+    normalizedStartTimeUTC && isExactWholeMinute(normalizedStartTimeUTC)
+  );
+  const backend = selectHoldBackend({
+    previousHoldId,
+    previousHoldToken,
+  });
+
+  const rateLimitPromise = requireRateLimit(res, {
+    key: `hold-slot:${clientAddress}`,
+    max: 20,
+    message: "Too many slot hold requests. Please try again later.",
+  });
+  const commerceControlPromise = settle(assertCommerceStartAllowed());
+
+  let client = null;
+  let clientError = null;
+  const holdId = validStartTime ? buildSlotHoldId(normalizedStartTimeUTC) : "";
+  const slotLockId = validStartTime ? buildBookingSlotId(normalizedStartTimeUTC) : "";
+  const wantsPreviousHold = Boolean(
+    validStartTime && previousHoldId && previousHoldId !== holdId && previousHoldToken
+  );
+
+  let prefetchedBatch = null;
+  let prefetchedBookings = null;
+  let prefetchedLegacy = null;
+  if (validStartTime) {
+    try {
+      client = createHoldClient(backend);
+      if (typeof client.getDocumentsByIds === "function") {
+        const batchIds = [
+          BOOKING_SETTINGS_ID,
+          slotLockId,
+          holdId,
+          ...(wantsPreviousHold ? [previousHoldId] : []),
+        ];
+        prefetchedBatch = settle(
+          client.getDocumentsByIds(batchIds, {
+            documentTypes: ["bookingSettings", "bookingSlot", "slotHold"],
+          })
+        );
+        prefetchedBookings = settle(
+          client.fetch(
+            `*[_type == "booking" && startTimeUTC == $startTimeUTC]{_id,status,originalOrderId}`,
+            { startTimeUTC: normalizedStartTimeUTC }
+          )
+        );
+      } else {
+        prefetchedLegacy = {
+          settings: settle(getBookingSettings({ client })),
+          slotLock: settle(
+            client.fetch(`*[_type == "bookingSlot" && _id == $id][0]`, {
+              id: slotLockId,
+            })
+          ),
+          bookings: settle(
+            client.fetch(
+              `*[_type == "booking" && startTimeUTC == $startTimeUTC]{_id,status,originalOrderId}`,
+              { startTimeUTC: normalizedStartTimeUTC }
+            )
+          ),
+          existingHold: settle(
+            client.fetch(`*[_type == "slotHold" && _id == $id][0]`, {
+              id: holdId,
+            })
+          ),
+          previousHold: wantsPreviousHold
+            ? settle(
+                client.fetch(`*[_type == "slotHold" && _id == $id][0]`, {
+                  id: previousHoldId,
+                })
+              )
+            : null,
+        };
+      }
+    } catch (error) {
+      clientError = error;
+    }
+  }
+
+  if (!(await rateLimitPromise)) {
     return;
   }
 
-  let commerceControl;
-  try {
-    commerceControl = await assertCommerceStartAllowed();
-  } catch (error) {
+  const controlResult = await commerceControlPromise;
+  if (!controlResult.ok) {
     res.setHeader?.("Retry-After", "60");
     return res.status(503).json({
       ok: false,
-      code: String(error?.code || "commerce_control_unavailable").toLowerCase(),
+      code: String(controlResult.error?.code || "commerce_control_unavailable").toLowerCase(),
       message: "New booking starts are temporarily unavailable. Please try again shortly.",
     });
   }
+  const commerceControl = controlResult.value;
 
-  const normalizedStartTimeUTC = normalizeStartTimeUTC(startTimeUTC);
-  if (!normalizedStartTimeUTC || !isExactWholeMinute(normalizedStartTimeUTC)) {
+  if (!validStartTime) {
     return res.status(400).json({
       ok: false,
       message: "startTimeUTC must be an exact configured minute.",
     });
   }
 
-  const backend = selectHoldBackend({
-    previousHoldId,
-    previousHoldToken,
-  });
   const cutoverGeneration = commerceControl.generation;
-  const client = createHoldClient(backend);
-  const holdMutationOptions =
-    {};
+  const holdMutationOptions = {};
 
   try {
-    const settings = await getBookingSettings({ client });
+    if (clientError) throw clientError;
+
+    let settings;
+    let slotLock;
+    let existingHold;
+    let previousHold = null;
+    let matchingBookings;
+    let snapshotIncludesBarrier = false;
+
+    if (prefetchedBatch) {
+      const [batchResult, bookingsResult] = await Promise.all([
+        prefetchedBatch,
+        prefetchedBookings,
+      ]);
+      const docs = unwrapSettled(batchResult);
+      matchingBookings = unwrapSettled(bookingsResult);
+      const byId = new Map(docs.map((doc) => [doc?._id, doc]));
+      const settingsDoc = byId.get(BOOKING_SETTINGS_ID) || null;
+      slotLock = byId.get(slotLockId) || null;
+      existingHold = byId.get(holdId) || null;
+      previousHold = wantsPreviousHold ? byId.get(previousHoldId) || null : null;
+      settings = await hydrateBookingSettings({ settingsDoc, client });
+      snapshotIncludesBarrier = true;
+    } else {
+      const [
+        settingsResult,
+        slotLockResult,
+        bookingsResult,
+        existingHoldResult,
+        previousHoldResult,
+      ] = await Promise.all([
+        prefetchedLegacy.settings,
+        prefetchedLegacy.slotLock,
+        prefetchedLegacy.bookings,
+        prefetchedLegacy.existingHold,
+        prefetchedLegacy.previousHold || Promise.resolve({ ok: true, value: null }),
+      ]);
+      settings = unwrapSettled(settingsResult);
+      slotLock = unwrapSettled(slotLockResult);
+      matchingBookings = unwrapSettled(bookingsResult);
+      existingHold = unwrapSettled(existingHoldResult);
+      previousHold = unwrapSettled(previousHoldResult);
+    }
+
     const slot = isSlotAllowedForPackage({
       settings,
       packageTitle,
@@ -229,67 +360,74 @@ export default async function handler(req, res) {
       });
     }
 
-    const holdId = buildSlotHoldId(normalizedStartTimeUTC);
-    const slotLockId = buildBookingSlotId(normalizedStartTimeUTC);
-    if (previousHoldId && previousHoldId !== holdId && previousHoldToken) {
-      const previousHold = await client.fetch(
-        `*[_type == "slotHold" && _id == $id][0]`,
-        { id: previousHoldId }
-      );
-      const ownsPreviousHold = previousHold?._id && verifyHoldToken({
-        token: previousHoldToken,
-        holdId: previousHoldId,
-        startTimeUTC: previousHold.startTimeUTC,
-        holdNonce: previousHold.holdNonce || "",
-        backend:
-          previousHold.backendOwner,
-        cutoverGeneration: Number(previousHold.cutoverGeneration || 0),
+    const ownsPreviousHold = Boolean(
+      wantsPreviousHold &&
+        previousHold?._id &&
+        verifyHoldToken({
+          token: previousHoldToken,
+          holdId: previousHoldId,
+          startTimeUTC: previousHold.startTimeUTC,
+          holdNonce: previousHold.holdNonce || "",
+          backend: previousHold.backendOwner,
+          cutoverGeneration: Number(previousHold.cutoverGeneration || 0),
+        })
+    );
+    const previousPhase = String(previousHold?.phase || "").trim().toLowerCase();
+    if (ownsPreviousHold && previousPhase === "payment_pending") {
+      return res.status(409).json({
+        ok: false,
+        message: "The existing payment session must finish before changing slots.",
       });
-      if (
-        ownsPreviousHold &&
-        String(previousHold.phase || "").trim().toLowerCase() ===
-          "payment_pending"
-      ) {
-        return res.status(409).json({
-          ok: false,
-          message: "The existing payment session must finish before changing slots.",
-        });
-      }
     }
-    const [slotLock, matchingBookings] = await Promise.all([
-      client.fetch(`*[_type == "bookingSlot" && _id == $id][0]`, {
-        id: slotLockId,
-      }),
-      client.fetch(
-        `*[_type == "booking" && startTimeUTC == $startTimeUTC]{_id,status,originalOrderId}`,
-        { startTimeUTC: normalizedStartTimeUTC }
-      ),
-    ]);
-    const matchingBookingList = normalizeBookingList(matchingBookings);
-    const activeLegacyBooking = hasBlockingBooking(matchingBookingList);
-    const lockOwner = matchingBookingList.find(
+
+    let matchingBookingList = normalizeBookingList(matchingBookings);
+    let activeLegacyBooking = hasBlockingBooking(matchingBookingList);
+    let lockOwner = matchingBookingList.find(
       (booking) => booking?._id === slotLock?.bookingId
     );
-    const staleReleasedLock =
-      slotLock?.status !== "released" &&
-      lockOwner?._id &&
-      (!!String(lockOwner.originalOrderId || "").trim() ||
-        !isBookingBlockingStatus(lockOwner.status));
+    let staleReleasedLock = Boolean(
+      slotLock &&
+        slotLock.status !== "released" &&
+        lockOwner?._id &&
+        (!!String(lockOwner.originalOrderId || "").trim() ||
+          !isBookingBlockingStatus(lockOwner.status))
+    );
     if (staleReleasedLock) {
-      try {
-        await patchAtRevision(client, slotLock, {
-          status: "released",
-          releasedAt: new Date().toISOString(),
-          releaseReason: "booking_status_repair",
-        });
-      } catch (error) {
-        if (isConflict(error)) {
-          return res.status(409).json({
-            ok: false,
-            message: "This slot changed while its booking status was repaired.",
+      const confirmedBookings = normalizeBookingList(
+        await client.fetch(
+          `*[_type == "booking" && startTimeUTC == $startTimeUTC]{_id,status,originalOrderId}`,
+          { startTimeUTC: normalizedStartTimeUTC }
+        )
+      );
+      matchingBookingList = confirmedBookings;
+      activeLegacyBooking = hasBlockingBooking(matchingBookingList);
+      lockOwner = matchingBookingList.find(
+        (booking) => booking?._id === slotLock?.bookingId
+      );
+      staleReleasedLock = Boolean(
+        !activeLegacyBooking &&
+          slotLock &&
+          slotLock.status !== "released" &&
+          lockOwner?._id &&
+          (!!String(lockOwner.originalOrderId || "").trim() ||
+            !isBookingBlockingStatus(lockOwner.status))
+      );
+      if (staleReleasedLock) {
+        try {
+          await patchAtRevision(client, slotLock, {
+            status: "released",
+            releasedAt: new Date().toISOString(),
+            releaseReason: "booking_status_repair",
           });
+        } catch (error) {
+          if (isConflict(error)) {
+            return res.status(409).json({
+              ok: false,
+              message: "This slot changed while its booking status was repaired.",
+            });
+          }
+          throw error;
         }
-        throw error;
       }
     }
     const activeLock =
@@ -301,28 +439,49 @@ export default async function handler(req, res) {
       });
     }
 
-    const existingHold = await client.fetch(`*[_type == "slotHold" && _id == $id][0]`,{id:holdId});
-
-    // The booking can be reactivated after the first availability read. Recheck
-    // after reading the deterministic hold barrier; from this point onward, its
-    // revision guard makes the hold write and admin reactivation mutually exclusive.
-    const [currentSlotLock, currentMatchingBookings] = await Promise.all([
-      client.fetch(`*[_type == "bookingSlot" && _id == $id][0]`, {
-        id: slotLockId,
-      }),
-      client.fetch(
-        `*[_type == "booking" && startTimeUTC == $startTimeUTC]{_id,status,originalOrderId}`,
-        { startTimeUTC: normalizedStartTimeUTC }
-      ),
-    ]);
-    if (
-      (currentSlotLock && currentSlotLock.status !== "released") ||
-      hasBlockingBooking(currentMatchingBookings)
-    ) {
-      return res.status(409).json({
-        ok: false,
-        message: "This slot is already booked.",
-      });
+    if (staleReleasedLock || !snapshotIncludesBarrier) {
+      let currentSlotLock;
+      let currentMatchingBookings;
+      if (staleReleasedLock && typeof client.getDocumentsByIds === "function") {
+        const [recheckDocs, recheckBookings] = await Promise.all([
+          client.getDocumentsByIds([slotLockId, holdId], {
+            documentTypes: ["bookingSlot", "slotHold"],
+          }),
+          client.fetch(
+            `*[_type == "booking" && startTimeUTC == $startTimeUTC]{_id,status,originalOrderId}`,
+            { startTimeUTC: normalizedStartTimeUTC }
+          ),
+        ]);
+        const recheckById = new Map(recheckDocs.map((doc) => [doc?._id, doc]));
+        currentSlotLock = recheckById.get(slotLockId) || null;
+        existingHold = recheckById.get(holdId) || null;
+        currentMatchingBookings = recheckBookings;
+      } else {
+        if (staleReleasedLock) {
+          existingHold = await client.fetch(
+            `*[_type == "slotHold" && _id == $id][0]`,
+            { id: holdId }
+          );
+        }
+        [currentSlotLock, currentMatchingBookings] = await Promise.all([
+          client.fetch(`*[_type == "bookingSlot" && _id == $id][0]`, {
+            id: slotLockId,
+          }),
+          client.fetch(
+            `*[_type == "booking" && startTimeUTC == $startTimeUTC]{_id,status,originalOrderId}`,
+            { startTimeUTC: normalizedStartTimeUTC }
+          ),
+        ]);
+      }
+      if (
+        (currentSlotLock && currentSlotLock.status !== "released") ||
+        hasBlockingBooking(currentMatchingBookings)
+      ) {
+        return res.status(409).json({
+          ok: false,
+          message: "This slot is already booked.",
+        });
+      }
     }
 
     const now = Date.now();
@@ -342,8 +501,7 @@ export default async function handler(req, res) {
           holdId,
           startTimeUTC: existingHold.startTimeUTC || normalizedStartTimeUTC,
           holdNonce: existingHold.holdNonce || "",
-          backend:
-            existingHold.backendOwner,
+          backend: existingHold.backendOwner,
           cutoverGeneration: Number(existingHold.cutoverGeneration || 0),
         });
       if (
@@ -425,16 +583,66 @@ export default async function handler(req, res) {
       paymentFailureCount: 0,
     };
 
+    const shouldReleasePrevious = Boolean(
+      ownsPreviousHold &&
+        previousHold?._id &&
+        previousHold._rev &&
+        previousPhase !== "released" &&
+        previousPhase !== "payment_pending"
+    );
+    const canBundlePreviousRelease = Boolean(
+      shouldReleasePrevious &&
+        typeof client.transaction === "function" &&
+        (!existingHold || existingHold._rev)
+    );
+
+    const writeTargetHoldOnly = () =>
+      existingHold
+        ? patchAtRevision(client, existingHold, holdValues, holdMutationOptions)
+        : client.create(holdValues, holdMutationOptions);
+
     let created;
+    let releasedPreviousAtomically = false;
+    let atomicReleaseFailed = false;
     try {
-      created = existingHold
-        ? await patchAtRevision(
-            client,
-            existingHold,
-            holdValues,
-            holdMutationOptions
-          )
-        : await client.create(holdValues, holdMutationOptions);
+      if (canBundlePreviousRelease) {
+        const releasedAt = new Date(now).toISOString();
+        const tx = client.transaction();
+        if (existingHold) {
+          tx.patch(holdId, (patch) =>
+            patch.ifRevisionId(existingHold._rev).set(holdValues)
+          );
+        } else {
+          tx.create(holdValues);
+        }
+        tx.patch(previousHold._id, (patch) =>
+          patch.ifRevisionId(previousHold._rev).set({
+            phase: "released",
+            releasedAt,
+            expiresAt: releasedAt,
+            holdNonce: crypto.randomUUID(),
+          })
+        );
+        const knownDocuments = new Map([
+          [holdId, existingHold || null],
+          [previousHold._id, previousHold],
+        ]);
+        try {
+          const committed = await tx.commit({
+            ...holdMutationOptions,
+            knownDocuments,
+          });
+          created =
+            committed?.results?.find((doc) => doc?._id === holdId) || holdValues;
+          releasedPreviousAtomically = true;
+        } catch (error) {
+          if (!isConflict(error) && !isNotFound(error)) throw error;
+          atomicReleaseFailed = true;
+          created = await writeTargetHoldOnly();
+        }
+      } else {
+        created = await writeTargetHoldOnly();
+      }
     } catch (error) {
       if (isConflict(error)) {
         return res.status(409).json({
@@ -454,11 +662,15 @@ export default async function handler(req, res) {
         backend,
         res,
       });
-      await releasePreviousHold({
-        previousHoldId,
-        previousHoldToken,
-        currentHoldId: holdId,
-      });
+      if (shouldReleasePrevious && !releasedPreviousAtomically && !atomicReleaseFailed) {
+        await releasePreviousHold({
+          previousHoldId,
+          previousHoldToken,
+          currentHoldId: holdId,
+          prefetchedHold: previousHold,
+          prefetchedBackend: backend,
+        });
+      }
       return response;
     } catch (error) {
       const failedAt = new Date().toISOString();
