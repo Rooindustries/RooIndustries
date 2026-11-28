@@ -49,7 +49,7 @@ const toolingPublishableKey = "fixture-only-tooling-browser-publishable-key";
 const paddedSelfIssued = { PAYMENT_SESSION_SECRET: "fixture-session-secret\\n ", CRON_SECRET: "fixture-cron\\n" };
 const releaseSecret = "x".repeat(40);
 const pastCutoff = "2000-01-01T00:00:00.000Z";
-const productionRelease = {
+export const productionRelease = {
   CI: "true",
   VERCEL: "1",
   VERCEL_ENV: "production",

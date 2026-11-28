@@ -35,4 +35,6 @@ create table storage.objects (id uuid primary key default gen_random_uuid(),buck
 grant usage on schema public,accounts,commerce,licensing,cms,migration,auth,ops to service_role;
 
 create schema tourney;
+create schema supabase_migrations;
+create table supabase_migrations.schema_migrations (version text primary key, statements text[], name text);
 create function public.rls_auto_enable() returns event_trigger language plpgsql as $$ begin return; end; $$;
