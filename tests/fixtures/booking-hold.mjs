@@ -72,6 +72,7 @@ export async function createBookingHoldFixture() {
     let checkoutCount = 0;
     let paymentStatus = null;
     let addedTax = 0;
+    let paymentCurrency = "USD";
     const sessions = new Map();
     database.setProviderHandler(async request => {
       evidence.providerRequests.push(request);
@@ -99,7 +100,7 @@ export async function createBookingHoldFixture() {
           status: paymentStatus,
           total_amount: session.product_cart[0].amount + addedTax,
           tax: addedTax ? null : 0,
-          currency: "USD",
+          currency: paymentCurrency,
           product_cart: session.product_cart,
           refunds: [],
           disputes: [],
@@ -265,7 +266,11 @@ export async function createBookingHoldFixture() {
     }
     globalThis.Date = ShiftedDate;
     const restoreClock = () => { clockShiftMs = 0; };
-    const setPaymentStatus = (status, options) => { paymentStatus = status; addedTax = options?.untaxedTotal || 0; };
+    const setPaymentStatus = (status, options) => {
+      paymentStatus = status;
+      addedTax = options?.untaxedTotal || 0;
+      paymentCurrency = options?.currency || "USD";
+    };
     const paymentRecord = holdId => commerce.fetch(
       '*[_type == "paymentRecord" && bookingPayload.slotHoldId == $id][0]', { id: holdId });
     const patchPaymentRecord = async (holdId, set) => commerce.patch((await paymentRecord(holdId))._id).set(set).commit();

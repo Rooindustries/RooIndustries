@@ -156,11 +156,11 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     });
 
     for (const parked of [false, true]) {
-      test(`a Dodo attempt that failed with an untaxed total${parked ? " and was parked by an earlier check" : ""} frees its slot once its hold runs out`, async ({ page, context, flow, native }) => {
+      test(`a Dodo attempt that failed in another currency with an untaxed total${parked ? " and was parked by an earlier check" : ""} frees its slot once its hold runs out`, async ({ page, context, flow, native }) => {
         await routeToNative(context, native, await native.nextSlotDate());
         try {
           const held = await startDodoCheckout(page, flow, native);
-          await native.setPaymentStatus("failed", { untaxedTotal: 445 });
+          await native.setPaymentStatus("failed", { untaxedTotal: 445, currency: "EUR" });
           await native.holdRunsOut(held._id);
           if (parked) {
             await native.patchPaymentRecord(held._id, { status: "needs_recovery", recoveryReason: "dodo_amount_mismatch",
@@ -189,9 +189,12 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         const held = await startDodoCheckout(page, flow, native);
         await native.setPaymentStatus("succeeded", { untaxedTotal: 445 });
         await native.holdRunsOut(held._id);
-        expect((await native.reconcile()).status).toBe(200);
-        expect(await native.paymentRecord(held._id)).toMatchObject({ status: "needs_recovery", recoveryReason: "dodo_amount_mismatch",
-          recoveryOwnerReviewRequired: true, providerPaymentState: "succeeded" });
+        for (let run = 0; run < 2; run += 1) {
+          expect((await native.reconcile()).status).toBe(200);
+          expect(await native.paymentRecord(held._id)).toMatchObject({ status: "needs_recovery", recoveryReason: "dodo_amount_mismatch",
+            recoveryOwnerReviewRequired: true, providerRecoveryTerminal: true, providerPaymentState: "succeeded" });
+        }
+        expect((await native.paymentRecord(held._id)).events.map(event => event.reason)).not.toContain("dodo_capture_check_park_resumed");
         expect((await native.getHold(held._id)).phase).toBe("payment_pending");
         const other = await context.newPage();
         await other.goto("/booking");
