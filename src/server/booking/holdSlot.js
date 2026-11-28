@@ -191,6 +191,16 @@ export default async function handler(req, res) {
   const { startTimeUTC, packageTitle, previousHoldId, previousHoldToken } =
     req.body || {};
   const clientAddress = getClientAddress(req);
+  if (
+    !(await requireRateLimit(res, {
+      key: `hold-slot:${clientAddress}`,
+      max: 20,
+      message: "Too many slot hold requests. Please try again later.",
+    }))
+  ) {
+    return;
+  }
+
   const normalizedStartTimeUTC = normalizeStartTimeUTC(startTimeUTC);
   const validStartTime = Boolean(
     normalizedStartTimeUTC && isExactWholeMinute(normalizedStartTimeUTC)
@@ -200,11 +210,6 @@ export default async function handler(req, res) {
     previousHoldToken,
   });
 
-  const rateLimitPromise = requireRateLimit(res, {
-    key: `hold-slot:${clientAddress}`,
-    max: 20,
-    message: "Too many slot hold requests. Please try again later.",
-  });
   const commerceControlPromise = settle(assertCommerceStartAllowed());
 
   let client = null;
@@ -270,10 +275,6 @@ export default async function handler(req, res) {
     } catch (error) {
       clientError = error;
     }
-  }
-
-  if (!(await rateLimitPromise)) {
-    return;
   }
 
   const controlResult = await commerceControlPromise;

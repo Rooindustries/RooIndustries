@@ -759,8 +759,8 @@ test("holdSlot and releaseHold stay within bounded Supabase RPC counts and seque
   );
   assert.equal(created.response.status, 200);
   assert.equal(created.calls.length, 5);
-  assert.equal(created.waves, 2);
-  assert.equal(created.maxConcurrency, 4);
+  assert.equal(created.waves, 3);
+  assert.equal(created.maxConcurrency, 3);
 
   const refreshed = await measureRpcTrace(() =>
     fixture.post("/api/holdSlot", {
@@ -772,8 +772,8 @@ test("holdSlot and releaseHold stay within bounded Supabase RPC counts and seque
   );
   assert.equal(refreshed.response.status, 200);
   assert.equal(refreshed.calls.length, 5);
-  assert.equal(refreshed.waves, 2);
-  assert.equal(refreshed.maxConcurrency, 4);
+  assert.equal(refreshed.waves, 3);
+  assert.equal(refreshed.maxConcurrency, 3);
 
   const switched = await measureRpcTrace(() =>
     fixture.post("/api/holdSlot", {
@@ -785,8 +785,8 @@ test("holdSlot and releaseHold stay within bounded Supabase RPC counts and seque
   );
   assert.equal(switched.response.status, 200);
   assert.equal(switched.calls.length, 5);
-  assert.equal(switched.waves, 2);
-  assert.equal(switched.maxConcurrency, 4);
+  assert.equal(switched.waves, 3);
+  assert.equal(switched.maxConcurrency, 3);
   assert.equal(switched.calls.find((c) => c.rpc === "roo_apply_commerce_document_mutations")?.mutations, 2);
   const previousAfterSwitch = await fixture.commerce.getDocument(refreshed.response.body.holdId);
   assert.equal(previousAfterSwitch.phase, "released");
@@ -799,15 +799,38 @@ test("holdSlot and releaseHold stay within bounded Supabase RPC counts and seque
   );
   assert.equal(released.response.status, 200);
   assert.equal(released.calls.length, 3);
-  assert.equal(released.waves, 2);
-  assert.equal(released.maxConcurrency, 2);
+  assert.equal(released.waves, 3);
 
   const reclaimed = await measureRpcTrace(() =>
     fixture.post("/api/holdSlot", { startTimeUTC: slot2, packageTitle: pkg }, "", { "x-forwarded-for": "192.0.2.75" })
   );
   assert.equal(reclaimed.response.status, 200);
   assert.equal(reclaimed.calls.length, 5);
-  assert.equal(reclaimed.waves, 2);
+  assert.equal(reclaimed.waves, 3);
+
+  for (let i = 0; i < 20; i += 1) {
+    await fixture.post("/api/holdSlot", { startTimeUTC: slot2, packageTitle: pkg }, "", { "x-forwarded-for": "192.0.2.77" });
+  }
+  const limitedHold = await measureRpcTrace(() =>
+    fixture.post("/api/holdSlot", { startTimeUTC: slot2, packageTitle: pkg }, "", { "x-forwarded-for": "192.0.2.77" })
+  );
+  assert.equal(limitedHold.response.status, 429);
+  assert.deepEqual(limitedHold.calls.map((c) => c.rpc), ["roo_consume_rate_limit"]);
+
+  for (let i = 0; i < 25; i += 1) {
+    await fixture.post("/api/releaseHold", {
+      holdId: reclaimed.response.body.holdId,
+      holdToken: "invalid-token",
+    }, "", { "x-forwarded-for": "192.0.2.78" });
+  }
+  const limitedRelease = await measureRpcTrace(() =>
+    fixture.post("/api/releaseHold", {
+      holdId: reclaimed.response.body.holdId,
+      holdToken: reclaimed.response.body.holdToken,
+    }, "", { "x-forwarded-for": "192.0.2.78" })
+  );
+  assert.equal(limitedRelease.response.status, 429);
+  assert.deepEqual(limitedRelease.calls.map((c) => c.rpc), ["roo_consume_rate_limit"]);
 
   const date2 = fixture.nextSlotDate();
   await fixture.setPackageSlots(date2);
@@ -817,7 +840,7 @@ test("holdSlot and releaseHold stay within bounded Supabase RPC counts and seque
     );
     assert.equal(withPackageSlots.response.status, 200);
     assert.equal(withPackageSlots.calls.length, 6);
-    assert.equal(withPackageSlots.waves, 3);
+    assert.equal(withPackageSlots.waves, 4);
   } finally {
     await fixture.restoreSettings();
   }

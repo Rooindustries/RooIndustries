@@ -12,12 +12,6 @@ const createReleaseClient = (backendOverride) =>
     { backendOverride, domain: "commerce" }
   );
 
-const settle = (promise) =>
-  Promise.resolve(promise).then(
-    (value) => ({ ok: true, value }),
-    (error) => ({ ok: false, error })
-  );
-
 const fetchHoldById = async (client, holdId) => {
   if (typeof client.getDocumentsByIds === "function") {
     const docs = await client.getDocumentsByIds([holdId], {
@@ -37,55 +31,34 @@ export default async function handler(req, res) {
 
   const { holdId, holdToken } = req.body || {};
   const clientAddress = getClientAddress(req);
-  const rateLimitPromise = requireRateLimit(res, {
-    key: `release-hold:${clientAddress}`,
-    max: 25,
-    message: "Too many hold release requests. Please try again later.",
-  });
+  if (
+    !(await requireRateLimit(res, {
+      key: `release-hold:${clientAddress}`,
+      max: 25,
+      message: "Too many hold release requests. Please try again later.",
+    }))
+  ) {
+    return;
+  }
+  if (!holdId || !holdToken) {
+    return res.status(400).json({ ok: false, message: "Missing hold credentials" });
+  }
 
-  const hasCredentials = Boolean(holdId && holdToken);
-  const tokenPayload = hasCredentials
-    ? verifyHoldToken({
-        token: holdToken,
-        holdId,
-        ignoreExpiry: true,
-      })
-    : null;
+  const tokenPayload = verifyHoldToken({
+    token: holdToken,
+    holdId,
+    ignoreExpiry: true,
+  });
   const policy = resolveSupabaseRuntimePolicy();
   const backend = selectHoldAuthority({
     tokenPayload,
     fallbackBackend: policy.commercePrimaryBackend,
     policy,
   });
-
-  let client = null;
-  let prefetchedHold = null;
-  if (hasCredentials && tokenPayload) {
-    try {
-      client = createReleaseClient(backend);
-      prefetchedHold = settle(fetchHoldById(client, holdId));
-    } catch (error) {
-      prefetchedHold = Promise.resolve({ ok: false, error });
-    }
-  }
-
-  if (!(await rateLimitPromise)) {
-    return;
-  }
-  if (!hasCredentials) {
-    return res.status(400).json({ ok: false, message: "Missing hold credentials" });
-  }
+  const client = createReleaseClient(backend);
 
   try {
-    let hold;
-    if (prefetchedHold) {
-      const result = await prefetchedHold;
-      if (!result.ok) throw result.error;
-      hold = result.value;
-    } else {
-      client = client || createReleaseClient(backend);
-      hold = await fetchHoldById(client, holdId);
-    }
+    const hold = await fetchHoldById(client, holdId);
     if (!hold) {
       return res.status(404).json({ ok: false, message: "Hold not found" });
     }
