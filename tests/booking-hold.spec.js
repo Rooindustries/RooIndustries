@@ -45,6 +45,7 @@ const test = base.extend({
         paymentSucceeded: id => call("paymentSucceeded", id),
         paymentRecord: id => call("paymentRecord", id),
         patchPaymentRecord: (id, set) => call("patchPaymentRecord", id, set),
+        seedOwnerReviews: (id, count) => call("seedOwnerReviews", id, count),
       });
     } finally {
       if (child.exitCode === null) {
@@ -156,7 +157,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     });
 
     for (const parked of [false, true]) {
-      test(`a Dodo attempt that failed in another currency with an untaxed total${parked ? " and was parked by an earlier check" : ""} frees its slot once its hold runs out`, async ({ page, context, flow, native }) => {
+      test(`a Dodo attempt that failed in another currency with an untaxed total${parked ? " and was parked by an earlier check behind 50 checkouts in owner review" : ""} frees its slot once its hold runs out`, async ({ page, context, flow, native }) => {
         await routeToNative(context, native, await native.nextSlotDate());
         try {
           const held = await startDodoCheckout(page, flow, native);
@@ -166,7 +167,13 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
             await native.patchPaymentRecord(held._id, { status: "needs_recovery", recoveryReason: "dodo_amount_mismatch",
               providerRecoveryTerminal: true, providerRecoveryTerminalReason: "dodo_amount_mismatch", nextRecoveryAt: "" });
           }
+          const reviews = parked ? await native.seedOwnerReviews(held._id, 50) : [];
           expect((await native.reconcile()).status).toBe(200);
+          for (const id of reviews) {
+            const review = await native.getHold(id);
+            expect(review).toMatchObject({ status: "needs_recovery", providerRecoveryTerminal: true, recoveryOwnerReviewRequired: true });
+            expect(review.events.map(event => event.reason)).not.toContain("dodo_capture_check_park_resumed");
+          }
           const record = await native.paymentRecord(held._id);
           expect(["failed", "abandoned"]).toContain(record.status);
           expect(record).toMatchObject({ providerPaymentState: "failed" });

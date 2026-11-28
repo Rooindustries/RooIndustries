@@ -274,6 +274,18 @@ export async function createBookingHoldFixture() {
     const paymentRecord = holdId => commerce.fetch(
       '*[_type == "paymentRecord" && bookingPayload.slotHoldId == $id][0]', { id: holdId });
     const patchPaymentRecord = async (holdId, set) => commerce.patch((await paymentRecord(holdId))._id).set(set).commit();
+    const seedOwnerReviews = async (holdId, count) => {
+      const { _rev, _createdAt, _updatedAt, ...record } = await paymentRecord(holdId);
+      const ids = Array.from({ length: count }, (_, index) => `paymentRecord.review.${record._id.slice(-8)}.${String(index).padStart(3, "0")}`);
+      for (const [index, _id] of ids.entries()) {
+        await commerce.create({ ...record, _id, providerOrderId: `${record.providerOrderId}_review_${index}`, providerPaymentId: "",
+          sessionScope: "", providerIdempotencyKey: "",
+          bookingPayload: { ...record.bookingPayload, slotHoldId: "" }, status: "needs_recovery", recoveryReason: "dodo_amount_mismatch",
+          recoveryOwnerReviewRequired: true, providerRecoveryTerminal: true, providerRecoveryTerminalReason: "dodo_amount_mismatch",
+          reconciliationRecoveryTerminal: true, nextRecoveryAt: "" });
+      }
+      return ids;
+    };
     const expireHold = async holdId => {
       const expiresAt = new RealDate(RealDate.now() - 1000).toISOString();
       await database.sql.begin(async sql => {
@@ -321,7 +333,7 @@ export async function createBookingHoldFixture() {
     };
     return { baseURL, post, get, hold, start, nextSlotDate, commerce, content, sql: database.sql, details, evidence, save, stop,
       setPaymentStatus, holdRunsOut, restoreClock, reconcile, paymentSucceeded, setPackageSlots, restoreSettings,
-      paymentRecord, patchPaymentRecord, createBooking, setHoldPhase, snapshot, setSlots, slotAt, nearSlot, extraSlot, resetRateLimits, rateWindow, expireHold,
+      paymentRecord, patchPaymentRecord, seedOwnerReviews, createBooking, setHoldPhase, snapshot, setSlots, slotAt, nearSlot, extraSlot, resetRateLimits, rateWindow, expireHold,
       commandCount, setFault, clearFault, setRequestHook: database.setRequestHook };
   } catch (error) { await stop(); throw error; }
 }
@@ -333,7 +345,7 @@ if (process.argv.includes("--worker")) {
   process.once("SIGINT", shutdown);
   process.once("disconnect", () => { fixture.stop(); });
   const forwardedMethods = ["get", "setPaymentStatus", "holdRunsOut", "restoreClock", "reconcile", "paymentSucceeded",
-    "paymentRecord", "patchPaymentRecord",
+    "paymentRecord", "patchPaymentRecord", "seedOwnerReviews",
     "setPackageSlots", "restoreSettings", "createBooking", "setHoldPhase", "snapshot", "setSlots", "nearSlot", "extraSlot",
     "resetRateLimits", "rateWindow", "expireHold", "commandCount", "setFault", "clearFault"];
   process.on("message", async ({ id, method, args = [] }) => {

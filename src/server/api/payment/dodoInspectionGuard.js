@@ -314,11 +314,11 @@ export const resumeExhaustedDodoRecord = async ({ client, record, mode, dodoEnab
 
 export const resumeParkedDodoCaptureChecks = async ({ client, patchRecord }) => {
   const parked = await client.fetch(
-    `*[_type == $type && provider == $provider && status == $status && providerRecoveryTerminal == $terminal && providerRecoveryTerminalReason in $reasons][0...50]`,
-    { type: PAYMENT_RECORD_TYPE, provider: "dodo", status: PAYMENT_STATUS_NEEDS_RECOVERY, terminal: true, reasons: CAPTURE_ONLY_CHECK_REASONS }
+    `*[_type == $type && provider == $provider && status == $status && providerRecoveryTerminal == $terminal && providerRecoveryTerminalReason in $reasons && reconciliationRecoveryTerminal in $open && recoveryOwnerReviewRequired in $open][0...50]`,
+    { type: PAYMENT_RECORD_TYPE, provider: "dodo", status: PAYMENT_STATUS_NEEDS_RECOVERY, terminal: true, reasons: CAPTURE_ONLY_CHECK_REASONS, open: [false, null] }
   );
   for (const record of Array.isArray(parked) ? parked : []) {
-    if (hasExplicitOwnerReview(record) || record.reconciliationRecoveryTerminal === true) continue;
+    if (hasExplicitOwnerReview(record)) continue;
     try {
       await patchRecord({
         client,
