@@ -518,7 +518,7 @@ jobs:
           const assert = require('node:assert/strict');
           const { stats } = require('./test-results/native-booking-hold.json');
           assert.equal(stats.skipped, 0, 'Native booking-hold cases must not skip');
-          assert.equal(stats.expected, 68, 'All native booking cases must pass');
+          assert.equal(stats.expected, 74, 'All native booking cases must pass');
           assert.equal(stats.unexpected, 0);
           assert.equal(stats.flaky, 0);
           NODE

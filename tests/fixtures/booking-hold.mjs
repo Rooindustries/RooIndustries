@@ -71,6 +71,7 @@ export async function createBookingHoldFixture() {
       NEXT_PUBLIC_SUPABASE_URL: database.origin, NEXT_PUBLIC_SUPABASE_ANON_KEY: database.token });
     let checkoutCount = 0;
     let paymentStatus = null;
+    let addedTax = 0;
     const sessions = new Map();
     database.setProviderHandler(async request => {
       evidence.providerRequests.push(request);
@@ -96,8 +97,8 @@ export async function createBookingHoldFixture() {
           checkout_session_id: id,
           metadata: session.metadata,
           status: paymentStatus,
-          total_amount: session.product_cart[0].amount,
-          tax: 0,
+          total_amount: session.product_cart[0].amount + addedTax,
+          tax: addedTax ? null : 0,
           currency: "USD",
           product_cart: session.product_cart,
           refunds: [],
@@ -264,7 +265,10 @@ export async function createBookingHoldFixture() {
     }
     globalThis.Date = ShiftedDate;
     const restoreClock = () => { clockShiftMs = 0; };
-    const setPaymentStatus = status => { paymentStatus = status; };
+    const setPaymentStatus = (status, options) => { paymentStatus = status; addedTax = options?.untaxedTotal || 0; };
+    const paymentRecord = holdId => commerce.fetch(
+      '*[_type == "paymentRecord" && bookingPayload.slotHoldId == $id][0]', { id: holdId });
+    const patchPaymentRecord = async (holdId, set) => commerce.patch((await paymentRecord(holdId))._id).set(set).commit();
     const expireHold = async holdId => {
       const expiresAt = new RealDate(RealDate.now() - 1000).toISOString();
       await database.sql.begin(async sql => {
@@ -283,8 +287,7 @@ export async function createBookingHoldFixture() {
     };
     const reconcile = () => post("/api/payment/reconcile", {}, "Bearer fixture-only-cron");
     const paymentSucceeded = async holdId => {
-      const record = await commerce.fetch(
-        '*[_type == "paymentRecord" && bookingPayload.slotHoldId == $id][0]', { id: holdId });
+      const record = await paymentRecord(holdId);
       const body = { business_id: "business_fixture", type: "payment.succeeded",
         timestamp: new Date().toISOString(), data: { payment_id: `payment_${record.providerOrderId}` } };
       const eventId = `fixture_paid_${record._id}`;
@@ -313,7 +316,7 @@ export async function createBookingHoldFixture() {
     };
     return { baseURL, post, get, hold, start, nextSlotDate, commerce, content, sql: database.sql, details, evidence, save, stop,
       setPaymentStatus, holdRunsOut, restoreClock, reconcile, paymentSucceeded, setPackageSlots, restoreSettings,
-      createBooking, setHoldPhase, snapshot, setSlots, slotAt, nearSlot, extraSlot, resetRateLimits, rateWindow, expireHold,
+      paymentRecord, patchPaymentRecord, createBooking, setHoldPhase, snapshot, setSlots, slotAt, nearSlot, extraSlot, resetRateLimits, rateWindow, expireHold,
       commandCount, setFault, clearFault };
   } catch (error) { await stop(); throw error; }
 }
@@ -325,6 +328,7 @@ if (process.argv.includes("--worker")) {
   process.once("SIGINT", shutdown);
   process.once("disconnect", () => { fixture.stop(); });
   const forwardedMethods = ["get", "setPaymentStatus", "holdRunsOut", "restoreClock", "reconcile", "paymentSucceeded",
+    "paymentRecord", "patchPaymentRecord",
     "setPackageSlots", "restoreSettings", "createBooking", "setHoldPhase", "snapshot", "setSlots", "nearSlot", "extraSlot",
     "resetRateLimits", "rateWindow", "expireHold", "commandCount", "setFault", "clearFault"];
   process.on("message", async ({ id, method, args = [] }) => {

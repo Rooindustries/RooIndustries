@@ -38,11 +38,13 @@ const test = base.extend({
         verifyHold: hold => call("verifyHold", hold),
         evidence: () => call("evidence"),
         get: route => call("get", route),
-        setPaymentStatus: status => call("setPaymentStatus", status),
+        setPaymentStatus: (status, options) => call("setPaymentStatus", status, options),
         holdRunsOut: id => call("holdRunsOut", id),
         restoreClock: () => call("restoreClock"),
         reconcile: () => call("reconcile"),
         paymentSucceeded: id => call("paymentSucceeded", id),
+        paymentRecord: id => call("paymentRecord", id),
+        patchPaymentRecord: (id, set) => call("patchPaymentRecord", id, set),
       });
     } finally {
       if (child.exitCode === null) {
@@ -92,6 +94,22 @@ const expectOnlyElevenOffered = async page => {
   await expect(page.getByRole("button", { name: "11:00 AM", exact: true })).toBeEnabled();
   await expect(page.getByRole("button", { name: "10:00 AM", exact: true })).toBeDisabled();
 };
+const expectTenOffered = async page => {
+  const earliest = page.getByRole("button", { name: /^Earliest available:/ });
+  await expect(earliest).toHaveText(/at 10:00 AM$/);
+  await earliest.click();
+  await expect(page.getByRole("button", { name: "10:00 AM", exact: true })).toBeEnabled();
+};
+const startDodoCheckout = async (page, flow, native) => {
+  await flow.reserve();
+  await flow.details();
+  await page.getByRole("button", { name: "Review before payment", exact: true }).click();
+  await flow.payment();
+  await page.getByRole("button", { name: "Pay your way", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Fixture provider checkout", exact: true })).toBeVisible();
+  const holdCall = (await native.evidence()).http.findLast(entry => entry.path === "/api/holdSlot");
+  return native.getHold(holdCall.response.holdId);
+};
 
 for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
   test.describe(`${viewport.width}px`, () => {
@@ -102,14 +120,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await routeToNative(context, native, date);
       await native.setPaymentStatus("processing");
       try {
-        await flow.reserve();
-        await flow.details();
-        await page.getByRole("button", { name: "Review before payment", exact: true }).click();
-        await flow.payment();
-        await page.getByRole("button", { name: "Pay your way", exact: true }).click();
-        await expect(page.getByRole("heading", { name: "Fixture provider checkout", exact: true })).toBeVisible();
-        const holdCall = (await native.evidence()).http.findLast(entry => entry.path === "/api/holdSlot");
-        const held = await native.getHold(holdCall.response.holdId);
+        const held = await startDodoCheckout(page, flow, native);
         expect(held.phase).toBe("payment_pending");
         await native.holdRunsOut(held._id);
         expect((await native.reconcile()).status).toBe(200);
@@ -137,6 +148,54 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await expectOnlyElevenOffered(other);
         const screenshot = await other.screenshot({ fullPage: true });
         await testInfo.attach("payment-window-other-visitor", { body: screenshot, contentType: "image/png" });
+        await other.close();
+      } finally {
+        await native.restoreClock();
+        await native.setPaymentStatus(null);
+      }
+    });
+
+    for (const parked of [false, true]) {
+      test(`a Dodo attempt that failed with an untaxed total${parked ? " and was parked by an earlier check" : ""} frees its slot once its hold runs out`, async ({ page, context, flow, native }) => {
+        await routeToNative(context, native, await native.nextSlotDate());
+        try {
+          const held = await startDodoCheckout(page, flow, native);
+          await native.setPaymentStatus("failed", { untaxedTotal: 445 });
+          await native.holdRunsOut(held._id);
+          if (parked) {
+            await native.patchPaymentRecord(held._id, { status: "needs_recovery", recoveryReason: "dodo_amount_mismatch",
+              providerRecoveryTerminal: true, providerRecoveryTerminalReason: "dodo_amount_mismatch", nextRecoveryAt: "" });
+          }
+          expect((await native.reconcile()).status).toBe(200);
+          const record = await native.paymentRecord(held._id);
+          expect(["failed", "abandoned"]).toContain(record.status);
+          expect(record).toMatchObject({ providerPaymentState: "failed" });
+          expect(record.recoveryOwnerReviewRequired).not.toBe(true);
+          expect((await native.getHold(held._id)).phase).not.toBe("payment_pending");
+          const other = await context.newPage();
+          await other.goto("/booking");
+          await expectTenOffered(other);
+          await other.close();
+        } finally {
+          await native.restoreClock();
+          await native.setPaymentStatus(null);
+        }
+      });
+    }
+
+    test("a captured Dodo payment whose total does not match goes to owner review and keeps its slot", async ({ page, context, flow, native }) => {
+      await routeToNative(context, native, await native.nextSlotDate());
+      try {
+        const held = await startDodoCheckout(page, flow, native);
+        await native.setPaymentStatus("succeeded", { untaxedTotal: 445 });
+        await native.holdRunsOut(held._id);
+        expect((await native.reconcile()).status).toBe(200);
+        expect(await native.paymentRecord(held._id)).toMatchObject({ status: "needs_recovery", recoveryReason: "dodo_amount_mismatch",
+          recoveryOwnerReviewRequired: true, providerPaymentState: "succeeded" });
+        expect((await native.getHold(held._id)).phase).toBe("payment_pending");
+        const other = await context.newPage();
+        await other.goto("/booking");
+        await expectOnlyElevenOffered(other);
         await other.close();
       } finally {
         await native.restoreClock();

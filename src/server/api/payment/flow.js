@@ -19,6 +19,7 @@ import {
   escalateDodoMismatchToOwnerReview,
   persistDodoInspectionEvidence,
   resumeExhaustedDodoRecord,
+  resumeParkedDodoCaptureChecks,
   vetoDodoPendingCleanup,
 } from "./dodoInspectionGuard.js";
 import {
@@ -4943,6 +4944,7 @@ export const reconcilePaymentSessions = async ({
     runId = startedRun?.run_id || null;
     if (!runId) throw Object.assign(new Error("Unable to start reconcile cleanup run."), { code: "reconcile_run_start_failed", status: 503 });
   }
+  if (dodoEnabled) await resumeParkedDodoCaptureChecks({ client, patchRecord: patchPaymentRecord });
   const records = await fetchRecoveryRecords(runId);
 
   for (const record of Array.isArray(records) ? records : []) {
@@ -5054,7 +5056,7 @@ export const reconcilePaymentSessions = async ({
         dodoInspection = await inspectDodoCheckout({ record });
         if (dodoInspection.retryable === false) {
           const isExplicitMismatch = dodoInspection.reason === "dodo_session_mismatch" || dodoInspection.reason === "dodo_payment_binding_mismatch";
-          if (isExplicitMismatch) {
+          if (dodoInspection.state !== "disabled") {
             await escalateDodoMismatchToOwnerReview({ client, record, reason: dodoInspection.reason, source: "reconcile", providerPaymentState: dodoInspection.providerPaymentState || "", patchRecord: patchPaymentRecord });
           } else {
             await patchPaymentRecord({ client, record, set: {
