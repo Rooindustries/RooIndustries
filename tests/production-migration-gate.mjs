@@ -101,14 +101,18 @@ test('a production build fails when a version is recorded under another name', a
   assertBlocked(await run('build'), `- ${file} (production records 20261118000000 as other_name)`);
 });
 
-test('the history function is service-role only, and its rollback and reapply round-trip on the full chain', async () => {
+test('the history function is service-role only, returns only version and name, and its rollback and reapply round-trip on the full chain', async () => {
   await record(applied);
   const [grants] = await fixture.sql`
     select has_function_privilege('anon', 'public.roo_migration_history()', 'execute') as anon,
       has_function_privilege('authenticated', 'public.roo_migration_history()', 'execute') as authenticated,
       has_function_privilege('service_role', 'public.roo_migration_history()', 'execute') as service_role,
-      (select prosecdef from pg_proc where oid = 'public.roo_migration_history()'::regprocedure) as definer`;
-  assert.deepEqual({ ...grants }, { anon: false, authenticated: false, service_role: true, definer: true });
+      prosecdef as definer, proconfig as config
+    from pg_proc where oid = 'public.roo_migration_history()'::regprocedure`;
+  assert.deepEqual({ ...grants }, { anon: false, authenticated: false, service_role: true, definer: true, config: ['search_path=""'] });
+  const { data, error } = await fixture.client.rpc('roo_migration_history');
+  assert.equal(error, null);
+  assert.deepEqual(data, [...applied, productionOnly].sort((a, b) => a.version.localeCompare(b.version)));
   const schemaReady = async missing => {
     for (let attempt = 0; attempt < 50; attempt += 1) {
       const { error } = await fixture.client.rpc('roo_migration_history');
